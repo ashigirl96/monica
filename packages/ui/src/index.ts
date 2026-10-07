@@ -1,4 +1,5 @@
 export { cn } from './cn.ts'
+export { FuzzyPickerModal } from './fuzzy-picker-modal.tsx'
 export { PinIcon, PlusIcon, PromptIcon, XIcon } from './icons.tsx'
 export {
   type PopoverAnchor,

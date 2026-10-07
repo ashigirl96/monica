@@ -2,11 +2,18 @@
 import { describe, expect, test } from 'bun:test'
 
 import type { Node as PMNode } from 'prosemirror-model'
-import { EditorState, TextSelection } from 'prosemirror-state'
+import { EditorState, Selection, TextSelection } from 'prosemirror-state'
 
-import { previewTransaction } from './link-menu.ts'
-import type { LinkMenuActiveState, LinkMetadata } from './link-menu.ts'
+import { EMPTY_DOC } from '../../body/index.ts'
+import type { LinkMetadata } from '../../contract.ts'
+import { clipboardPlugin } from './clipboard.ts'
+import { docFromJSON } from './create-editor.ts'
+import { linkMenuPlugin, previewTransaction } from './link-menu.ts'
+import type { LinkMenuActiveState } from './link-menu.ts'
+import { linkMenuKey } from './menu-keys.ts'
+import { normalizerPlugin } from './normalizer.ts'
 import { createContainer, nodes, schema } from './schema.ts'
+import { beyondBlockIds, block, contentPos, docOf, heading, paste, todo } from './test-fixtures.ts'
 
 const URL = 'https://example.com/x'
 
@@ -187,5 +194,54 @@ describe('previewTransaction', () => {
     expect(group.child(0).child(0).type).toBe(nodes.bullet)
     expect(group.child(1).child(0).type).toBe(nodes.bookmark)
     expect(s.extraParaPos).toBeNull()
+  })
+})
+
+function editorState(doc: PMNode, selection?: Selection): EditorState {
+  return EditorState.create({
+    doc,
+    selection,
+    plugins: [linkMenuPlugin(async () => null), normalizerPlugin()],
+  })
+}
+
+function pasteUrl(state: EditorState): EditorState {
+  const pasted = paste(clipboardPlugin(), state, { 'text/plain': URL })
+  expect(pasted.handled).toBe(true)
+  return pasted.state
+}
+
+/** block 'a' に URL を貼って menu を開いた state。後ろの block 't' は caret より後ろにある */
+function openedBeforeTodo(): EditorState {
+  const doc = docOf(block('a', nodes.paragraph.create()), block('t', todo('task')))
+  const opened = pasteUrl(editorState(doc, TextSelection.create(doc, contentPos(doc, 'a', 'end'))))
+  expect(linkMenuKey.getState(opened)?.active).toBe(true)
+  return opened
+}
+
+describe('menu を開いた後の transaction', () => {
+  test('id の無い block に URL を貼ると、normalizer が id を振った後も開いたまま', () => {
+    const after = pasteUrl(editorState(docFromJSON(EMPTY_DOC)))
+
+    expect(linkMenuKey.getState(after)?.active).toBe(true)
+    expect(after.doc.child(0).child(0).attrs.id).toEqual(expect.any(String))
+  })
+
+  test.each(beyondBlockIds)('%s を含む transaction では閉じる', (_, build) => {
+    const opened = openedBeforeTodo()
+
+    expect(linkMenuKey.getState(opened.apply(build(opened)))?.active).toBe(false)
+  })
+
+  test('normalizer が id を振るのと一緒に折りたたみを開くと閉じる', () => {
+    const doc = docOf(
+      block('h', heading('H', 2, true)),
+      nodes.blockContainer.create(null, nodes.paragraph.create(null, schema.text('x'))),
+    )
+    const after = pasteUrl(editorState(doc, Selection.atEnd(doc)))
+
+    expect(after.doc.child(0).child(0).child(0).attrs.collapsed).toBe(false)
+    expect(after.doc.child(0).child(1).attrs.id).toEqual(expect.any(String))
+    expect(linkMenuKey.getState(after)?.active).toBe(false)
   })
 })

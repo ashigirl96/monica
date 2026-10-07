@@ -29,6 +29,7 @@
       "drizzle-kit": "^0.31.11",
       "drizzle-orm": "^0.45.3",
       "drizzle-zod": "^0.8.3",
+      "entities": "^8.1.0",
       "hono": "^4.13.12",
       "jotai": "^3.0.0",
       "prosemirror-commands": "^1.7.2",

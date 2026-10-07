@@ -81,7 +81,7 @@ export function EssayEditorPage({ id }: { id: string }) {
   const noteRef = useRef<Note | null>(null)
 
   const noteQuery = useNoteQuery(id)
-  const { note, generation, reload, patch, adopt } = useServerDoc({
+  const { note, generation, reload, adopt, patchNote } = useServerDoc({
     docKey: id,
     data: noteQuery.data,
     autosave,
@@ -208,8 +208,10 @@ export function EssayEditorPage({ id }: { id: string }) {
             seedNote(next)
             adopt(next, remount)
           },
-          patchStatus: (status) =>
-            patch((current) => (current.kind === 'essay' ? { ...current, status } : current)),
+          patchStatus: (status) => {
+            const current = noteRef.current
+            if (current?.kind === 'essay') patchNote({ ...current, status })
+          },
         })
         if (updated?.kind === 'essay') {
           patchEssays((list) => patchEssay(list, updated.id, { status: updated.status }))
@@ -220,7 +222,17 @@ export function EssayEditorPage({ id }: { id: string }) {
       }
     }
     statusChainRef.current = statusChainRef.current.then(run)
-  }, [client, flush, hasUnsaved, setBase, seedNote, adopt, patch, patchEssays, invalidateEssays])
+  }, [
+    client,
+    flush,
+    hasUnsaved,
+    setBase,
+    seedNote,
+    adopt,
+    patchNote,
+    patchEssays,
+    invalidateEssays,
+  ])
 
   useEffect(() => {
     // エディタ（ProseMirror）より先に取るため capture phase で張る
@@ -275,11 +287,11 @@ export function EssayEditorPage({ id }: { id: string }) {
       const current = noteRef.current
       if (current?.kind !== 'essay') return
       const next: Note = { ...current, title }
-      patch(() => next)
+      patchNote(next)
       scheduleSave(next)
       patchEssays((list) => patchEssay(list, next.id, { title }))
     },
-    [scheduleSave, patch, patchEssays],
+    [scheduleSave, patchNote, patchEssays],
   )
 
   const onDocChange = useCallback(

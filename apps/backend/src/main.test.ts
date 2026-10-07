@@ -47,16 +47,18 @@ async function startBackend(notesPort: number) {
   return endpointLine(backend.stdout)
 }
 
+function viaToken({ port, token }: { port: number; token: string }, path: string) {
+  return fetch(`http://127.0.0.1:${port}/rpc/${path}`, {
+    method: 'POST',
+    headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' },
+    body: JSON.stringify({ json: {} }),
+  })
+}
+
 test('the token listener carries workbench, task and job but not note, and the notes listener only note', async () => {
   const notesPort = freePort()
-  const { port, token } = await startBackend(notesPort)
+  const backend = await startBackend(notesPort)
 
-  const viaToken = (path: string) =>
-    fetch(`http://127.0.0.1:${port}/rpc/${path}`, {
-      method: 'POST',
-      headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' },
-      body: JSON.stringify({ json: {} }),
-    })
   const viaNotes = (path: string) =>
     fetch(`http://127.0.0.1:${notesPort}/rpc/${path}`, {
       method: 'POST',
@@ -69,9 +71,20 @@ test('the token listener carries workbench, task and job but not note, and the n
     })
 
   for (const path of ['workbench/layout/get', 'task/list', 'job/list']) {
-    expect([path, (await viaToken(path)).status]).toEqual([path, 200])
+    expect([path, (await viaToken(backend, path)).status]).toEqual([path, 200])
     expect([path, (await viaNotes(path)).status]).toEqual([path, 404])
   }
   expect((await viaNotes('note/essay/create')).status).toBe(200)
-  expect((await viaToken('note/essay/create')).status).toBe(404)
+  expect((await viaToken(backend, 'note/essay/create')).status).toBe(404)
+}, 20_000)
+
+test('the Backend hands the Job Ledger the system Jobs of task and note', async () => {
+  const response = await viaToken(await startBackend(freePort()), 'job/list')
+  const { json } = (await response.json()) as { json: { jobs: { name: string }[] } }
+
+  expect(json.jobs.map(({ name }) => name)).toEqual([
+    'task.sync',
+    'task.setup-log-cleanup',
+    'note.image-cleanup',
+  ])
 }, 20_000)

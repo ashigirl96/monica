@@ -44,6 +44,14 @@ describe('noteLabel', () => {
   })
 })
 
+describe('summaryTitle', () => {
+  test('一覧の行は title を使い、無題なら本文の 1 行目、本文も空なら Untitled', () => {
+    expect(summaryTitle({ title: 'Spec', preview: 'first line' })).toBe('Spec')
+    expect(summaryTitle({ title: '', preview: 'first line' })).toBe('first line')
+    expect(summaryTitle({ title: '', preview: null })).toBe('Untitled')
+  })
+})
+
 function summary(title: string, preview: string | null): NoteSummary {
   const at = new Date('2026-08-29T10:00:00.000Z')
   return {
@@ -57,17 +65,6 @@ function summary(title: string, preview: string | null): NoteSummary {
     updatedAt: at,
   }
 }
-
-describe('summaryTitle', () => {
-  test('非空 title があれば preview より title を使う', () => {
-    expect(summaryTitle(summary('On Rust', 'first line'))).toBe('On Rust')
-  })
-
-  test('無題は preview を、preview も無ければ Untitled を使う', () => {
-    expect(summaryTitle(summary('', 'first line'))).toBe('first line')
-    expect(summaryTitle(summary('', null))).toBe('Untitled')
-  })
-})
 
 describe('withSavedPreview', () => {
   test('保存した Note の preview だけを、保存した本文から作り直す', () => {

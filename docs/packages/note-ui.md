@@ -1,13 +1,13 @@
 # note の ui
 
-`packages/note/src/ui` に置く notes の画面とエディタ。`@tania/note/ui` から import する。決定の理由は ADR-0019 と #115・#118 の決定にある。今あるのはエディタと Daily と Essay の画面で、Repo の画面、テーマと ambient は後続の issue で足す。
+`packages/note/src/ui` に置く notes の画面とエディタ。`@tania/note/ui` から import する。決定の理由は ADR-0019 と #115・#118 の決定にある。今あるのはエディタと、Daily と Essay と Repo の画面と、見た目の設定。
 
 ## monica のコードを移すとき
 
 notes の ui は monica の `web/` と `shared/` を移して作る。
 
 - tania の tsconfig（`noUncheckedIndexedAccess`・`erasableSyntaxOnly`）と oxlint（`consistent-function-scoping`・`no-shadow` など）は monica より厳しく、import を書き換えただけでは通らない。parameter property は明示的なフィールドと constructor の先頭での代入に展開する。配列の読み出しは CODING_STANDARDS の「型」に従い、同じ関数の条件から範囲内と読める箇所は `!`、そうでなければ分岐にする。テストも同じ検査を通す。
-- 手で入れた変更だけをレビューに見せるには、import の書き換えと oxfmt だけを当てた状態を repo の外に控え、`git diff --no-index <控え> <移した先>` で比べる。
+- 手で入れた変更だけをレビューに見せるには、import の書き換えと oxfmt だけを当てた状態を repo の外に控え、`git diff --no-index <控え> <移した先>` で比べる。oxfmt は repo の root から控えの directory を指して走らせる。控えの側に設定を置いて走らせると、Tailwind の class の並べ替えが repo の globals.css を引けずに効かず、並びの差が diff に混ざる。
 - 振る舞いを変えずに移す slice でも、セキュリティ（スクリプトの実行など）と本文の消失につながる不具合は直し、PR に書く。それ以外の monica の振る舞いはそのまま移し、直すなら別の issue にする。
 - monica の画面の判断（保存・競合・取り直し・開き直し）は hook の中にあり、DOM を入れない bun test では守れない。移すときは判断を React に依らない module か純関数に出し、hook はそれを React の状態と event につなぐだけにする（`notes/save-queue.ts`、`notes/note-sync.ts` の `noteToOpen` と `reloadLatest`）。monica の hook には、画面を移る・取り直す間に本文を失う経路が残っていた。
 - monica は change stream で cache を取り直していたが、tania が取り直すのは focus のときだけ（ADR-0018）。移すときは、monica の画面が change stream で新しくしていた表示（一覧の preview や title）を数え、手元の cache に写す（`notes/summary.ts` の `withSavedPreview`）。
@@ -26,13 +26,29 @@ monica の `shared/block-editor` を `src/ui/editor/` に振る舞いを変え�
 ### 依存
 
 - `prosemirror-*` の 7 つ（state・model・view・keymap・inputrules・history・commands）を catalog から直に入れる。Milkdown は入れない。monica が使っていた `@milkdown/kit/prose/*` は `prosemirror-*` を `export *` するだけだった。
-- 外への import は `react`・`prosemirror-*`・note の `contract.ts` と `ui/routes.ts` だけ。
+- 外への import は `react`・`prosemirror-*`・note の `contract.ts`・`body`・`ui/routes.ts` だけ。テストは body の fixture と markdown の変換も import する。
+
+### markdown の copy と paste
+
+- `NoteBlockEditor` は `renderMarkdown` に `@tania/note/body` の `toMarkdown` を、`parseMarkdown` に `fromMarkdown` を渡す。どちらも手元で同期に呼ぶ。
+- copy は text/plain に markdown を載せる。block 選択の copy は選んだ block を、文字選択の copy と drag は選んだ範囲の slice を書き出す。block 選択の copy は、ほかに `BLOCKS_MIME` と text/html も載せる。
+- paste は、text/html を持たない text/plain だけを markdown として読む。code block の中では読まない。読んだ doc が schema に合わなければ素のテキストで入れ、paragraph 1 つだけなら block を割らずにカーソル位置へ入れる。
+- monica は変換を Backend に頼んでいたので、copy に備えて選択が変わるたびに 150ms 後に変換を先読みして cache し、paste は変換を待つ間の貼り先を plugin state で追っていた。手元で同期に呼べるので、どちらも持ち込まない。
+- Note Mention の表示名は、開いている Note の cache から解決し終えたものを `toMarkdown` に渡す（`notes/note-references.ts` の `noteName`）。copy の handler は同期で、解決を待てないため。まだ解決していない Note Mention と、削除した Note を指す Note Mention は `[[note-N]]` で書く。
+
+### paste の menu
+
+- URL の paste で出る link-menu（URL / Mention / Bookmark）と、block の paste で出る paste-menu（Paste / Paste and sync）は、menu の外の doc 変更を「今の表現のまま確定」とみなして閉じる。
+- normalizer が block に id を振るだけの transaction（step がすべて attr `id` の `AttrStep`）は、この doc 変更に数えない（`normalizer.ts` の `onlyWritesBlockIds`）。`EMPTY_DOC` から作った Note の最初の段落は id を持たず、貼ったのと同じ dispatch で normalizer が id を振る。数えると menu が出ず、OGP の fetch も始まらない（monica にあった不具合）。`AttrStep` は位置を動かさないので、menu が持つ位置は mapping せずに使える。
+- normalizer が同じ transaction で空の blockGroup を消したり折りたたみを開いたりしたときは、位置が動くので今どおり閉じる。
 
 ### node 型と plugin を減らせない理由
 
 - `create-editor.ts` の `docFromJSON` は、`Node.fromJSON` か `check()` に失敗した本文を空の doc にして開く。開いたまま 1 打鍵すると、autosave がその空の doc を保存する。node 型か mark が 1 つでも欠けたエディタは、それを含む保存済みの本文を消す。
 - module どうしが循環して import している（`node-views` と `synced-block`、`note-mention-menu` と `clipboard` など）ので、一部の plugin だけを外して持ち込むこともできない。
-- 機能を止めたいときは、`BlockEditor` の props を渡さない。`fetchLinkMetadata`・`searchNoteMentions`・`resolveNoteMention`・`resolveBlock`・`uploadImage`・`renderMarkdown`・`parseMarkdown` は、渡さなければその機能が無効になる（`block-editor.tsx`、`create-editor.ts`、`synced-block.ts`）。後続の issue はこの props を 1 つずつ足して機能を有効にする。props は mount 時に固定され、差し替えは `key` を変えた再 mount で行う。
+- 機能を止めたいときは、`BlockEditor` の props を渡さない。`fetchLinkMetadata`・`searchNoteMentions`・`resolveNoteMention`・`resolveBlock`・`uploadImage`・`renderMarkdown`・`parseMarkdown` は、渡さなければその機能が無効になる（`block-editor.tsx`、`create-editor.ts`、`synced-block.ts`）。後続の issue はこの props を 1 つずつ足して機能を有効にする。有効にした plugin の経路は移してから初めて動くので、CODING_STANDARDS の「眠っていた経路を有効にする変更」で見直す。今 `NoteBlockEditor` が渡しているのは、Note Mention と Synced Block の props（`searchNoteMentions`・`resolveNoteMention`・`onNoteMentionClick`・`noteId`・`resolveBlock`・`onOpenBlock`）、画像の `uploadImage`・`importExternalImage`、OGP の `fetchLinkMetadata`。props の有無は mount 時に固定され、差し替えは `key` を変えた再 mount で行う。
+- 画像の props は `notes/editor-support.ts` の `imageCallbacks` が作る。どちらも `image.upload` と `image.import` を呼び、失敗は null にする。エディタは upload の失敗を再試行のボタンで、取り込みの失敗を外部 URL のままで見せ、理由では分岐しない。
+- `fetchLinkMetadata` は note の `linkMetadata` を呼ぶ。link-menu は呼び出しの失敗を値の無い OGP として扱う（monica と同じ）。そのため、取れなかった URL は既定の URL のままなら普通の link、「Mention」を選べば URL を title にした favicon の無い `linkMention`、「Bookmark」を選べば URL だけの `bookmark` になる。
 
 ### 直書きの文字列の置き場所
 
@@ -42,6 +58,7 @@ monica の `shared/block-editor` を `src/ui/editor/` に振る舞いを変え�
 | Note の path（`/notes/:id`） | `src/ui/routes.ts` の `notePath` と `noteIdOfPath`。Note Mention の href（`noteHref`）と内部リンクの判定（`internalNoteId`）が読む |
 | 内部リンクとして扱う host 名 | `@tania/note/contract` の `NOTES_HOSTNAMES`。notes の口の Host の照合も同じ定数を読む |
 | clipboard の MIME（`application/x-tania-blocks+json`） | `clipboard.ts` の `BLOCKS_MIME` |
+| テーマの localStorage の key（`tania-theme`）と、保存値から light / dark を決める規則 | `src/ui/theme.ts` と `apps/web/index.html` の描画前の script の 2 箇所。index.html の script は描画を止めて走る classic script で、module を import できないため。`theme.test.ts` が index.html の script を走らせ、`setThemePref` と同じテーマになるかを確かめる |
 
 - 内部リンクの判定は、自分の origin の URL に加えて、開いている origin と link の host 名がどちらも `NOTES_HOSTNAMES`（`tania.localhost`・`localhost`・`127.0.0.1`）にあり、scheme と port が同じ URL を内部として扱う。保存される link は `tania.localhost` で書かれるが、ユーザーが同じ Backend を別の名前で開くこともあるため。port が違えば同じ host 名でも外部のリンクになる。
 - `import.meta.env.DEV` は残す。dev でだけ IME の debug plugin を入れる。`vite/client` の型は program 全体で効いている。
@@ -59,11 +76,13 @@ monica の `shared/block-editor` を `src/ui/editor/` に振る舞いを変え�
 - `bun test` のままで、DOM の環境は入れない。`EditorState` だけで回し、`EditorView` は型キャストした最小のモックで代える。
 - monica のテスト 11 本と `test-fixtures.ts` を移してあり、回帰の網にする。
 - 保存済みの本文を開けることは、`src/body/fixtures/full-doc.json`（全 node 型を持つ）を `docFromJSON` に通し、block がすべて残ることで確かめる。
+- markdown の copy と paste は、copy の handler・`clipboardTextSerializer`・`handlePaste` を最小のモックの view で呼んで確かめる。`handlePaste` は `test-fixtures.ts` の `paste` で呼ぶ。dispatch を `state.apply` で当てるので、state に登録した plugin の `appendTransaction` も同じ dispatch で走る。block 選択の copy は text/html を `document` で組むので、そのテストの間だけ組めるだけの偽の `document` を置く。
+- paste の menu が開いたままかを確かめる state には、menu の plugin と一緒に normalizer を登録する。登録しないと id を振る transaction が走らず、menu を閉じる経路を通らない。
 - `src/body/fixtures/unknown-nodes.json` はエディタのテストに使わない。server が知らない node を読み飛ばすことを確かめる fixture で、schema に無い node（`aiHint`・`chart`）と mark（`highlight`）を持つので、エディタでは monica と同じく空の doc になる。monica の本文に出てくる node と mark は、どれも schema にある。
 
 ## 画面
 
-monica の `web/src` の router・autosave・Daily と Essay の画面を移したもの。monica と同じ構成で、`notes/` に画面が共有する部品、`pages/` に画面、`components/` に rail を置く。
+monica の `web/src` の router・autosave・Daily と Essay と project の画面を移したもの。project の画面は Repo の画面にした。monica と同じ構成で、`notes/` に画面が共有する部品、`pages/` に画面、`components/` に rail を置く。
 
 ### root と apps/web の分担
 
@@ -86,16 +105,19 @@ monica の `web/src` の router・autosave・Daily と Essay の画面を移し�
 | `/daily`、`/notes`、`/` | 今日の `/daily/:date` に replace |
 | `/essays` | Essay の一覧 |
 | `/essays/:id` | Essay の編集 |
+| `/repos` | 前回の Repo に replace。無ければ Repo の picker |
+| `/repos/:owner/:repo` | その Repo の Scratch（開くと作られる） |
+| `/repos/:owner/:repo/notes/:id` | Repo Note。その Repo の Repo Note でなければ、その Note の path に replace |
 | `/notes/:id` | id から種類ごとの path に replace。削除済みと不在は「Note not found」 |
 | それ以外 | 「Not found」 |
 
 - path の文字列と route の解釈は `routes.ts` に集める。router は monica の自作を移したもの（`router.ts`、History API）。
 - 今日は `/daily` を開くたびに `logicalDate(new Date())` で導く（`todayPath`）。開いたまま 5 時を越えても、次に `/daily` を開けば次の日になる。今日を返す procedure は無い。Daily の画面の TODAY は画面を作った時に導き、`/daily` を開き直すと作り直される。
-- `/notes/:id` は `get` で引いた Note の種類から行き先を決める（`notePagePath`）。Daily は `/daily/:date`、Essay は `/essays/:id` に移る。Repo Note と Scratch は後続の issue が行き先を足すまで「Not found」。
+- `/notes/:id` は `get` で引いた Note の種類から行き先を決める（`notePagePath`）。Daily は `/daily/:date`、Essay は `/essays/:id`、Scratch は `/repos/:owner/:repo`、Repo Note は `/repos/:owner/:repo/notes/:id` に移る。
 - rail は Daily / Essays / Repo で、⌃1 / ⌃2 / ⌃3 で移る。Library と Settings は持ち込まない。
 - NotesShell のサイドバーは既定 400px で、境界のドラッグで 260〜720px、ダブルクリックで 400px に戻る。幅は画面の間で共有し、localStorage の `tania-notes-sidebar-w` に持つ。
 - Daily の表示名の書式は `notes/dates.ts` が持つ。サイドバーは今日が `TODAY · TUE 10.6`、ほかは `TUE 10.6`、今年以外は `TUE 2025.10.6`。見出しと競合の通知は年付きの `dayLabelWithYear`（今年なら年を省く）。
-- `document.title` は表示名に ` · tania` を付ける（`TUE 10.6 · tania`、`On ledgers · tania`）。Essay の表示名は title で、空なら `Untitled`（`displayName`）。表示名の無い画面（Essay の一覧など）は `tania`。
+- `document.title` は表示名に ` · tania` を付ける（`TUE 10.6 · tania`、`On ledgers · tania`）。Essay と Repo Note は title（空なら `Untitled`）、Scratch は `owner/repo` で、contract の `displayName` を使う。表示名の無い画面（Essay の一覧など）は `tania`。
 
 ### Essay の画面
 
@@ -127,6 +149,25 @@ monica の `pages/essays` を移したもの（`pages/essays/`）。
 - キーは window の capture phase の keydown で取るので、⌥Backspace は本文の中でも削除になり、macOS の単語の削除は使えない（monica どおり）。
 - 取り消しの stack は `support.ts` の module の変数で、一覧と編集が共有する。そのため一覧の右クリックで消したものも編集の ⌥Z で、編集で消したものも一覧の ⌥Z で戻る。stack は頁を読み込み直すまで残り、Essay の画面を離れている間は ⌥Z が無いので戻せない。戻すときは autosave の `resume` で、削除で止めた保存の再試行を戻す（monica の一覧の ⌥Z は戻さなかった）。
 
+### Repo の画面
+
+- monica の `pages/projects` を `pages/repos` に移したもの。「Project」の label は「Repo」に、primary は Scratch に、meta の行の `primary` は `scratch` にした。
+- Scratch を上に固定し、その下に Repo Note を `repoNote.list` の頁で無限スクロールに並べる（`docs/packages/note-ledger.md`）。サイドバーは「Repo」の label、Scratch の行、区切り、Repo Note の一覧（日付は出さず、hover で削除の ×）。
+- Scratch の見出しとサイドバーの行は `owner/repo`（Scratch が持つ綴り）。Repo Note の行は title、無題なら preview、どちらも無ければ `Untitled`（`notes/summary.ts` の `summaryTitle`。monica と同じ）。Repo Note の title の欄の placeholder は `Untitled`。
+- 前回の Repo は localStorage の `tania-repos-last` に持ち、`/repos` は Repo の候補を待たずにそこへ移る。候補は ghq を spawn し、取るのに数秒かかりうるため。
+- Repo の候補は picker（`@tania/ui` の `FuzzyPickerModal`）を開いている間だけ取る。選ぶとその Repo の Scratch が作られるので、一度開いただけの Repo にも空の Scratch が残る。これは受け入れる。
+- キー（capture phase で ProseMirror より先に取る）:
+  - ⌃W: Repo の picker を開く。
+  - ⌥N: Repo Note を作って開き、title の欄から書き始める。
+  - ⌥Backspace と ⌥Delete: 開いている Repo Note を確認なしで削除して Scratch に移る。Scratch の上では素通しし、エディタの単語の削除になる。
+  - ⌥Z: 削除を取り消してその Repo Note を開く。
+  - ⌥J / ⌥K: Scratch と Repo Note を巡回する。
+- 削除と取り消しの判断は `notes/removals.ts` の `Removals` が持つ。保存を出し切ってから消し、その Note の未保存の編集が残れば消さない（⌥Z で戻せるのが server に届いた本文までになるため）。取り消しの stack は画面の寿命の間だけ持ち、Repo を切り替えると画面ごと作り直すので空になる（monica と同じ）。
+- 開いている Repo Note を消す間は、`noteRef` を外して保存の予約を締め、消せなかったら開き直して締めている間の打鍵を保存し直す。待つ間に別の Note を開いていたら開き直さない。開き直すと、今開いている Note の打鍵が消せなかった Note へ保存される（monica にあった不具合）。
+- 消せたら、その時に開いている Note が消した Note なら Scratch へ移る。開いているかは待った後の route で見る。サイドバーの × で消している間に、その Note を開いて書くことがあるため。
+- 別のタブで消された Repo Note は、取り直しの `NOT_FOUND` で、このタブで消したときと同じく保存の予約を捨てて Scratch へ移る。開いた本文を出し続けると、書いた分の保存が `NOT_FOUND` で再試行され続ける。開いた本文の無い（URL から直に開いた）消えた Note は、エラーを出す。
+- Scratch の保存は title を省く。server は title の付いた Scratch の保存を本文ごと断る。
+
 ### 保存と競合
 
 - autosave は router より上で 1 つだけ mount し、画面を移っても pending・基準版・競合を持ち続ける。1 秒の debounce で保存し、送信は直列にし、CONFLICT 以外の失敗は 5 秒ごとに再試行する。判断は React に依らない `notes/save-queue.ts` の `SaveQueue` が持ち、`notes/use-autosave.ts` はそれを React の状態と pagehide・beforeunload につなぐ。
@@ -137,6 +178,18 @@ monica の `pages/essays` を移したもの（`pages/essays/`）。
 - 保存は query の cache を通らない。保存の応答は doc を返さないので、cache は 1 世代古くなる。`notes/note-sync.ts` は、基準版より古い cache を採用しない。外の更新は、未保存が無く、基準版より新しいときだけ採用してエディタを作り直す。
 - pagehide で未保存を送る。`CallContext` の `keepalive` を link の `fetch` が init に渡す。keepalive の body の上限（64KB）を超える本文は送れない（monica と同じ）。
 - `notes/save-state.ts` は monica の `note-ledger.ts` を改名したもの。tania では Ledger を Backend の部品にだけ使う。
+
+### Note Mention と Synced Block
+
+- エディタの props は `notes/note-block-editor.tsx` の `NoteBlockEditor` がまとめて渡し、画面ごとには配線しない。monica は Daily・Essay・Project の 3 つの画面に同じ配線を持っていた。procedure を呼ぶ判断は React に依らない `notes/note-references.ts` の `noteReferences` が持つ。
+- `[[` の候補は、打鍵のたびに `noteMention.search` を呼んで取る（debounce なし、monica どおり）。
+- Note Mention の表示名は、開いている Note ごとに cache する。`NoteBlockEditor` は Note の id を key に内側を作り直すので、Note を開き直すと引き直す。外の更新を採用してエディタを作り直しても、同じ Note を開いている間は引き直さない（monica どおり）。
+- 「Deleted note」と出すのは、Backend が `NOT_FOUND` と答えたときだけ。Backend の答えは `ORPCError` で届くので、それ以外の失敗は届かなかったとみなし、表示を noteId のまま残す。送り直すのは、`Reach.onRecover`（失敗の後に届いた合図）が来てから。失敗してから購読するまでの間に別の request が届いて回復していれば、その合図はもう来ないので、request を出す前に控えた `Reach.recoveries()` と比べてすぐ送り直す。応答はあるのに body を読めない失敗も `ORPCError` にならないので、すぐ送り直すと Backend に届いたまま送り続ける。`NOT_FOUND` 以外の答え（500 など）は送り直さず、noteId のまま残す。monica の web は通信エラーでも「Deleted note」と出していた。
+- Synced Block の元の block は、未保存の編集を flush してから `block.get` で取る。別の Note の block は保存済みの本文から取るため。`NOT_FOUND` は「Original block was deleted」、ほかの失敗は Retry の付いた「Failed to load synced block」になり、通信エラーでも再接続を待たない（monica どおり）。同じ Note の Synced Block は Backend を引かず、開いている doc から映す。
+- Note Mention の素のクリックは、flush を始めてから `/notes/:id` へ移る。⌘ / ⌃ 付きのクリックは、NodeView が新しいタブで開く。
+- 「↗」は Synced Block の先頭の block へ飛ぶ。同じ Note ならその場でスクロールし、別の Note なら飛び先を置いて `/notes/:id` へ移る。移った先の `NoteBlockEditor` が、エディタの mount の後に飛び先を取り出してスクロールする。判断は `notes/block-jump.ts`（`jumpToBlock` と `arrivalAt`）が持つ。
+- dev の StrictMode は effect を片付けてから走らせ直し、その間にエディタを作り直す。`arrivalAt` は一度取り出した飛び先を 2 度目にも返すので、作り直したエディタへも飛ぶ。取り出すたびに消すと、1 度目のエディタだけがスクロールして壊され、画面には何も起きない。
+- Essay はまだ画面を持たないので、Essay を指す Note Mention と「↗」は「Not found」に着く。Repo Note と Scratch を指すものは、`/notes/:id` から Repo の画面へ移る。
 
 ### 再接続の表示と beforeunload
 
@@ -153,12 +206,44 @@ monica の `pages/essays` を移したもの（`pages/essays/`）。
 
 - `notes/notes.css` を NotesShell が import する。面の色（`--desk`・`--paper`・`--ink-*`）を持ち、既定は dark で、light は `:root[data-theme="light"]` で上書きする。
 - 机と紙は背景写真（ambient）を透かすため alpha を持ち、写真なし（`:root[data-ambient="none"]`）では不透明にする。
-- テーマと ambient の切り替えが入るまでは、`apps/web` の `index.html` が `data-theme="dark"` と `data-ambient="none"` を置く。写真を敷く規則は ambient と一緒に足す。
+- 背景写真は `.notes-screen::before` が `position: fixed` と負の `z-index` で面の下に敷く。`.notes-screen` に `z-index` や `isolation` を足すと stacking context ができ、写真が面の上に乗る。opacity は `ambient.ts` が light と dark の 2 つを `:root` に流し込み、`notes.css` がテーマで選ぶ。
+
+### 見た目の設定
+
+monica の notes の見た目の設定を、振る舞いを変えずに移したもの。どれもブラウザごとの好みで、Backend には保存しない。
+
+| 設定 | 切り替え | 保存 | 当て方 |
+|---|---|---|---|
+| テーマ（system / light / dark） | rail の一番下のボタン。押すたびに system → light → dark | `tania-theme`。system のときは key を消す | `:root` の `data-theme`。system は OS の設定を JS で light / dark に解き、OS の切り替えに追従する |
+| ambient（none・universe・sakura・village・fireworks・shrine） | 右下のピル、⌥; で次、⇧⌥; で前 | `tania-ambient`。知らない値は universe | `:root` の `data-ambient` と `--ambient`・`--ambient-blur`・`--ambient-opacity-{dark,light}` |
+| 本文の幅 | 右下のピルのスライダー。760px に 0〜520px を 8px 刻みで足す | `tania-note-extra-w`。スライダーを離したときに書く | `:root` の `--note-extra-w`。本文の column が `max-w-[calc(760px+var(--note-extra-w,0px))]` で読む |
+| 密度（relaxed / compact） | ⌥D | `tania-notes-density` | NotesShell の `data-density`。`block-editor.css` が compact で縦のリズムを詰める（`--jb-line` 32→28px など） |
+| zen | ⌥B | 保存しない。reload で解ける | AppShell の `data-zen`。rail とサイドバーを幅 0 にし、右下のピルは残す |
+
+- ⌥B は AppShell が、⌥; は AppShell の中の AmbientSwitcher が取るので全画面で効き、⌥D は NotesShell が取るので NotesShell の画面で効く。どれも `window` の capture phase の `keydown` で取り、エディタより先に横取りする。
+- ⌥; だけは変換中も効く。ambient は本文に触らないので、変換中に奪っても害が無いため。⌥B と ⌥D は変換中は効かない。
+- テーマは `apps/web` の `index.html` の描画前の script が、最初の描画の前に当てる（上の「直書きの文字列の置き場所」）。ambient と本文の幅は CSS 変数で読むので、`NotesApp` の layout effect が最初の描画の前に当てる。
+- App は `/daily` から今日への replace の間も AppShell を外さない。外すと zen が解け、⌃1 で Daily に移るたびに zen を抜ける。
+- 写真（JPG、計 1.7MB）は `src/ui/ambients/` に置き、Vite の asset として import する。build では `assets/` に hash 付きで出て、notes の口が immutable の cache で配る。
+- 右下のピルの popup は、外側の mousedown、Escape、外の要素への focus で閉じる（`components/use-popup-dismiss.ts`）。Escape は capture phase で取る。bubble では、エディタにいるときに ProseMirror がブロック選択に使って届かないため。
+
+notes の画面が localStorage に書く key は次の 5 つで、どれも `tania-` で始まる。monica の `monica-*` は読まない（origin が違うので、どちらにしても値は引き継がれない）。
+
+| key | 値 |
+|---|---|
+| `tania-theme` | `light` か `dark` |
+| `tania-ambient` | ambient の名前 |
+| `tania-note-extra-w` | 本文の幅に足す px |
+| `tania-notes-density` | `relaxed` か `compact` |
+| `tania-notes-sidebar-w` | NotesShell のサイドバーの幅の px |
 
 ### テスト
 
 - エディタと同じく DOM の環境は入れず、純関数と link を確かめる。
-- monica の save-state（14 本）・note-sync（10 本）・summary（4 本）のテストを、contract の形（平らな種類、Date の版）に直して移してある。summary には `summaryTitle` と `withSavedPreview` の 2 本ずつを足してある。
+- monica の save-state（14 本）・note-sync（10 本）・summary（4 本）のテストを、contract の形（平らな種類、Date の版）に直して移してある。summary には `summaryTitle` の 1 本と `withSavedPreview` の 2 本を足してある。
 - 保存は `save-queue.test.ts` が、偽の保存と `spyOn` で捕まえた timer で確かめる（debounce、基準版、CONFLICT、再試行、直列、keepalive、title を省くこと、閉じると失われる編集の数え方）。
 - Essay の画面は `support.test.ts` と `actions.test.ts` で確かめる。`support.test.ts` は、monica の `pages/essays/support.test.ts`（7 本）を contract の形に直して移したものに、取り消しの stack の 1 本を足してある。`actions.test.ts` は、削除と状態の切り替えの判断を偽の保存の口で確かめる。確かめるのは、flush が返るまで待ってから未保存を見ること、残れば中止すること、往復の間の編集と移動、外で書き換わった版を基準版にしないこと、Essay 以外を消さないこと。
-- route は `routes.test.ts`（今日の導出、`/notes/:id` の行き先）、再接続は `reach.test.ts`（1 秒の待ちと確かめの request。timer は `setTimeout` を `spyOn` で捕まえて手で進める）、link は `client.test.ts`（keepalive と届いたかの合図。fetch を `spyOn` で差し替える）。
+- 削除と取り消しは `removals.test.ts` が、偽の保存と procedure で確かめる。
+- 見た目の設定は、`fake-browser.ts` が置く偽の localStorage・matchMedia・document で確かめる。`theme.test.ts` はテーマを切り替えてから `apps/web/index.html` の描画前の script を走らせ、reload の最初の描画に同じテーマが当たるかを見る。`ambient.test.ts` は保存値の読み方（prototype の名前を弾く）、巡回の向き、⌥; の判定（⇧ で逆順、変換中も効く。`ambientStepOf`）を、`note-width.test.ts` は本文の幅の保存と読み戻しを見る。⌥B と ⌥D、zen、スライダー、密度、写真の見た目は DOM が要るので、ブラウザで確かめる。
+- route は `routes.test.ts`（今日の導出、`/notes/:id` の行き先、Repo の path で開いた Note の行き先）、再接続は `reach.test.ts`（1 秒の待ちと確かめの request。timer は `setTimeout` を `spyOn` で捕まえて手で進める）、link は `client.test.ts`（keepalive と届いたかの合図。fetch を `spyOn` で差し替える）。
+- 本文の中の参照は `note-references.test.ts` が、本物の RPCLink と `Reach` に、path ごとに答えを差し替えた fetch を当てて確かめる（`NOT_FOUND` とほかの答えと通信エラーの分け方、届かない間に送り直さないこと、再接続の後の取り直し、表示名の cache、copy が同期に引く解決済みの表示名、flush が終わってからの block の取得）。「↗」の飛び先は `block-jump.test.ts`。`NoteBlockEditor` が Note ごとに作り直すことと、クリックで移ることは DOM の無いテストでは見えないので、画面で確かめる。

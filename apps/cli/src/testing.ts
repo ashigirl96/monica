@@ -7,6 +7,11 @@ import {
   migrations as jobMigrations,
   router as jobRouter,
 } from '@tania/job/server'
+import {
+  createNoteLedger,
+  migrations as noteMigrations,
+  systemJobs as noteSystemJobs,
+} from '@tania/note/server'
 import { issue, issueBlocker, task as taskTable } from '@tania/task/schema'
 import {
   createTaskLedger,
@@ -44,7 +49,7 @@ export function inMemoryBackend({ home, ghq = noGhq }: { home?: string; ghq?: Gh
   const sqlite = new Database(':memory:')
   sqlite.run('PRAGMA foreign_keys = ON')
   const db = drizzle(sqlite)
-  for (const m of [workbenchMigrations, taskMigrations, jobMigrations]) {
+  for (const m of [workbenchMigrations, taskMigrations, jobMigrations, noteMigrations]) {
     migrate(db, { migrationsFolder: m.folder, migrationsTable: m.table })
   }
   const ptydHome = tempHome(onCleanup)
@@ -69,10 +74,12 @@ export function inMemoryBackend({ home, ghq = noGhq }: { home?: string; ghq?: Gh
       token: () => Promise.reject(new Error('`gh auth token` failed: not logged in')),
     },
   })
+  const noteLedger = createNoteLedger({ db, home: home ?? ptydHome })
+  onCleanup(() => noteLedger.stop())
   const jobLedger = createJobLedger({
     db,
     home: home ?? ptydHome,
-    systemJobs: taskSystemJobs(taskLedger),
+    systemJobs: [...taskSystemJobs(taskLedger), ...noteSystemJobs(noteLedger)],
   })
   onCleanup(() => jobLedger.stop())
   const context = { db, workbenchLedger, taskLedger, jobLedger }

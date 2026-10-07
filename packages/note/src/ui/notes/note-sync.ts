@@ -108,7 +108,7 @@ export function useServerDoc({
   autosave: Autosave
   contentRef: RefObject<unknown>
   /** 保存経路（onDocChange / 削除 / status トグル）が closure を跨いで読む最新 note。
-   * 削除は `noteRef.current = null` で予約を締めるので、同期は adopt / patch に閉じる
+   * 削除は `noteRef.current = null` で予約を締めるので、同期は adopt と patchNote に閉じる
    * （毎レンダーの effect で書き戻すと、締めている間の再レンダーでゲートが開いてしまう）。 */
   noteRef: RefObject<Note | null>
   refetch: RefetchNote
@@ -170,12 +170,10 @@ export function useServerDoc({
     return () => setOpenNote(null)
   }, [openId, setOpenNote])
 
-  // 本文と版は変えずに、title や status だけを差し替える。
-  const patch = useCallback(
-    (update: (note: Note) => Note) => {
-      const base = noteRef.current
-      if (base === null) return
-      const next = update(base)
+  /** latch の note だけを差し替える。title の編集のように、サーバから届いた本文を伴わない
+   * 更新に使うので、基準版も世代も進めない。 */
+  const patchNote = useCallback(
+    (next: Note) => {
       noteRef.current = next
       setNote(next)
     },
@@ -194,5 +192,5 @@ export function useServerDoc({
     })
   }, [current, dropPending, refetch, adopt, editMark, noteRef])
 
-  return { note: current, generation, reload, patch, adopt }
+  return { note: current, generation, reload, adopt, patchNote }
 }

@@ -1,15 +1,6 @@
 import { preview } from '../../body/index.ts'
 import type { Doc, Note, NoteSummary } from '../../contract.ts'
 
-/** サイドバーの 1 行の見出し。title を持つ kind は非空 title を優先し、
- * 無題や title の無い kind は本文の preview へ、それも無ければ Untitled へ倒す。 */
-export function summaryTitle(summary: NoteSummary): string {
-  if ((summary.kind === 'essay' || summary.kind === 'repo_note') && summary.title !== '') {
-    return summary.title
-  }
-  return summary.preview || 'Untitled'
-}
-
 /** 保存した本文の preview を一覧に写す。Backend が保存のたびに作り直すものと同じ関数で作る。 */
 export function withSavedPreview<T extends NoteSummary>(
   list: T[] | undefined,
@@ -17,6 +8,11 @@ export function withSavedPreview<T extends NoteSummary>(
   content: Doc,
 ): T[] | undefined {
   return list?.map((s) => (s.id === id ? { ...s, preview: preview(content) } : s))
+}
+
+/** サイドバーの 1 行見出し。無題は本文の 1 行目で見分ける。 */
+export function summaryTitle(summary: { title: string; preview: string | null }): string {
+  return summary.title || summary.preview || 'Untitled'
 }
 
 /** 競合通知のように、開いていない note を名指しするときの短い見出し。title を持つ kind は

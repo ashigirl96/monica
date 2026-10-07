@@ -3,19 +3,13 @@ import { Plugin, TextSelection } from 'prosemirror-state'
 import type { EditorState, Transaction } from 'prosemirror-state'
 import type { EditorView } from 'prosemirror-view'
 
+import type { LinkMetadata } from '../../contract.ts'
 import { appendEmptyParagraphAfter } from './commands.ts'
 import { getBlockContext } from './context.ts'
 import { linkMenuKey } from './menu-keys.ts'
 import { createMenuOverlay, menuItemButton, positionMenuAt } from './menu-overlay.ts'
+import { onlyWritesBlockIds } from './normalizer.ts'
 import { createContainer, nodes, schema } from './schema.ts'
-
-export type LinkMetadata = {
-  title: string | null
-  description: string | null
-  image: string | null
-  favicon: string | null
-  siteName: string | null
-}
 
 export type FetchLinkMetadata = (url: string) => Promise<LinkMetadata | null>
 
@@ -24,7 +18,7 @@ type PreviewKind = 'url' | 'mention' | 'bookmark'
 // Notion の paste メニュー同様、↑↓で選んだ表現を doc に即時反映（ライブプレビュー）し、
 // Enter は「表示中の状態をそのまま確定」するだけにする。メニュー表示中の doc 変更は
 // すべて previewTransaction 経由（set meta 同梱）で行い、それ以外の doc 変更は
-// 「そのまま確定」として閉じる。
+// id を振るだけのものを除いて「そのまま確定」として閉じる。
 export type LinkMenuActiveState = {
   active: true
   from: number
@@ -346,8 +340,9 @@ export function linkMenuPlugin(fetchLinkMetadata: FetchLinkMetadata): Plugin<Lin
         if (meta?.type === 'close') return { active: false }
         if (!value.active) return value
         if (meta?.type === 'set') return meta.state
-        // メニュー由来でない doc 変更・カーソル移動は「そのまま確定」として閉じる
-        if (tr.docChanged) return { active: false }
+        // メニュー由来でない doc 変更・カーソル移動は「そのまま確定」として閉じる。
+        // id を振るだけの変更は位置を動かさないので、from などを mapping せずに開いたままにする
+        if (tr.docChanged && !onlyWritesBlockIds(tr)) return { active: false }
         if (!newState.selection.empty || newState.selection.head !== value.caret) {
           return { active: false }
         }

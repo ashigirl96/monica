@@ -2,6 +2,7 @@ import { oc } from '@orpc/contract'
 import { createSchemaFactory } from 'drizzle-zod'
 import { z } from 'zod'
 
+import { IMAGE_URL_PREFIX } from './body/image-url.ts'
 import { note } from './schema.ts'
 
 // notes の口にだけ載せ、CLI には出さないので、meta に cli を持たない。
@@ -10,8 +11,7 @@ const { createSelectSchema } = createSchemaFactory({ coerce: { date: true } })
 
 const NoteRowSchema = createSelectSchema(note)
 
-// monica の本文が持つ src の形のまま（ADR-0019）。
-export const IMAGE_URL_PREFIX = '/api/assets/'
+export { IMAGE_URL_PREFIX }
 
 // notes の口は Host がこれ以外の request を断る（DNS rebinding）ので、名前を足すとその口に届く経路も増える。
 // 保存される link は tania.localhost で書かれるが、ユーザーが同じ Backend を別の名前で開くこともある。
@@ -73,6 +73,44 @@ export const NoteSummarySchema = z.discriminatedUnion('kind', [
   z.object({ kind: z.literal('scratch'), repo: z.string(), ...summaryCommon }),
 ])
 
+const ImageUrlSchema = z.string().describe(`${IMAGE_URL_PREFIX}<uuid>.<ext> on the notes listener`)
+
+export const RepoNoteSummarySchema = z.object({
+  id: NoteIdSchema,
+  date: common.date,
+  title: z.string(),
+  preview: NoteRowSchema.shape.preview.describe(
+    'the first line of the body; null until the body is first saved',
+  ),
+  updatedAt: common.updatedAt,
+})
+
+export const RepoNotesCursorSchema = z
+  .object({ date: common.date, id: NoteIdSchema })
+  .describe('the date and id of the last Repo Note of the page before')
+
+export const RepoNotesPageSchema = z.object({
+  notes: z.array(RepoNoteSummarySchema),
+  next: RepoNotesCursorSchema.nullable().describe('null on the last page'),
+})
+
+// 中の node の形は Note の本文と同じくエディタの schema が決める。
+export const BlockSchema = z.looseObject({ type: z.literal('blockContainer') })
+
+export const NoteMentionCandidateSchema = z.object({
+  id: NoteIdSchema,
+  displayName: z.string(),
+  preview: NoteRowSchema.shape.preview,
+})
+
+export const LinkMetadataSchema = z.object({
+  title: z.string().nullable(),
+  description: z.string().nullable(),
+  image: z.string().nullable().describe('an absolute URL'),
+  favicon: z.string().nullable().describe('an absolute URL'),
+  siteName: z.string().nullable(),
+})
+
 export const saveErrors = {
   CONFLICT: {
     status: 409,
@@ -85,6 +123,11 @@ export type Doc = z.infer<typeof DocSchema>
 export type Note = z.infer<typeof NoteSchema>
 export type NoteSummary = z.infer<typeof NoteSummarySchema>
 export type EssaySummary = z.infer<typeof EssaySummarySchema>
+export type RepoNoteSummary = z.infer<typeof RepoNoteSummarySchema>
+export type RepoNotesCursor = z.infer<typeof RepoNotesCursorSchema>
+export type RepoNotesPage = z.infer<typeof RepoNotesPageSchema>
+export type NoteMentionCandidate = z.infer<typeof NoteMentionCandidateSchema>
+export type LinkMetadata = z.infer<typeof LinkMetadataSchema>
 
 export type Named =
   | { kind: 'daily'; date: string }
@@ -103,6 +146,11 @@ export function displayName(named: Named): string {
   }
 }
 
+// GitHub の repo 名は大文字と小文字を区別しない。
+export function sameRepo(a: string, b: string): boolean {
+  return a.toLowerCase() === b.toLowerCase()
+}
+
 const DAY_BOUNDARY_HOUR = 5
 
 /** Logical Date の `YYYY-MM-DD`。local time の 5 時より前は前の日に数える。 */
@@ -118,6 +166,11 @@ function pad(n: number): string {
 }
 
 const id = NoteIdSchema
+
+// 本文の attrs の id には、貼った URL から緩く抜き出したものもあるので、形を問わず受ける。
+const referencedId = z
+  .string()
+  .describe('a Note id as a body holds it; one no Note has is not found')
 
 export const contract = {
   get: meta
@@ -161,6 +214,14 @@ export const contract = {
       .meta({ description: 'List the Logical Dates that have a Daily, newest first' })
       .output(z.array(z.iso.date().describe('YYYY-MM-DD'))),
   },
+  repo: {
+    candidates: meta
+      .meta({
+        description:
+          'List the Repos to open: those with a Note, most recently updated first, then the other ghq checkouts under github.com',
+      })
+      .output(z.array(RepoSchema)),
+  },
   scratch: {
     open: meta
       .meta({ description: 'Get the Scratch of a Repo, making it when there is none' })
@@ -182,5 +243,59 @@ export const contract = {
       .meta({ description: 'Make a Repo Note with no title' })
       .input(z.object({ repo: RepoSchema }))
       .output(NoteSchema),
+    list: meta
+      .meta({
+        description: 'List the Repo Notes of a Repo, newest day first, 100 to a page',
+      })
+      .input(z.object({ repo: RepoSchema, after: RepoNotesCursorSchema.optional() }))
+      .output(RepoNotesPageSchema),
   },
+  image: {
+    upload: meta
+      .meta({
+        description:
+          'Place a png, jpg, gif or webp image of up to 20MB for a body to show, and give its URL',
+      })
+      .input(z.object({ file: z.file() }))
+      .output(z.object({ url: ImageUrlSchema })),
+    import: meta
+      .meta({
+        description:
+          'Fetch the image at an http or https URL within 10s and place it like an uploaded one, giving its URL',
+      })
+      .input(z.object({ url: z.url({ protocol: /^https?$/ }) }))
+      .output(z.object({ url: ImageUrlSchema })),
+  },
+  noteMention: {
+    search: meta
+      .meta({
+        description:
+          'Find up to 20 Notes whose title, name, preview or Repo has q, ignoring case, the most recently updated first; a deleted Note is not among them',
+      })
+      .input(z.object({ q: z.string() }))
+      .output(z.array(NoteMentionCandidateSchema)),
+    resolve: meta
+      .meta({
+        description:
+          'Read the name the Note a Note Mention points at has now; a deleted Note is not found',
+      })
+      .input(z.object({ id: referencedId }))
+      .output(z.object({ displayName: z.string() })),
+  },
+  block: {
+    get: meta
+      .meta({
+        description: 'Read a block of a Note with the blocks nested in it; a deleted Note has none',
+      })
+      .input(z.object({ id: referencedId, blockId: z.string() }))
+      .output(BlockSchema),
+  },
+  linkMetadata: meta
+    .meta({
+      description:
+        'Read the title, description, image, site name and favicon of the web page at a URL, for a pasted link',
+    })
+    // Bun の fetch は file: も読むので、http と https に限る。
+    .input(z.object({ url: z.url({ protocol: /^https?$/ }).describe('an http or https URL') }))
+    .output(LinkMetadataSchema),
 }

@@ -5,6 +5,9 @@ export const queryKeys = {
   essays: () => ['essays'] as const,
   dailyNote: (date: string) => ['daily-note', date] as const,
   dailyDates: () => ['daily-dates'] as const,
+  repoCandidates: () => ['repo-candidates'] as const,
+  scratch: (repo: string) => ['scratch', repo] as const,
+  repoNotes: (repo: string) => ['repo-notes', repo] as const,
 }
 
 // TanStack Query v5 は visibilitychange しか購読しない（v4 で focus を意図的に外した）。

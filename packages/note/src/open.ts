@@ -1,9 +1,9 @@
-import { and, desc, eq, isNull, sql } from 'drizzle-orm'
+import { and, desc, eq, isNull } from 'drizzle-orm'
 
 import { EMPTY_DOC } from './body/index.ts'
 import { type EssaySummary, logicalDate, type Note } from './contract.ts'
 import type { Db } from './note.ts'
-import { type NoteRow, toEssaySummary, toNote } from './row.ts'
+import { isRepo, type NoteRow, toEssaySummary, toNote } from './row.ts'
 import { note } from './schema.ts'
 
 // bun:sqlite は同期なので、SELECT と INSERT の間に他の request は割り込まない。
@@ -60,11 +60,6 @@ export function listEssays(db: Db): EssaySummary[] {
 
 export function createRepoNote(db: Db, repo: string): Note {
   return toNote(insertNote(db, { kind: 'repo_note', repo, title: '' }))
-}
-
-// GitHub の repo 名は大文字と小文字を区別しない。
-function isRepo(repo: string) {
-  return eq(sql`lower(${note.repo})`, repo.toLowerCase())
 }
 
 function insertNote(

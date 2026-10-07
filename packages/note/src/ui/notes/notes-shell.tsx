@@ -1,6 +1,16 @@
 import { type CSSProperties, type ReactNode, useEffect, useState } from 'react'
 
+import { altOnly } from '../keys.ts'
+
 import './notes.css'
+
+type NoteDensity = 'relaxed' | 'compact'
+
+const DENSITY_KEY = 'tania-notes-density'
+
+function readDensity(): NoteDensity {
+  return localStorage.getItem(DENSITY_KEY) === 'compact' ? 'compact' : 'relaxed'
+}
 
 const SIDEBAR_KEY = 'tania-notes-sidebar-w'
 const SIDEBAR_DEFAULT = 400
@@ -8,7 +18,7 @@ const SIDEBAR_MIN = 260
 const SIDEBAR_MAX = 720
 /** 本文側に必ず残す幅 */
 const MAIN_MIN = 320
-/** app rail（app-shell の w-12） */
+/** app rail（app-shell の w-12）。zen 中はサイドバーごと畳まれるので過大見積りは無害 */
 const RAIL_W = 48
 
 const clampSidebar = (w: number, max = SIDEBAR_MAX) => Math.min(max, Math.max(SIDEBAR_MIN, w))
@@ -25,10 +35,11 @@ function readSidebarWidth(): number {
 
 /**
  * Note の画面の枠。サイドバー幅のドラッグリサイズ
- * （localStorage 永続化・ダブルクリックで既定幅に戻す）を持つ。
+ * （localStorage 永続化・ダブルクリックで既定幅に戻す）と ⌥D の density トグルを持つ。
  */
 export function NotesShell({ sidebar, children }: { sidebar: ReactNode; children: ReactNode }) {
   const [sidebarWidth, setSidebarWidth] = useState<number>(readSidebarWidth)
+  const [density, setDensity] = useState<NoteDensity>(readDensity)
   // ドラッグ開始時の座標と幅。null = ドラッグ中でない
   const [resizeStart, setResizeStart] = useState<{ x: number; w: number } | null>(null)
   const [maxWidth, setMaxWidth] = useState(() => maxSidebarFor(window.innerWidth))
@@ -47,6 +58,10 @@ export function NotesShell({ sidebar, children }: { sidebar: ReactNode; children
     if (resizing) return
     localStorage.setItem(SIDEBAR_KEY, String(sidebarWidth))
   }, [resizing, sidebarWidth])
+
+  useEffect(() => {
+    localStorage.setItem(DENSITY_KEY, density)
+  }, [density])
 
   useEffect(() => {
     if (resizeStart === null) return
@@ -91,15 +106,29 @@ export function NotesShell({ sidebar, children }: { sidebar: ReactNode; children
     }
   }, [resizeStart, maxWidth])
 
+  useEffect(() => {
+    // capture phase で登録する: エディタ（ProseMirror）に食われる前に横取りする
+    function onKey(e: KeyboardEvent) {
+      if (e.isComposing || !altOnly(e)) return
+      if (e.code !== 'KeyD') return
+      e.preventDefault()
+      e.stopPropagation()
+      setDensity((d) => (d === 'compact' ? 'relaxed' : 'compact'))
+    }
+    window.addEventListener('keydown', onKey, true)
+    return () => window.removeEventListener('keydown', onKey, true)
+  }, [])
+
   return (
     <div
       className={`notes-screen relative flex h-dvh shrink-0 overflow-hidden ${
         resizing ? 'cursor-col-resize select-none' : ''
       }`}
       style={{ '--sb-w': `${shownWidth}px` } as CSSProperties}
+      data-density={density}
     >
       <aside
-        className={`w-[var(--sb-w)] shrink-0 overflow-hidden border-r border-[var(--ink-border)] bg-[var(--desk)] ${
+        className={`w-[var(--sb-w)] shrink-0 overflow-hidden border-r border-[var(--ink-border)] bg-[var(--desk)] group-data-[zen]/shell:w-0 group-data-[zen]/shell:border-r-0 ${
           resizing ? '' : 'transition-[width] duration-200 motion-reduce:transition-none'
         }`}
       >
@@ -116,7 +145,7 @@ export function NotesShell({ sidebar, children }: { sidebar: ReactNode; children
           setResizeStart({ x: e.clientX, w: shownWidth })
         }}
         onDoubleClick={() => setSidebarWidth(SIDEBAR_DEFAULT)}
-        className="group/resize absolute inset-y-0 left-[var(--sb-w)] z-20 flex w-3 -translate-x-1/2 cursor-col-resize justify-center"
+        className="group/resize absolute inset-y-0 left-[var(--sb-w)] z-20 flex w-3 -translate-x-1/2 cursor-col-resize justify-center group-data-[zen]/shell:hidden"
       >
         <span
           className={`h-full w-0.5 transition-colors duration-100 ${
