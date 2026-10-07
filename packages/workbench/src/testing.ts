@@ -1,4 +1,5 @@
 import { Database } from 'bun:sqlite'
+import { spyOn } from 'bun:test'
 import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -10,7 +11,7 @@ import type { Atom, Store } from 'jotai'
 
 import { startFakePtyd, tempHome, untilSettled } from './fake-ptyd.ts'
 import { createWorkbenchLedger, migrations, router } from './server.ts'
-import type { NotificationDeps } from './workbench.ts'
+import type { Badge, NotificationDeps } from './workbench.ts'
 
 const cleanups: (() => void)[] = []
 
@@ -22,10 +23,17 @@ export function cleanUp() {
   for (const cleanup of cleanups.splice(0).toReversed()) cleanup()
 }
 
+export function stderrLines() {
+  const spy = spyOn(console, 'error').mockImplementation(() => {})
+  onCleanup(() => spy.mockRestore())
+  return () => spy.mock.calls.map((args) => args.join(' '))
+}
+
 export function setup({
   notify = () => {},
   nameAgentSession = () => null,
-}: Partial<NotificationDeps> = {}) {
+  badge = () => {},
+}: Partial<NotificationDeps & { badge: Badge }> = {}) {
   const home = tempHome(onCleanup)
   const ptyd = startFakePtyd(home)
   onCleanup(() => ptyd.stop())
@@ -42,6 +50,7 @@ export function setup({
       ptydPath: join(home, 'no-ptyd'),
       notify,
       nameAgentSession,
+      badge,
     })
     onCleanup(() => workbenchLedger.stop())
     const client = createRouterClient(router, { context: { db, workbenchLedger } })
