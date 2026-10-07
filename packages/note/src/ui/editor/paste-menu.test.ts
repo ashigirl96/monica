@@ -2,12 +2,15 @@
 import { describe, expect, test } from 'bun:test'
 
 import { Node as PMNode } from 'prosemirror-model'
-import { EditorState } from 'prosemirror-state'
+import { EditorState, Selection } from 'prosemirror-state'
 
-import { serializeBlocksPayload } from './clipboard.ts'
-import { buildSyncedContainer, previewPasteTransaction } from './paste-menu.ts'
+import { BLOCKS_MIME, clipboardPlugin, serializeBlocksPayload } from './clipboard.ts'
+import { pasteMenuKey } from './menu-keys.ts'
+import { normalizerPlugin } from './normalizer.ts'
+import { buildSyncedContainer, pasteMenuPlugin, previewPasteTransaction } from './paste-menu.ts'
 import type { PasteMenuActiveState } from './paste-menu.ts'
 import { createContainer, nodes, reissueIds, schema } from './schema.ts'
+import { beyondBlockIds, block, docOf, para, paste, todo } from './test-fixtures.ts'
 
 function textContainer(text: string, id: string): PMNode {
   return createContainer(nodes.paragraph.create(null, schema.text(text)), [], id)
@@ -126,5 +129,56 @@ describe('serializeBlocksPayload', () => {
   test('sourceNoteId 省略時は payload に含めない（旧 payload 互換）', () => {
     const payload = JSON.parse(serializeBlocksPayload([textContainer('a', 'src-1')]))
     expect(payload.sourceNoteId).toBeUndefined()
+  })
+})
+
+function editorState(doc: PMNode): EditorState {
+  return EditorState.create({
+    doc,
+    selection: Selection.atEnd(doc),
+    plugins: [pasteMenuPlugin(), normalizerPlugin()],
+  })
+}
+
+function pasteBlocks(state: EditorState): EditorState {
+  const payload = serializeBlocksPayload([textContainer('x', 'src-1')], 'note-A')
+  const pasted = paste(clipboardPlugin({ syncPasteEnabled: true }), state, {
+    [BLOCKS_MIME]: payload,
+  })
+  expect(pasted.handled).toBe(true)
+  return pasted.state
+}
+
+/** block 't' の後ろに block を貼って menu を開いた state */
+function openedAfterTodo(): EditorState {
+  const opened = pasteBlocks(editorState(docOf(block('t', todo('task')))))
+  expect(pasteMenuKey.getState(opened)?.active).toBe(true)
+  return opened
+}
+
+describe('menu を開いた後の transaction', () => {
+  test('id の無い空でない段落の上で block を貼ると、normalizer が id を振った後も開いたまま', () => {
+    const doc = nodes.doc.create(
+      null,
+      nodes.blockGroup.create(null, [
+        nodes.blockContainer.create(null, para('hello')),
+        nodes.blockContainer.create(null, para('world')),
+      ]),
+    )
+    const after = pasteBlocks(editorState(doc))
+
+    expect(pasteMenuKey.getState(after)?.active).toBe(true)
+    const group = after.doc.child(0)
+    expect(group.childCount).toBe(3)
+    expect([group.child(0).attrs.id, group.child(1).attrs.id]).toEqual([
+      expect.any(String),
+      expect.any(String),
+    ])
+  })
+
+  test.each(beyondBlockIds)('%s を含む transaction では閉じる', (_, build) => {
+    const opened = openedAfterTodo()
+
+    expect(pasteMenuKey.getState(opened.apply(build(opened)))?.active).toBe(false)
   })
 })

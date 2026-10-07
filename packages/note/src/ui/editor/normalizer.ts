@@ -6,6 +6,14 @@ import { emptyParagraphContainer, newBlockId, nodes } from './schema.ts'
 
 const normalizerKey = new PluginKey('journalNormalizer')
 
+/** prosemirror-transform を依存に持たないので、AttrStep は instanceof ではなく JSON の stepType で見分ける。 */
+export function onlyWritesBlockIds(tr: Transaction): boolean {
+  return tr.steps.every((step) => {
+    const json = step.toJSON() as { stepType?: unknown; attr?: unknown }
+    return json.stepType === 'attr' && json.attr === 'id'
+  })
+}
+
 // appendTransaction は最終防衛に限定する。
 // 修復対象: missing ID / duplicate ID / empty blockGroup / empty doc / 不可視カーソル。
 export function normalizerPlugin(): Plugin {
