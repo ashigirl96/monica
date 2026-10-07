@@ -6,9 +6,9 @@ import { WorkbenchHeader } from './header.tsx'
 import { followMetaHold } from './meta-hold.ts'
 import { ResizeHandle } from './resize-handle.tsx'
 import type { BenchLabelOf } from './sidebar-model.ts'
-import { RailHeading, WorkbenchSidebar } from './sidebar.tsx'
+import { TileHeading, WorkbenchSidebar } from './sidebar.tsx'
 import {
-  appendRunspacesJoiningRail,
+  appendRunspacesJoiningTile,
   benchLabelOfAtom,
   lastTabClosedAtom,
   reloadAgentSessionsAtom,
@@ -73,7 +73,7 @@ export function Workbench({
   useEffect(() => persistUiState(store), [store])
   useEffect(() => followWindowFocus(store), [store])
   useEffect(() => markSeenWhileShown(store), [store])
-  useEffect(() => appendRunspacesJoiningRail(store), [store])
+  useEffect(() => appendRunspacesJoiningTile(store), [store])
   useEffect(() => followMetaHold(store), [store])
   const setLastTabClosed = useSetAtom(lastTabClosedAtom)
   useEffect(
@@ -113,7 +113,7 @@ export function Workbench({
                 Workbench
               </span>
             </div>
-            <RailHeading />
+            <TileHeading />
           </div>
           <WorkbenchSidebar />
         </div>

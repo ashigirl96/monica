@@ -84,10 +84,10 @@ function ownedRunspace({ db, workbenchLedger }: Backend) {
   return db.transaction((tx) => workbenchLedger.createRunspace(tx, { cwd: '/work/bench' }))
 }
 
-// Repo を指定しない Runspace は Repo の外の札に並ぶ。
+// Repo を指定しない Runspace は Repo の外の Tile に並ぶ。
 function pinnedAndListed(store: Store) {
   const sidebar = store.get(sidebarAtom)
-  const outside = sidebar.rails.find((r) => r.key === OUTSIDE)
+  const outside = sidebar.tiles.find((tile) => tile.key === OUTSIDE)
   return {
     pinned: sidebar.pinned.map((r) => r.id),
     listed: outside?.sections.flatMap((s) => s.rows.map((r) => r.id)) ?? [],

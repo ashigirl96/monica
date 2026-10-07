@@ -8,7 +8,7 @@ export {
   cycleTerminalTabAtom,
   moveActiveRunspaceAtom,
   moveActiveTabAtom,
-  pickRailAtom,
+  pickTileAtom,
   toggleTabPinAtom,
 } from './store.ts'
 export type { BenchLabel, BenchLabelOf, BenchNote } from './sidebar-model.ts'

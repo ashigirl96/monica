@@ -10,7 +10,7 @@ import {
   type JumpModeActions,
   moveActiveRunspaceAtom,
   moveActiveTabAtom,
-  pickRailAtom,
+  pickTileAtom,
   setUiZoomAtom,
   sidebarOpenAtom,
   toggleTabPinAtom,
@@ -66,7 +66,7 @@ export function useShortcuts() {
   const setUiZoom = useSetAtom(setUiZoomAtom)
   const toggleTabPin = useSetAtom(toggleTabPinAtom)
   const copyActiveAgentSessionId = useSetAtom(copyActiveAgentSessionIdAtom)
-  const pickRail = useSetAtom(pickRailAtom)
+  const pickTile = useSetAtom(pickTileAtom)
 
   useEffect(() => {
     if (!jumpActive) return
@@ -106,7 +106,7 @@ export function useShortcuts() {
         shift: false,
         keys: ['0', '1', '2', '3', '4', '5', '6', '7', '8', '9'],
         editable: true,
-        action: (e) => (pickRail(Number(e.key)) ? undefined : false),
+        action: (e) => (pickTile(Number(e.key)) ? undefined : false),
       },
       { meta: true, keys: ['=', '+'], action: () => setUiZoom('in') },
       { meta: true, key: '-', action: () => setUiZoom('out') },
@@ -157,6 +157,6 @@ export function useShortcuts() {
     setUiZoom,
     toggleTabPin,
     copyActiveAgentSessionId,
-    pickRail,
+    pickTile,
   ])
 }

@@ -3,7 +3,7 @@ import { shortPath } from '../paths.ts'
 
 type Runspace = Layout['runspaces'][number]
 
-// Repo の札の key は owner/repo で必ず `/` を含むので、`/` の無い語は Repo と重ならない。
+// Repo の Tile の key は owner/repo で必ず `/` を含むので、`/` の無い語は Repo と重ならない。
 export const OUTSIDE = 'outside'
 
 export type BenchNote = { text: string; error: boolean }
@@ -55,21 +55,21 @@ export type SidebarSection = {
   rows: SidebarRow[]
 }
 
-export type Rail = {
+export type Tile = {
   key: string
   repo: string | null
   unreadCount: number
   sections: SidebarSection[]
 }
 
-// railKeys は Pinned でない Runspace ごとの札で、畳んだセクションの行も含む。
-// cwdRailKeys はそのうち、Task が持たず、一番左の Tab の cwd の Repo が引けた Runspace の札。
+// tileKeys は Pinned でない Runspace ごとの Tile の key で、畳んだセクションの行も含む。
+// cwdTileKeys はそのうち、Task が持たず、一番左の Tab の cwd の Repo が引けた Runspace の Tile の key。
 export type Sidebar = {
   pinned: RunspaceRow[]
-  rails: Rail[]
-  selected: Rail
-  railKeys: Record<string, string>
-  cwdRailKeys: Record<string, string>
+  tiles: Tile[]
+  selected: Tile
+  tileKeys: Record<string, string>
+  cwdTileKeys: Record<string, string>
 }
 
 export type SidebarInput = {
@@ -81,7 +81,7 @@ export type SidebarInput = {
   unreadOf: (terminalSessionId: string) => boolean
   benchLabelOf: BenchLabelOf
   detached: TerminalSession[]
-  railChoice: string | null
+  tileChoice: string | null
   collapsed: ReadonlySet<string>
 }
 
@@ -89,8 +89,8 @@ export function isPathTitle(title: string): boolean {
   return title === '~' || title.startsWith('~/') || title.startsWith('/')
 }
 
-export function sectionKey(railKey: string, kind: SectionKind): string {
-  return `${railKey}:${kind}`
+export function sectionKey(tileKey: string, kind: SectionKind): string {
+  return `${tileKey}:${kind}`
 }
 
 export function repoName(repo: string): string {
@@ -106,7 +106,7 @@ function holdsPin(runspace: Runspace): boolean {
   return runspace.tabs.some((t) => t.pinned)
 }
 
-// 一番左の Tab で決めるので、Tab を切り替えても行は別の札へ移らない。
+// 一番左の Tab で決めるので、Tab を切り替えても行は別の Tile へ移らない。
 function leftmostCwd(runspace: Runspace): string {
   return runspace.tabs[0]?.cwd ?? runspace.cwd
 }
@@ -151,7 +151,7 @@ function sum(items: { unreadCount: number }[]): number {
   return items.reduce((total, item) => total + item.unreadCount, 0)
 }
 
-function railOf(input: SidebarInput, key: string, rows: SidebarRow[]): Rail {
+function tileOf(input: SidebarInput, key: string, rows: SidebarRow[]): Tile {
   const isBench = (row: SidebarRow) => row.type === 'runspace' && row.bench !== null
   const parts = [
     { kind: 'bench' as const, rows: rows.filter(isBench) },
@@ -184,56 +184,56 @@ export function buildSidebar(input: SidebarInput): Sidebar {
     ...runspaces.filter((r) => !r.pinned).map((r) => r.row),
     ...input.detached.map((s) => detachedRow(input, s)),
   ]
-  // GitHub の Repo 名は大小文字を区別しないので、Task の nameWithOwner と checkout の path が違っても同じ札にする。
-  const railKey = (row: SidebarRow) => row.repo?.toLowerCase() ?? OUTSIDE
-  const keys = new Set(listed.map(railKey))
+  // GitHub の Repo 名は大小文字を区別しないので、Task の nameWithOwner と checkout の path が違っても同じ Tile にする。
+  const tileKey = (row: SidebarRow) => row.repo?.toLowerCase() ?? OUTSIDE
+  const keys = new Set(listed.map(tileKey))
   keys.delete(OUTSIDE)
-  const rails = [...keys, OUTSIDE].map((key) =>
-    railOf(
+  const tiles = [...keys, OUTSIDE].map((key) =>
+    tileOf(
       input,
       key,
-      listed.filter((r) => railKey(r) === key),
+      listed.filter((r) => tileKey(r) === key),
     ),
   )
-  const railKeys = Object.fromEntries(
-    listed.filter((r) => r.type === 'runspace').map((r) => [r.id, railKey(r)]),
+  const tileKeys = Object.fromEntries(
+    listed.filter((r) => r.type === 'runspace').map((r) => [r.id, tileKey(r)]),
   )
-  const cwdRailKeys = Object.fromEntries(
+  const cwdTileKeys = Object.fromEntries(
     input.runspaces
-      .filter((r) => r.id in railKeys && !r.owned && input.places[leftmostCwd(r)])
-      .map((r) => [r.id, railKeys[r.id]!]),
+      .filter((r) => r.id in tileKeys && !r.owned && input.places[leftmostCwd(r)])
+      .map((r) => [r.id, tileKeys[r.id]!]),
   )
-  const active = input.activeRunspaceId && railKeys[input.activeRunspaceId]
+  const active = input.activeRunspaceId && tileKeys[input.activeRunspaceId]
   const selected =
-    rails.find((r) => r.key === input.railChoice) ??
-    rails.find((r) => r.key === active) ??
-    rails[0]!
+    tiles.find((tile) => tile.key === input.tileChoice) ??
+    tiles.find((tile) => tile.key === active) ??
+    tiles[0]!
   return {
     pinned: runspaces.filter((r) => r.pinned).map((r) => r.row),
-    rails,
+    tiles,
     selected,
-    railKeys,
-    cwdRailKeys,
+    tileKeys,
+    cwdTileKeys,
   }
 }
 
-// Repo の外の札は常に最後にある。
-export function railNumberOf(sidebar: Sidebar, key: string): number | null {
+// Repo の外の Tile は常に最後にある。
+export function tileNumberOf(sidebar: Sidebar, key: string): number | null {
   if (key === OUTSIDE) return 0
-  const n = sidebar.rails.findIndex((r) => r.key === key) + 1
+  const n = sidebar.tiles.findIndex((tile) => tile.key === key) + 1
   return n >= 1 && n <= 9 ? n : null
 }
 
-export function railAt(sidebar: Sidebar, n: number): Rail | undefined {
-  return sidebar.rails.find((r) => railNumberOf(sidebar, r.key) === n)
+export function tileAt(sidebar: Sidebar, n: number): Tile | undefined {
+  return sidebar.tiles.find((tile) => tileNumberOf(sidebar, tile.key) === n)
 }
 
 function runspaceRowsOf(rows: SidebarRow[]): RunspaceRow[] {
   return rows.filter((row): row is RunspaceRow => row.type === 'runspace')
 }
 
-function shownRunspaceRowsOf(rail: Rail): RunspaceRow[] {
-  return rail.sections.flatMap((s) => runspaceRowsOf(s.rows))
+function shownRunspaceRowsOf(tile: Tile): RunspaceRow[] {
+  return tile.sections.flatMap((s) => runspaceRowsOf(s.rows))
 }
 
 export function shownRunspaceIds(sidebar: Sidebar): string[] {
@@ -244,7 +244,7 @@ export function shownRunspaceIds(sidebar: Sidebar): string[] {
 export function sectionPeersOf(sidebar: Sidebar, runspaceId: string): string[] {
   const groups = [
     sidebar.pinned,
-    ...sidebar.rails.flatMap((rail) => rail.sections.map((s) => runspaceRowsOf(s.rows))),
+    ...sidebar.tiles.flatMap((tile) => tile.sections.map((s) => runspaceRowsOf(s.rows))),
   ]
   return groups.find((rows) => rows.some((r) => r.id === runspaceId))?.map((r) => r.id) ?? []
 }

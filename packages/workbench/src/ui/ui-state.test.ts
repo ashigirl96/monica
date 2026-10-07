@@ -9,7 +9,7 @@ import {
   activateTerminalTabAtom,
   activeRunspaceAtom,
   activeTerminalTabAtom,
-  pickRailAtom,
+  pickTileAtom,
   reloadAtom,
   sidebarAtom,
   toggleSectionAtom,
@@ -18,10 +18,10 @@ import {
 } from './store.ts'
 import { persistUiState } from './ui-state-persistence.ts'
 import {
-  railChoiceAtom,
   setUiZoomAtom,
   sidebarOpenAtom,
   sidebarWidthAtom,
+  tileChoiceAtom,
   uiZoomAtom,
 } from './ui-state.ts'
 
@@ -105,7 +105,7 @@ test('the active Runspace and Tab, the sidebar, and the UI zoom come back after 
   })
 })
 
-test('a number brings back the Runspace that was active at a restart, even after visiting another rail', async () => {
+test('a number brings back the Runspace that was active at a restart, even after visiting another Tile', async () => {
   const { client } = setup()
   const app = ghqCheckout('acme/app')
   const lib = ghqCheckout('acme/lib')
@@ -116,9 +116,9 @@ test('a number brings back the Runspace that was active at a restart, even after
   const pickAfterRestart = async (...numbers: number[]) => {
     const store = workbenchStore(client)
     await store.set(reloadAtom)
-    await until(store, sidebarAtom, (s) => s.railKeys[inLib.runspaceId] === 'acme/lib')
+    await until(store, sidebarAtom, (s) => s.tileKeys[inLib.runspaceId] === 'acme/lib')
     return numbers.map((n) => {
-      store.set(pickRailAtom, n)
+      store.set(pickTileAtom, n)
       return store.get(activeRunspaceAtom)?.id
     })
   }
@@ -127,7 +127,7 @@ test('a number brings back the Runspace that was active at a restart, even after
   expect(await pickAfterRestart(2, 1)).toEqual([inLib.runspaceId, restored.runspaceId])
 })
 
-test('the selected rail and the collapsed sections come back after a restart', async () => {
+test('the selected Tile and the collapsed sections come back after a restart', async () => {
   const { client } = setup()
   const app = ghqCheckout('acme/app')
   const { runspaceId } = await client.runspace.create({ cwd: app.checkout, ...size })
@@ -136,18 +136,38 @@ test('the selected rail and the collapsed sections come back after a restart', a
 
   await saveFrom(client, (store) => {
     store.set(toggleSectionAtom, 'acme/app:detached')
-    store.set(railChoiceAtom, OUTSIDE)
+    store.set(tileChoiceAtom, OUTSIDE)
   })
 
   const store = workbenchStore(client)
   await store.set(reloadAtom)
-  // Repo は Backend への問い合わせを待って決まるので、札が出るまで待つ。
-  const sidebar = await until(store, sidebarAtom, (s) => s.rails.some((r) => r.key === 'acme/app'))
+  // Repo は Backend への問い合わせを待って決まるので、Tile が出るまで待つ。
+  const sidebar = await until(store, sidebarAtom, (s) =>
+    s.tiles.some((tile) => tile.key === 'acme/app'),
+  )
   expect(sidebar.selected.key).toBe(OUTSIDE)
-  expect(sidebar.rails[0]?.sections).toMatchObject([
+  expect(sidebar.tiles[0]?.sections).toMatchObject([
     { kind: 'runspaces', collapsed: false },
     { kind: 'detached', collapsed: true },
   ])
+})
+
+test('the selected Tile is saved as tile, and one saved as rail is not read, leaving the Tile to follow the active Runspace', async () => {
+  const { client } = setup()
+  const app = ghqCheckout('acme/app')
+  await client.runspace.create({ cwd: app.checkout, ...size })
+  await saveFrom(client, (store) => store.set(tileChoiceAtom, OUTSIDE))
+  const key = [...stored.keys()][0]!
+  const { tile: saved, ...rest } = JSON.parse(stored.get(key)!)
+  expect(saved).toBe(OUTSIDE)
+  stored.set(key, JSON.stringify({ ...rest, rail: OUTSIDE }))
+
+  const store = workbenchStore(client)
+  await store.set(reloadAtom)
+  const sidebar = await until(store, sidebarAtom, (s) =>
+    s.tiles.some((tile) => tile.key === 'acme/app'),
+  )
+  expect(sidebar.selected.key).toBe('acme/app')
 })
 
 test('a change made just before the page goes away is saved without waiting for the debounce', async () => {
