@@ -357,6 +357,25 @@ test('a Runspace made active before its Repo is known takes the selected rail al
   expect(sidebar.selected.key).toBe('acme/lib')
 })
 
+test('the selected rail follows the front Tab when the Backend moves it into the first Runspace and its own Runspace goes away', async () => {
+  const { db, workbenchLedger, client, store } = bench()
+  const app = ghqCheckout('acme/app')
+  const lib = ghqCheckout('acme/lib')
+  const first = await client.runspace.create({ cwd: lib.checkout, ...size })
+  const kept = await client.runspace.create({ cwd: app.checkout, ...size })
+  const emptied = await client.runspace.create({ cwd: app.checkout, ...size })
+  await store.set(reloadAtom)
+  await untilListed(store, 'acme/app', [kept.runspaceId, emptied.runspaceId])
+  store.set(activateRunspaceAtom, emptied.runspaceId)
+  store.set(railChoiceAtom, 'acme/app')
+
+  db.transaction((tx) => workbenchLedger.moveTab(tx, emptied.tab.id, first.runspaceId))
+  await store.set(reloadAtom)
+
+  expect(store.get(activeRunspaceAtom)?.id).toBe(first.runspaceId)
+  expect(store.get(sidebarAtom).selected.key).toBe('acme/lib')
+})
+
 test('making a Pinned Runspace active leaves the rail that was shown', async () => {
   const { client, store } = bench()
   const app = ghqCheckout('acme/app')

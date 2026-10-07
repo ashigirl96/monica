@@ -171,13 +171,15 @@ export const copyActiveAgentSessionIdAtom = atom(null, (get): boolean => {
 // 切り替えはすべてここを通るので、jump hint を閉じるのも、選んだ札を active な Runspace の札に合わせるのもここで行う。
 const setActiveAtom = atom(null, (get, set, next: { runspaceId: string; tabId?: string }) => {
   const before = [get(activeRunspaceAtom)?.id, get(activeTerminalTabAtom)?.id]
+  // layout が入れ替わった直後は、消えた Runspace の代わりに先頭が active に見えるので、選んでいた id と比べる。
+  const chosenBefore = get(activeRunspaceIdAtom)
   const shownRail = get(sidebarAtom).selected.key
   set(activeRunspaceIdAtom, next.runspaceId)
   const { tabId } = next
   if (tabId) set(activeTabIdsAtom, (prev) => ({ ...prev, [next.runspaceId]: tabId }))
   const after = [get(activeRunspaceAtom)?.id, get(activeTerminalTabAtom)?.id]
   if (before[0] !== after[0] || before[1] !== after[1]) set(jumpHintsActiveAtom, false)
-  if (!after[0] || before[0] === after[0]) return
+  if (!after[0] || chosenBefore === next.runspaceId) return
   // Repo は repo.of を待って決まるので、札の key を書かずに active な Runspace に従わせる。
   // Pinned はどの札でも見えているので、そのとき見えていた札に留める。
   set(railChoiceAtom, after[0] in get(sidebarAtom).railKeys ? null : shownRail)
