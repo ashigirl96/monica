@@ -38,8 +38,9 @@ monica の `shared/block-editor` を `src/ui/editor/` に振る舞いを変え�
 
 - `create-editor.ts` の `docFromJSON` は、`Node.fromJSON` か `check()` に失敗した本文を空の doc にして開く。開いたまま 1 打鍵すると、autosave がその空の doc を保存する。node 型か mark が 1 つでも欠けたエディタは、それを含む保存済みの本文を消す。
 - module どうしが循環して import している（`node-views` と `synced-block`、`note-mention-menu` と `clipboard` など）ので、一部の plugin だけを外して持ち込むこともできない。
-- 機能を止めたいときは、`BlockEditor` の props を渡さない。`fetchLinkMetadata`・`searchNoteMentions`・`resolveNoteMention`・`resolveBlock`・`uploadImage`・`renderMarkdown`・`parseMarkdown` は、渡さなければその機能が無効になる（`block-editor.tsx`、`create-editor.ts`、`synced-block.ts`）。後続の issue はこの props を 1 つずつ足して機能を有効にする。有効にした plugin の経路は移してから初めて動くので、CODING_STANDARDS の「眠っていた経路を有効にする変更」で見直す。今 `NoteBlockEditor` が渡しているのは、Note Mention と Synced Block の props（`searchNoteMentions`・`resolveNoteMention`・`onNoteMentionClick`・`noteId`・`resolveBlock`・`onOpenBlock`）と、画像の `uploadImage`・`importExternalImage`。props の有無は mount 時に固定され、差し替えは `key` を変えた再 mount で行う。
+- 機能を止めたいときは、`BlockEditor` の props を渡さない。`fetchLinkMetadata`・`searchNoteMentions`・`resolveNoteMention`・`resolveBlock`・`uploadImage`・`renderMarkdown`・`parseMarkdown` は、渡さなければその機能が無効になる（`block-editor.tsx`、`create-editor.ts`、`synced-block.ts`）。後続の issue はこの props を 1 つずつ足して機能を有効にする。有効にした plugin の経路は移してから初めて動くので、CODING_STANDARDS の「眠っていた経路を有効にする変更」で見直す。今 `NoteBlockEditor` が渡しているのは、Note Mention と Synced Block の props（`searchNoteMentions`・`resolveNoteMention`・`onNoteMentionClick`・`noteId`・`resolveBlock`・`onOpenBlock`）、画像の `uploadImage`・`importExternalImage`、OGP の `fetchLinkMetadata`。props の有無は mount 時に固定され、差し替えは `key` を変えた再 mount で行う。
 - 画像の props は `notes/editor-support.ts` の `imageCallbacks` が作る。どちらも `image.upload` と `image.import` を呼び、失敗は null にする。エディタは upload の失敗を再試行のボタンで、取り込みの失敗を外部 URL のままで見せ、理由では分岐しない。
+- `fetchLinkMetadata` は note の `linkMetadata` を呼ぶ。link-menu は呼び出しの失敗を値の無い OGP として扱う（monica と同じ）。そのため、取れなかった URL は既定の URL のままなら普通の link、「Mention」を選べば URL を title にした favicon の無い `linkMention`、「Bookmark」を選べば URL だけの `bookmark` になる。
 
 ### 直書きの文字列の置き場所
 

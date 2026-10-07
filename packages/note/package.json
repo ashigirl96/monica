@@ -20,6 +20,7 @@
     "@tanstack/react-query": "catalog:",
     "drizzle-orm": "catalog:",
     "drizzle-zod": "catalog:",
+    "entities": "catalog:",
     "prosemirror-commands": "catalog:",
     "prosemirror-history": "catalog:",
     "prosemirror-inputrules": "catalog:",

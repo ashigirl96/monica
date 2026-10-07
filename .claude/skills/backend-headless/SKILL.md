@@ -168,6 +168,8 @@ Backend を本物の ptyd に繋いで起こす。Shell の役（親として生
 
    画像の貼り付けは、`DataTransfer` に `File` を `items.add` して送る。ドロップは `new DragEvent("drop", { dataTransfer: dt, clientX, clientY, bubbles: true, cancelable: true })` を送る。page は手元の file を読めないので、画像のバイト列は base64 で js に埋める。他の site の画像は、別の port で立てた Bun.serve の fake を `<img src>` に書く。
 
+   block の id がまだ無い段落（新しい Daily の最初の段落など）に URL を貼ると、「Paste as」が出ない（#177）。メニューを確かめるときは、先に `press End` と `press Enter` で次の段落を作ってから貼る。
+
 片付けでは `agent-browser --session tania-s2 close` で browser を閉じ、Vite の pid（`lsof -ti tcp:<Vite の port> -sTCP:LISTEN`）に `kill` を送ってから、下の手順で Backend を止める。
 
 ## 止めて片付ける
