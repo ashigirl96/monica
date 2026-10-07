@@ -47,13 +47,23 @@ export function PopoverMenu({
     const onEvent = (e: Event) => {
       if (outside(e)) onClose()
     }
+    // Captured on window so the focused element (a terminal, say) never sees the Escape; every
+    // open menu still does, since stopPropagation does not skip other listeners on the same target.
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key !== 'Escape' || e.isComposing) return
+      e.preventDefault()
+      e.stopPropagation()
+      onClose()
+    }
     window.addEventListener('scroll', onEvent, { capture: true })
     window.addEventListener('resize', onClose)
     window.addEventListener('pointerdown', onEvent)
+    window.addEventListener('keydown', onKeyDown, { capture: true })
     return () => {
       window.removeEventListener('scroll', onEvent, { capture: true })
       window.removeEventListener('resize', onClose)
       window.removeEventListener('pointerdown', onEvent)
+      window.removeEventListener('keydown', onKeyDown, { capture: true })
     }
   }, [onClose])
 
