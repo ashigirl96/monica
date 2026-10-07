@@ -53,7 +53,7 @@ pub fn run() {
     builder
         .manage(Supervisor::new(home.clone()))
         .manage(ptyd::PtydHandle::new())
-        .manage(notification::Clicks::default())
+        .manage(notification::PendingClick::default())
         .invoke_handler(tauri::generate_handler![
             backend_endpoint,
             backend_restart,

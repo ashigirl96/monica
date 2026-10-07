@@ -20,12 +20,11 @@ use crate::announcement::Notification;
 
 const TERMINAL_SESSION_ID: &str = "terminalSessionId";
 
-/// クリックされた通知の Terminal Session のうち、webview がまだ取り出していないもの。
-/// 通知で起こした tania では、webview が listen を張る前にクリックが届く。
+/// 通知で起こした tania では webview が listen を張る前にクリックが届くので、webview が取り出すまで持つ。
 #[derive(Default)]
-pub struct Clicks(Mutex<Option<String>>);
+pub struct PendingClick(Mutex<Option<String>>);
 
-impl Clicks {
+impl PendingClick {
     fn guard(&self) -> MutexGuard<'_, Option<String>> {
         self.0
             .lock()
@@ -34,8 +33,8 @@ impl Clicks {
 }
 
 #[tauri::command]
-pub fn take_notification_click(clicks: State<'_, Clicks>) -> Option<String> {
-    clicks.guard().take()
+pub fn take_notification_click(pending: State<'_, PendingClick>) -> Option<String> {
+    pending.guard().take()
 }
 
 /// .app の外の process で `currentNotificationCenter` を呼ぶと catch できない例外で abort するので、dev は plugin で出す（ADR-0022）。
@@ -48,7 +47,7 @@ fn is_app_bundle(path: &str) -> bool {
     Path::new(path).extension().is_some_and(|ext| ext == "app")
 }
 
-/// 通知で起こされたときのクリックを取りこぼさないよう、起動完了より前（`setup`）に呼ぶ。
+/// 通知で起こされたときのクリックを取りこぼさないよう、起動完了より前に呼ぶ。
 pub fn start(app: &AppHandle) {
     if !in_app_bundle() {
         return;
@@ -56,15 +55,10 @@ pub fn start(app: &AppHandle) {
     let center = UNUserNotificationCenter::currentNotificationCenter();
     center.setDelegate(Some(ProtocolObject::from_ref(Delegate::get_or_init(app))));
     let answered = RcBlock::new(|granted: Bool, error: *mut NSError| {
-        // SAFETY: completion handler の error は nil か有効な NSError。
-        if let Some(error) = unsafe { error.as_ref() } {
-            eprintln!(
-                "[shell] could not ask to post notifications: {}",
-                error.localizedDescription()
-            );
-        } else if !granted.as_bool() {
+        if !granted.as_bool() && error.is_null() {
             eprintln!("[shell] notifications are not allowed in System Settings");
         }
+        log_error("could not ask to post notifications", error);
     });
     center.requestAuthorizationWithOptions_completionHandler(
         UNAuthorizationOptions::Alert,
@@ -100,17 +94,17 @@ fn post_to_center(
         &content,
         None,
     );
-    let added = RcBlock::new(|error: *mut NSError| {
-        // SAFETY: completion handler の error は nil か有効な NSError。
-        if let Some(error) = unsafe { error.as_ref() } {
-            eprintln!(
-                "[shell] failed to post a notification: {}",
-                error.localizedDescription()
-            );
-        }
-    });
+    let added =
+        RcBlock::new(|error: *mut NSError| log_error("failed to post a notification", error));
     UNUserNotificationCenter::currentNotificationCenter()
         .addNotificationRequest_withCompletionHandler(&request, Some(&added));
+}
+
+fn log_error(what: &str, error: *mut NSError) {
+    // SAFETY: completion handler の error は nil か有効な NSError。
+    if let Some(error) = unsafe { error.as_ref() } {
+        eprintln!("[shell] {what}: {}", error.localizedDescription());
+    }
 }
 
 fn post_through_plugin(app: &AppHandle, Notification { title, body, .. }: Notification) {
@@ -121,7 +115,7 @@ fn post_through_plugin(app: &AppHandle, Notification { title, body, .. }: Notifi
 }
 
 fn clicked(app: &AppHandle, terminal_session_id: String) {
-    *app.state::<Clicks>().guard() = Some(terminal_session_id);
+    *app.state::<PendingClick>().guard() = Some(terminal_session_id);
     if let Err(error) = app.emit("notification-clicked", ()) {
         eprintln!("[shell] failed to tell the webview about a notification click: {error}");
     }

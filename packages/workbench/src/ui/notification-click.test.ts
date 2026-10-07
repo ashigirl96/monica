@@ -69,6 +69,18 @@ test('a click heard while listening is taken from the Shell and brings up its Ta
   heldClick = waiting.terminalSessionId
   listeners.get('notification-clicked')?.()
 
-  await until(store, activeTerminalTabAtom, (tab) => tab?.id === waiting.id)
-  expect(heldClick).toBeNull()
+  const shown = await until(store, activeTerminalTabAtom, (tab) => tab?.id === waiting.id)
+  expect(shown?.id).toBe(waiting.id)
+})
+
+// 取り出したクリックは Shell から消えるので、dev の StrictMode が effect を張り直しても捨てられない。
+test('a click taken after its effect was cleaned up still brings up its Tab', async () => {
+  const { store, waiting } = await bench()
+  await store.set(reloadAtom)
+  heldClick = waiting.terminalSessionId
+
+  followNotificationClicks(store)()
+
+  const shown = await until(store, activeTerminalTabAtom, (tab) => tab?.id === waiting.id)
+  expect(shown?.id).toBe(waiting.id)
 })

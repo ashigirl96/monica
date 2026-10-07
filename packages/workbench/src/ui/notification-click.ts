@@ -1,14 +1,14 @@
-import { invoke } from '@tauri-apps/api/core'
 import { listen } from '@tauri-apps/api/event'
 import type { Store } from 'jotai'
 
+import { shell } from './shell.ts'
 import { layoutAtom, showTerminalSessionAtom, warnFailed } from './store.ts'
 
 // 通知で起こした tania ではクリックが listen より先に届くので、Shell が持っているものを listen を張ってから取り出す。
 // 取り出すと Shell から消えるので、effect を片付けた後に届いた答えも捨てずに Tab を選ぶ。
 export function followNotificationClicks(store: Store): () => void {
   const take = () =>
-    invoke<string | null>('take_notification_click')
+    shell<string | null>('take_notification_click', {})
       .then((terminalSessionId) => {
         if (terminalSessionId) showOnceLaidOut(store, terminalSessionId)
       })

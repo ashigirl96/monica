@@ -173,8 +173,15 @@ export const copyActiveAgentSessionIdAtom = atom(null, (get): boolean => {
 // Runspace の Tile は repo.of を待って後から決まるので、Tile ごとではなく Runspace の id を新しい順に覚えておく。
 const recentRunspaceIdsAtom = atom<string[]>([])
 
+type Activation = {
+  runspaceId: string
+  tabId?: string
+  // 既に active な Runspace でも、覗いている Tile からその Runspace の Tile に戻す。
+  revealTile?: boolean
+}
+
 // 切り替えはすべてここを通るので、jump hint を閉じるのも、選んだ Tile を active な Runspace の Tile に合わせるのもここで行う。
-const setActiveAtom = atom(null, (get, set, next: { runspaceId: string; tabId?: string }) => {
+const setActiveAtom = atom(null, (get, set, next: Activation) => {
   const before = [get(activeRunspaceAtom)?.id, get(activeTerminalTabAtom)?.id]
   // layout が入れ替わった直後は、消えた Runspace の代わりに先頭が active に見えるので、選んでいた id と比べる。
   const chosenBefore = get(activeRunspaceIdAtom)
@@ -188,7 +195,7 @@ const setActiveAtom = atom(null, (get, set, next: { runspaceId: string; tabId?: 
   if (tabId) set(activeTabIdsAtom, (prev) => ({ ...prev, [next.runspaceId]: tabId }))
   const after = [get(activeRunspaceAtom)?.id, get(activeTerminalTabAtom)?.id]
   if (before[0] !== after[0] || before[1] !== after[1]) set(jumpHintsActiveAtom, false)
-  if (!after[0] || chosenBefore === next.runspaceId) return
+  if (!after[0] || (chosenBefore === next.runspaceId && !next.revealTile)) return
   // Repo は repo.of を待って決まるので、Tile の key を書かずに active な Runspace に従わせる。
   // Pinned はどの Tile を選んでも見えているので、そのとき見えていた Tile に留める。
   set(tileChoiceAtom, after[0] in get(sidebarAtom).tileKeys ? null : shownTile)
@@ -211,14 +218,11 @@ export const activateTerminalTabAtom = atom(null, (get, set, tabId: string) => {
   set(terminalFocusRequestAtom, (c) => c + 1)
 })
 
-// 押された通知の Tab を選ぶ。その Terminal Session を表示する Tab が無ければ何もしない（ADR-0022）。
 export const showTerminalSessionAtom = atom(null, (get, set, terminalSessionId: string) => {
   for (const runspace of get(layoutAtom)?.runspaces ?? []) {
     const tab = runspace.tabs.find((t) => t.terminalSessionId === terminalSessionId)
     if (!tab) continue
-    set(setActiveAtom, { runspaceId: runspace.id, tabId: tab.id })
-    // 既に active な Runspace でも、別の Tile を覗いていたらその Runspace の Tile に戻す。
-    if (runspace.id in get(sidebarAtom).tileKeys) set(tileChoiceAtom, null)
+    set(setActiveAtom, { runspaceId: runspace.id, tabId: tab.id, revealTile: true })
     set(terminalFocusRequestAtom, (c) => c + 1)
     return
   }

@@ -99,11 +99,10 @@ test('the token listener carries workbench, task and job but not note, and the n
   expect((await viaToken(backend, 'note/essay/create')).status).toBe(404)
 }, 20_000)
 
-test('the Backend tells the Shell the unread count before its endpoint and again when a notified wait adds one', async () => {
-  const backend = await startBackend(freePort())
+// 新しい Tab の claude が turn を終え、手空きの通知が出る。
+async function waitInANewTab(backend: Awaited<ReturnType<typeof startBackend>>) {
   const created = await viaToken(backend, 'workbench/runspace/create', { rows: 24, cols: 80 })
   const { json } = (await created.json()) as { json: { tab: { terminalSessionId: string } } }
-
   await viaToken(backend, 'workbench/agentSession/recordHook', {
     terminalSessionId: json.tab.terminalSessionId,
     payload: {
@@ -113,11 +112,33 @@ test('the Backend tells the Shell the unread count before its endpoint and again
       hook_event_name: 'Stop',
     },
   })
+  return json.tab.terminalSessionId
+}
+
+async function nextOf(
+  backend: Awaited<ReturnType<typeof startBackend>>,
+  type: Announcement['type'],
+): Promise<Announcement> {
+  let line = await backend.next()
+  while (line.type !== type) line = await backend.next()
+  return line
+}
+
+test('the Backend tells the Shell the unread count before its endpoint and again when a notified wait adds one', async () => {
+  const backend = await startBackend(freePort())
+
+  await waitInANewTab(backend)
 
   expect(backend.beforeEndpoint).toEqual([{ type: 'badge', count: 0 }])
-  let line = await backend.next()
-  while (line.type !== 'badge') line = await backend.next()
-  expect(line).toEqual({ type: 'badge', count: 1 })
+  expect(await nextOf(backend, 'badge')).toEqual({ type: 'badge', count: 1 })
+}, 20_000)
+
+test('the Backend tells the Shell to post a notification that carries the Terminal Session of the wait', async () => {
+  const backend = await startBackend(freePort())
+
+  const terminalSessionId = await waitInANewTab(backend)
+
+  expect(await nextOf(backend, 'notify')).toMatchObject({ type: 'notify', terminalSessionId })
 }, 20_000)
 
 test('the Backend hands the Job Ledger the system Jobs of task and note', async () => {
