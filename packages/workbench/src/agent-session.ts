@@ -59,8 +59,8 @@ export function recordHook(
   })
   if (!recorded) return []
   const { changed, before, after } = recorded
-  const body = after && notificationFor(before, event, after)
-  if (after && body) notifyWaiting(workbenchLedger, after, body)
+  const reason = after && notificationFor(before, event, after)
+  if (after && reason) notifyWaiting(workbenchLedger, after, reason)
   return changed
 }
 

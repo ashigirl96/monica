@@ -3,6 +3,7 @@ import { userInfo } from 'node:os'
 import { EventPublisher } from '@orpc/server'
 import type { BunSQLiteDatabase } from 'drizzle-orm/bun-sqlite'
 
+import { readAgentSessionTitle } from './agent-session-title.ts'
 import type { AgentSession, WorkbenchChange } from './contract.ts'
 import { createRunspace, moveTab, openTab, removeRunspace } from './layout.ts'
 import { shortPath } from './paths.ts'
@@ -188,12 +189,13 @@ export function createWorkbenchLedger(
 export function notifyWaiting(
   workbenchLedger: WorkbenchLedger,
   agentSession: AgentSession,
-  body: string,
+  reason: string,
 ) {
   const { db, notify, nameAgentSession } = internals(workbenchLedger)
   try {
     const title = nameAgentSession(db, agentSession.sessionId) ?? shortPath(agentSession.cwd)
-    notify({ title, body })
+    const agentSessionTitle = readAgentSessionTitle(agentSession.transcriptPath)
+    notify({ title, body: agentSessionTitle ? `${reason} · ${agentSessionTitle}` : reason })
   } catch (error) {
     console.error(`[workbench] could not notify for ${agentSession.sessionId}: ${error}`)
   }

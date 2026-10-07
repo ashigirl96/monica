@@ -1,4 +1,6 @@
 import { afterEach, expect, spyOn, test } from 'bun:test'
+import { writeFileSync } from 'node:fs'
+import { join } from 'node:path'
 
 import { eq } from 'drizzle-orm'
 
@@ -33,6 +35,41 @@ function seedTerminalSession(
   db.insert(terminalSession)
     .values({ id, cwd: '/work', shell: '/bin/zsh', status, createdAt: new Date(0) })
     .run()
+}
+
+function writeTranscript(home: string, lines: string[]) {
+  const path = join(home, 'transcript.jsonl')
+  writeFileSync(path, lines.map((line) => `${line}\n`).join(''))
+  return path
+}
+
+function aiTitle(title: string) {
+  return JSON.stringify({ type: 'ai-title', aiTitle: title, sessionId: 's-1' })
+}
+
+function turnsOfOneKiB(count: number) {
+  return Array.from({ length: count }, () =>
+    JSON.stringify({ type: 'assistant', message: { content: 'あ'.repeat(330) } }),
+  )
+}
+
+async function notificationsOn(
+  hookEventName: string,
+  fields: object,
+  transcript: (home: string) => string | undefined,
+) {
+  const sent: object[] = []
+  const { home, db, client } = setup({ notify: (n) => sent.push(n) })
+  seedTerminalSession(db, 'ts-a', 'running')
+  await client.agentSession.recordHook({
+    terminalSessionId: 'ts-a',
+    payload: payload('s-1', hookEventName, {
+      cwd: '/Users/me/src/tania',
+      transcript_path: transcript(home),
+      ...fields,
+    }),
+  })
+  return sent
 }
 
 function stderrLines() {
@@ -226,21 +263,98 @@ test("a question asked through both of its hooks notifies once, after the commit
   expect(sent).toEqual([{ title: 'src/tania', body: '質問', committed: true }])
 })
 
-test('the name the Task gives an Agent Session titles its notification', async () => {
+test.each([
+  ['Stop', '手空き · Tania通知の問題', {}],
+  ['PreToolUse', '質問 · Tania通知の問題', { tool_name: 'AskUserQuestion' }],
+  ['PermissionRequest', '許可: Bash · Tania通知の問題', { tool_name: 'Bash' }],
+  ['StopFailure', 'エラー: rate_limit · Tania通知の問題', { error: 'rate_limit' }],
+  ['StopFailure', 'エラー · Tania通知の問題', {}],
+])(
+  'a notification on %s puts the Agent Session title from the transcript after the reason: %s',
+  async (hookEventName, body, fields) => {
+    const sent = await notificationsOn(hookEventName, fields, (home) =>
+      writeTranscript(home, [
+        JSON.stringify({ type: 'user', message: { role: 'user', content: '通知を直したい' } }),
+        aiTitle('Tania通知の問題'),
+      ]),
+    )
+
+    expect(sent).toEqual([{ title: 'src/tania', body }])
+  },
+)
+
+test('the last ai-title in the transcript is the Agent Session title when the conversation was renamed', async () => {
+  const sent = await notificationsOn('Stop', {}, (home) =>
+    writeTranscript(home, [
+      aiTitle('最初の名前'),
+      JSON.stringify({ type: 'assistant', message: { role: 'assistant', content: '…' } }),
+      aiTitle('今の名前'),
+      JSON.stringify({ type: 'assistant', message: { role: 'assistant', content: '…' } }),
+    ]),
+  )
+
+  expect(sent).toEqual([{ title: 'src/tania', body: '手空き · 今の名前' }])
+})
+
+test('an ai-title near the end of a transcript longer than 64 KiB is the Agent Session title', async () => {
+  const sent = await notificationsOn('Stop', {}, (home) =>
+    writeTranscript(home, [
+      aiTitle('古い名前'),
+      ...turnsOfOneKiB(100),
+      aiTitle('今の名前'),
+      ...turnsOfOneKiB(30),
+    ]),
+  )
+
+  expect(sent).toEqual([{ title: 'src/tania', body: '手空き · 今の名前' }])
+})
+
+test.each([
+  ['the transcript does not exist', (home: string) => join(home, 'gone.jsonl')],
+  ['the hook gives no transcript', () => undefined],
+  [
+    'the transcript has no ai-title',
+    (home: string) =>
+      writeTranscript(home, [JSON.stringify({ type: 'user', message: { content: 'hi' } })]),
+  ],
+  [
+    'the last ai-title line is not JSON',
+    (home: string) =>
+      writeTranscript(home, [aiTitle('古い名前'), '{"type":"ai-title","aiTitle":"書きかけ']),
+  ],
+  [
+    'the last ai-title line has no aiTitle',
+    (home: string) =>
+      writeTranscript(home, [
+        aiTitle('古い名前'),
+        JSON.stringify({ type: 'ai-title', title: '別の形' }),
+      ]),
+  ],
+])('a notification still goes out with the reason alone when %s', async (_case, transcript) => {
+  const sent = await notificationsOn('Stop', {}, transcript)
+
+  expect(sent).toEqual([{ title: 'src/tania', body: '手空き' }])
+})
+
+test('the name the Task gives an Agent Session titles its notification, and the Agent Session title stays in the body', async () => {
   const sent: object[] = []
-  const { db, client } = setup({
+  const { home, db, client } = setup({
     notify: (n) => sent.push(n),
     nameAgentSession: (_db, agentSessionId) =>
       agentSessionId === 's-1' ? 'tania#43 骨格 (8)' : null,
   })
   seedTerminalSession(db, 'ts-a', 'running')
+  const transcriptPath = writeTranscript(home, [aiTitle('通知のTab名表示')])
 
   await client.agentSession.recordHook({
     terminalSessionId: 'ts-a',
-    payload: payload('s-1', 'Stop'),
+    payload: payload('s-1', 'PermissionRequest', {
+      tool_name: 'Bash',
+      transcript_path: transcriptPath,
+    }),
   })
 
-  expect(sent).toEqual([{ title: 'tania#43 骨格 (8)', body: '手空き' }])
+  expect(sent).toEqual([{ title: 'tania#43 骨格 (8)', body: '許可: Bash · 通知のTab名表示' }])
 })
 
 test('a notification that cannot be named still leaves the hook recorded and signalled, with one line on stderr', async () => {
