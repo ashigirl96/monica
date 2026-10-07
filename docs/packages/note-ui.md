@@ -124,7 +124,7 @@ monica の `web/src` の router・autosave・Daily と Essay と project の画�
 monica の `pages/essays` を移したもの（`pages/essays/`）。
 
 - 一覧（`list.tsx`）はサイドバーの無いカードの grid。カードは writing のバッジ、title と preview の紙のミニチュア、日付（Logical Date を `2026/7/21` で。`notes/dates.ts` の `slashDate`）。並びは `essay.list` のまま（`createdAt` の降順）。
-- 一覧の右クリックの menu は `@tania/ui` の `PopoverMenu` で、状態の切り替え（「Mark as finished」か「Move to writing」）と削除を出す。`PopoverMenu` は Escape を見ないので、menu を開いている間だけ一覧の画面が Escape で閉じる。
+- 一覧の右クリックの menu は `@tania/ui` の `PopoverMenu` で、状態の切り替え（「Mark as finished」か「Move to writing」）と削除を出す。`PopoverMenu` が Escape で閉じるので、一覧の画面は Escape を見ない（`docs/packages/desktop.md`）。
 - 編集（`editor.tsx`）は NotesShell に載せる。サイドバー（`sidebar.tsx`）は `writing N` と `finished N` のタブと、そのタブの Essay の一覧（title、無題なら preview、それも無ければ `Untitled`。`notes/summary.ts` の `summaryTitle`）。タブは開いた Essay の status に合わせ、⌥H / ⌥L で移す。合わせるのは開いた時と status が変わった時だけで、⌥H / ⌥L で移したタブは引き戻さない。
 - 一覧の cache の preview は、保存が通るたびに、保存した本文から Backend と同じ `preview` で作り直す（`summary.ts` の `withSavedPreview`。写すのは autosave）。change stream が無いので、写さないと無題の Essay の見出しが `Untitled` のまま残る。一覧を取り直さないのは、打っている途中の title が保存済みの古い値へ戻るため。
 - 本文の上に title の入力欄（空なら placeholder の `Untitled`）、status の StatusChip、日付、保存の状態を置く。title は本文と同じ autosave で保存する。title で Enter・↓・Tab・⌃N を押すと本文の先頭へ、本文の先頭で ↑ を押すと title へ移る。
