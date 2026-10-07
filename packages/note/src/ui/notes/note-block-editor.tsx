@@ -74,6 +74,8 @@ function OpenNoteEditor({
       uploadImage={uploadImage}
       importExternalImage={importExternalImage}
       onExitUp={onExitUp}
+      // 失敗した呼び出しは、link-menu が値の無い OGP として扱う。
+      fetchLinkMetadata={(url) => client.linkMetadata({ url })}
       noteId={noteId}
       searchNoteMentions={references.searchNoteMentions}
       resolveNoteMention={references.resolveNoteMention}

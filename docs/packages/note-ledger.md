@@ -1,6 +1,6 @@
 # Note Ledger
 
-`packages/note` の contract と、Note の種類ごとの不変条件、保存、削除と取り消し、本文の中の参照、画像の規則。決定の理由は ADR-0017・0018・0019 にある。今あるのは Note を 1 件ずつ扱う procedure、Repo の Note の一覧と Repo の候補、本文の中の参照（Note Mention の候補と解決、block の取得）、画像で、Essay の一覧と OGP は後続の issue で足す。
+`packages/note` の contract と、Note の種類ごとの不変条件、保存、削除と取り消し、本文の中の参照、画像、OGP の規則。決定の理由は ADR-0017・0018・0019 にある。今あるのは Note を 1 件ずつ扱う procedure、Repo の Note の一覧と Repo の候補、本文の中の参照（Note Mention の候補と解決、block の取得）、画像、OGP で、Essay の一覧は後続の issue で足す。
 
 ## contract（root は `note`）
 
@@ -22,6 +22,7 @@ noteMention.resolve  { id } → { displayName }
 block.get            { id, blockId } → block
 image.upload         { file } → { url }
 image.import         { url } → { url }
+linkMetadata         { url } → { title, description, image, favicon, siteName }
 ```
 
 - `Note` は `kind`（`daily` / `essay` / `repo_note` / `scratch`）の判別 union。どの種類も `id`・`date`・`content`・`createdAt`・`updatedAt` を持ち、Essay は `title` と `status`、Repo Note は `repo` と `title`、Scratch は `repo` を持つ。
@@ -130,9 +131,44 @@ Note Mention と Synced Block が引く procedure。画面での扱いは `docs/
 - 同期の fs で走らせる。参照を読んでから消すまでの間に await があると、`save` が古い画像の参照を書き戻せるため（task の setup の log の掃除と同じ）。
 - 消せなかった画像があれば、残りを消してから reject する。Job Execution が失敗になり、次の回がやり直す。本文の JSON が読めなければ、何も消さずに reject する。
 
+## OGP
+
+`linkMetadata` は URL の頁を fetch し、Bun の HTMLRewriter で OGP を読む。エディタが URL を貼ったときの「Paste as」で、「Mention」が作る `linkMention` と「Bookmark」が作る `bookmark` に使う。ブラウザは他の origin の HTML を読めないので、server の procedure にしている。
+
+- 受けるのは http と https の URL だけで、ほかは contract が `BAD_REQUEST` で断る。Bun の fetch は `file:` と `data:` も読むため。`file:` への redirect は Bun の fetch が断る。
+- 10 秒で打ち切り、`GATEWAY_TIMEOUT` で失敗する。時間は header を待つ間と body を読む間の両方に掛かる。
+- HTML は 1MB まで読み、そこで読みやめて残りの転送を止め、読んだ分を解析する。OGP は head にあるので、読みやめても取りこぼさない。
+- 2xx 以外の応答と、届かなかった request は `BAD_GATEWAY` で失敗する。redirect は fetch の既定のまま追う。
+- `Content-Type` が無いか、大文字小文字を区別せずに `html` を含むときだけ body を読む。ほかは body を読まず、項目はどれも無いものとして favicon だけを `/favicon.ico` にする。
+- 行き先の host は制限しない。localhost の URL を貼るのは正当な使い方で、外の site からの呼び出しは notes の口の same-origin の照合で止まるため。
+- cache は持たない。取った値は、貼った時点で本文の attrs に入る。
+- 画面は失敗の種類で分岐しないので、`.errors()` で宣言しない。
+
+取る項目は monica と同じ。値は前後の空白を落とし、空なら無いものとして次の候補を見る。
+
+| 項目 | 取り方 |
+|---|---|
+| `title` | `og:title`、無ければ文書の中で最初の `<title>` の text（head より前に svg の `<title>` があればそれになる） |
+| `description` | `og:description`、無ければ `meta name=description` |
+| `image` | `og:image` を頁の URL で絶対 URL にしたもの |
+| `siteName` | `og:site_name` |
+| `favicon` | `rel` の token に `icon`（大文字小文字を区別しない）を含み、`href` が空でなく絶対 URL に解ける最初の `link` の `href`、無ければ `/favicon.ico` |
+
+- meta は `property` と `name` の両方を見て、同じ key は最初のものを使う。key は大文字小文字を区別する（monica と同じ）。
+- 相対 URL は redirect を追った後の URL を基準に解く。
+
+monica から変えたのは次の 4 つ。
+
+- 2xx 以外を失敗にする。monica は 404 の頁の title も拾っていた。
+- charset に従って TextDecoder で decode してから解析する。charset は `Content-Type` の `charset`、無ければ先頭 1024 byte の `<meta charset>` か `<meta http-equiv="Content-Type">` の `charset`、どちらも無ければ UTF-8 で決める。TextDecoder が知らない名前も UTF-8 で読む。HTMLRewriter は byte 列を UTF-8 として読むので、先に decode しないと Shift_JIS の頁が化ける。
+- entity を decode する。HTMLRewriter は属性値と text の entity を decode せずに渡すので、`entities` の `decodeHTMLAttribute`（属性値）と `decodeHTML`（`<title>` の text）を当てる。属性値の規則（`&copy=` のように `=` や英数字が続く `;` の無い参照は decode しない）は text と違う。
+- User-Agent に `tania` を送る。monica は送っていなかった。
+
+このほか、`Content-Type` の大文字小文字を区別しないことと、空か絶対 URL に解けない `href` の icon を飛ばすことも monica と違う。
+
 ## createNoteLedger
 
-`createNoteLedger({ db, home, ghq? })` は `start()` / `stop()`・`repoCandidates()`・`cleanImages()`・`serveImage(name)` を持つ。`start()` は何もせず、`stop()` は走っている画像の取り込みを打ち切る。`home` は画像の置き場所に使う。`ghq` は `list(signal)` を持ち、省けば `ghq list` を `env: process.env` で spawn する。`signal` で打ち切ると ghq を kill する。task の `Ghq`（`packages/task/src/prepare.ts`）は import しない。`repoCandidates()` は `repo.candidates` の中身で、router の handler が呼ぶ。後続の issue で、`stop()` での OGP の fetch の打ち切りを足す。router の context は `{ db, noteLedger }`。procedure が使う画像の置き場所と打ち切りの signal は、型に出さずに `internals(noteLedger)` で引く（task と job と同じ形）。
+`createNoteLedger({ db, home, ghq? })` は `start()` / `stop()`・`repoCandidates()`・`cleanImages()`・`serveImage(name)` を持つ。`start()` は何もせず、`stop()` は走っている画像の取り込みと OGP の fetch を打ち切る。`home` は画像の置き場所に使う。`ghq` は `list(signal)` を持ち、省けば `ghq list` を `env: process.env` で spawn する。`signal` で打ち切ると ghq を kill する。task の `Ghq`（`packages/task/src/prepare.ts`）は import しない。`repoCandidates()` は `repo.candidates` の中身で、router の handler が呼ぶ。router の context は `{ db, noteLedger }`。procedure が使う画像の置き場所と打ち切りの signal は、型に出さずに `internals(noteLedger)` で引く（task と job と同じ形）。
 
 `@tania/note/server` の `systemJobs(noteLedger)` が system の Job の並び（`note.image-cleanup`）を出す。note は job を import しないので、task と同じく `createJobLedger` の `systemJobs` と同じ構造の素のオブジェクトを返す。
 
@@ -166,3 +202,7 @@ monica の Rust（`note_markdown.rs`・`note_markdown_import.rs`）を TypeScrip
 - monica の Rust を写した関数は、monica の `crates/monica-domain` を path 依存で読む scratch の crate に、テストの入力と部品を乱択で組み合わせた入力を流し、TS の出力と突き合わせる。空白の判定（Rust の `trim` は Unicode の White_Space）や `str::lines` の `\r` のような境界の振る舞いは、golden と写したテストだけでは写し漏れを拾えないため。
 - 画像は `image.test.ts` が、一時 directory の home で確かめる。取り込みの相手は Bun.serve の fake で、終わらない body、始まらない応答、途中で止まる body を作る。10 秒の打ち切りは、task の sync と同じく `importImage` に短い timeout を渡して確かめる。GC の 48 時間は時計を止めず、画像の mtime を `utimesSync` で過去と未来に置く。
 - 画像の GET と multipart の輸送は、apps/backend の `notes-listener.test.ts` が RPCLink で upload してから GET して確かめる。
+- OGP の行き先は `src/fake-site.ts` の fake の site に差し替える。fake は Bun.serve で path ごとに status・header・body を返し、届いた request の path と User-Agent を記録し、header の保留（`hold()`）、body の後に送り続けるか止まったままでいること、client が body を読みやめたこと（`cancelled`）を記録する。task の `fake-github.ts` と同じ形。
+- 10 秒の打ち切りは、`AbortSignal.timeout` を `spyOn` で差し替え、渡された ms を確かめてから手で abort する。header を待つ間と body の途中で止まった間の両方で確かめる。`stop()` も同じ 2 つで確かめる。
+- 1MB で転送を止めたことは、fake に cancel が 200ms 以内に届くことで見る。読みやめたまま捨てた body も GC が 1 秒ほどで cancel するので、待つ時間を長くすると cancel を呼ばなくても通る。
+- Shift_JIS の頁は、iconv で作った byte 列を fake に返させて確かめる。

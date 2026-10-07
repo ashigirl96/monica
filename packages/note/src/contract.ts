@@ -79,6 +79,14 @@ export const NoteMentionCandidateSchema = z.object({
   preview: NoteRowSchema.shape.preview,
 })
 
+export const LinkMetadataSchema = z.object({
+  title: z.string().nullable(),
+  description: z.string().nullable(),
+  image: z.string().nullable().describe('an absolute URL'),
+  favicon: z.string().nullable().describe('an absolute URL'),
+  siteName: z.string().nullable(),
+})
+
 export const saveErrors = {
   CONFLICT: {
     status: 409,
@@ -93,6 +101,7 @@ export type RepoNoteSummary = z.infer<typeof RepoNoteSummarySchema>
 export type RepoNotesCursor = z.infer<typeof RepoNotesCursorSchema>
 export type RepoNotesPage = z.infer<typeof RepoNotesPageSchema>
 export type NoteMentionCandidate = z.infer<typeof NoteMentionCandidateSchema>
+export type LinkMetadata = z.infer<typeof LinkMetadataSchema>
 
 export type Named =
   | { kind: 'daily'; date: string }
@@ -252,4 +261,12 @@ export const contract = {
       .input(z.object({ id: referencedId, blockId: z.string() }))
       .output(BlockSchema),
   },
+  linkMetadata: meta
+    .meta({
+      description:
+        'Read the title, description, image, site name and favicon of the web page at a URL, for a pasted link',
+    })
+    // Bun の fetch は file: も読むので、http と https に限る。
+    .input(z.object({ url: z.url({ protocol: /^https?$/ }).describe('an http or https URL') }))
+    .output(LinkMetadataSchema),
 }

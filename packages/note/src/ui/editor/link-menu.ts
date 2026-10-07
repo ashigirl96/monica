@@ -3,19 +3,12 @@ import { Plugin, TextSelection } from 'prosemirror-state'
 import type { EditorState, Transaction } from 'prosemirror-state'
 import type { EditorView } from 'prosemirror-view'
 
+import type { LinkMetadata } from '../../contract.ts'
 import { appendEmptyParagraphAfter } from './commands.ts'
 import { getBlockContext } from './context.ts'
 import { linkMenuKey } from './menu-keys.ts'
 import { createMenuOverlay, menuItemButton, positionMenuAt } from './menu-overlay.ts'
 import { createContainer, nodes, schema } from './schema.ts'
-
-export type LinkMetadata = {
-  title: string | null
-  description: string | null
-  image: string | null
-  favicon: string | null
-  siteName: string | null
-}
 
 export type FetchLinkMetadata = (url: string) => Promise<LinkMetadata | null>
 

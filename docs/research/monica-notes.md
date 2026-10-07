@@ -122,7 +122,7 @@ node の type の出現回数（括弧は含む note 数）: paragraph 1512 (135
 - `crates/monica-adapters/src/ogp/mod.rs`（本体 149 行）。reqwest と scraper で、timeout は 10 秒、HTML は 1MB で切り詰めてそのまま parse する。content-type が無いか `html` を含むときだけ本文を読む。
 - response の status を見ないので、404 の頁でもその HTML から値を取る。redirect は reqwest の既定（10 回）で追い、相対 URL の基準は最後の URL。User-Agent は送らない。cache は server にも client にも無い。行き先の制限は scheme（http/https）だけ。
 - 取る項目は title（`og:title`、無ければ `<title>`）、description（`og:description`、無ければ `meta name=description`）、image（`og:image` を絶対 URL に）、site_name、favicon（`rel` に icon を含む最初の `link`、無ければ `/favicon.ico`）。
-- 取った値は貼り付けた時点で本文の attrs に入る。linkMention は `{href, title, favicon}`、bookmark は `{href, title, description, thumbnail, favicon, siteName}`。href は貼った URL のままで、画像は外部 URL を直に参照する（`shared/block-editor/link-menu.ts:80-96, 240-250`）。失敗すると web は普通のリンクに戻す。
+- 取った値は貼り付けた時点で本文の attrs に入る。linkMention は `{href, title, favicon}`、bookmark は `{href, title, description, thumbnail, favicon, siteName}`。href は貼った URL のままで、画像は外部 URL を直に参照する（`shared/block-editor/link-menu.ts:80-96, 240-250`）。失敗すると web の `fetchLinkPreview` は null を返し、link-menu はそれを値の無い OGP として扱う（`EMPTY_META`）。普通のリンクになるのは既定の「URL」のままのときだけで、「Mention」を選べば URL を title にした favicon の無い chip、「Bookmark」を選べば URL だけのカードが残る。`web/src/api.ts` のコメントは「プレーンリンクへのフォールバック」と書くが、link-menu は link に戻さない。
 
 ## エディタ（`shared/block-editor`）
 

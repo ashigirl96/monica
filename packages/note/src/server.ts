@@ -2,6 +2,7 @@ import { implement } from '@orpc/server'
 
 import { contract } from './contract.ts'
 import { IMPORT_TIMEOUT_MS, importImage, uploadImage } from './image.ts'
+import { readLinkMetadata } from './link-metadata.ts'
 import { type Db, internals, type NoteLedger } from './note.ts'
 import { createEssay, createRepoNote, dailyDates, openDaily, openScratch } from './open.ts'
 import { noteBlock, resolveNoteMention, searchNoteMentions } from './reference.ts'
@@ -66,4 +67,7 @@ export const router = os.router({
       noteBlock(context.db, input.id, input.blockId),
     ),
   },
+  linkMetadata: os.linkMetadata.handler(({ context, input }) =>
+    readLinkMetadata(input.url, internals(context.noteLedger).stopped),
+  ),
 })

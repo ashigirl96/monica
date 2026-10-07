@@ -4,8 +4,9 @@ import { describe, expect, test } from 'bun:test'
 import type { Node as PMNode } from 'prosemirror-model'
 import { EditorState, TextSelection } from 'prosemirror-state'
 
+import type { LinkMetadata } from '../../contract.ts'
 import { previewTransaction } from './link-menu.ts'
-import type { LinkMenuActiveState, LinkMetadata } from './link-menu.ts'
+import type { LinkMenuActiveState } from './link-menu.ts'
 import { createContainer, nodes, schema } from './schema.ts'
 
 const URL = 'https://example.com/x'
