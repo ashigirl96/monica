@@ -1,6 +1,6 @@
 # Note Ledger
 
-`packages/note` の contract と、Note の種類ごとの不変条件、保存、削除と取り消し、画像の規則。決定の理由は ADR-0017・0018・0019 にある。今あるのは Note を 1 件ずつ扱う procedure と画像だけで、一覧、候補の検索、Note Mention の解決、block の取得、OGP は後続の issue で足す。
+`packages/note` の contract と、Note の種類ごとの不変条件、保存、削除と取り消し、本文の中の参照、画像の規則。決定の理由は ADR-0017・0018・0019 にある。今あるのは Note を 1 件ずつ扱う procedure と、本文の中の参照（Note Mention の候補と解決、block の取得）と、画像で、一覧と OGP は後続の issue で足す。
 
 ## contract（root は `note`）
 
@@ -15,8 +15,11 @@ scratch.open     { repo } → Note
 essay.create     → Note
 essay.setStatus  { id, status } → Note
 repoNote.create  { repo } → Note
-image.upload     { file } → { url }
-image.import     { url } → { url }
+noteMention.search   { q } → { id, displayName, preview }[]
+noteMention.resolve  { id } → { displayName }
+block.get            { id, blockId } → block
+image.upload         { file } → { url }
+image.import         { url } → { url }
 ```
 
 - `Note` は `kind`（`daily` / `essay` / `repo_note` / `scratch`）の判別 union。どの種類も `id`・`date`・`content`・`createdAt`・`updatedAt` を持ち、Essay は `title` と `status`、Repo Note は `repo` と `title`、Scratch は `repo` を持つ。
@@ -68,6 +71,16 @@ Note は `note` table に 1 件 1 行で持つ。種類と列の対応を CHECK 
 - `restore` は `deletedAt` を外して Note を返す。削除していない Note はそのまま返す。無い id は `NOT_FOUND`。
 - 削除した Note の一覧（ゴミ箱）は無い。取り消せるのは、削除した画面にいる間だけ（`GLOSSARY.md` の Note）。
 
+## 本文の中の参照
+
+Note Mention と Synced Block が引く procedure。画面での扱いは `docs/packages/note-ui.md` の「Note Mention と Synced Block」にある。
+
+- `noteMention.search` は、title・表示名・preview・Repo のどれかが q を含む Note を、更新の新しい順に 20 件返す。大文字と小文字を区別せず、q の前後の空白は落とす。空の q は最近更新した 20 件になる。削除した Note は出さず、開いている Note も外さない（monica どおり）。
+- 表示名は列に無い導出値なので、SQL では絞らず、削除していない行を新しい順に読んで `displayName` で絞る。monica は列の LIKE で絞った後に表示名で絞り直していたので、title が空の Essay を「Untitled」で引けなかった。Essay と Repo Note の `date` は名前に含まないので、日付では引けない。
+- `noteMention.resolve` は Note の今の表示名を返す。削除した Note と無い id は `NOT_FOUND`。
+- `block.get` は、`attrs.id` が blockId の blockContainer を、入れ子の block ごと保存された JSON のまま返す（`@tania/note/body` の `blockById`）。Note が無いか削除してあるとき、その block が無いときは `NOT_FOUND`。Synced Block の中の Synced Block を深さ 8 まで展開する処理は持たない。monica で使っていたのは CLI の `note show --expand` だけだった。
+- `noteMention.resolve` と `block.get` は id を形を問わずに受け、`note-N` の形でなければ `NOT_FOUND` にする。本文の attrs の id には、貼った URL から緩く抜き出したもの（ui の `internalNoteId`）もある。`BAD_REQUEST` で断ると、画面は「Deleted note」も「Original block was deleted」も出せない。
+
 ## 画像
 
 `GLOSSARY.md` の画像。Note とは別に file で置き、本文の image node の `src` が相対の URL で参照する。Note と画像の対応表は持たない。処理は `src/image.ts` に置く。
@@ -99,6 +112,7 @@ Note は `note` table に 1 件 1 行で持つ。種類と列の対応を CHECK 
 - `NoteLedger.cleanImages()` は、どの Note の本文にも参照されず、置いてから 48 時間を過ぎた画像を消す。system の Job `note.image-cleanup`（24 時間ごと）が呼ぶ。Job Ledger は start のときにすぐ 1 回走らせるが、48 時間の猶予があるので、貼ったばかりでまだ保存していない画像は消えない。
 - 参照として数えるのは、全 Note（削除したものを含む）の本文の、相対の `/api/assets/` で始まる文字列の値。node の型を問わない（`@tania/note/body` の `imageReferences`）。削除した Note は取り消せるので、その本文の参照も数える。`http://…/api/assets/…` のような絶対 URL は数えない（ADR-0019）。
 - 消すのは画像の file 名の形をしたものだけ。置いた時刻は mtime で、mtime が読めないものと未来のものは残す。
+- 外から画像を置くとき（monica からの移行、#134）は、mtime を置いた時刻にする。`cp -p` や `rsync -a` で元の mtime を残すと、参照する本文がまだ入っていない間に Backend が起きたとき、起動直後の掃除が消す。
 - 同期の fs で走らせる。参照を読んでから消すまでの間に await があると、`save` が古い画像の参照を書き戻せるため（task の setup の log の掃除と同じ）。
 - 消せなかった画像があれば、残りを消してから reject する。Job Execution が失敗になり、次の回がやり直す。本文の JSON が読めなければ、何も消さずに reject する。
 
@@ -112,7 +126,7 @@ note は他の domain を import せず、他の domain からも import され�
 
 ## body
 
-`@tania/note/body` は本文の JSON を読む module で、server と ui の両方が import する。そのため `bun:sqlite`・`drizzle-orm`・schema と server の entry を import しない（`.oxlintrc.json` の override が守る）。node は JSON のまま辿り、prosemirror-model に依らない。今あるのは `preview` と `EMPTY_DOC` と、画像の参照を列挙する `imageReferences` で、markdown の変換は後続の issue で足す。`IMAGE_URL_PREFIX` は `@tania/note/contract` から読む。
+`@tania/note/body` は本文の JSON を読む module で、server と ui の両方が import する。そのため `bun:sqlite`・`drizzle-orm`・schema と server の entry を import しない（`.oxlintrc.json` の override が守る）。node は JSON のまま辿り、prosemirror-model に依らない。今あるのは `preview`・`blockById`・`EMPTY_DOC` と、画像の参照を列挙する `imageReferences` で、markdown の変換は後続の issue で足す。`IMAGE_URL_PREFIX` は `@tania/note/contract` から読む。
 
 ## テスト
 

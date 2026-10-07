@@ -4,6 +4,7 @@ import { contract } from './contract.ts'
 import { IMPORT_TIMEOUT_MS, importImage, uploadImage } from './image.ts'
 import { type Db, internals, type NoteLedger } from './note.ts'
 import { createEssay, createRepoNote, dailyDates, openDaily, openScratch } from './open.ts'
+import { noteBlock, resolveNoteMention, searchNoteMentions } from './reference.ts'
 import { removeNote, restoreNote } from './remove.ts'
 import { toNote, undeletedNote } from './row.ts'
 import { saveNote, setEssayStatus } from './save.ts'
@@ -42,6 +43,19 @@ export const router = os.router({
     ),
     import: os.image.import.handler(({ context, input }) =>
       importImage(internals(context.noteLedger), input.url, IMPORT_TIMEOUT_MS),
+    ),
+  },
+  noteMention: {
+    search: os.noteMention.search.handler(({ context, input }) =>
+      searchNoteMentions(context.db, input.q),
+    ),
+    resolve: os.noteMention.resolve.handler(({ context, input }) =>
+      resolveNoteMention(context.db, input.id),
+    ),
+  },
+  block: {
+    get: os.block.get.handler(({ context, input }) =>
+      noteBlock(context.db, input.id, input.blockId),
     ),
   },
 })

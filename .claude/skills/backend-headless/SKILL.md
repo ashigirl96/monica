@@ -8,14 +8,15 @@ Backend を本物の ptyd に繋いで起こす。Shell の役（親として生
 ## 起こす
 
 1. `cargo build -p tania-ptyd`
-2. home は `${TMPDIR%/}/tania-s2` のように、`$TMPDIR` の下に短い名前で作る。ptyd の socket（`$TANIA_HOME/ptyd.sock`）の path が 104 byte を超えると bind できず、client には ENOENT にしか見えない。
+2. home は `${TMPDIR%/}/tania-s2` のように、`$TMPDIR` の下に短い名前で作る。名前は作業ごとに変える（issue 番号を入れるなど）。並行する他の agent も同じ手順で Backend を起こしている。ptyd の socket（`$TANIA_HOME/ptyd.sock`）の path が 104 byte を超えると bind できず、client には ENOENT にしか見えない。
 3. Bash の `run_in_background` で、stdin を無名 pipe で握って起こす。出力は scratchpad の file に向ける。
 
    ```bash
-   sleep 100000 | TANIA_HOME=${TMPDIR%/}/tania-s2 TANIA_PTYD_PATH=target/debug/tania-ptyd \
+   sleep 100002 | TANIA_HOME=${TMPDIR%/}/tania-s2 TANIA_PTYD_PATH=target/debug/tania-ptyd \
      bun apps/backend/src/main.ts > $SCRATCH/out.jsonl 2> $SCRATCH/err.log
    ```
 
+   - sleep の秒数は home ごとに固有の値にする（`tania-s2` なら `100002`）。止めるときにこの秒数で自分の sleep だけを探す。他の agent と同じ秒数だと、互いの sleep を kill し、相手の Backend が stdin の EOF で黙って抜ける。
    - 親は background job のまま生かす。`( … &)` で切り離すと親がすぐ死に、Backend は ppid=1 の見張りで約 1 秒後に黙って抜ける。
    - stdin は無名 pipe にする。Bun は fifo の EOF を拾わないので、fifo では stdin の EOF で抜ける振る舞いを確かめられない。
    - `.app` でだけ起きること（gh や ghq が見つからないなど）を確かめるときは、`env -i HOME=$HOME USER=$USER SHELL=/bin/zsh LANG=$LANG TMPDIR=$TMPDIR PATH=/usr/bin:/bin:/usr/sbin:/sbin` を前に付け、bun を絶対 path（`~/.bun/bin/bun`）で起こす。PATH が launchd の渡すものと同じになり、Backend が login shell から取った PATH が効いているかを見られる。
@@ -24,7 +25,7 @@ Backend を本物の ptyd に繋いで起こす。Shell の役（親として生
 
 4. tab の claude の hook を確かめるなら、起動した後に `ln -s $PWD/scripts/tania-dev ${TMPDIR%/}/tania-s2/bin/tania` を張る。hook の settings の command はこの path を指し、desktop では Shell が張る。
 
-起動できたのは、`out.jsonl` に `{"type":"endpoint",…}` の行が出て、`$TANIA_HOME/backend.json` ができたとき。待つのは、Bash の `run_in_background` で `until [ -f ${TMPDIR%/}/tania-s2/backend.json ] || ! pgrep -qf apps/backend/src/main.ts; do sleep 0.5; done` を走らせる（前景の `sleep` は harness が止める）。抜けた後に `backend.json` が無ければ Backend は落ちているので、`err.log` を読む。
+起動できたのは、`out.jsonl` に `{"type":"endpoint",…}` の行が出て、`$TANIA_HOME/backend.json` ができたとき。待つのは、Bash の `run_in_background` で `for i in $(seq 60); do [ -f ${TMPDIR%/}/tania-s2/backend.json ] && break; sleep 0.5; done` を走らせる（前景の `sleep` は harness が止める）。Backend の生死は自分の home の `backend.json` で見る。`pgrep -f apps/backend/src/main.ts` は他の agent の Backend にも当たる。30 秒たっても `backend.json` が無いか、Backend の background job が終わったと知らされたら、Backend は落ちているので `err.log` を読む。
 
 ## 確かめる
 
@@ -144,15 +145,34 @@ Backend を本物の ptyd に繋いで起こす。Shell の役（親として生
 
    Backend に届かないときは、Vite が proxy の接続を応答なしで切り（release の口と同じく、画面には network error に見える）、`web.log` に `http proxy error` が出る。
 
-エディタへの貼り付けとドロップは、`agent-browser --session tania-s2 eval '<js>'` で `.ProseMirror` に event を送って起こす。`DataTransfer` に `File` を `items.add` するか `setData('text/html', …)` で入れ、`new ClipboardEvent('paste', { clipboardData: dt, bubbles: true, cancelable: true })` か `new DragEvent('drop', { dataTransfer: dt, clientX, clientY, bubbles: true, cancelable: true })` を `dispatchEvent` する。page は手元の file を読めないので、画像のバイト列は base64 で js に埋める。他の site の画像は、別の port で立てた Bun.serve の fake を `<img src>` に書く。
+5. 確かめる Note は、notes の口に RPCLink を向けた script で入れる。router は `{ note }` の下にあり、GET 以外の request には `Sec-Fetch-Site: same-origin` が要る。script を `packages/note/` の下に置くと `@orpc/*` と `./src/contract.ts` を解決できるので、終わったら消す。
+
+   ```ts
+   const root: ContractRouterClient<{ note: typeof contract }> = createORPCClient(
+     new RPCLink({ url: `http://localhost:${notesPort}/rpc`, headers: { 'sec-fetch-site': 'same-origin' } }),
+   )
+   const daily = await root.note.daily.open({ date: '2026-10-06' })
+   ```
+
+6. headless の Chromium では、キーの ⌘C / ⌘V が copy と paste にならず、agent-browser の click と mouse には修飾キーが載らない。どちらも event を合成して DOM に送る。ProseMirror は `ClipboardEvent` の `clipboardData` だけを読み書きするので、clipboard の plugin は本物の経路を通る。copy の DataTransfer を `window` に控え、移るときは画面の link で移る（`open` は頁を読み直して控えを消す）。
+
+   ```bash
+   agent-browser --session tania-s2 eval "(() => { const dt = new DataTransfer(); document.querySelector('.ProseMirror').dispatchEvent(new ClipboardEvent('copy', { clipboardData: dt, bubbles: true, cancelable: true })); window.__copied = Object.fromEntries(dt.types.map((t) => [t, dt.getData(t)])) })()"
+   agent-browser --session tania-s2 eval "(() => { const dt = new DataTransfer(); for (const [t, v] of Object.entries(window.__copied)) dt.setData(t, v); document.querySelector('.ProseMirror').dispatchEvent(new ClipboardEvent('paste', { clipboardData: dt, bubbles: true, cancelable: true })) })()"
+   agent-browser --session tania-s2 eval "document.querySelector('a[data-note-mention=\"note-3\"]').dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, metaKey: true }))"
+   ```
+
+   エディタの中の文字は `find text … click` では押せないので、`click '[data-block-id="<id>"] [data-block-content]'` のように CSS の selector で押す。
+
+   画像の貼り付けは、`DataTransfer` に `File` を `items.add` して送る。ドロップは `new DragEvent("drop", { dataTransfer: dt, clientX, clientY, bubbles: true, cancelable: true })` を送る。page は手元の file を読めないので、画像のバイト列は base64 で js に埋める。他の site の画像は、別の port で立てた Bun.serve の fake を `<img src>` に書く。
 
 片付けでは `agent-browser --session tania-s2 close` で browser を閉じ、Vite の pid（`lsof -ti tcp:<Vite の port> -sTCP:LISTEN`）に `kill` を送ってから、下の手順で Backend を止める。
 
 ## 止めて片付ける
 
-- stdin の EOF で止める: sleep の pid を `pgrep -f "^sleep 100000$"` で取り、その pid に `kill` を送る。`pkill -f` は harness の zsh にも当たり、親ごと殺す。
+- stdin の EOF で止める: sleep の pid を、起こしたときの固有の秒数で `pgrep -f "^sleep 100002$"` と取り、その pid に `kill` を送る。`pkill -f` は harness の zsh にも当たり、親ごと殺す。
 - SIGTERM で止める: `kill -TERM $(jq .pid ${TMPDIR%/}/tania-s2/backend.json)`。pipe の左の sleep は残り、background の job が終わらないので、続けて上の手順で sleep も止める。
-- Backend が止まったら `rm -rf ${TMPDIR%/}/tania-s2` で home を消す。ptyd は socket が消えたのを 2 秒おきの確認で見つけ、shell ごと終わるので、下の判定は数秒待ってからする。
+- Backend は抜けるときに `backend.json` を消すので、それが消えたら止まっている。`rm -rf ${TMPDIR%/}/tania-s2` で home を消す。ptyd は socket が消えたのを 2 秒おきの確認で見つけ、shell ごと終わるので、下の判定は数秒待ってからする。
 - Tab で claude を起こしたなら、claude が cwd ごとに作る `~/.claude/projects/-private-var-folders-…-tania-s2…` も消す（cwd の `/` と `.` が `-` になった名前）。`ls ~/.claude/projects | grep tania-s2` で見つかる。
 
-片付いたのは、`pgrep -f apps/backend/src/main.ts` と `pgrep -f "tania-ptyd --tania-home ${TMPDIR%/}/tania-s2"` が何も返さず、home が消えたとき。消し忘れた dev は `bun run dev:list` で見つけ、`bun run dev:kill <NAME>` で片付ける。
+片付いたのは、`backend.json` が消えた後に `pgrep -f "tania-ptyd --tania-home ${TMPDIR%/}/tania-s2"` が何も返さず、home が消えたとき。消し忘れた dev は `bun run dev:list` で見つけ、`bun run dev:kill <NAME>` で片付ける。
