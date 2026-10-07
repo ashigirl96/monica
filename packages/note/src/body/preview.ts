@@ -1,3 +1,5 @@
+import { childrenOf, isNode } from './node.ts'
+
 const PREVIEW_MAX_CHARS = 200
 const graphemes = new Intl.Segmenter()
 
@@ -15,8 +17,6 @@ const TEXTBLOCKS = new Set([
 ])
 const ATOM_BLOCKS = new Set(['divider', 'bookmark', 'syncedBlock', 'image'])
 const ATOM_INLINES = new Set(['linkMention', 'noteMention', 'hardBreak'])
-
-type Node = { type?: unknown; text?: unknown; content?: unknown }
 
 /**
  * 最初の空でない block の text を 200 文字まで。どの block にも text が無ければ null。
@@ -80,12 +80,4 @@ function allText(node: unknown): string {
   if (!isNode(node)) return ''
   const own = typeof node.text === 'string' ? node.text : ''
   return own + childrenOf(node).map(allText).join('')
-}
-
-function childrenOf(node: unknown): unknown[] {
-  return isNode(node) && Array.isArray(node.content) ? node.content : []
-}
-
-function isNode(value: unknown): value is Node {
-  return typeof value === 'object' && value !== null && !Array.isArray(value)
 }
