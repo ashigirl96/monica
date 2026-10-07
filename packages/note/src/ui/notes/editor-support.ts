@@ -1,8 +1,24 @@
 import { type KeyboardEvent as ReactKeyboardEvent, type RefObject, useCallback } from 'react'
 
 import type { Doc, Note } from '../../contract.ts'
+import type { NoteClient } from '../client.ts'
 import type { BlockEditorHandle } from '../editor/block-editor.tsx'
-import { stripPendingImages } from '../editor/image-upload.ts'
+import {
+  type ImportExternalImage,
+  stripPendingImages,
+  type UploadImage,
+} from '../editor/image-upload.ts'
+
+// editor は失敗を null で受け、upload は失敗の表示と retry に、取り込みは外部 URL のままにする。
+export function imageCallbacks(client: NoteClient): {
+  uploadImage: UploadImage
+  importExternalImage: ImportExternalImage
+} {
+  return {
+    uploadImage: (file) => client.image.upload({ file }).catch(() => null),
+    importExternalImage: (url) => client.image.import({ url }).catch(() => null),
+  }
+}
 
 // autosave が保存する content から、アップロード未完了（src:null）の image block を除く。
 // toJSON を持つ live doc（PMNode）はフラッシュ時に一度だけ walk するよう

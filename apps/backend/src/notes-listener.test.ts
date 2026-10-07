@@ -4,6 +4,10 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 
+import { createORPCClient } from '@orpc/client'
+import { RPCLink } from '@orpc/client/fetch'
+import type { ContractRouterClient } from '@orpc/contract'
+import type { contract } from '@tania/note/contract'
 import { createNoteLedger, migrations } from '@tania/note/server'
 import { drizzle } from 'drizzle-orm/bun-sqlite'
 import { migrate } from 'drizzle-orm/bun-sqlite/migrator'
@@ -27,12 +31,14 @@ function webDist(files: Record<string, string>): string {
 }
 
 function listen(port: number | undefined, dist = webDist({ 'index.html': '<p>notes</p>' })) {
+  const home = mkdtempSync(join(tmpdir(), 'tania-home-'))
+  cleanups.push(() => rmSync(home, { recursive: true, force: true }))
   const db = drizzle(new Database(':memory:'))
   migrate(db, { migrationsFolder: migrations.folder, migrationsTable: migrations.table })
-  const noteLedger = createNoteLedger({ db, home: tmpdir() })
+  const noteLedger = createNoteLedger({ db, home })
   const listener = listenNotes(port?.toString(), { context: { db, noteLedger }, webDist: dist })
   if (listener) cleanups.push(() => listener.stop())
-  return listener
+  return { listener, home }
 }
 
 test('the notes listener answers on both loopbacks to the three names of its port and refuses any other Host', async () => {
@@ -112,9 +118,56 @@ test('a GET for a path of the SPA gets index.html uncached, and a hashed asset i
   }
 })
 
+const PNG = Uint8Array.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 0x0d])
+
+test('an image uploaded through the notes listener is served back byte for byte and cached for good', async () => {
+  const port = freePort()
+  listen(port)
+  const client: ContractRouterClient<{ note: typeof contract }> = createORPCClient(
+    new RPCLink({
+      url: `http://127.0.0.1:${port}/rpc`,
+      headers: { 'sec-fetch-site': 'same-origin' },
+    }),
+  )
+
+  const { url } = await client.note.image.upload({ file: new File([PNG], 'pasted.png') })
+  const image = await fetch(`http://127.0.0.1:${port}${url}`)
+
+  expect(image.status).toBe(200)
+  expect(image.headers.get('content-type')).toBe('image/png')
+  expect(image.headers.get('cache-control')).toBe('public, max-age=31536000, immutable')
+  expect(new Uint8Array(await image.arrayBuffer())).toEqual(PNG)
+})
+
+test('a GET for an image whose name is not one the Note Ledger makes is not found, whatever is on disk', async () => {
+  const port = freePort()
+  const { home } = listen(port)
+  const uuid = crypto.randomUUID()
+  mkdirSync(join(home, 'note-images'))
+  for (const name of [`${uuid.toUpperCase()}.png`, `${uuid}.svg`, `${uuid}.png.txt`, 'notes.txt']) {
+    writeFileSync(join(home, 'note-images', name), PNG)
+  }
+  writeFileSync(join(home, 'tania.db'), 'the DB')
+
+  for (const path of [
+    `${crypto.randomUUID()}.png`,
+    `${uuid.toUpperCase()}.png`,
+    `${uuid}.svg`,
+    `${uuid}.png.txt`,
+    'notes.txt',
+    '..%2Ftania.db',
+    `x/${uuid}.png`,
+    '',
+  ]) {
+    const response = await fetch(`http://127.0.0.1:${port}/api/assets/${path}`)
+    expect([path, response.status]).toEqual([path, 404])
+    expect([path, await response.text()]).not.toEqual([path, 'the DB'])
+  }
+})
+
 // headless で起こした dev の Backend が release の 19380 を取らないよう、env が無ければ既定の port にも倒さない。
 test('without a port there is no notes listener', () => {
-  expect(listen(undefined)).toBeNull()
+  expect(listen(undefined).listener).toBeNull()
 })
 
 // Chromium と macOS は tania.localhost を ::1 から先に引くので、::1 だけを他の process が握っていてもブラウザはそちらに繋がる。
@@ -127,7 +180,7 @@ test.each(['::1', '127.0.0.1'])(
     const stderr = spyOn(console, 'error').mockImplementation(() => {})
     cleanups.push(() => stderr.mockRestore())
 
-    const listener = listen(port)
+    const { listener } = listen(port)
 
     expect(listener).toBeNull()
     expect(stderr).toHaveBeenCalledTimes(1)
