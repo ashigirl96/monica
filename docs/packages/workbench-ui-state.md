@@ -80,6 +80,6 @@ release で通知を押すと、Shell がその通知の Terminal Session を we
 
 - webview は `notification-clicked` の listen を張ってから、Shell の `take_notification_click` command で持っている Terminal Session を取り出す。event を受けたときも同じ command で取り出す。通知で起こした tania では、webview が listen を張る前にクリックが届くため。
 - 取り出すと Shell から消えるので、effect を片付けた後に届いた答えも捨てずに Tab を選ぶ（dev の StrictMode が effect を張り直しても取りこぼさない）。
-- layout を読み直してから選ぶ。窓が隠れている間は webview の JS が止まり、その間に CLI などで開いた Tab が layout に載っていないため。Backend にまだ繋がっていなければ（通知で起こした直後）、繋がって最初に読めた layout で選ぶ。
+- layout を読み直してから選ぶ。窓が隠れている間は webview の JS が止まり、その間に CLI などで開いた Tab が layout に載っていないため。Backend に繋がっていなければ（通知で起こした直後や Backend の再起動中）、繋がって次に読めた layout で選ぶ。再起動中も layout は前の値のまま残り、その間に開いた Tab が載っていないため。
 - その Terminal Session を表示している Tab があれば、その Runspace と Tab を active にし、端末に focus を移す。その Runspace が Pinned（pin された Tab を持つ）でなければ、別の Tile を覗いていても、その Runspace の Tile に戻す。Pinned の Runspace はどの Tile を選んでも一覧の上に見えているので、そのとき見えていた Tile に留める。Bench は pin しても Tab を切り出さないので、押された Tab が pin されていなくても、同じ Runspace の別の Tab が pin されていれば留める。
 - 表示している Tab が無ければ（Tab を閉じて detached になった、Terminal Session が終わった、pin の張り直しで Terminal Session が替わった）、何もしない。Tab を選べば、既読は上の「未読」の規則で書かれる。

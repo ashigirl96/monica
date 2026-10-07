@@ -63,6 +63,22 @@ test('a click the Shell held before the webview reached the Backend brings up it
   expect(shown?.id).toBe(waiting.id)
 })
 
+test('a click while the Backend is away waits for the layout read once it is back, rather than the one left from before', async () => {
+  const { client, store, runspaceId } = await bench()
+  await store.set(reloadAtom)
+  const opened = await client.tab.open({ runspaceId, ...size })
+  store.set(workbenchClientAtom, null)
+  heldClick = opened.terminalSessionId
+
+  onCleanup(followNotificationClicks(store))
+  await untilTrue(() => heldClick === null)
+  store.set(workbenchClientAtom, () => client)
+  await store.set(reloadAtom)
+
+  const shown = await until(store, activeTerminalTabAtom, (tab) => tab?.id === opened.id)
+  expect(shown?.id).toBe(opened.id)
+})
+
 test('a click on a Tab opened since the layout was last read brings up that Tab', async () => {
   const { client, store, runspaceId } = await bench()
   await store.set(reloadAtom)

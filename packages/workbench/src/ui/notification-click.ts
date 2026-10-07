@@ -22,17 +22,15 @@ export function followNotificationClicks(store: Store): () => void {
 function showInLatestLayout(store: Store, terminalSessionId: string) {
   store.set(reloadAtom).then(
     () => store.set(showTerminalSessionAtom, terminalSessionId),
-    // Backend にまだ繋がっていなければ、繋がって最初に読めた layout で照合する。
-    () => showOnceLaidOut(store, terminalSessionId),
+    // Backend が居ない間も layout は前の値のまま残るので、繋がって次に読めた layout で照合する。
+    () => showInNextLayout(store, terminalSessionId),
   )
 }
 
-function showOnceLaidOut(store: Store, terminalSessionId: string) {
-  const show = () => store.set(showTerminalSessionAtom, terminalSessionId)
-  if (store.get(layoutAtom)) return show()
+function showInNextLayout(store: Store, terminalSessionId: string) {
   const stop = store.sub(layoutAtom, () => {
     if (!store.get(layoutAtom)) return
     stop()
-    show()
+    store.set(showTerminalSessionAtom, terminalSessionId)
   })
 }
