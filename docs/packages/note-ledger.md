@@ -38,7 +38,7 @@ contract に置く純関数と定数。server と ui が同じものを読む。
 
 - `logicalDate(at)`: Logical Date。local time の 5 時より前は前の日に数える。server は作るときの `date` に、ui は `/daily` の今日に使う。`today` の procedure は作らない。
 - `displayName(note)`: Daily は ISO の日付、Essay と Repo Note は title（空なら `Untitled`）、Scratch は `owner/repo`。
-- `IMAGE_URL_PREFIX`: 本文の画像の URL の prefix の `/api/assets/`（ADR-0019）。
+- `IMAGE_URL_PREFIX`: 本文の画像の URL の prefix の `/api/assets/`（ADR-0019）。body の画像の参照の列挙と markdown の取り込みも読むので、定義は body に置いて contract が re-export する。body が contract を import すると、contract の先の schema と drizzle-orm まで読むため。
 - `NOTES_HOSTNAMES`: notes の口が答える host 名（`tania.localhost`・`localhost`・`127.0.0.1`）。notes の口の Host の照合と、エディタの内部リンクの判定が読む。Host の照合は DNS rebinding を防ぐ許可の一覧なので、名前を足すとその口に届く経路も増える。
 
 ## 種類ごとの不変条件
@@ -140,7 +140,19 @@ note は他の domain を import せず、他の domain からも import され�
 
 ## body
 
-`@tania/note/body` は本文の JSON を読む module で、server と ui の両方が import する。そのため `bun:sqlite`・`drizzle-orm`・schema と server の entry を import しない（`.oxlintrc.json` の override が守る）。node は JSON のまま辿り、prosemirror-model に依らない。今あるのは `preview`・`blockById`・`EMPTY_DOC` と、画像の参照を列挙する `imageReferences` で、markdown の変換は後続の issue で足す。`IMAGE_URL_PREFIX` は `@tania/note/contract` から読む。
+`@tania/note/body` は本文の JSON を読む module で、server と ui の両方が import する。そのため `bun:sqlite`・`drizzle-orm`・schema と server の entry を import しない（直接の import は `.oxlintrc.json` の override が、contract などを経た import は `src/body/entry.test.ts` が守る）。node は JSON のまま辿り、prosemirror-model に依らない。今あるのは `preview`・`blockById`・`EMPTY_DOC`、画像の参照を列挙する `imageReferences`、本文と markdown の変換（`toMarkdown`・`fromMarkdown`）。
+
+### markdown の変換
+
+monica の Rust（`note_markdown.rs`・`note_markdown_import.rs`）を TypeScript に写したもの。ui が copy と paste で手元で呼ぶ（`docs/packages/note-ui.md` の「markdown の copy と paste」）。procedure は作らない。contract は oRPC の型の正本なので、変換を混ぜずに body に置く。
+
+- `toMarkdown(doc, noteName?)` は失敗しない。知らない node と mark は中の text だけを拾い、型の違う field は無いものとして読む。doc でない値はその text を書く。monica は型の違う field が 1 つでもあると文書全体を plain text に落としていたが、node を JSON のまま辿るので持ち込まない。
+- Note Mention は `[[note-N|表示名]]` で書く。表示名は呼び手が `noteName` で渡し、null か空なら `[[note-N]]`。
+- link mention と bookmark は `[title](href)`、underline は `<u>…</u>`、callout は `> [!kind]` で書く。Synced Block は参照の形（`![[note-N#^block]]`、block ごとに 1 行）のまま書き、中身を展開しない。
+- `fromMarkdown(markdown)` は失敗せず、どの構文にも当たらない行は paragraph にする。block の id は振らない（貼り付けの経路が振る）。`[title](href)` は link の mark になり、`![[note]]`・`![[note#^blk]]` は Synced Block になる。画像は src が `IMAGE_URL_PREFIX` か http(s) の行だけを image にする。
+- 往復しないもの: toggle は quote に、list 以外の block の子は平らになり、`[[note-N|表示名]]` の表示名は捨てる。見出しの中の改行は、続く行を別の block として読む。
+- 字下げは 64 段で打ち切り、それより深い行は兄弟にする。1 段ごとに再帰するため。
+- 持ち込まないもの: Synced Block の展開（`FULL_DOC_EXPANDED_MD`）、循環の打ち切り、全文検索の plain text。どれも CLI の `note show --expand` と全文検索のためのもの。
 
 ## テスト
 
@@ -149,6 +161,8 @@ note は他の domain を import せず、他の domain からも import され�
 - 時計は bun:test の `setSystemTime` で止める。止まるのは Date だけで、timer は動く。
 - ghq は `createNoteLedger` に偽の `list` を渡して差し替える。CI の ts job に ghq は無い。5 秒の打ち切りは、`setTimeout` を `spyOn` して 5000ms の callback を捕まえ、手で呼ぶ。偽の `list` は終わらない promise を返し、ghq の終わりを待たずに返ることを確かめる。
 - 種類と列の対応と、1 つだけある Note は、table に直に insert して確かめる。
-- preview は monica の fixture（`src/body/fixtures/` の `full-doc.json`・`unknown-nodes.json`）で確かめる。fixture は後続の markdown の変換のテストも使う。
+- preview と markdown の変換は monica の fixture（`src/body/fixtures/` の `full-doc.json`・`unknown-nodes.json`）で確かめる。
+- markdown の変換のテストは、monica の import の 33 本と export の 11 本から、展開・循環・plain text のものを除いて写してある。`full-doc.json` の書き出しは monica の golden（`FULL_DOC_MD`）と一字ずつ比べる。
+- monica の Rust を写した関数は、monica の `crates/monica-domain` を path 依存で読む scratch の crate に、テストの入力と部品を乱択で組み合わせた入力を流し、TS の出力と突き合わせる。空白の判定（Rust の `trim` は Unicode の White_Space）や `str::lines` の `\r` のような境界の振る舞いは、golden と写したテストだけでは写し漏れを拾えないため。
 - 画像は `image.test.ts` が、一時 directory の home で確かめる。取り込みの相手は Bun.serve の fake で、終わらない body、始まらない応答、途中で止まる body を作る。10 秒の打ち切りは、task の sync と同じく `importImage` に短い timeout を渡して確かめる。GC の 48 時間は時計を止めず、画像の mtime を `utimesSync` で過去と未来に置く。
 - 画像の GET と multipart の輸送は、apps/backend の `notes-listener.test.ts` が RPCLink で upload してから GET して確かめる。

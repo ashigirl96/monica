@@ -1,4 +1,4 @@
-import { IMAGE_URL_PREFIX } from '../contract.ts'
+import { IMAGE_URL_PREFIX } from './image-url.ts'
 
 // node の形が変わっても参照を落とさないよう、node の型を問わず文字列の値をすべて見る。
 export function imageReferences(doc: unknown): string[] {

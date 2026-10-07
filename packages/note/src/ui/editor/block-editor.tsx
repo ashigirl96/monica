@@ -155,11 +155,10 @@ export function BlockEditor({
         ? (url) => importExternalImageRef.current?.(url) ?? Promise.resolve(null)
         : undefined,
       renderMarkdown: hasRenderMarkdown
-        ? (docJson) => renderMarkdownRef.current?.(docJson) ?? Promise.resolve('')
+        ? (docJson) => renderMarkdownRef.current?.(docJson) ?? ''
         : undefined,
       parseMarkdown: hasParseMarkdown
-        ? (markdown) =>
-            parseMarkdownRef.current?.(markdown) ?? Promise.reject(new Error('unavailable'))
+        ? (markdown) => parseMarkdownRef.current?.(markdown) ?? null
         : undefined,
     })
 

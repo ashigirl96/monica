@@ -1,5 +1,6 @@
 import { type RefObject, useCallback, useEffect, useState } from 'react'
 
+import { fromMarkdown, toMarkdown } from '../../body/index.ts'
 import type { Note } from '../../contract.ts'
 import { reach, useNoteClient } from '../client.ts'
 import { BlockEditor, type BlockEditorHandle } from '../editor/block-editor.tsx'
@@ -80,6 +81,8 @@ function OpenNoteEditor({
       resolveBlock={references.resolveBlock}
       onOpenBlock={openBlock}
       handleRef={handleRef}
+      renderMarkdown={(doc) => toMarkdown(doc, references.noteName)}
+      parseMarkdown={fromMarkdown}
       className="min-h-[70dvh] pt-4 pb-[40dvh]"
     />
   )
