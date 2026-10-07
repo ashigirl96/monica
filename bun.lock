@@ -114,6 +114,7 @@
         "@orpc/client": "catalog:",
         "@orpc/contract": "catalog:",
         "@orpc/server": "catalog:",
+        "@tania/ui": "workspace:*",
         "@tanstack/react-query": "catalog:",
         "drizzle-orm": "catalog:",
         "drizzle-zod": "catalog:",

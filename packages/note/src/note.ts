@@ -2,13 +2,16 @@ import { join } from 'node:path'
 
 import type { BunSQLiteDatabase } from 'drizzle-orm/bun-sqlite'
 
+import { defaultGhq, type Ghq } from './ghq.ts'
 import { cleanImages, type ImageDeps, serveImage } from './image.ts'
+import { repoCandidates } from './repo.ts'
 
 export type Db = BunSQLiteDatabase
 
 export type NoteLedger = {
   start(): void
   stop(): void
+  repoCandidates(): Promise<string[]>
   /** 消せなかった画像があれば、残りを消してから reject する。 */
   cleanImages(): Promise<void>
   /** oRPC の RPCHandler は File を multipart に包むので、`<img src>` が読む生のバイト列はここから返す。 */
@@ -35,7 +38,8 @@ export function internals(noteLedger: NoteLedger): ImageDeps {
   return found
 }
 
-export function createNoteLedger(deps: { db: Db; home: string }): NoteLedger {
+export function createNoteLedger(deps: { db: Db; home: string; ghq?: Ghq }): NoteLedger {
+  const ghq = deps.ghq ?? defaultGhq
   const dir = join(deps.home, 'note-images')
   const stopped = new AbortController()
   const noteLedger: NoteLedger = {
@@ -43,6 +47,7 @@ export function createNoteLedger(deps: { db: Db; home: string }): NoteLedger {
     stop() {
       stopped.abort()
     },
+    repoCandidates: () => repoCandidates(deps.db, ghq),
     cleanImages: () => cleanImages(deps.db, dir),
     serveImage: (name) => serveImage(dir, name),
   }

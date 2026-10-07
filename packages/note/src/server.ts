@@ -6,10 +6,12 @@ import { type Db, internals, type NoteLedger } from './note.ts'
 import { createEssay, createRepoNote, dailyDates, openDaily, openScratch } from './open.ts'
 import { noteBlock, resolveNoteMention, searchNoteMentions } from './reference.ts'
 import { removeNote, restoreNote } from './remove.ts'
+import { listRepoNotes } from './repo.ts'
 import { toNote, undeletedNote } from './row.ts'
 import { saveNote, setEssayStatus } from './save.ts'
 
 export { migrations } from '../migrations/index.ts'
+export type { Ghq } from './ghq.ts'
 export { createNoteLedger, type NoteLedger, systemJobs } from './note.ts'
 
 const os = implement(contract).$context<{ db: Db; noteLedger: NoteLedger }>()
@@ -23,6 +25,9 @@ export const router = os.router({
     open: os.daily.open.handler(({ context, input }) => openDaily(context.db, input.date)),
     dates: os.daily.dates.handler(({ context }) => dailyDates(context.db)),
   },
+  repo: {
+    candidates: os.repo.candidates.handler(({ context }) => context.noteLedger.repoCandidates()),
+  },
   scratch: {
     open: os.scratch.open.handler(({ context, input }) => openScratch(context.db, input.repo)),
   },
@@ -35,6 +40,9 @@ export const router = os.router({
   repoNote: {
     create: os.repoNote.create.handler(({ context, input }) =>
       createRepoNote(context.db, input.repo),
+    ),
+    list: os.repoNote.list.handler(({ context, input }) =>
+      listRepoNotes(context.db, input.repo, input.after),
     ),
   },
   image: {

@@ -1,5 +1,8 @@
-import type { Doc } from '../../contract.ts'
+import { type KeyboardEvent as ReactKeyboardEvent, type RefObject, useCallback } from 'react'
+
+import type { Doc, Note } from '../../contract.ts'
 import type { NoteClient } from '../client.ts'
+import type { BlockEditorHandle } from '../editor/block-editor.tsx'
 import {
   type ImportExternalImage,
   stripPendingImages,
@@ -28,6 +31,47 @@ export function persistableContent(content: unknown): { toJSON: () => Doc } {
       return stripPendingImages(json) as Doc
     },
   }
+}
+
+/** title 入力欄のキーハンドリング。Enter / ↓ / Tab / ⌃N で本文先頭へフォーカスを移す。 */
+export function titleFieldKeyDown(
+  e: ReactKeyboardEvent<HTMLInputElement>,
+  focusBody: () => void,
+): void {
+  if (e.nativeEvent.isComposing) return
+  const ctrlN = e.ctrlKey && !e.metaKey && !e.altKey && e.key === 'n'
+  if (e.key === 'Enter' || e.key === 'ArrowDown' || (e.key === 'Tab' && !e.shiftKey) || ctrlN) {
+    e.preventDefault()
+    focusBody()
+  }
+}
+
+/** 本文編集の共有配線。onDocChange は最新 doc を contentRef に控えて現 note の保存を予約し、
+ * focusEditorStart は本文先頭へフォーカスする。title の保存差分（kind ごと）は呼び手の
+ * scheduleSave に閉じる。 */
+export function useEditorDoc({
+  contentRef,
+  noteRef,
+  editorHandleRef,
+  scheduleSave,
+}: {
+  contentRef: RefObject<unknown>
+  noteRef: RefObject<Note | null>
+  editorHandleRef: RefObject<BlockEditorHandle | null>
+  scheduleSave: (note: Note) => void
+}) {
+  const onDocChange = useCallback(
+    (doc: unknown) => {
+      contentRef.current = doc
+      const current = noteRef.current
+      if (current) scheduleSave(current)
+    },
+    [contentRef, noteRef, scheduleSave],
+  )
+  const focusEditorStart = useCallback(() => {
+    editorHandleRef.current?.focusStart()
+  }, [editorHandleRef])
+  return { onDocChange, focusEditorStart }
 }
 
 /** ⌥K/J の巡回選択。current がリスト外（未選択・巡回対象外の項目を開いている等）の

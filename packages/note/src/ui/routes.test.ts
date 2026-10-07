@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test'
 
 import type { Note } from '../contract.ts'
-import { notePagePath, routeOf, todayPath } from './routes.ts'
+import { notePagePath, repoNoteRedirect, routeOf, todayPath } from './routes.ts'
 
 const now = new Date(2026, 9, 6, 12)
 
@@ -17,8 +17,30 @@ describe('routeOf', () => {
     expect(routeOf('/notes/note-7')).toEqual({ page: 'note', id: 'note-7' })
   })
 
+  test('/repos opens the last Repo, /repos/:owner/:repo its Scratch, and a Repo Note is under its notes', () => {
+    expect(routeOf('/repos')).toEqual({ page: 'repos' })
+    expect(routeOf('/repos/')).toEqual({ page: 'repos' })
+    expect(routeOf('/repos/acme/app.js')).toEqual({
+      page: 'repo',
+      repo: 'acme/app.js',
+      noteId: null,
+    })
+    expect(routeOf('/repos/acme/app/notes/note-7')).toEqual({
+      page: 'repo',
+      repo: 'acme/app',
+      noteId: 'note-7',
+    })
+  })
+
   test('any other path is not found', () => {
-    for (const path of ['/essays', '/repos/a/b', '/daily/2026-10-06/x', '/settings']) {
+    for (const path of [
+      '/essays',
+      '/repos/acme',
+      '/repos/acme/app/x',
+      '/repos/acme/app/notes',
+      '/daily/2026-10-06/x',
+      '/settings',
+    ]) {
       expect(routeOf(path)).toEqual({ page: 'not-found' })
     }
   })
@@ -42,12 +64,49 @@ describe('notePagePath', () => {
     expect(notePagePath({ kind: 'daily', ...common, date: '2099-01-01' })).toBe('/daily/2099-01-01')
   })
 
-  test('a Note of a kind with no screen yet has no path', () => {
-    const others: Note[] = [
-      { kind: 'essay', title: 'On Rust', status: 'writing', ...common },
-      { kind: 'repo_note', repo: 'a/b', title: 'Spec', ...common },
-      { kind: 'scratch', repo: 'a/b', ...common },
+  test('a Scratch opens at the path of its Repo, and a Repo Note under the notes of its Repo', () => {
+    expect(notePagePath({ kind: 'scratch', repo: 'acme/app', ...common })).toBe('/repos/acme/app')
+    expect(notePagePath({ kind: 'repo_note', repo: 'acme/app', title: 'Spec', ...common })).toBe(
+      '/repos/acme/app/notes/note-7',
+    )
+  })
+
+  test('an Essay has no screen yet, so no path', () => {
+    expect(
+      notePagePath({ kind: 'essay', title: 'On Rust', status: 'writing', ...common }),
+    ).toBeNull()
+  })
+})
+
+describe('repoNoteRedirect', () => {
+  const common = {
+    id: 'note-7',
+    date: '2026-10-06',
+    content: { type: 'doc' as const },
+    createdAt: now,
+    updatedAt: now,
+  }
+
+  test('a Repo Note of the Repo stays, whatever the case of the Repo in the path', () => {
+    const note: Note = { kind: 'repo_note', repo: 'acme/app', title: 'Spec', ...common }
+    expect(repoNoteRedirect('Acme/App', note)).toBeNull()
+  })
+
+  test('the Scratch of the Repo goes to the path of the Repo, as it is spelled in the path', () => {
+    expect(repoNoteRedirect('Acme/App', { kind: 'scratch', repo: 'acme/app', ...common })).toBe(
+      '/repos/Acme/App',
+    )
+  })
+
+  test('a Note of another Repo or another kind goes to its own path', () => {
+    const others: [Note, string][] = [
+      [
+        { kind: 'repo_note', repo: 'acme/web', title: 'Spec', ...common },
+        '/repos/acme/web/notes/note-7',
+      ],
+      [{ kind: 'scratch', repo: 'acme/web', ...common }, '/repos/acme/web'],
+      [{ kind: 'daily', ...common }, '/daily/2026-10-06'],
     ]
-    for (const note of others) expect(notePagePath(note)).toBeNull()
+    for (const [note, path] of others) expect(repoNoteRedirect('acme/app', note)).toBe(path)
   })
 })

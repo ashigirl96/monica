@@ -143,6 +143,8 @@ Backend を本物の ptyd に繋いで起こす。Shell の役（親として生
    agent-browser --session tania-s2 snapshot
    ```
 
+   `eval` の式は頁の global で評価され、2 回目の `const` の宣言で失敗する。式は `(() => { … })()` で包む。失敗に気付かずにキーを送ると、思った所と違う Note に効く。
+
    Backend に届かないときは、Vite が proxy の接続を応答なしで切り（release の口と同じく、画面には network error に見える）、`web.log` に `http proxy error` が出る。
 
 5. 確かめる Note は、notes の口に RPCLink を向けた script で入れる。router は `{ note }` の下にあり、GET 以外の request には `Sec-Fetch-Site: same-origin` が要る。script を `packages/note/` の下に置くと `@orpc/*` と `./src/contract.ts` を解決できるので、終わったら消す。
