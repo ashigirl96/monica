@@ -28,7 +28,6 @@ Tab の dot（label の左）は、その Tab の Terminal Session の live な 
 - Terminal Session の dot（label の右。exited / lost / failed）は monica のまま残す。
 - sidebar の行（Pinned・Runspaces・Detached）には Agent の状態の dot を出さない。Agent の状態は Tab の帯の dot で見る。1 つの Runspace に Tab と claude が複数あると、行の dot を 1 つに畳んでも何が起きているか読めないため。行には未読を出す（下の「未読」）。
 - 状態と色の対応は Task の型を借りない。monica の `lib/status-config` は Task の `DisplayStatus` を借りていたが、workbench は task を import しない（ADR-0005）。
-- dot の atom（`agentDotOfTerminalSessionAtom` など、Terminal Session の id から引く関数を返す atom）は、Agent Session の map を read の中で読み、関数はそれを閉じ込める。返す関数の中で `get` を呼ぶと jotai は依存を記録せず、Agent Session を読み直しても atom が変わらないので、Tab の帯が描き直されない。
 
 ## 未読
 

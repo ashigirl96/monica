@@ -116,7 +116,6 @@ export const agentSessionByTerminalSessionAtom = atom(
   (get) => new Map(get(agentSessionsAtom).map((a) => [a.terminalSessionId, a])),
 )
 
-// 返す関数の中で get を呼ぶと依存にならず、読み直しても描き直されないので、map は read の中で読む。
 export const agentDotOfTerminalSessionAtom = atom((get) => {
   const byTerminalSession = get(agentSessionByTerminalSessionAtom)
   return (terminalSessionId: string) => agentDotOf(byTerminalSession.get(terminalSessionId))
