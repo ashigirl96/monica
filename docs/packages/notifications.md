@@ -1,6 +1,6 @@
 # 通知と Dock の数
 
-Agent Session がユーザー待ちに入ったときに macOS の通知を出す（ADR-0013、語は `GLOSSARY.md` の通知）。判定と本文は workbench が持ち、OS に渡すのは Shell が持つ。Task の無い Tab でも出すので、観測と同じく Workbench を持ち込む骨格の実装に含める。task が足すのは `nameAgentSession` だけ（`docs/packages/task-ledger.md` の「Run」）。未読の数を Dock の icon に出すのも同じ経路で行う（下の「Dock の数」）。
+Agent Session がユーザー待ちに入ったときに macOS の通知を出し、押されたらその Tab を選ぶ（ADR-0013、ADR-0022、語は `GLOSSARY.md` の通知）。判定と本文は workbench が持ち、OS に渡すのは Shell が持つ。Task の無い Tab でも出すので、観測と同じく Workbench を持ち込む骨格の実装に含める。task が足すのは `nameAgentSession` だけ（`docs/packages/task-ledger.md` の「Run」）。未読の数を Dock の icon に出すのも同じ経路で行う（下の「Dock の数」）。
 
 ## 出す遷移
 
@@ -33,12 +33,24 @@ Agent Session がユーザー待ちに入ったときに macOS の通知を出�
 
 ## Backend と Shell
 
-- apps/backend が `createWorkbenchLedger` に渡す `notify({ title, body })` は、stdout に `{"type":"notify","title","body"}` を 1 行書く。test では `notify` と `nameAgentSession` を差し替える。
+- apps/backend が `createWorkbenchLedger` に渡す `notify({ title, body, terminalSessionId })` は、stdout に `{"type":"notify","title","body","terminalSessionId"}` を 1 行書く。`terminalSessionId` は、通知を出した時に Agent Session が居た Terminal Session（遷移した後の行のもの）。test では `notify` と `nameAgentSession` を差し替える。
 - `nameAgentSession` か `notify` が throw したら、stderr に 1 行出して捨てる。`recordHook` の記録と `changes` の合図は続ける。
 - Backend の stdout は Shell 宛ての JSON 行専用（ADR-0007）。Backend の log は stderr に出す。
-- Shell は stdout の行を `type` で振り分ける。`endpoint` は `backend-endpoint` event に、`notify` は tauri-plugin-notification の `app.notification().builder().title(..).body(..).show()` に、`badge` は Dock の数（下の「Dock の数」）に渡す。解釈できない行は Shell の log に流して捨てる。
-- plugin の macOS 実装は NSUserNotificationCenter なので、取り下げ、クリックの受け取り、最前面でのバナーは無い。クリックすると tania が前面に出るだけ。
-- dev の通知は plugin が Terminal.app の名義で出す（`tauri::is_dev()` で切り替わる）。Terminal.app に通知の許可が要る。見た目は `bun run install-app` で入れた release で確かめる。
+- Shell は stdout の行を `type` で振り分ける。`endpoint` は `backend-endpoint` event に、`notify` は通知（下の「Shell が出す通知」）に、`badge` は Dock の数（下の「Dock の数」）に渡す。解釈できない行は Shell の log に流して捨てる。
+
+### Shell が出す通知
+
+- Shell は main bundle の path が `.app` で終わるか（release）で経路を分ける。.app の外の process で `UNUserNotificationCenter.currentNotificationCenter` を呼ぶと、catch できない例外で abort するため（`docs/research/macos-notifications.md`）。
+- release は objc2-user-notifications で UNUserNotificationCenter に出す。title と body に加え、`userInfo` の `terminalSessionId` に notify の行の値を載せる。request identifier は通知ごとの UUID で、取り下げと置き換えはしない。音は鳴らさない。投稿の失敗は completion handler で受け、stderr に 1 行出す。
+- release の Shell は `setup` で center の delegate を置き、許可（alert だけ）を求める。`setup` は `applicationDidFinishLaunching:` の中で走るので、通知で起こされたときのクリックにも delegate が間に合う。center は delegate を weak で持つので、Shell は process が終わるまで static に持つ。許可が無ければ通知は出ず、stderr に 1 行出す。
+- delegate の `willPresent` は list だけを返す。tania が前面の間はバナーを出さず、通知センターにだけ入れる。
+- dev（.app の外）は今までどおり tauri-plugin-notification で出す。plugin は Terminal.app の名義で出す（`tauri::is_dev()` で切り替わる）ので、Terminal.app に通知の許可が要り、押しても Tab へは移らない。見た目とクリックは `bun run install-app` で入れた release で確かめる。
+
+### クリック
+
+- delegate の `didReceive` は、`userInfo` の `terminalSessionId` を Shell に 1 つ持ち（新しいクリックで上書き）、webview に `notification-clicked` を emit し、main の窓を unminimize・show・focus する。
+- webview は `take_notification_click` command で持っている Terminal Session を取り出し、その Tab を選ぶ（`docs/packages/workbench-ui-state.md` の「通知のクリック」）。取り出すと Shell から消える。
+- 通知で起こした tania では、webview が listen を張る前にクリックが届く。ptyd は tania より長生きする（ADR-0011）ので、その Terminal Session がまだ Tab にあれば選べる。
 
 ## Dock の数
 

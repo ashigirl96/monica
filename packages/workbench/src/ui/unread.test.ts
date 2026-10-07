@@ -3,11 +3,13 @@ import { afterEach, expect, test } from 'bun:test'
 import { createStore, type Store } from 'jotai'
 
 import { cleanUp, onCleanup, setup, until } from '../testing.ts'
+import type { RunspaceRow } from './sidebar-model.ts'
 import {
   activateRunspaceAtom,
   activateTerminalTabAtom,
   activeTerminalTabAtom,
   agentSessionByTerminalSessionAtom,
+  benchLabelOfAtom,
   reloadAgentSessionsAtom,
   reloadAtom,
   sidebarAtom,
@@ -54,11 +56,12 @@ function untilUnread(store: Store, terminalSessionId: string, unread: boolean) {
   )
 }
 
+function rowsOf(store: Store): RunspaceRow[] {
+  return store.get(sidebarAtom).tiles.flatMap((tile) => tile.sections.flatMap((s) => s.rows))
+}
+
 function unreadCountsOfRows(store: Store) {
-  return store
-    .get(sidebarAtom)
-    .tiles.flatMap((tile) => tile.sections.flatMap((s) => s.rows))
-    .map((row) => ({ id: row.id, unreadCount: row.unreadCount }))
+  return rowsOf(store).map((row) => ({ id: row.id, unreadCount: row.unreadCount }))
 }
 
 function seenAtOf(store: Store, terminalSessionId: string) {
@@ -94,6 +97,38 @@ test('showing an unread Tab while the window is in front clears it', async () =>
 
   await untilUnread(store, behind.terminalSessionId, false)
   expect(unreadCountsOfRows(store)).toEqual([{ id: runspaceId, unreadCount: 0 }])
+})
+
+test('a Tab seen while its claude still waits leaves the unread count of its row but stays among its dots', async () => {
+  const { client, store, record } = bench({ focused: true })
+  const { runspaceId, tab: front } = await client.runspace.create(size)
+  const behind = await client.tab.open({ runspaceId, ...size })
+  await store.set(reloadAtom)
+  store.set(activateTerminalTabAtom, front.id)
+  await record(behind.terminalSessionId, 'PermissionRequest', { tool_name: 'Bash' })
+  await untilUnread(store, behind.terminalSessionId, true)
+
+  store.set(activateTerminalTabAtom, behind.id)
+  await untilUnread(store, behind.terminalSessionId, false)
+
+  expect(rowsOf(store)).toMatchObject([
+    { id: runspaceId, unreadCount: 0, agentTallies: [{ kind: 'questionOrPermission', count: 1 }] },
+  ])
+})
+
+test("a Bench's Tab seen while its claude still waits leaves the unread count but keeps its dot on the row", async () => {
+  const { db, workbenchLedger, client, store, record } = bench({ focused: true })
+  const runspaceId = db.transaction((tx) => workbenchLedger.createRunspace(tx, { cwd: '/work' }))
+  const { terminalSessionId } = await client.tab.open({ runspaceId, ...size })
+  const label = { repo: 'acme/app', number: 12, title: 'Ship it', setup: null }
+  store.set(benchLabelOfAtom, () => (id: string) => (id === runspaceId ? label : null))
+  await store.set(reloadAtom)
+
+  await record(terminalSessionId, 'PermissionRequest', { tool_name: 'Bash' })
+  await untilUnread(store, terminalSessionId, true)
+  await untilUnread(store, terminalSessionId, false)
+
+  expect(rowsOf(store)).toMatchObject([{ id: runspaceId, unreadCount: 0, agentDot: 'permission' }])
 })
 
 test('a notification for the Tab shown in the front window is seen at once', async () => {

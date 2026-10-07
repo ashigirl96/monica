@@ -53,15 +53,16 @@
 - externalBin を base の `tauri.conf.json` に書かないのは、tauri-build が cargo の build のたびに `binaries/` の存在を求め、`binaries/tania-ptyd-<triple>` で `target/<profile>/tania-ptyd` を上書きするため。base に書くと dev と CI の clippy にも `binaries/` が要り、空の placeholder は cargo が作った ptyd を潰す。
 - `--minify` は使わない。trpc-cli が class 名で instanceof を判定しており、名前が潰れると起動しない。`--bytecode` は top-level await があるので `--format=esm` が要る。
 - compiled binary は Bun の runtime だけで約 60MB あり、Backend と CLI で約 120MB になる。
-- `bun run install-app` は `.app` を `/Applications` にコピーし、codesign と quarantine の解除を行う（monica の `just install-app` と同じ）。codesign の identity は Keychain Access で作った自己署名の `tania`。ad-hoc と違い、build をまたいで署名の同一性が保たれる。
+- `bun run install-app` は 起きている Tania を終了させ、`.app` を一時の場所にコピーして codesign と quarantine の解除を済ませてから `/Applications` に置く。署名する前の `.app` を開かせないため。Tab の shell と claude は ptyd が持ち続けるので、終了させても切れない。codesign の identity は Keychain Access で作った自己署名の `tania`。ad-hoc と違い、build をまたいで署名の同一性が保たれる。
 - 署名と notarization（hardenedRuntime 下の Bun の JIT entitlements。Bun の binary は Backend と CLI の 2 つ）は配布を始めるときに決める。
 
 ## 検査と CI
 
-- 検査は `bun run check` に集める。何を流すかの正本は `package.json` の `check:ts` と `check:rust` で、CI の job も同じ script を呼ぶ。`check:ts` は最後に apps/desktop と apps/web の `vite build` を流す（`docs/packages.md` の「entry」の bundle の検査）。
+- 検査は `bun run check` に集める。何を流すかの正本は `package.json` の `check:ts` と `check:rust` で、CI の job も同じ script を呼ぶ。agent は `bun run check:brief`（引数で `check:ts` なども渡せる）で流す。通れば要約だけ、落ちればテストの Ledger が stderr に書く行を除いた出力を出し、検査の終了コードで抜ける。パイプで出力を絞ると、終了コードがパイプの末尾のものになるため。`check:ts` は最後に apps/desktop と apps/web の `vite build` を流す（`docs/packages.md` の「entry」の bundle の検査）。
 - oxlint は型を見る rule も流す。on にしているのは `.oxlintrc.json` の `options.typeAware` で、型は `oxlint-tsgolint` が読む。
 - Rust の検査は macOS の runner で流す。Tauri の crate が macOS の system library を要るため。
 - Rust の検査は、Rust に関わる file が変わったときだけ走らせる（対象は `ci.yml` の `changes` job の filter）。private repo では macOS の runner の 1 分が 10 分に数えられ、crate は monica から rename しただけで骨格の後はほとんど変わらないため。GitHub Actions には job 単位の paths filter が無いので、判定は ubuntu の小さな job で行う。
+- テストが誤りを捕まえるかを code に変異を入れて確かめるときは、変異の前に `cp` で控えを取り、控えから戻す。`git checkout -- <file>` は HEAD の内容に戻すので、まだコミットしていない変更ごと消える。
 - Rust のテストが誤りを捕まえるかを、code に変異を入れて確かめたら、戻したファイルを `touch` してから次のテストを流す。cargo は mtime で作り直しを決めるので、`cp` で取った控えを `mv` で戻すと mtime が古くなり、変異入りの binary のまま走る。
 - 整形だけの commit は、SHA を `.git-blame-ignore-revs` に書いて blame から外す。repo は squash merge なので、SHA は merge の後の main のものを後続の PR で足す。GitHub の blame はこのファイルを自動で読み、手元の git は `git config blame.ignoreRevsFile .git-blame-ignore-revs` を 1 回打つと読む。
 - tauri の bundle build、knip、jscpd、lefthook は入れない。
