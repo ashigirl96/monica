@@ -16,6 +16,7 @@ import {
 import { TabContextMenu, type TabMenuItems } from './tab-context-menu.tsx'
 import { persistUiState } from './ui-state-persistence.ts'
 import { sidebarOpenAtom, sidebarResizingAtom, sidebarWidthAtom, uiZoomAtom } from './ui-state.ts'
+import { followWindowFocus, markSeenWhileShown } from './unread.ts'
 
 const WorkbenchContent = lazy(() => import('./content.tsx'))
 
@@ -66,6 +67,8 @@ export function Workbench({
   useWorkbenchChanges(client)
   const store = useStore()
   useEffect(() => persistUiState(store), [store])
+  useEffect(() => followWindowFocus(store), [store])
+  useEffect(() => markSeenWhileShown(store), [store])
   const setLastTabClosed = useSetAtom(lastTabClosedAtom)
   useEffect(
     () => setLastTabClosed(() => onLastTabClosed ?? null),

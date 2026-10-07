@@ -4,6 +4,7 @@ import { useEffect, useRef } from 'react'
 
 import { baseName } from '../paths.ts'
 import { AgentDotMark } from './agent-dot-mark.tsx'
+import { UNREAD_LABEL_STYLE } from './agent-dot.ts'
 import { JumpHint } from './jump-hint.tsx'
 import { jumpHintTargetsAtom } from './jump-hints.ts'
 import {
@@ -18,6 +19,7 @@ import {
   reorderTabsAtom,
   tabMenuAtom,
   tabTitlesAtom,
+  unreadOfTerminalSessionAtom,
 } from './store.ts'
 
 const TERMINAL_SESSION_STATUS_DOT: Record<string, string> = {
@@ -32,6 +34,7 @@ export function WorkbenchHeader() {
   const titles = useAtomValue(tabTitlesAtom)
   const deadTabs = useAtomValue(deadTabsAtom)
   const agentDotOfTerminalSession = useAtomValue(agentDotOfTerminalSessionAtom)
+  const unreadOfTerminalSession = useAtomValue(unreadOfTerminalSessionAtom)
   const setTabMenu = useSetAtom(tabMenuAtom)
   const activateTab = useSetAtom(activateTerminalTabAtom)
   const closeTab = useSetAtom(closeTerminalTabAtom)
@@ -61,6 +64,7 @@ export function WorkbenchHeader() {
         const status = deadTabs[tab.id]?.status
         const terminalDot = status ? TERMINAL_SESSION_STATUS_DOT[status] : undefined
         const hint = jumpHints.byTabId[tab.id]
+        const unread = unreadOfTerminalSession(tab.terminalSessionId)
         return (
           <button
             key={tab.id}
@@ -90,9 +94,10 @@ export function WorkbenchHeader() {
             {tab.pinned && <PinIcon size={14} className="mr-1.5 shrink-0 text-rose-400" />}
             <AgentDotMark
               dot={agentDotOfTerminalSession(tab.terminalSessionId)}
+              unread={unread}
               className="mr-1.5"
             />
-            <span className="flex-1 truncate">{label}</span>
+            <span className={cn('flex-1 truncate', unread && UNREAD_LABEL_STYLE)}>{label}</span>
             {terminalDot && (
               <span
                 title={status}

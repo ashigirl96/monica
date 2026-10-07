@@ -4,7 +4,7 @@ Agent Session がユーザー待ちに入ったときに macOS の通知を出�
 
 ## 出す遷移
 
-`recordHook` が遷移を書いて commit した後、`notificationFor(前の行 | null, event, 次の行)` が通知の理由を返す。`transition` の隣に置く純関数。
+`recordHook` は遷移を書く transaction の中で `notificationFor(前の行 | null, event, 次の行)` に通知の理由を聞き、理由があればその行に `notified_at` を書く（未読の材料。`docs/packages/workbench-ledger.md` の「未読」）。通知そのものは commit した後に出す。`notificationFor` は `transition` の隣に置く純関数。
 
 | 次の状態 | 出す条件 |
 |---|---|

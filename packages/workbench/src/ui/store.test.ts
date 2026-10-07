@@ -2,7 +2,7 @@ import { afterEach, expect, mock, setSystemTime, test } from 'bun:test'
 import { homedir } from 'node:os'
 import { basename, join } from 'node:path'
 
-import type { Atom, Store } from 'jotai'
+import type { Store } from 'jotai'
 
 import type { Tab, TerminalSession } from '../contract.ts'
 
@@ -27,12 +27,13 @@ await mock.module('@tania/ui', () => ({
 }))
 
 const { createStore } = await import('jotai')
-const { cleanUp, git, linkedWorktree, setup } = await import('../testing.ts')
+const { cleanUp, git, linkedWorktree, onCleanup, setup, until } = await import('../testing.ts')
 const {
   activateRunspaceAtom,
   activateTerminalTabAtom,
   activeRunspaceAtom,
   activeTerminalTabAtom,
+  agentDotOfTerminalSessionAtom,
   closeTerminalTabAtom,
   createRunspaceAtom,
   createTerminalTabAtom,
@@ -44,6 +45,7 @@ const {
   moveActiveRunspaceAtom,
   moveTabToRunspaceAtom,
   reattachTerminalSessionAtom,
+  reloadAgentSessionsAtom,
   reloadAtom,
   reorderRunspacesAtom,
   reorderTabsAtom,
@@ -86,19 +88,6 @@ function lastTabClosedCalls(store: Store): string[] {
   const calls: string[] = []
   store.set(lastTabClosedAtom, () => (runspaceId: string) => void calls.push(runspaceId))
   return calls
-}
-
-function until<T>(store: Store, atom: Atom<T>, done: (value: T) => boolean): Promise<T> {
-  return new Promise((resolve) => {
-    const check = () => {
-      const value = store.get(atom)
-      if (!done(value)) return
-      unsubscribe()
-      resolve(value)
-    }
-    const unsubscribe = store.sub(atom, check)
-    check()
-  })
 }
 
 test('an empty layout gets one Runspace, even when two reloads race', async () => {
@@ -639,6 +628,29 @@ test('a branch switched in a terminal that reports nothing reaches the title on 
   expect(
     await until(store, runspaceSummariesAtom, (r) => r[0]?.title !== 'acme:feature/title'),
   ).toMatchObject([{ title: 'acme:feature/renamed' }])
+})
+
+test("a Tab's dot follows its Agent Session each time the Agent Sessions are read again", async () => {
+  const { client, store } = bench()
+  const { tab } = await client.runspace.create(size)
+  const dots: unknown[] = []
+  onCleanup(
+    store.sub(agentDotOfTerminalSessionAtom, () =>
+      dots.push(store.get(agentDotOfTerminalSessionAtom)(tab.terminalSessionId)),
+    ),
+  )
+  const record = async (hookEventName: string) => {
+    await client.agentSession.recordHook({
+      terminalSessionId: tab.terminalSessionId,
+      payload: { session_id: 's-1', cwd: '/work', hook_event_name: hookEventName },
+    })
+    await store.set(reloadAgentSessionsAtom)
+  }
+
+  await record('UserPromptSubmit')
+  await record('Stop')
+
+  expect(dots).toEqual(['running', 'idle'])
 })
 
 test('a title in a ~ form the Backend cannot make absolute does not move the cwd', async () => {
