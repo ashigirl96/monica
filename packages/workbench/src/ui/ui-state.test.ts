@@ -2,18 +2,27 @@ import { afterEach, beforeEach, expect, test } from 'bun:test'
 
 import { createStore, type Store } from 'jotai'
 
-import { cleanUp, setup } from '../testing.ts'
+import { cleanUp, ghqCheckout, setup, until } from '../testing.ts'
+import { OUTSIDE } from './sidebar-model.ts'
 import {
   activateRunspaceAtom,
   activateTerminalTabAtom,
   activeRunspaceAtom,
   activeTerminalTabAtom,
   reloadAtom,
+  sidebarAtom,
+  toggleSectionAtom,
   type WorkbenchClient,
   workbenchClientAtom,
 } from './store.ts'
 import { persistUiState } from './ui-state-persistence.ts'
-import { setUiZoomAtom, sidebarOpenAtom, sidebarWidthAtom, uiZoomAtom } from './ui-state.ts'
+import {
+  railChoiceAtom,
+  setUiZoomAtom,
+  sidebarOpenAtom,
+  sidebarWidthAtom,
+  uiZoomAtom,
+} from './ui-state.ts'
 
 const size = { rows: 24, cols: 80 }
 
@@ -93,6 +102,29 @@ test('the active Runspace and Tab, the sidebar, and the UI zoom come back after 
     sidebarWidth: 280,
     uiZoom: 1.1,
   })
+})
+
+test('the selected rail and the collapsed sections come back after a restart', async () => {
+  const { client } = setup()
+  const app = ghqCheckout('acme/app')
+  const { runspaceId } = await client.runspace.create({ cwd: app.checkout, ...size })
+  const closed = await client.tab.open({ runspaceId, cwd: app.checkout, ...size })
+  await client.tab.close({ id: closed.id })
+
+  await saveFrom(client, (store) => {
+    store.set(toggleSectionAtom, 'acme/app:detached')
+    store.set(railChoiceAtom, OUTSIDE)
+  })
+
+  const store = workbenchStore(client)
+  await store.set(reloadAtom)
+  // Repo は Backend への問い合わせを待って決まるので、札が出るまで待つ。
+  const sidebar = await until(store, sidebarAtom, (s) => s.rails.some((r) => r.key === 'acme/app'))
+  expect(sidebar.selected.key).toBe(OUTSIDE)
+  expect(sidebar.rails[0]?.sections).toMatchObject([
+    { kind: 'runspaces', collapsed: false },
+    { kind: 'detached', collapsed: true },
+  ])
 })
 
 test('a change made just before the page goes away is saved without waiting for the debounce', async () => {

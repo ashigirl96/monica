@@ -166,10 +166,12 @@ export function unpinTab(tx: Tx, id: string) {
 
 // title から取った cwd は `~` で始まるが、Workbench Ledger の cwd は git や fs にそのまま渡すので絶対 path にする。
 export function setTabCwd(tx: Tx, input: { id: string; cwd: string }) {
-  tabOf(tx, input.id)
+  const { terminalSessionId } = tabOf(tx, input.id)
   const cwd =
     input.cwd === '~' || input.cwd.startsWith('~/') ? homedir() + input.cwd.slice(1) : input.cwd
   tx.update(tab).set({ cwd }).where(eq(tab.id, input.id)).run()
+  // Tab を閉じると Tab の cwd は消えるので、detach した shell が最後にいた directory を Terminal Session の行に残す。
+  tx.update(terminalSession).set({ cwd }).where(eq(terminalSession.id, terminalSessionId)).run()
 }
 
 export function respawnTab(

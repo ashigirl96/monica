@@ -12,7 +12,7 @@ import type { CurrentOutput, ListItem } from '../contract.ts'
 import { taskLabel } from '../label.ts'
 import { stateText } from '../state-text.ts'
 import { attachChoices } from './attach-choices.ts'
-import type { TaskClient } from './runspace-labels.tsx'
+import type { TaskClient } from './bench-labels.ts'
 
 export function useTabMenuItems(client: TaskClient | null): TabMenuItems {
   return useCallback(

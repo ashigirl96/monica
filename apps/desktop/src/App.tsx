@@ -1,4 +1,4 @@
-import { useCloseTaskOfBench, useRunspaceLabels, useTabMenuItems } from '@tania/task/ui'
+import { useBenchLabels, useCloseTaskOfBench, useTabMenuItems } from '@tania/task/ui'
 import { Toaster } from '@tania/ui'
 import { Workbench } from '@tania/workbench/ui'
 import { useMemo } from 'react'
@@ -12,7 +12,7 @@ export function App() {
   // oRPC の client は property を読むたびに新しい Proxy を返すので、endpoint ごとに 1 つに固定する。
   const workbench = useMemo(() => client?.workbench ?? null, [client])
   const task = useMemo(() => client?.task ?? null, [client])
-  const renderRunspaceLabel = useRunspaceLabels(task)
+  const benchLabelOf = useBenchLabels(task)
   const tabMenuItems = useTabMenuItems(task)
   const closeTaskOfBench = useCloseTaskOfBench(task)
 
@@ -20,7 +20,7 @@ export function App() {
     <>
       <Workbench
         client={workbench}
-        renderRunspaceLabel={renderRunspaceLabel}
+        benchLabelOf={benchLabelOf}
         tabMenuItems={tabMenuItems}
         onLastTabClosed={closeTaskOfBench}
       />

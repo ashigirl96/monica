@@ -3,6 +3,7 @@ import { afterEach, expect, test } from 'bun:test'
 import { createStore, type Store } from 'jotai'
 
 import { cleanUp, onCleanup, setup, until } from '../testing.ts'
+import type { SidebarRow } from './sidebar-model.ts'
 import {
   activateRunspaceAtom,
   activateTerminalTabAtom,
@@ -10,7 +11,7 @@ import {
   agentSessionByTerminalSessionAtom,
   reloadAgentSessionsAtom,
   reloadAtom,
-  runspaceSummariesAtom,
+  sidebarAtom,
   unreadOfTerminalSessionAtom,
   workbenchClientAtom,
 } from './store.ts'
@@ -54,6 +55,13 @@ function untilUnread(store: Store, terminalSessionId: string, unread: boolean) {
   )
 }
 
+function unreadCountsOfRows(store: Store) {
+  return store
+    .get(sidebarAtom)
+    .rails.flatMap((r) => r.sections.flatMap((s): SidebarRow[] => s.rows))
+    .map((row) => ({ id: row.id, unreadCount: row.unreadCount }))
+}
+
 function seenAtOf(store: Store, terminalSessionId: string) {
   return store.get(agentSessionByTerminalSessionAtom).get(terminalSessionId)?.seenAt
 }
@@ -70,9 +78,7 @@ test("two permissions asked behind the front Tab mark that Tab unread and count 
   await untilUnread(store, behind.terminalSessionId, true)
   await store.set(reloadAgentSessionsAtom)
 
-  expect(store.get(runspaceSummariesAtom)).toEqual([
-    expect.objectContaining({ id: runspaceId, unreadCount: 1 }),
-  ])
+  expect(unreadCountsOfRows(store)).toEqual([{ id: runspaceId, unreadCount: 1 }])
   expect(seenAtOf(store, behind.terminalSessionId)).toBeNull()
 })
 
@@ -88,9 +94,7 @@ test('showing an unread Tab while the window is in front clears it', async () =>
   store.set(activateTerminalTabAtom, behind.id)
 
   await untilUnread(store, behind.terminalSessionId, false)
-  expect(store.get(runspaceSummariesAtom)).toEqual([
-    expect.objectContaining({ id: runspaceId, unreadCount: 0 }),
-  ])
+  expect(unreadCountsOfRows(store)).toEqual([{ id: runspaceId, unreadCount: 0 }])
 })
 
 test('a notification for the Tab shown in the front window is seen at once', async () => {
