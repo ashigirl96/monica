@@ -112,9 +112,9 @@ test("a Bench is listed in the Bench section of its Task's Repo, whichever Repo 
   const beforeRename = benchIn(renamed.worktree)
   const unprepared = benchIn(join(app.root, 'worktrees', 'acme', 'app', 'issue-3'))
   const labels: Record<string, BenchLabel> = {
-    [inPlace]: { repo: 'acme/app', number: 1, title: 'Ship it', note: null },
-    [beforeRename]: { repo: 'acme/app', number: 2, title: 'Fix it', note: null },
-    [unprepared]: { repo: 'acme/app', number: 3, title: 'Try it', note: null },
+    [inPlace]: { repo: 'acme/app', number: 1, title: 'Ship it', setup: null },
+    [beforeRename]: { repo: 'acme/app', number: 2, title: 'Fix it', setup: null },
+    [unprepared]: { repo: 'acme/app', number: 3, title: 'Try it', setup: null },
   }
   store.set(benchLabelOfAtom, () => (runspaceId: string) => labels[runspaceId] ?? null)
   await store.set(reloadAtom)
@@ -258,7 +258,7 @@ test("a Bench's row reads its Issue's title, then its terminal's title with Clau
   const { db, workbenchLedger, client, store } = bench()
   const runspaceId = db.transaction((tx) => workbenchLedger.createRunspace(tx, { cwd: '/work' }))
   const tab = await client.tab.open({ runspaceId, ...size })
-  const label = { repo: 'acme/app', number: 12, title: 'Ship it', note: null }
+  const label = { repo: 'acme/app', number: 12, title: 'Ship it', setup: null }
   store.set(benchLabelOfAtom, () => (id: string) => (id === runspaceId ? label : null))
   await store.set(reloadAtom)
 
@@ -491,7 +491,7 @@ test("a Bench and a checkout of the same Repo share a rail whatever the case of 
   const plain = await client.runspace.create({ cwd: app.checkout, ...size })
   // Task は GitHub の nameWithOwner で Repo を持つので、checkout の path と大小文字が違うことがある。
   const shipIt = db.transaction((tx) => workbenchLedger.createRunspace(tx, { cwd: app.worktree }))
-  const label: BenchLabel = { repo: 'Acme/App', number: 1, title: 'Ship it', note: null }
+  const label: BenchLabel = { repo: 'Acme/App', number: 1, title: 'Ship it', setup: null }
   store.set(benchLabelOfAtom, () => (runspaceId: string) => (runspaceId === shipIt ? label : null))
   await store.set(reloadAtom)
 
@@ -504,7 +504,7 @@ test('keys going up from an active row hidden in a collapsed section start from 
   const { db, workbenchLedger, client, store } = bench()
   const app = ghqCheckout('acme/app')
   const shipIt = db.transaction((tx) => workbenchLedger.createRunspace(tx, { cwd: app.worktree }))
-  const label: BenchLabel = { repo: 'acme/app', number: 1, title: 'Ship it', note: null }
+  const label: BenchLabel = { repo: 'acme/app', number: 1, title: 'Ship it', setup: null }
   store.set(benchLabelOfAtom, () => (runspaceId: string) => (runspaceId === shipIt ? label : null))
   await client.runspace.create({ cwd: app.checkout, ...size })
   const last = await client.runspace.create({ cwd: app.checkout, ...size })
@@ -548,7 +548,7 @@ test('a Runspace whose shell moves into another Repo goes to the bottom of that 
   const inLib = await client.runspace.create({ cwd: lib.checkout, ...size })
   // Bench は動かないので、Repo が初めて引けたときに動かすと、Bench が前へ出て札の順が変わる。
   const shipIt = db.transaction((tx) => workbenchLedger.createRunspace(tx, { cwd: lib.worktree }))
-  const label: BenchLabel = { repo: 'acme/lib', number: 1, title: 'Ship it', note: null }
+  const label: BenchLabel = { repo: 'acme/lib', number: 1, title: 'Ship it', setup: null }
   store.set(benchLabelOfAtom, () => (runspaceId: string) => (runspaceId === shipIt ? label : null))
   await store.set(reloadAtom)
   await untilListed(store, 'acme/lib', [inLib.runspaceId])
@@ -590,7 +590,7 @@ test('jump hints number the Pinned rows and the rows shown under the selected ra
   const listed = await client.runspace.create({ cwd: app.checkout, ...size })
   await client.runspace.create({ cwd: lib.checkout, ...size })
   const benchId = db.transaction((tx) => workbenchLedger.createRunspace(tx, { cwd: app.checkout }))
-  const label = { repo: 'acme/app', number: 1, title: 'Ship it', note: null }
+  const label = { repo: 'acme/app', number: 1, title: 'Ship it', setup: null }
   store.set(benchLabelOfAtom, () => (id: string) => (id === benchId ? label : null))
   await store.set(reloadAtom)
   await untilListed(store, 'acme/app', [listed.runspaceId])
@@ -620,7 +620,7 @@ const shell: RunspaceRow = {
 }
 const benchRow: RunspaceRow = {
   ...shell,
-  bench: { repo: 'acme/app', number: 12, title: 'Ship it', note: null },
+  bench: { repo: 'acme/app', number: 12, title: 'Ship it', setup: null },
   title: 'Ship it',
 }
 
@@ -635,9 +635,9 @@ test.each([
   ['a Bench', benchRow, 'repo', { info: 'Read the rail', where: '#12', chip: null }],
   [
     'a Bench being prepared',
-    { ...benchRow, bench: { ...benchRow.bench!, note: { text: 'preparing', error: false } } },
+    { ...benchRow, bench: { ...benchRow.bench!, setup: { text: 'preparing', error: false } } },
     'repo',
-    { note: { text: 'preparing', error: false }, where: '#12' },
+    { setup: { text: 'preparing', error: false }, where: '#12' },
   ],
   [
     'a row in no Repo',
