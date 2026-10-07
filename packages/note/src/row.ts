@@ -1,7 +1,7 @@
 import { ORPCError } from '@orpc/server'
 import { and, eq, isNull, sql } from 'drizzle-orm'
 
-import { displayName, type Note } from './contract.ts'
+import { displayName, type EssaySummary, type Note } from './contract.ts'
 import type { Db } from './note.ts'
 import { note } from './schema.ts'
 
@@ -58,6 +58,22 @@ export function toNote(row: NoteRow): Note {
       return { kind: 'repo_note', repo: row.repo!, title: row.title!, ...common }
     case 'scratch':
       return { kind: 'scratch', repo: row.repo!, ...common }
+  }
+}
+
+type EssaySummaryRow = Pick<
+  NoteRow,
+  'id' | 'title' | 'status' | 'date' | 'preview' | 'createdAt' | 'updatedAt'
+>
+
+// Essay の title と status が NOT NULL なのは note の CHECK が守る。
+export function toEssaySummary(row: EssaySummaryRow): EssaySummary {
+  return {
+    kind: 'essay',
+    ...row,
+    id: noteId(row.id),
+    title: row.title!,
+    status: row.status!,
   }
 }
 

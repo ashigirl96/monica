@@ -130,11 +130,24 @@ describe('noteToOpen', () => {
   const edited = { type: 'doc' as const, content: [{ type: 'text', text: 'unsaved' }] }
 
   test('未保存の編集がある note を開き直したら、cache の本文ではなくその編集を出す', () => {
-    expect(noteToOpen(note(V2), V2, edited)).toEqual({ ...note(V2), content: edited })
+    expect(noteToOpen(note(V2), V2, { content: edited })).toEqual({
+      ...note(V2),
+      content: edited,
+    })
+  })
+
+  test('未保存の title も、cache の title ではなくその編集を出す', () => {
+    const essay: Note = { ...note(V2), kind: 'essay', title: 'Saved', status: 'writing' }
+
+    expect(noteToOpen(essay, V2, { content: edited, title: 'Unsaved' })).toEqual({
+      ...essay,
+      content: edited,
+      title: 'Unsaved',
+    })
   })
 
   test('cache が基準版より古くても、未保存の編集があればそれで開く', () => {
-    expect(noteToOpen(note(V1), V2, edited)).toEqual({
+    expect(noteToOpen(note(V1), V2, { content: edited })).toEqual({
       ...note(V1),
       content: edited,
       updatedAt: V2,
@@ -142,7 +155,7 @@ describe('noteToOpen', () => {
   })
 
   test('cache に外から新しい版が入っていても、未保存の編集は基準版のまま開き、競合を保存に拾わせる', () => {
-    expect(noteToOpen(note(V3), V2, edited)?.updatedAt).toEqual(V2)
+    expect(noteToOpen(note(V3), V2, { content: edited })?.updatedAt).toEqual(V2)
   })
 
   test('未保存の編集が無ければ、使える cache をそのまま開き、1 世代古い cache では開かない', () => {

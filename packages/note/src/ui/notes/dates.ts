@@ -18,6 +18,12 @@ export function dayLabel(key: string): string {
   return `${weekday(d)} ${d.getMonth() + 1}.${d.getDate()}`
 }
 
+/** Essay のカードの日付。ゼロ埋めしない */
+export function slashDate(key: string): string {
+  const d = fromKey(key)
+  return `${d.getFullYear()}/${d.getMonth() + 1}/${d.getDate()}`
+}
+
 /** 一覧は年をまたぐので、今年以外の日は年も見せる */
 export function dayLabelWithYear(key: string): string {
   const d = fromKey(key)

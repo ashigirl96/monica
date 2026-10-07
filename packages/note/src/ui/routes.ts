@@ -8,6 +8,10 @@ export function dailyPath(date: string): string {
   return `${DAILY_PATH}/${date}`
 }
 
+export function essayPath(id: string): string {
+  return `${ESSAYS_PATH}/${id}`
+}
+
 export function repoPath(repo: string): string {
   return `${REPOS_PATH}/${repo}`
 }
@@ -22,7 +26,11 @@ export function notePath(id: string): string {
 }
 
 export function noteIdOfPath(pathname: string): string | null {
-  const match = /^\/notes\/([^/]+)\/?$/.exec(pathname)
+  return idOfPath(/^\/notes\/([^/]+)\/?$/, pathname)
+}
+
+function idOfPath(pattern: RegExp, pathname: string): string | null {
+  const match = pattern.exec(pathname)
   if (!match) return null
   try {
     return decodeURIComponent(match[1]!)
@@ -34,6 +42,8 @@ export function noteIdOfPath(pathname: string): string | null {
 export type Route =
   | { page: 'today' }
   | { page: 'daily'; date: string }
+  | { page: 'essays' }
+  | { page: 'essay'; id: string }
   | { page: 'repos' }
   | { page: 'repo'; repo: string; noteId: string | null }
   | { page: 'note'; id: string }
@@ -43,6 +53,9 @@ export function routeOf(pathname: string): Route {
   if (/^\/(notes\/?|daily\/?)?$/.test(pathname)) return { page: 'today' }
   const daily = /^\/daily\/([^/]+)\/?$/.exec(pathname)
   if (daily) return { page: 'daily', date: daily[1]! }
+  if (/^\/essays\/?$/.test(pathname)) return { page: 'essays' }
+  const essayId = idOfPath(/^\/essays\/([^/]+)\/?$/, pathname)
+  if (essayId !== null) return { page: 'essay', id: essayId }
   if (/^\/repos\/?$/.test(pathname)) return { page: 'repos' }
   const repo = /^\/repos\/([^/]+\/[^/]+)(?:\/notes\/([^/]+))?\/?$/.exec(pathname)
   if (repo) return { page: 'repo', repo: repo[1]!, noteId: repo[2] ?? null }
@@ -56,16 +69,16 @@ export function todayPath(now: Date): string {
   return dailyPath(logicalDate(now))
 }
 
-export function notePagePath(note: Note): string | null {
+export function notePagePath(note: Note): string {
   switch (note.kind) {
     case 'daily':
       return dailyPath(note.date)
+    case 'essay':
+      return essayPath(note.id)
     case 'repo_note':
       return repoNotePath(note.repo, note.id)
     case 'scratch':
       return repoPath(note.repo)
-    case 'essay':
-      return null
   }
 }
 
@@ -74,5 +87,5 @@ export function repoNoteRedirect(repo: string, note: Note): string | null {
   const inRepo = 'repo' in note && sameRepo(note.repo, repo)
   if (inRepo && note.kind === 'repo_note') return null
   if (inRepo && note.kind === 'scratch') return repoPath(repo)
-  return notePagePath(note) ?? notePath(note.id)
+  return notePagePath(note)
 }

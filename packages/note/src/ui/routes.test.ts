@@ -17,6 +17,11 @@ describe('routeOf', () => {
     expect(routeOf('/notes/note-7')).toEqual({ page: 'note', id: 'note-7' })
   })
 
+  test('/essays opens the list of Essays, and /essays/:id the Essay', () => {
+    for (const path of ['/essays', '/essays/']) expect(routeOf(path)).toEqual({ page: 'essays' })
+    expect(routeOf('/essays/note-7')).toEqual({ page: 'essay', id: 'note-7' })
+  })
+
   test('/repos opens the last Repo, /repos/:owner/:repo its Scratch, and a Repo Note is under its notes', () => {
     expect(routeOf('/repos')).toEqual({ page: 'repos' })
     expect(routeOf('/repos/')).toEqual({ page: 'repos' })
@@ -34,7 +39,7 @@ describe('routeOf', () => {
 
   test('any other path is not found', () => {
     for (const path of [
-      '/essays',
+      '/essays/note-7/x',
       '/repos/acme',
       '/repos/acme/app/x',
       '/repos/acme/app/notes',
@@ -64,17 +69,17 @@ describe('notePagePath', () => {
     expect(notePagePath({ kind: 'daily', ...common, date: '2099-01-01' })).toBe('/daily/2099-01-01')
   })
 
+  test('an Essay opens at the path of its id', () => {
+    expect(notePagePath({ kind: 'essay', title: 'On Rust', status: 'writing', ...common })).toBe(
+      '/essays/note-7',
+    )
+  })
+
   test('a Scratch opens at the path of its Repo, and a Repo Note under the notes of its Repo', () => {
     expect(notePagePath({ kind: 'scratch', repo: 'acme/app', ...common })).toBe('/repos/acme/app')
     expect(notePagePath({ kind: 'repo_note', repo: 'acme/app', title: 'Spec', ...common })).toBe(
       '/repos/acme/app/notes/note-7',
     )
-  })
-
-  test('an Essay has no screen yet, so no path', () => {
-    expect(
-      notePagePath({ kind: 'essay', title: 'On Rust', status: 'writing', ...common }),
-    ).toBeNull()
   })
 })
 
@@ -106,6 +111,7 @@ describe('repoNoteRedirect', () => {
       ],
       [{ kind: 'scratch', repo: 'acme/web', ...common }, '/repos/acme/web'],
       [{ kind: 'daily', ...common }, '/daily/2026-10-06'],
+      [{ kind: 'essay', title: 'On Rust', status: 'writing', ...common }, '/essays/note-7'],
     ]
     for (const [note, path] of others) expect(repoNoteRedirect('acme/app', note)).toBe(path)
   })

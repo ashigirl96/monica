@@ -3,6 +3,8 @@ import { useEffect } from 'react'
 import { AppShell, type Section } from './components/app-shell.tsx'
 import { NoteConflictNotice } from './notes/conflict-notice.tsx'
 import { DailyPage } from './pages/daily/index.tsx'
+import { EssayEditorPage } from './pages/essays/editor.tsx'
+import { EssaysListPage } from './pages/essays/list.tsx'
 import { NotFound, NoteRedirect } from './pages/note-redirect.tsx'
 import { ReposPage } from './pages/repos/index.tsx'
 import { navigate, usePathname } from './router.ts'
@@ -22,6 +24,10 @@ export function App() {
       <AppShell active={sectionOf(route)}>
         {toToday ? null : route.page === 'daily' ? (
           <DailyPage date={route.date} />
+        ) : route.page === 'essays' ? (
+          <EssaysListPage />
+        ) : route.page === 'essay' ? (
+          <EssayEditorPage id={route.id} />
         ) : route.page === 'repos' ? (
           <ReposPage repo={null} noteId={null} />
         ) : route.page === 'repo' ? (
@@ -42,6 +48,9 @@ function sectionOf(route: Route): Section | null {
     case 'today':
     case 'daily':
       return 'daily'
+    case 'essays':
+    case 'essay':
+      return 'essays'
     case 'repos':
     case 'repo':
       return 'repos'

@@ -1,6 +1,6 @@
 import { afterEach, expect, setSystemTime, test } from 'bun:test'
 
-import { addMonths, dayLabel, dayLabelWithYear, monthGrid, monthLabel } from './dates.ts'
+import { addMonths, dayLabel, dayLabelWithYear, monthGrid, monthLabel, slashDate } from './dates.ts'
 
 afterEach(() => {
   setSystemTime()
@@ -13,6 +13,11 @@ test('a day is named by its weekday, month and day, and by its year too outside 
   expect(dayLabelWithYear('2026-10-06')).toBe('TUE 10.6')
   expect(dayLabelWithYear('2025-10-06')).toBe('MON 2025.10.6')
   expect(dayLabelWithYear('2027-01-03')).toBe('SUN 2027.1.3')
+})
+
+test('the card of an Essay writes its date with slashes and no zero padding', () => {
+  expect(slashDate('2026-07-01')).toBe('2026/7/1')
+  expect(slashDate('2026-10-21')).toBe('2026/10/21')
 })
 
 test('a month is named in capitals with its year, and moves across years', () => {
