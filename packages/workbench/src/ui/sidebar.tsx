@@ -1,6 +1,6 @@
 import { ChevronRightIcon, cn, FolderIcon, PinIcon, useDragReorder } from '@tania/ui'
 import { useAtomValue, useSetAtom } from 'jotai'
-import { type RefObject, useLayoutEffect, useRef, useState } from 'react'
+import { type MouseEvent, type RefObject, useLayoutEffect, useRef, useState } from 'react'
 
 import { UNREAD_LABEL_STYLE } from './agent-dot.ts'
 import { JumpHint } from './jump-hint.tsx'
@@ -60,6 +60,11 @@ function withUnread(label: string, count: number): string {
   return count > 0 ? `${label}、未読の Tab ${count}` : label
 }
 
+// 札と見出しは、押した後に focus を戻すと xterm が DECSET 1004 を立てた app に focus out と in を送るので、mousedown の既定の動作を止めて focus を動かさない。
+function keepTerminalFocus(e: MouseEvent) {
+  e.preventDefault()
+}
+
 function UnreadCount({ count, className }: { count: number; className?: string }) {
   if (count === 0) return null
   return (
@@ -103,6 +108,7 @@ function RailButton({
         aria-label={withUnread(label, rail.unreadCount)}
         aria-keyshortcuts={number === null ? undefined : `Meta+${number}`}
         title={number === null ? label : `${label} (⌘${number})`}
+        onMouseDown={keepTerminalFocus}
         onClick={onPick}
         className={cn(
           'relative flex size-[30px] shrink-0 items-center justify-center text-xs leading-none font-bold',
@@ -304,6 +310,7 @@ function SectionHeader({ railKey, section }: { railKey: string; section: Sidebar
       type="button"
       aria-expanded={!section.collapsed}
       aria-label={section.collapsed ? withUnread(label, section.unreadCount) : label}
+      onMouseDown={keepTerminalFocus}
       onClick={() => toggle(sectionKey(railKey, section.kind))}
       className="flex h-6 w-full shrink-0 items-center gap-1.5 rounded-md px-2 text-[11px] font-semibold text-white/55 transition-colors hover:bg-white/[0.04] hover:text-white/85"
     >
