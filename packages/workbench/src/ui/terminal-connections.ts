@@ -9,7 +9,8 @@ export type TabConnection = {
   inFlight?: Promise<void>
   unlisteners: UnlistenFn[]
   // While the attach replay is being parsed, xterm answers terminal queries recorded in
-  // the transcript (DA, OSC 10/11, kitty); those responses must not reach the live PTY.
+  // the Terminal Session Transcript (DA, OSC 10/11, kitty); those responses must not
+  // reach the live PTY.
   replaying?: boolean
 }
 

@@ -67,7 +67,7 @@ function refuseLiveRuns(db: Db, forIssue: Issue) {
   })
 }
 
-// Bench より前の Run は reopen の前の挑戦で、transcript の無い claude（最初の prompt まで書かない）は --resume が会話を見つけられないので、どちらも候補にしない。
+// Bench より前の Run は reopen の前の挑戦で、Agent Session Transcript の無い Agent Session（claude は最初の prompt まで書かない）は --resume が会話を見つけられないので、どちらも候補にしない。
 function resumeOf(db: Db, forIssue: Issue, row: Bench): Launch | null {
   const last = db
     .select({

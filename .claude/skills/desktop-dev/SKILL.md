@@ -90,7 +90,7 @@ dev の desktop は `TANIA_HOME` ごとに identifier と vite の port が分�
   swift $SCRATCH/put-files.swift <file>...
   ```
 
-  - Tab の claude が受け取ったものは、transcript（`~/.claude/projects/<cwd の / と . を - にした名前>/<session id>.jsonl`）の `[Image: source: …]` で分かる。ファイルの中身ならその path、clipboard の画像なら claude の `images/<n>.png` になる。claude は prompt を送るまで transcript を書かないので、貼った後に短い prompt を送る。transcript が他の session と混ざらないよう、一時 directory に cd してから claude を起こす。
+  - Tab の claude が受け取ったものは、Agent Session Transcript（`~/.claude/projects/<cwd の / と . を - にした名前>/<session id>.jsonl`）の `[Image: source: …]` で分かる。ファイルの中身ならその path、clipboard の画像なら claude の `images/<n>.png` になる。claude は prompt を送るまで Agent Session Transcript を書かないので、貼った後に短い prompt を送る。Agent Session Transcript が他の Agent Session の分と混ざらないよう、一時 directory に cd してから claude を起こす。
 - **clipboard への書き込み**（`navigator.clipboard.writeText`）は、合成のキーイベントでは user activation が無いので `NotAllowedError` で断られる。確かめるのは binding が拾って書きにいくところまでにし、実キーでの確認はユーザーに頼む。
 - **Agent Session の状態**（status dot）は、backend-headless の「Agent Session の状態を claude 無しで動かす」の手順で作る。`TANIA_HOME` は desktop の home にする。
 - **Task の Bench**（sidebar のラベル、Bench の Tab）は、backend-headless の「Task の Bench を確かめる」の手順で ghq と origin を一時 directory に閉じ込めて作る。`GHQ_ROOT` は `bun run desktop` の env に渡す。
@@ -112,13 +112,13 @@ dev の desktop は `TANIA_HOME` ごとに identifier と vite の port が分�
   ```
 
 - **Shell の起こし直し**は、`kill -TERM <DESKTOP の pid>` の後に、起こすの手順 3 をやり直す。background の job を TaskStop すると、子孫の ptyd まで止まる。ptyd が生き残れば、再 attach と replay まで確かめられる。
-  - replay の末尾 256 KB から落ちたモードを確かめるときは、起こし直す前に、Tab の pty へ外から書いて transcript を押し出す。shell の pid は `terminal-session list` の `pid` にある。
+  - replay の末尾 256 KB から落ちたモードを確かめるときは、起こし直す前に、Tab の pty へ外から書いて Terminal Session Transcript を押し出す。shell の pid は `terminal-session list` の `pid` にある。
 
     ```bash
     yes 'filler' | head -c 300000 > /dev/$(ps -o tty= -p <shell の pid> | tr -d ' ')
     ```
 
-  - 末尾に何が残ったかは `$TANIA_HOME/terminal-sessions/<Terminal Session の id>.log` の末尾 256 KB で見る。claude は繋ぎ直した後に自分でも kitty の flag を push し直すので、ptyd が足した分と見分けるには、transcript の末尾に無い CSI が replay の先頭に流れたかを見る。
+  - 末尾に何が残ったかは `$TANIA_HOME/terminal-sessions/<Terminal Session の id>.log` の末尾 256 KB で見る。claude は繋ぎ直した後に自分でも kitty の flag を push し直すので、ptyd が足した分と見分けるには、Terminal Session Transcript の末尾に無い CSI が replay の先頭に流れたかを見る。
 - **app の終了**（localStorage の UI 状態のように、終了の手順を通った後に残るものを確かめるとき）は、pid 宛てに AppKit の正規の quit を送る。dev の binary は bundle として登録されていないので、identifier 宛ての `tell application id … to quit` は届かない。
 
   ```bash
@@ -132,6 +132,6 @@ dev の desktop は `TANIA_HOME` ごとに identifier と vite の port が分�
 
 自分で起こした desktop は、`bun run dev:kill tania-<名前>` で desktop → Backend → ptyd の順に止め、home を消す。desktop が止まると background の job も終わる。
 
-Tab で claude を起こしたなら、claude が cwd ごとに作る `~/.claude/projects/<cwd の / と . を - にした名前>` と、clipboard の画像を保存した directory（transcript の `[Image: source: …]` にある `images/` の 2 つ上）も消す。
+Tab で claude を起こしたなら、claude が cwd ごとに作る `~/.claude/projects/<cwd の / と . を - にした名前>` と、clipboard の画像を保存した directory（Agent Session Transcript の `[Image: source: …]` にある `images/` の 2 つ上）も消す。
 
 片付いたのは、`bun run dev:list` に `tania-<名前>` の行が無いとき。

@@ -62,8 +62,12 @@ Tab を常駐させる印。pin された Tab は閉じられず、その Termin
 _Avoid_: 固定, pinned runspace（印は Tab に付く）
 
 **Terminal Session**:
-ptyd が持つ 1 つの PTY。app より長生きし、再 attach すると transcript を replay する。どの Tab も表示していない生きている Terminal Session を detached と呼び、Tab で開き直す（reattach）か終了させるまで残る。
+ptyd が持つ 1 つの PTY。app より長生きし、再 attach すると Terminal Session Transcript を replay する。どの Tab も表示していない生きている Terminal Session を detached と呼び、Tab で開き直す（reattach）か終了させるまで残る。
 _Avoid_: session（Agent Session と紛れる）
+
+**Terminal Session Transcript**:
+ptyd が Terminal Session の出力をそのまま書き残したもの。直近の分だけを持ち、再 attach ではその末尾を replay する。Terminal Session が終わると消える。
+_Avoid_: Transcript（単独で使わない）, log（ptyd の診断の log と紛れる）, scrollback（xterm の語）
 
 **Agent Session**:
 Tab の中で動く agent が自分で名乗るセッション。同一性は agent の session_id で、resume と compact は同じ Agent Session の再開、fork は別の Agent Session。Terminal Session とは別物で、同じ Tab に両方が存在する。agent の状態の唯一の正本で、Task に紐づかない Tab でも観測する。状態は次の 4 つ。動作中とユーザー待ちには agent 自身の報告でだけ入る。終了には Terminal Session の終わりでも入り、未観測には Backend の不在でだけ入る。
@@ -77,8 +81,12 @@ Tab の中で動く agent が自分で名乗るセッション。同一性は ag
 _Avoid_: session, agent status on Terminal Session, stopped（手空きと終了が紛れる）, plan 待ち（許可の一種）
 
 **Agent Session の title**:
-agent が Agent Session の会話に付ける短い名前。claude は Tab の title に出し、自分の会話の記録（hook が渡す `transcript_path`）にも残す。会話が進むと付け直され、短い会話には付かない。同じ repo で開いた複数の Tab のうち、どれの待ちかを通知で見分けるのに使う。
+agent が Agent Session の会話に付ける短い名前。claude は Tab の title に出し、Agent Session Transcript にも残す。会話が進むと付け直され、短い会話には付かない。同じ repo で開いた複数の Tab のうち、どれの待ちかを通知で見分けるのに使う。
 _Avoid_: Tab の title（shell や claude 以外の program も出す、Tab の帯の表示）, session 名
+
+**Agent Session Transcript**:
+agent が Agent Session の会話を書き残したもの。agent が書き、tania は読むだけ。Agent Session の title はここから読む。
+_Avoid_: Transcript（単独で使わない）, 会話ログ
 
 **通知**:
 Agent Session がユーザー待ちに入ったことを知らせる macOS の通知。質問とエラーはその理由の待ちに入るたびに出し、許可は許可を求められるたびに出し（許可待ちの間に次の許可を求められても出す）、手空きは turn が終わった時だけ出す。claude の起動や resume の直後の手空きでは出さない。Task に属する Agent Session は Task の Issue の参照と title で、それ以外は agent の cwd で呼ぶ。本文は待ちの理由に Agent Session の title を添え、title が無ければ理由だけにする。desktop が動いている間だけ出し、待ちが解けても取り下げない。
