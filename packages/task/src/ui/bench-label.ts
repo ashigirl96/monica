@@ -1,8 +1,8 @@
-import type { BenchLabel, BenchNote } from '@tania/workbench/ui'
+import type { BenchLabel, BenchSetup } from '@tania/workbench/ui'
 
 import type { BenchItem } from '../contract.ts'
 
-const NOTES: Record<BenchItem['setupState'], BenchNote | null> = {
+const SETUPS: Record<BenchItem['setupState'], BenchSetup | null> = {
   preparing: { text: 'preparing', error: false },
   failed: { text: 'setup failed', error: true },
   ready: null,
@@ -15,6 +15,6 @@ export function benchLabel({ ref, title, setupState }: BenchItem): BenchLabel {
     repo: ref.slice(0, hash),
     number: Number(ref.slice(hash + 1)),
     title,
-    note: NOTES[setupState],
+    setup: SETUPS[setupState],
   }
 }
