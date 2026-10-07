@@ -113,7 +113,10 @@ function ensureBackendStopped(home: string): void {
     return
   }
   if (typeof pid === 'number' && isAlive(pid)) {
-    throw new Error(`the Backend (pid ${pid}) is running on ${home}; quit tania desktop first`)
+    throw new Error(
+      `the Backend (pid ${pid}) is running on ${home}; quit tania desktop first. ` +
+        'If tania is not running, a crashed Backend left backend.json and another process took its pid; remove backend.json',
+    )
   }
 }
 
