@@ -94,5 +94,7 @@ test('the notification for a Run waiting on the user is titled with its Task', a
     tool_input: { command: 'git push' },
   })
 
-  expect(fixture.notifications).toEqual([{ title: 'app#12 Ship it', body: '許可: Bash' }])
+  expect(fixture.notifications).toEqual([
+    { title: 'app#12 Ship it', body: '許可: Bash', terminalSessionId: inBench },
+  ])
 })

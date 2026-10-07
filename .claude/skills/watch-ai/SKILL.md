@@ -40,7 +40,7 @@ gh api repos/<owner>/<repo>/pulls/<PR>/comments \
 
 ## 4. 指摘に対応する
 
-1. 妥当な指摘は working tree で直し、検査が通ったら 1 コミットにまとめて push する。検査は、PR の diff に Rust の file（`.github/workflows/ci.yml` の `changes` job の filter が見る path）があれば `bun run check`、無ければ `bun run check:ts`。CI も Rust の file の無い PR では Rust の job を飛ばす。妥当でない指摘には、直さない理由だけを返信する。返信は `@codex` を付けずに書く。付けると Codex がフォローアップとして作業を始め、local の修正と競合する。
+1. 妥当な指摘は working tree で直し、検査が通ったら 1 コミットにまとめて push する。検査は、PR の diff に Rust の file（`.github/workflows/ci.yml` の `changes` job の filter が見る path）があれば `bun run check:brief`、無ければ `bun run check:brief check:ts`。CI も Rust の file の無い PR では Rust の job を飛ばす。妥当でない指摘には、直さない理由だけを返信する。返信は `@codex` を付けずに書く。付けると Codex がフォローアップとして作業を始め、local の修正と競合する。
 2. 対応した codex のコメントに 👍 を付ける。今回の指摘コメントがすべて「修正 or 返信」と 👍 を済ませたら次へ進む。
 
    ```bash

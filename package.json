@@ -61,7 +61,8 @@
     "generate": "bun run --filter './packages/*' generate",
     "check": "bun run check:ts && bun run check:rust",
     "check:ts": "oxlint --no-error-on-unmatched-pattern --report-unused-disable-directives-severity=error && oxfmt --check && tsc --noEmit && bun test --pass-with-no-tests && bun run --cwd apps/desktop build && bun run --cwd apps/web build",
-    "check:rust": "cargo fmt --all --check && cargo clippy --workspace --all-targets -- -D warnings && cargo test --workspace"
+    "check:rust": "cargo fmt --all --check && cargo clippy --workspace --all-targets -- -D warnings && cargo test --workspace",
+    "check:brief": "bun scripts/check-brief.ts"
   },
   "devDependencies": {
     "@types/bun": "^1.4.2",
