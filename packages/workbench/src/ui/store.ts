@@ -442,22 +442,32 @@ export const closeTerminalTabAtom = action(async (get, set, tabId?: string) => {
   if (found) await closeTab(get, set, found)
 })
 
+// webview の一覧は合図の後に読み直すまで古く、起動の直後は空なので、閉じる前に Backend に聞く。
+async function hasLiveAgentSession(get: Getter, terminalSessionId: string): Promise<boolean> {
+  const listed = await clientOf(get).agentSession.list()
+  return listed.some((a) => a.terminalSessionId === terminalSessionId)
+}
+
 // d は c（新しい Tab）の隣のキーなので、claude の居る Tab は打ち損じで消さないよう 2 度目の d を待つ。
-export const closeTabFromJumpModeAtom = atom(null, (get, set): Promise<void> => {
+export const closeTabFromJumpModeAtom = action(async (get, set) => {
   const front = frontTab(get)
   const pending = get(pendingCloseTabIdAtom)
   // 尋ねた Tab が shell の終了で先に閉じたら、手前に来た別の Tab は誰も確かめていない。
   if (!front || front.tab.pinned || (pending !== null && pending !== front.tab.id)) {
     set(jumpHintsActiveAtom, false)
-    return Promise.resolve()
+    return
   }
-  const asked = pending === front.tab.id
-  if (!asked && get(agentSessionByTerminalSessionAtom).has(front.tab.terminalSessionId)) {
-    set(pendingCloseTabIdAtom, front.tab.id)
-    return Promise.resolve()
+  if (pending !== front.tab.id) {
+    const live = await hasLiveAgentSession(get, front.tab.terminalSessionId)
+    // 聞く間にほかのキーや Tab の切り替えで jump モードを抜けていたら、その操作を優先する。
+    if (!get(jumpHintsActiveAtom)) return
+    if (live) {
+      set(pendingCloseTabIdAtom, front.tab.id)
+      return
+    }
   }
   set(jumpHintsActiveAtom, false)
-  return set(closeTerminalTabAtom, front.tab.id)
+  await set(closeTerminalTabAtom, front.tab.id)
 })
 
 // 接続中の Tab は Exit で閉じるので、閉じ終わるまでの間も終わった印を出さない。

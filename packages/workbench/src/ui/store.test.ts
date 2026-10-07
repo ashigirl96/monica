@@ -215,6 +215,39 @@ test('leaving jump mode forgets the first d, so the next d asks again', async ()
   expect(store.get(pendingCloseTabIdAtom)).toBe(tab.id)
 })
 
+test('d in jump mode asks for d again on a Tab whose Agent Session the webview has not read yet', async () => {
+  const { client, store } = bench()
+  const { runspaceId, tab: a } = await client.runspace.create(size)
+  const claude = await client.tab.open({ runspaceId, ...size })
+  await store.set(reloadAtom)
+  await client.agentSession.recordHook({
+    terminalSessionId: claude.terminalSessionId,
+    payload: { session_id: 's-1', cwd: '/work', hook_event_name: 'SessionStart' },
+  })
+  store.set(activateTerminalTabAtom, claude.id)
+  store.set(jumpHintsActiveAtom, true)
+
+  await store.set(closeTabFromJumpModeAtom)
+
+  expect((await client.layout.get()).runspaces[0]!.tabs.map((t) => t.id)).toEqual([a.id, claude.id])
+  expect(store.get(pendingCloseTabIdAtom)).toBe(claude.id)
+})
+
+test('a d whose check for an Agent Session is still on its way closes nothing once jump mode is left', async () => {
+  const { client, store } = bench()
+  const { runspaceId, tab: a } = await client.runspace.create(size)
+  const b = await client.tab.open({ runspaceId, ...size })
+  await store.set(reloadAtom)
+  store.set(activateTerminalTabAtom, b.id)
+  store.set(jumpHintsActiveAtom, true)
+
+  const pressed = store.set(closeTabFromJumpModeAtom)
+  store.set(jumpHintsActiveAtom, false)
+  await pressed
+
+  expect((await client.layout.get()).runspaces[0]!.tabs.map((t) => t.id)).toEqual([a.id, b.id])
+})
+
 test('a second d after the Tab it asked about has closed on its own leaves jump mode without closing the Tab in front now', async () => {
   const backend = bench()
   const { ptyd, client, store, settled } = backend
