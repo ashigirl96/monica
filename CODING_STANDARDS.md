@@ -35,6 +35,7 @@ review で差分に当てる規則。どれも判断が要るもので、決定�
 ## 語
 
 - 型・関数・画面の語は `GLOSSARY.md` の定義に合わせる。_Avoid_ に挙がった語は使わない。
+  - 置かれた場所（table の列、module、crate）で指すものが 1 つに決まる識別子は、語の修飾を省いてよい（`agent_session.transcript_path`、Rust の terminal-daemon の `Transcript`、`agentSession.sessionId`）。外が決めた名前（hook の payload の field）は外の名前のまま受ける。
 
 ## コメント
 

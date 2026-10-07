@@ -85,7 +85,7 @@ agent が Agent Session の会話に付ける短い名前。claude は Tab の t
 _Avoid_: Tab の title（shell や claude 以外の program も出す、Tab の帯の表示）, session 名
 
 **Agent Session Transcript**:
-agent が Agent Session の会話を書き残したもの。agent が書き、tania は読むだけ。Agent Session の title はここから読む。
+agent が Agent Session の会話を書き残したもの。agent が書き、tania は読むだけ。claude は hook の payload の `transcript_path` でその file の path を渡す。Agent Session の title はここから読む。
 _Avoid_: Transcript（単独で使わない）, 会話ログ
 
 **通知**:
