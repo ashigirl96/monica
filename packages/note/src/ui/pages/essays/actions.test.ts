@@ -141,6 +141,25 @@ describe('removeOpenEssay', () => {
     expect(calls.rescheduled).toEqual([])
   })
 
+  test('leaves a Note of another kind that was opened by its id', async () => {
+    const repoNote: Note = {
+      kind: 'repo_note',
+      id: 'note-1',
+      repo: 'acme/app',
+      title: 'Plan',
+      date: '2026-10-07',
+      content: { type: 'doc' },
+      createdAt: before,
+      updatedAt: before,
+    }
+    const gate: Gate = { current: repoNote }
+    const { run, calls } = removal(gate)
+
+    expect(await run).toBeNull()
+    expect(calls.removed).toEqual([])
+    expect(gate.current).toBe(repoNote)
+  })
+
   test('leaves a Note that was taken up while waiting', async () => {
     const other = essay('note-2')
     const gate: Gate = { current: essay('note-1') }

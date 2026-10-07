@@ -44,7 +44,8 @@ export async function removeOpenEssay({
   reschedule: (note: Note) => void
 }): Promise<Note | null> {
   const target = gate.current
-  if (target === null) return null
+  // `/essays/:id` はほかの種類の id でも開くので、ここで種類を見ないと Repo Note を消してしまう。
+  if (target?.kind !== 'essay') return null
   // 往復の間に打った分を予約させない。予約すると flush の成否に入らず、消した後に保存が 404 を繰り返す。
   gate.current = null
   if (await removeEssay({ id: target.id, flush, hasUnsaved, remove })) return target
