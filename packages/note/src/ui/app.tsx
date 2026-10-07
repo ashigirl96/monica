@@ -15,11 +15,11 @@ export function App() {
     if (toToday) navigate(todayPath(new Date()), { replace: true })
   }, [toToday])
 
-  if (route.page === 'today') return null
   return (
     <>
-      <AppShell active={route.page === 'daily' ? 'daily' : null}>
-        {route.page === 'daily' ? (
+      {/* 今日への replace の間も外さない。外すと zen が解ける。 */}
+      <AppShell active={route.page === 'daily' || toToday ? 'daily' : null}>
+        {toToday ? null : route.page === 'daily' ? (
           <DailyPage date={route.date} />
         ) : route.page === 'note' ? (
           <NoteRedirect id={route.id} />

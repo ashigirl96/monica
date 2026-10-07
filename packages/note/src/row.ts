@@ -1,7 +1,7 @@
 import { ORPCError } from '@orpc/server'
 import { and, eq, isNull } from 'drizzle-orm'
 
-import type { Note } from './contract.ts'
+import { displayName, type Note } from './contract.ts'
 import type { Db } from './note.ts'
 import { note } from './schema.ts'
 
@@ -21,6 +21,10 @@ export function idNumber(id: string): number {
   return Number(id.slice(ID_PREFIX.length))
 }
 
+export function noteId(number: number): string {
+  return `${ID_PREFIX}${number}`
+}
+
 export function undeletedNote(db: Db, id: string): NoteRow {
   const row = db
     .select()
@@ -34,7 +38,7 @@ export function undeletedNote(db: Db, id: string): NoteRow {
 // 種類ごとに NOT NULL の列は note の CHECK が守る。
 export function toNote(row: NoteRow): Note {
   const common = {
-    id: `${ID_PREFIX}${row.id}`,
+    id: noteId(row.id),
     date: row.date,
     content: JSON.parse(row.content),
     createdAt: row.createdAt,
@@ -49,5 +53,17 @@ export function toNote(row: NoteRow): Note {
       return { kind: 'repo_note', repo: row.repo!, title: row.title!, ...common }
     case 'scratch':
       return { kind: 'scratch', repo: row.repo!, ...common }
+  }
+}
+
+export function displayNameOf(row: Pick<NoteRow, 'kind' | 'date' | 'title' | 'repo'>): string {
+  switch (row.kind) {
+    case 'daily':
+      return displayName({ kind: 'daily', date: row.date })
+    case 'essay':
+    case 'repo_note':
+      return displayName({ kind: row.kind, title: row.title! })
+    case 'scratch':
+      return displayName({ kind: 'scratch', repo: row.repo! })
   }
 }

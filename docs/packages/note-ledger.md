@@ -1,6 +1,6 @@
 # Note Ledger
 
-`packages/note` の contract と、Note の種類ごとの不変条件、保存、削除と取り消しの規則。決定の理由は ADR-0017・0018・0019 にある。今あるのは Note を 1 件ずつ扱う procedure だけで、一覧、候補の検索、Note Mention の解決、block の取得、OGP、画像は後続の issue で足す。
+`packages/note` の contract と、Note の種類ごとの不変条件、保存、削除と取り消しの規則。決定の理由は ADR-0017・0018・0019 にある。今あるのは Note を 1 件ずつ扱う procedure と本文の中の参照（Note Mention の候補と解決、block の取得）で、一覧、OGP、画像は後続の issue で足す。
 
 ## contract（root は `note`）
 
@@ -15,6 +15,9 @@ scratch.open     { repo } → Note
 essay.create     → Note
 essay.setStatus  { id, status } → Note
 repoNote.create  { repo } → Note
+noteMention.search   { q } → { id, displayName, preview }[]
+noteMention.resolve  { id } → { displayName }
+block.get            { id, blockId } → block
 ```
 
 - `Note` は `kind`（`daily` / `essay` / `repo_note` / `scratch`）の判別 union。どの種類も `id`・`date`・`content`・`createdAt`・`updatedAt` を持ち、Essay は `title` と `status`、Repo Note は `repo` と `title`、Scratch は `repo` を持つ。
@@ -66,6 +69,16 @@ Note は `note` table に 1 件 1 行で持つ。種類と列の対応を CHECK 
 - `restore` は `deletedAt` を外して Note を返す。削除していない Note はそのまま返す。無い id は `NOT_FOUND`。
 - 削除した Note の一覧（ゴミ箱）は無い。取り消せるのは、削除した画面にいる間だけ（`GLOSSARY.md` の Note）。
 
+## 本文の中の参照
+
+Note Mention と Synced Block が引く procedure。画面での扱いは `docs/packages/note-ui.md` の「Note Mention と Synced Block」にある。
+
+- `noteMention.search` は、title・表示名・preview・Repo のどれかが q を含む Note を、更新の新しい順に 20 件返す。大文字と小文字を区別せず、q の前後の空白は落とす。空の q は最近更新した 20 件になる。削除した Note は出さず、開いている Note も外さない（monica どおり）。
+- 表示名は列に無い導出値なので、SQL では絞らず、削除していない行を新しい順に読んで `displayName` で絞る。monica は列の LIKE で絞った後に表示名で絞り直していたので、title が空の Essay を「Untitled」で引けなかった。Essay と Repo Note の `date` は名前に含まないので、日付では引けない。
+- `noteMention.resolve` は Note の今の表示名を返す。削除した Note と無い id は `NOT_FOUND`。
+- `block.get` は、`attrs.id` が blockId の blockContainer を、入れ子の block ごと保存された JSON のまま返す（`@tania/note/body` の `blockById`）。Note が無いか削除してあるとき、その block が無いときは `NOT_FOUND`。Synced Block の中の Synced Block を深さ 8 まで展開する処理は持たない。monica で使っていたのは CLI の `note show --expand` だけだった。
+- `noteMention.resolve` と `block.get` は id を形を問わずに受け、`note-N` の形でなければ `NOT_FOUND` にする。本文の attrs の id には、貼った URL から緩く抜き出したもの（ui の `internalNoteId`）もある。`BAD_REQUEST` で断ると、画面は「Deleted note」も「Original block was deleted」も出せない。
+
 ## createNoteLedger
 
 `createNoteLedger({ db, home })` は `start()` / `stop()` を持つ。今はどちらも何もしない。`home` は画像の置き場所に使う。後続の issue で、Repo の候補のための ghq、`cleanImages()` と画像を配る handler、`stop()` での fetch の打ち切りを足す。router の context は `{ db, noteLedger }`。
@@ -74,7 +87,7 @@ note は他の domain を import せず、他の domain からも import され�
 
 ## body
 
-`@tania/note/body` は本文の JSON を読む module で、server と ui の両方が import する。そのため `bun:sqlite`・`drizzle-orm`・schema と server の entry を import しない（直接の import は `.oxlintrc.json` の override が、contract などを経た import は `src/body/entry.test.ts` が守る）。node は JSON のまま辿り、prosemirror-model に依らない。今あるのは `preview`・`EMPTY_DOC` と、本文と markdown の変換（`toMarkdown`・`fromMarkdown`）で、画像の参照の列挙は後続の issue で足す。
+`@tania/note/body` は本文の JSON を読む module で、server と ui の両方が import する。そのため `bun:sqlite`・`drizzle-orm`・schema と server の entry を import しない（直接の import は `.oxlintrc.json` の override が、contract などを経た import は `src/body/entry.test.ts` が守る）。node は JSON のまま辿り、prosemirror-model に依らない。今あるのは `preview`・`blockById`・`EMPTY_DOC` と、本文と markdown の変換（`toMarkdown`・`fromMarkdown`）で、画像の参照の列挙は後続の issue で足す。
 
 ### markdown の変換
 

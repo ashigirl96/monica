@@ -1,10 +1,4 @@
-export type JsonNode = {
-  type?: unknown
-  text?: unknown
-  attrs?: unknown
-  marks?: unknown
-  content?: unknown
-}
+export type JsonNode = Record<string, unknown>
 
 export function isNode(value: unknown): value is JsonNode {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
@@ -20,7 +14,7 @@ export function childrenOf(node: unknown): unknown[] {
 
 export function attrOf(node: unknown, key: string): unknown {
   if (!isNode(node) || !isNode(node.attrs)) return undefined
-  return (node.attrs as Record<string, unknown>)[key]
+  return node.attrs[key]
 }
 
 export function stringAttr(node: unknown, key: string): string | undefined {

@@ -5,6 +5,7 @@ const PROBE_EVERY_MS = 1000
 /** notes の口に request が届いているか。link が request ごとに reached か failed を知らせる。 */
 export class Reach {
   #failingSince: number | null = null
+  #recoveries = 0
   #unreachable = false
   #timer: ReturnType<typeof setTimeout> | null = null
   #probe: (() => Promise<unknown>) | null = null
@@ -17,6 +18,9 @@ export class Reach {
   }
 
   isUnreachable = (): boolean => this.#unreachable
+
+  /** 失敗の後に届いた回数。onRecover を購読する前に過ぎた回復も、request を出す前の値と比べれば分かる。 */
+  recoveries = (): number => this.#recoveries
 
   /** 失敗の後に届いたときに呼ぶ。帯を出す前の短い停止で失敗した取得も、これで取り直せる。 */
   onRecover(listener: () => void): () => void {
@@ -38,7 +42,9 @@ export class Reach {
     if (this.#timer !== null) clearTimeout(this.#timer)
     this.#timer = null
     this.#set(false)
-    if (recovered) for (const listener of this.#recoverListeners) listener()
+    if (!recovered) return
+    this.#recoveries += 1
+    for (const listener of this.#recoverListeners) listener()
   }
 
   failed(): void {
