@@ -48,6 +48,25 @@ export const NoteSchema = z.discriminatedUnion('kind', [
   z.object({ kind: z.literal('scratch'), repo: z.string(), ...common }),
 ])
 
+export const RepoNoteSummarySchema = z.object({
+  id: NoteIdSchema,
+  date: common.date,
+  title: z.string(),
+  preview: NoteRowSchema.shape.preview.describe(
+    'the first line of the body; null until the body is first saved',
+  ),
+  updatedAt: common.updatedAt,
+})
+
+export const RepoNotesCursorSchema = z
+  .object({ date: common.date, id: NoteIdSchema })
+  .describe('the date and id of the last Repo Note of the page before')
+
+export const RepoNotesPageSchema = z.object({
+  notes: z.array(RepoNoteSummarySchema),
+  next: RepoNotesCursorSchema.nullable().describe('null on the last page'),
+})
+
 // 中の node の形は Note の本文と同じくエディタの schema が決める。
 export const BlockSchema = z.looseObject({ type: z.literal('blockContainer') })
 
@@ -67,6 +86,9 @@ export const saveErrors = {
 export type EssayStatus = z.infer<typeof EssayStatusSchema>
 export type Doc = z.infer<typeof DocSchema>
 export type Note = z.infer<typeof NoteSchema>
+export type RepoNoteSummary = z.infer<typeof RepoNoteSummarySchema>
+export type RepoNotesCursor = z.infer<typeof RepoNotesCursorSchema>
+export type RepoNotesPage = z.infer<typeof RepoNotesPageSchema>
 export type NoteMentionCandidate = z.infer<typeof NoteMentionCandidateSchema>
 
 export type Named =
@@ -84,6 +106,11 @@ export function displayName(named: Named): string {
     case 'scratch':
       return named.repo
   }
+}
+
+// GitHub の repo 名は大文字と小文字を区別しない。
+export function sameRepo(a: string, b: string): boolean {
+  return a.toLowerCase() === b.toLowerCase()
 }
 
 const DAY_BOUNDARY_HOUR = 5
@@ -149,6 +176,14 @@ export const contract = {
       .meta({ description: 'List the Logical Dates that have a Daily, newest first' })
       .output(z.array(z.iso.date().describe('YYYY-MM-DD'))),
   },
+  repo: {
+    candidates: meta
+      .meta({
+        description:
+          'List the Repos to open: those with a Note, most recently updated first, then the other ghq checkouts under github.com',
+      })
+      .output(z.array(RepoSchema)),
+  },
   scratch: {
     open: meta
       .meta({ description: 'Get the Scratch of a Repo, making it when there is none' })
@@ -167,6 +202,12 @@ export const contract = {
       .meta({ description: 'Make a Repo Note with no title' })
       .input(z.object({ repo: RepoSchema }))
       .output(NoteSchema),
+    list: meta
+      .meta({
+        description: 'List the Repo Notes of a Repo, newest day first, 100 to a page',
+      })
+      .input(z.object({ repo: RepoSchema, after: RepoNotesCursorSchema.optional() }))
+      .output(RepoNotesPageSchema),
   },
   noteMention: {
     search: meta

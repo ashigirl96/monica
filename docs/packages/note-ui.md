@@ -1,6 +1,6 @@
 # note の ui
 
-`packages/note/src/ui` に置く notes の画面とエディタ。`@tania/note/ui` から import する。決定の理由は ADR-0019 と #115・#118 の決定にある。今あるのはエディタと Daily の画面と見た目の設定で、Essay と Repo の画面は後続の issue で足す。
+`packages/note/src/ui` に置く notes の画面とエディタ。`@tania/note/ui` から import する。決定の理由は ADR-0019 と #115・#118 の決定にある。今あるのはエディタと Daily と Repo の画面と見た目の設定で、Essay の画面は後続の issue で足す。
 
 ## monica のコードを移すとき
 
@@ -71,7 +71,7 @@ monica の `shared/block-editor` を `src/ui/editor/` に振る舞いを変え�
 
 ## 画面
 
-monica の `web/src` の router・autosave・Daily の画面を移したもの。monica と同じ構成で、`notes/` に画面が共有する部品、`pages/` に画面、`components/` に rail を置く。
+monica の `web/src` の router・autosave・Daily と project の画面を移したもの。project の画面は Repo の画面にした。monica と同じ構成で、`notes/` に画面が共有する部品、`pages/` に画面、`components/` に rail を置く。
 
 ### root と apps/web の分担
 
@@ -92,16 +92,38 @@ monica の `web/src` の router・autosave・Daily の画面を移したもの�
 |---|---|
 | `/daily/:date` | その Logical Date の Daily（開くと作られる） |
 | `/daily`、`/notes`、`/` | 今日の `/daily/:date` に replace |
+| `/repos` | 前回の Repo に replace。無ければ Repo の picker |
+| `/repos/:owner/:repo` | その Repo の Scratch（開くと作られる） |
+| `/repos/:owner/:repo/notes/:id` | Repo Note。その Repo の Repo Note でなければ、その Note の path に replace |
 | `/notes/:id` | id から種類ごとの path に replace。削除済みと不在は「Note not found」 |
 | それ以外 | 「Not found」 |
 
 - path の文字列と route の解釈は `routes.ts` に集める。router は monica の自作を移したもの（`router.ts`、History API）。
 - 今日は `/daily` を開くたびに `logicalDate(new Date())` で導く（`todayPath`）。開いたまま 5 時を越えても、次に `/daily` を開けば次の日になる。今日を返す procedure は無い。Daily の画面の TODAY は画面を作った時に導き、`/daily` を開き直すと作り直される。
-- `/notes/:id` は `get` で引いた Note の種類から行き先を決める（`notePagePath`）。今は Daily だけが画面を持ち、Essay・Repo Note・Scratch は後続の issue が行き先を足すまで「Not found」。
+- `/notes/:id` は `get` で引いた Note の種類から行き先を決める（`notePagePath`）。Scratch は `/repos/:owner/:repo`、Repo Note は `/repos/:owner/:repo/notes/:id`。Essay は後続の issue が行き先を足すまで「Not found」。
 - rail は Daily / Essays / Repo で、⌃1 / ⌃2 / ⌃3 で移る。Library と Settings は持ち込まない。
 - NotesShell のサイドバーは既定 400px で、境界のドラッグで 260〜720px、ダブルクリックで 400px に戻る。幅は画面の間で共有し、localStorage の `tania-notes-sidebar-w` に持つ。
 - Daily の表示名の書式は `notes/dates.ts` が持つ。サイドバーは今日が `TODAY · TUE 10.6`、ほかは `TUE 10.6`、今年以外は `TUE 2025.10.6`。見出しと競合の通知は年付きの `dayLabelWithYear`（今年なら年を省く）。
-- `document.title` は表示名に ` · tania` を付ける（`TUE 10.6 · tania`）。表示名の無い画面は `tania`。
+- `document.title` は表示名に ` · tania` を付ける（`TUE 10.6 · tania`）。Scratch は `owner/repo`、Repo Note は title（空なら `Untitled`）で、contract の `displayName` を使う。表示名の無い画面は `tania`。
+
+### Repo の画面
+
+- monica の `pages/projects` を `pages/repos` に移したもの。「Project」の label は「Repo」に、primary は Scratch に、meta の行の `primary` は `scratch` にした。
+- Scratch を上に固定し、その下に Repo Note を `repoNote.list` の頁で無限スクロールに並べる（`docs/packages/note-ledger.md`）。サイドバーは「Repo」の label、Scratch の行、区切り、Repo Note の一覧（日付は出さず、hover で削除の ×）。
+- Scratch の見出しとサイドバーの行は `owner/repo`（Scratch が持つ綴り）。Repo Note の行は title、無題なら preview、どちらも無ければ `Untitled`（`notes/summary.ts` の `summaryTitle`。monica と同じ）。Repo Note の title の欄の placeholder は `Untitled`。
+- 前回の Repo は localStorage の `tania-repos-last` に持ち、`/repos` は Repo の候補を待たずにそこへ移る。候補は ghq を spawn し、取るのに数秒かかりうるため。
+- Repo の候補は picker（`@tania/ui` の `FuzzyPickerModal`）を開いている間だけ取る。選ぶとその Repo の Scratch が作られるので、一度開いただけの Repo にも空の Scratch が残る。これは受け入れる。
+- キー（capture phase で ProseMirror より先に取る）:
+  - ⌃W: Repo の picker を開く。
+  - ⌥N: Repo Note を作って開き、title の欄から書き始める。
+  - ⌥Backspace と ⌥Delete: 開いている Repo Note を確認なしで削除して Scratch に移る。Scratch の上では素通しし、エディタの単語の削除になる。
+  - ⌥Z: 削除を取り消してその Repo Note を開く。
+  - ⌥J / ⌥K: Scratch と Repo Note を巡回する。
+- 削除と取り消しの判断は `notes/removals.ts` の `Removals` が持つ。保存を出し切ってから消し、その Note の未保存の編集が残れば消さない（⌥Z で戻せるのが server に届いた本文までになるため）。取り消しの stack は画面の寿命の間だけ持ち、Repo を切り替えると画面ごと作り直すので空になる（monica と同じ）。
+- 開いている Repo Note を消す間は、`noteRef` を外して保存の予約を締め、消せなかったら開き直して締めている間の打鍵を保存し直す。待つ間に別の Note を開いていたら開き直さない。開き直すと、今開いている Note の打鍵が消せなかった Note へ保存される（monica にあった不具合）。
+- 消せたら、その時に開いている Note が消した Note なら Scratch へ移る。開いているかは待った後の route で見る。サイドバーの × で消している間に、その Note を開いて書くことがあるため。
+- 別のタブで消された Repo Note は、取り直しの `NOT_FOUND` で、このタブで消したときと同じく保存の予約を捨てて Scratch へ移る。開いた本文を出し続けると、書いた分の保存が `NOT_FOUND` で再試行され続ける。開いた本文の無い（URL から直に開いた）消えた Note は、エラーを出す。
+- Scratch の保存は title を省く。server は title の付いた Scratch の保存を本文ごと断る。
 
 ### 保存と競合
 
@@ -124,7 +146,7 @@ monica の `web/src` の router・autosave・Daily の画面を移したもの�
 - Note Mention の素のクリックは、flush を始めてから `/notes/:id` へ移る。⌘ / ⌃ 付きのクリックは、NodeView が新しいタブで開く。
 - 「↗」は Synced Block の先頭の block へ飛ぶ。同じ Note ならその場でスクロールし、別の Note なら飛び先を置いて `/notes/:id` へ移る。移った先の `NoteBlockEditor` が、エディタの mount の後に飛び先を取り出してスクロールする。判断は `notes/block-jump.ts`（`jumpToBlock` と `arrivalAt`）が持つ。
 - dev の StrictMode は effect を片付けてから走らせ直し、その間にエディタを作り直す。`arrivalAt` は一度取り出した飛び先を 2 度目にも返すので、作り直したエディタへも飛ぶ。取り出すたびに消すと、1 度目のエディタだけがスクロールして壊され、画面には何も起きない。
-- Essay・Repo Note・Scratch はまだ画面を持たないので、それらを指す Note Mention と「↗」は「Not found」に着く。
+- Essay はまだ画面を持たないので、Essay を指す Note Mention と「↗」は「Not found」に着く。Repo Note と Scratch を指すものは、`/notes/:id` から Repo の画面へ移る。
 
 ### 再接続の表示と beforeunload
 
@@ -177,6 +199,7 @@ notes の画面が localStorage に書く key は次の 5 つで、どれも `ta
 - エディタと同じく DOM の環境は入れず、純関数と link を確かめる。
 - monica の save-state（14 本）・note-sync（10 本）・summary（4 本）のテストを、contract の形（平らな種類、Date の版）に直して移してある。
 - 保存は `save-queue.test.ts` が、偽の保存と `spyOn` で捕まえた timer で確かめる（debounce、基準版、CONFLICT、再試行、直列、keepalive、title を省くこと、閉じると失われる編集の数え方）。
+- 削除と取り消しは `removals.test.ts` が、偽の保存と procedure で確かめる。
 - 見た目の設定は、`fake-browser.ts` が置く偽の localStorage・matchMedia・document で確かめる。`theme.test.ts` はテーマを切り替えてから `apps/web/index.html` の描画前の script を走らせ、reload の最初の描画に同じテーマが当たるかを見る。`ambient.test.ts` は保存値の読み方（prototype の名前を弾く）、巡回の向き、⌥; の判定（⇧ で逆順、変換中も効く。`ambientStepOf`）を、`note-width.test.ts` は本文の幅の保存と読み戻しを見る。⌥B と ⌥D、zen、スライダー、密度、写真の見た目は DOM が要るので、ブラウザで確かめる。
-- route は `routes.test.ts`（今日の導出、`/notes/:id` の行き先）、再接続は `reach.test.ts`（1 秒の待ちと確かめの request。timer は `setTimeout` を `spyOn` で捕まえて手で進める）、link は `client.test.ts`（keepalive と届いたかの合図。fetch を `spyOn` で差し替える）。
+- route は `routes.test.ts`（今日の導出、`/notes/:id` の行き先、Repo の path で開いた Note の行き先）、再接続は `reach.test.ts`（1 秒の待ちと確かめの request。timer は `setTimeout` を `spyOn` で捕まえて手で進める）、link は `client.test.ts`（keepalive と届いたかの合図。fetch を `spyOn` で差し替える）。
 - 本文の中の参照は `note-references.test.ts` が、本物の RPCLink と `Reach` に、path ごとに答えを差し替えた fetch を当てて確かめる（`NOT_FOUND` とほかの答えと通信エラーの分け方、届かない間に送り直さないこと、再接続の後の取り直し、表示名の cache、copy が同期に引く解決済みの表示名、flush が終わってからの block の取得）。「↗」の飛び先は `block-jump.test.ts`。`NoteBlockEditor` が Note ごとに作り直すことと、クリックで移ることは DOM の無いテストでは見えないので、画面で確かめる。

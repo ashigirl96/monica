@@ -1,5 +1,5 @@
 import { ORPCError } from '@orpc/server'
-import { and, eq, isNull } from 'drizzle-orm'
+import { and, eq, isNull, sql } from 'drizzle-orm'
 
 import { displayName, type Note } from './contract.ts'
 import type { Db } from './note.ts'
@@ -23,6 +23,11 @@ export function idNumber(id: string): number {
 
 export function noteId(number: number): string {
   return `${ID_PREFIX}${number}`
+}
+
+// GitHub の repo 名は大文字と小文字を区別しない。
+export function isRepo(repo: string) {
+  return eq(sql`lower(${note.repo})`, repo.toLowerCase())
 }
 
 export function undeletedNote(db: Db, id: string): NoteRow {

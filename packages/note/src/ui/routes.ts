@@ -1,4 +1,4 @@
-import { logicalDate, type Note } from '../contract.ts'
+import { logicalDate, type Note, sameRepo } from '../contract.ts'
 
 export const DAILY_PATH = '/daily'
 export const ESSAYS_PATH = '/essays'
@@ -6,6 +6,14 @@ export const REPOS_PATH = '/repos'
 
 export function dailyPath(date: string): string {
   return `${DAILY_PATH}/${date}`
+}
+
+export function repoPath(repo: string): string {
+  return `${REPOS_PATH}/${repo}`
+}
+
+export function repoNotePath(repo: string, id: string): string {
+  return `${repoPath(repo)}/notes/${id}`
 }
 
 // 保存済みの本文の link がこの形を持つ。
@@ -26,6 +34,8 @@ export function noteIdOfPath(pathname: string): string | null {
 export type Route =
   | { page: 'today' }
   | { page: 'daily'; date: string }
+  | { page: 'repos' }
+  | { page: 'repo'; repo: string; noteId: string | null }
   | { page: 'note'; id: string }
   | { page: 'not-found' }
 
@@ -33,6 +43,9 @@ export function routeOf(pathname: string): Route {
   if (/^\/(notes\/?|daily\/?)?$/.test(pathname)) return { page: 'today' }
   const daily = /^\/daily\/([^/]+)\/?$/.exec(pathname)
   if (daily) return { page: 'daily', date: daily[1]! }
+  if (/^\/repos\/?$/.test(pathname)) return { page: 'repos' }
+  const repo = /^\/repos\/([^/]+\/[^/]+)(?:\/notes\/([^/]+))?\/?$/.exec(pathname)
+  if (repo) return { page: 'repo', repo: repo[1]!, noteId: repo[2] ?? null }
   const id = noteIdOfPath(pathname)
   if (id !== null) return { page: 'note', id }
   return { page: 'not-found' }
@@ -47,9 +60,19 @@ export function notePagePath(note: Note): string | null {
   switch (note.kind) {
     case 'daily':
       return dailyPath(note.date)
-    case 'essay':
     case 'repo_note':
+      return repoNotePath(note.repo, note.id)
     case 'scratch':
+      return repoPath(note.repo)
+    case 'essay':
       return null
   }
+}
+
+/** `/repos/:owner/:repo/notes/:id` の id が、その Repo の Repo Note でなかったときの行き先。 */
+export function repoNoteRedirect(repo: string, note: Note): string | null {
+  const inRepo = 'repo' in note && sameRepo(note.repo, repo)
+  if (inRepo && note.kind === 'repo_note') return null
+  if (inRepo && note.kind === 'scratch') return repoPath(repo)
+  return notePagePath(note) ?? notePath(note.id)
 }
