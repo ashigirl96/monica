@@ -186,7 +186,7 @@ test("run starts a new claude when the Task's Runs all began before its Bench, a
   })
 })
 
-test('run starts a new claude rather than resume one that left no transcript, as when it exited before any prompt', async () => {
+test('run starts a new claude rather than resume one that left no Agent Session Transcript, as when it exited before any prompt', async () => {
   const fixture = await tracked()
   await endedRun(fixture, { conversed: false })
 
