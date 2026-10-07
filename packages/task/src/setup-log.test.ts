@@ -2,6 +2,7 @@ import { afterEach, expect, mock, test } from 'bun:test'
 import { chmodSync, existsSync, mkdirSync, utimesSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 
+import { systemJobs } from './server.ts'
 import { cleanUp, failure, onCleanup, setup } from './testing.ts'
 
 afterEach(() => {
@@ -103,4 +104,15 @@ test('logs it cannot remove fail the clean-up on one line after the other logs a
   expect(error.message).toBe(
     `could not remove the setup logs: ${stuck.map((log) => `EACCES: permission denied, unlink '${log}'`).join('; ')}`,
   )
+})
+
+test('the system Job task.setup-log-cleanup cleans the setup logs', async () => {
+  const { taskLedger, home } = setup()
+  const log = writeLog(home, 'acme/app/issue-12.log', 15)
+
+  await systemJobs(taskLedger)
+    .find((job) => job.name === 'task.setup-log-cleanup')!
+    .run()
+
+  expect(existsSync(log)).toBe(false)
 })
