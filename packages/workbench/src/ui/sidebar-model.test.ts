@@ -27,6 +27,7 @@ import {
   pickTileByNumberAtom,
   reloadAgentSessionsAtom,
   reloadAtom,
+  showTerminalSessionAtom,
   sidebarAtom,
   toggleSectionAtom,
   toggleTabPinAtom,
@@ -468,6 +469,80 @@ test('the selected Tile follows the front Tab when the Backend moves it into the
 
   expect(store.get(activeRunspaceAtom)?.id).toBe(first.runspaceId)
   expect(store.get(sidebarAtom).selected.key).toBe('acme/lib')
+})
+
+test.each([
+  ['another Runspace under another Tile is active', 'inLib', null],
+  ["the Tab's Runspace is active while another Tile is peeked at", 'inApp', 'acme/lib'],
+] as const)(
+  "a clicked notification brings up its Tab with that Tab's Runspace and Tile when %s",
+  async (_case, active, peeked) => {
+    const { client, store } = bench()
+    const app = ghqCheckout('acme/app')
+    const lib = ghqCheckout('acme/lib')
+    const inApp = await client.runspace.create({ cwd: app.checkout, ...size })
+    const waiting = await client.tab.open({
+      runspaceId: inApp.runspaceId,
+      cwd: app.checkout,
+      ...size,
+    })
+    const inLib = await client.runspace.create({ cwd: lib.checkout, ...size })
+    await store.set(reloadAtom)
+    await untilListed(store, 'acme/app', [inApp.runspaceId])
+    await untilListed(store, 'acme/lib', [inLib.runspaceId])
+    store.set(activateRunspaceAtom, { inApp, inLib }[active].runspaceId)
+    store.set(activateTerminalTabAtom, { inApp, inLib }[active].tab.id)
+    if (peeked) store.set(tileChoiceAtom, peeked)
+
+    store.set(showTerminalSessionAtom, waiting.terminalSessionId)
+
+    expect([
+      store.get(sidebarAtom).selected.key,
+      store.get(activeRunspaceAtom)?.id,
+      store.get(activeTerminalTabAtom)?.id,
+    ]).toEqual(['acme/app', inApp.runspaceId, waiting.id])
+  },
+)
+
+test('a clicked notification of a Pinned Tab brings up that Tab and leaves the Tile that was shown', async () => {
+  const { client, store } = bench()
+  const app = ghqCheckout('acme/app')
+  const lib = ghqCheckout('acme/lib')
+  const pinned = await client.runspace.create({ cwd: lib.checkout, ...size })
+  await client.tab.pin({ id: pinned.tab.id })
+  await client.runspace.create({ cwd: lib.checkout, ...size })
+  const inApp = await client.runspace.create({ cwd: app.checkout, ...size })
+  await store.set(reloadAtom)
+  await untilListed(store, 'acme/app', [inApp.runspaceId])
+  store.set(activateRunspaceAtom, inApp.runspaceId)
+
+  store.set(showTerminalSessionAtom, pinned.tab.terminalSessionId)
+
+  expect(store.get(activeTerminalTabAtom)?.id).toBe(pinned.tab.id)
+  expect(store.get(sidebarAtom).selected.key).toBe('acme/app')
+})
+
+test('a clicked notification of a Terminal Session no Tab shows leaves the view as it is', async () => {
+  const { client, store } = bench()
+  const app = ghqCheckout('acme/app')
+  const lib = ghqCheckout('acme/lib')
+  const inApp = await client.runspace.create({ cwd: app.checkout, ...size })
+  const closed = await client.tab.open({ runspaceId: inApp.runspaceId, cwd: app.checkout, ...size })
+  const inLib = await client.runspace.create({ cwd: lib.checkout, ...size })
+  await client.tab.close({ id: closed.id })
+  await store.set(reloadAtom)
+  await untilListed(store, 'acme/lib', [inLib.runspaceId])
+  store.set(activateRunspaceAtom, inLib.runspaceId)
+  const onScreen = () => [
+    store.get(sidebarAtom).selected.key,
+    store.get(activeRunspaceAtom)?.id,
+    store.get(activeTerminalTabAtom)?.id,
+  ]
+  const before = onScreen()
+
+  store.set(showTerminalSessionAtom, closed.terminalSessionId)
+
+  expect(onScreen()).toEqual(before)
 })
 
 test('making a Pinned Runspace active leaves the Tile that was shown', async () => {

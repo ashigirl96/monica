@@ -4,6 +4,7 @@ import { lazy, Suspense, useEffect } from 'react'
 
 import { WorkbenchHeader } from './header.tsx'
 import { followMetaHold } from './meta-hold.ts'
+import { followNotificationClicks } from './notification-click.ts'
 import { ResizeHandle } from './resize-handle.tsx'
 import type { BenchLabelOf } from './sidebar-model.ts'
 import { TileHeading, WorkbenchSidebar } from './sidebar.tsx'
@@ -73,6 +74,7 @@ export function Workbench({
   useEffect(() => persistUiState(store), [store])
   useEffect(() => followWindowFocus(store), [store])
   useEffect(() => markSeenWhileShown(store), [store])
+  useEffect(() => followNotificationClicks(store), [store])
   useEffect(() => appendRunspacesJoiningTile(store), [store])
   useEffect(() => followMetaHold(store), [store])
   const setLastTabClosed = useSetAtom(lastTabClosedAtom)

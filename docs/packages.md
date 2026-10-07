@@ -100,7 +100,7 @@ export function createWorkbenchLedger(deps: {
   db: Db;
   home: string;
   ptydPath: string;
-  notify: (n: { title: string; body: string }) => void;
+  notify: (n: { title: string; body: string; terminalSessionId: string }) => void;
   nameAgentSession: (db: Db, agentSessionId: string) => string | null;
   badge: (count: number) => void;
 }): WorkbenchLedger;

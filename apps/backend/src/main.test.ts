@@ -12,7 +12,7 @@ afterEach(() => {
 
 type Announcement =
   | { type: 'endpoint'; port: number; token: string }
-  | { type: 'notify'; title: string; body: string }
+  | { type: 'notify'; title: string; body: string; terminalSessionId: string }
   | { type: 'badge'; count: number }
 
 function announcements(stdout: ReadableStream<Uint8Array>) {

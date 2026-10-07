@@ -7,9 +7,11 @@ pub struct Endpoint {
 }
 
 #[derive(Debug, PartialEq, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct Notification {
     pub title: String,
     pub body: String,
+    pub terminal_session_id: String,
 }
 
 #[derive(Debug, PartialEq, Deserialize)]
@@ -55,10 +57,13 @@ mod tests {
     #[test]
     fn reads_the_notify_line() {
         assert_eq!(
-            parse(r#"{"type":"notify","title":"tania#43","body":"手空き"}"#),
+            parse(
+                r#"{"type":"notify","title":"tania#43","body":"手空き","terminalSessionId":"ts-1"}"#
+            ),
             Some(Announcement::Notify(Notification {
                 title: "tania#43".into(),
-                body: "手空き".into()
+                body: "手空き".into(),
+                terminal_session_id: "ts-1".into(),
             })),
         );
     }
@@ -80,6 +85,10 @@ mod tests {
     #[test]
     fn leaves_lines_it_does_not_relay_to_the_log() {
         assert_eq!(parse(r#"{"type":"notify","title":"tania#43"}"#), None);
+        assert_eq!(
+            parse(r#"{"type":"notify","title":"tania#43","body":"手空き"}"#),
+            None
+        );
         assert_eq!(parse(r#"{"type":"endpoint","port":"x"}"#), None);
         assert_eq!(parse(r#"{"type":"badge","count":-1}"#), None);
         assert_eq!(parse("[backend] stray print"), None);

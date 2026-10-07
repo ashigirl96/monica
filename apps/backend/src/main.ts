@@ -69,7 +69,8 @@ const workbenchLedger = createWorkbenchLedger({
   db,
   home,
   ptydPath,
-  notify: ({ title, body }) => announce({ type: 'notify', title, body }),
+  notify: ({ title, body, terminalSessionId }) =>
+    announce({ type: 'notify', title, body, terminalSessionId }),
   nameAgentSession,
   badge: (count) => announce({ type: 'badge', count }),
 })

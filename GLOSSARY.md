@@ -150,7 +150,7 @@ _Avoid_: transclusion, mirror, embed
 ### Process
 
 **Shell**:
-Tauri の殻。窓、端末の中継、Backend の起動・監督と、OS への窓口（通知を出す、Dock に未読の数を出す、画像をクリップボードに置く、クリップボードからファイルの path を読む、URL を開く）だけを持ち、Task も Backend の中身も知らない。
+Tauri の殻。窓、端末の中継、Backend の起動・監督と、OS への窓口（通知を出し、押された通知を Workbench に渡す、Dock に未読の数を出す、画像をクリップボードに置く、クリップボードからファイルの path を読む、URL を開く）だけを持ち、Task も Backend の中身も知らない。
 _Avoid_: Rust 側, Tauri 側
 
 **Backend**:

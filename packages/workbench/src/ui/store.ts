@@ -194,7 +194,7 @@ const setActiveAtom = atom(null, (get, set, next: { runspaceId: string; tabId?: 
   set(tileChoiceAtom, after[0] in get(sidebarAtom).tileKeys ? null : shownTile)
 })
 
-// 通知を click しても Tab へは移れないので、Runspace を選ぶと未読の Tab へ 1 手で着くようにする。
+// 通知を押さずに sidebar から来ても、未読の Tab へ 1 手で着くようにする。
 export const activateRunspaceAtom = atom(null, (get, set, runspaceId: string) => {
   const unreadOf = get(unreadOfTerminalSessionAtom)
   const unread = get(layoutAtom)
@@ -209,6 +209,19 @@ export const activateTerminalTabAtom = atom(null, (get, set, tabId: string) => {
   if (!runspace?.tabs.some((t) => t.id === tabId)) return
   set(setActiveAtom, { runspaceId: runspace.id, tabId })
   set(terminalFocusRequestAtom, (c) => c + 1)
+})
+
+// 押された通知の Tab を選ぶ。その Terminal Session を表示する Tab が無ければ何もしない（ADR-0022）。
+export const showTerminalSessionAtom = atom(null, (get, set, terminalSessionId: string) => {
+  for (const runspace of get(layoutAtom)?.runspaces ?? []) {
+    const tab = runspace.tabs.find((t) => t.terminalSessionId === terminalSessionId)
+    if (!tab) continue
+    set(setActiveAtom, { runspaceId: runspace.id, tabId: tab.id })
+    // 既に active な Runspace でも、別の Tile を覗いていたらその Runspace の Tile に戻す。
+    if (runspace.id in get(sidebarAtom).tileKeys) set(tileChoiceAtom, null)
+    set(terminalFocusRequestAtom, (c) => c + 1)
+    return
+  }
 })
 
 // OSC 0/2 の title は shell が prompt のたびに書き換えるので、Workbench Ledger に書かず memory にだけ持つ。

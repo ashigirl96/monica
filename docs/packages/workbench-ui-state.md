@@ -68,8 +68,18 @@ Tab の dot（label の左）は、その Tab の Terminal Session の live な 
 - Tab の帯は、未読の Tab の dot を白い輪で囲んで点滅を止め、label を白の太字にする。
 - sidebar の行は、未読の Tab の数を title の右に白地に暗い字の丸で出し、title を白の太字にする。Detached の行は、その Terminal Session の Agent Session が未読なら 1 を出す。数を 2 行目に置かないのは、通知が来るたびに行が伸び縮みするため。見たうえでまだ待っている Tab は sidebar に出さない。
 - 未読の印は白にそろえる。dot の緑・琥珀・赤と重ならないため。
-- 行を押すと（jump hint の Ctrl も同じ）、その Runspace に未読の Tab があれば一番左のそれを開き、無ければ最後に見ていた Tab を開く。通知を click しても tania が前面に出るだけで Tab へは移れない（ADR-0013）ので、行から 1 手で着くようにする。key で Runspace を巡るときは、今どおり最後に見ていた Tab を開く。
+- 行を押すと（jump hint の Ctrl も同じ）、その Runspace に未読の Tab があれば一番左のそれを開き、無ければ最後に見ていた Tab を開く。dev では通知を押しても Tab へ移れず、通知を見逃した後にも sidebar から来るので、行から 1 手で着くようにする。key で Runspace を巡るときは、今どおり最後に見ていた Tab を開く。
 - 窓が前面にあり、表示している Tab（active な Runspace の active な Tab）の Agent Session が未読なら、webview は一覧で読んだその通知の `notifiedAt` を添えて `agentSession.markSeen` を呼ぶ。見た瞬間に既読にし、見ていた時間は問わない。Tab を切り替えるたびには呼ばない。
 - 窓が前面かどうかは、Tauri の `getCurrentWindow()` の `onFocusChanged` の購読が張れてから `isFocused()` で読む（`core:default` の権限で足りる）。読む間に event が届いたら、読んだ値は捨てる。別の app が前面にあるときも、窓を最小化したときも event が届くことを実機で確かめた。前面でない間は、表示している Tab でも見たことにしない。前面に戻ったときに、表示している Tab を見たことにする。
 - `agentSession.list` を読み直すたびに Agent Session は別の値になるので、表示している間に届いた次の通知も、読み直した時点で見たことにする。`markSeen` が重なっても、Backend は未読でない行に何も書かない。
-- tania が前面にある間は通知のバナーが出ない（ADR-0013）。active でない Runspace の通知には、行の数で気づく。
+- tania が前面にある間は通知のバナーが出ない（ADR-0013、ADR-0022）。active でない Runspace の通知には、行の数で気づく。
+
+## 通知のクリック
+
+release で通知を押すと、Shell がその通知の Terminal Session を webview に渡し（`docs/packages/notifications.md` の「クリック」）、webview はその Terminal Session を表示している Tab を選ぶ（ADR-0022）。
+
+- webview は `notification-clicked` の listen を張ってから、Shell の `take_notification_click` command で持っている Terminal Session を取り出す。event を受けたときも同じ command で取り出す。通知で起こした tania では、webview が listen を張る前にクリックが届くため。
+- 取り出すと Shell から消えるので、effect を片付けた後に届いた答えも捨てずに Tab を選ぶ（dev の StrictMode が effect を張り直しても取りこぼさない）。
+- layout をまだ読んでいなければ、読めるまで待ってから選ぶ。
+- その Terminal Session を表示している Tab があれば、その Runspace と Tab を active にし、端末に focus を移す。Tab が Pinned でなければ、別の Tile を覗いていても、その Runspace の Tile に戻す。Pinned の Tab ならどの Tile を選んでも見えているので、そのとき見えていた Tile に留める。
+- 表示している Tab が無ければ（Tab を閉じて detached になった、Terminal Session が終わった、pin の張り直しで Terminal Session が替わった）、何もしない。Tab を選べば、既読は上の「未読」の規則で書かれる。
