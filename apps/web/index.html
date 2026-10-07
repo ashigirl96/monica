@@ -1,9 +1,19 @@
 <!doctype html>
-<html lang="ja" data-theme="dark" data-ambient="none">
+<html lang="ja">
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>tania</title>
+    <script>
+      // ちらつき防止: 描画前にテーマを解決して data-theme を付与する（@tania/note の ui の theme.ts と同じ規則）
+      ;(function () {
+        var pref = localStorage.getItem('tania-theme')
+        var dark =
+          pref === 'dark' ||
+          (pref !== 'light' && matchMedia('(prefers-color-scheme: dark)').matches)
+        document.documentElement.dataset.theme = dark ? 'dark' : 'light'
+      })()
+    </script>
   </head>
   <body>
     <div id="root"></div>
