@@ -8,6 +8,7 @@ import { navigate } from '../router.ts'
 import { notePath } from '../routes.ts'
 import { useAutosaveContext } from './autosave-context.tsx'
 import { arrivalAt, jumpToBlock } from './block-jump.ts'
+import { imageCallbacks } from './editor-support.ts'
 import { noteReferences } from './note-references.ts'
 
 type NoteBlockEditorProps = {
@@ -37,6 +38,7 @@ function OpenNoteEditor({
   const client = useNoteClient()
   const { flush } = useAutosaveContext()
   const [references] = useState(() => noteReferences({ client, reach, flush }))
+  const { uploadImage, importExternalImage } = imageCallbacks(client)
   const noteId = note.id
   const [arrival] = useState(() => arrivalAt(noteId))
 
@@ -69,6 +71,8 @@ function OpenNoteEditor({
       initialDoc={note.content}
       autoFocus={autoFocus}
       onDocChange={onDocChange}
+      uploadImage={uploadImage}
+      importExternalImage={importExternalImage}
       onExitUp={onExitUp}
       noteId={noteId}
       searchNoteMentions={references.searchNoteMentions}

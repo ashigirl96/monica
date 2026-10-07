@@ -137,18 +137,23 @@ export function createNoteLedger(deps: {
   home: string;
   ghq?: Ghq;
 }): NoteLedger;
+export function systemJobs(
+  noteLedger: NoteLedger,
+): { name: string; every: number; run: () => Promise<void> }[];
 ```
 
 `ptydPath` は spawn する ptyd の場所（ADR-0011）。`notify` と `nameAgentSession` は通知のための口（`docs/packages/notifications.md`）。`github` は GraphQL の URL と token の取り方で、省けば `https://api.github.com/graphql` と `gh auth token --hostname github.com` になる。task の `home` は Bench の worktree と setup の log を置く場所（`docs/packages/task-ledger.md` の「Bench」）。`ghq` は `root()` と `get(repo)` で、省けば `ghq` の command を呼ぶ。テストは偽の GitHub と ghq を渡す。
 
 job の `home` はユーザーの Job の log を置く場所。`systemJobs` は system の Job の並びで、名前は `<domain>.<name>`、`run` は失敗なら reject する。`now` はテストが時計を進めるための口（`docs/packages/job-ledger.md`）。
 
-note の `home` は画像の置き場所に使う（後続の issue）。`ghq` は `list(signal)` で、省けば `ghq list` の command を呼ぶ。Repo の候補（`docs/packages/note-ledger.md`）に使い、テストは偽の ghq を渡す。task の `Ghq` とは別の型で、note は task を import しない。
+note の `home` は画像を `$TANIA_HOME/note-images/` に置くのに使う（`docs/packages/note-ledger.md` の「画像」）。`ghq` は `list(signal)` で、省けば `ghq list` の command を呼ぶ。Repo の候補（`docs/packages/note-ledger.md`）に使い、テストは偽の ghq を渡す。task の `Ghq` とは別の型で、note は task を import しない。
 
 `WorkbenchLedger` と `TaskLedger` と `JobLedger` と `NoteLedger` は、Backend が 1 つずつ作り、`GLOSSARY.md` の Workbench Ledger と Task Ledger と Job Ledger と Note Ledger を扱う部品で、どれも `start()` / `stop()` を持つ。`WorkbenchLedger` と `TaskLedger` は `events` も持つ。
 
 - `events`: その domain の変更を知らせる in-process の publisher。job と note は change stream を持たないので無い（ADR-0016・0018）。
-- `start()` / `stop()`: 起動時と終了時の処理。`WorkbenchLedger` は ptyd への接続（無ければ spawn、版違いは入れ替え）と reconcile（ADR-0011）、`TaskLedger` は起動時に preparing のまま残った Bench を失敗にすることと、終了時に走っている setup の process group を kill すること、`JobLedger` は起動時に途中で止まった Job Execution を中断にして system の Job を 1 回走らせ、tick の timer を張ることと、終了時にそれを止めること。`NoteLedger` は今は何もしない。
+- `start()` / `stop()`: 起動時と終了時の処理。`WorkbenchLedger` は ptyd への接続（無ければ spawn、版違いは入れ替え）と reconcile（ADR-0011）、`TaskLedger` は起動時に preparing のまま残った Bench を失敗にすることと、終了時に走っている setup の process group を kill すること、`JobLedger` は起動時に途中で止まった Job Execution を中断にして system の Job を 1 回走らせ、tick の timer を張ることと、終了時にそれを止めること。`NoteLedger` は起動時に何もせず、終了時に走っている画像の取り込みの fetch を打ち切る。
+
+`NoteLedger` はほかに、system の Job が呼ぶ `cleanImages()` と、notes の口が画像の GET に載せる `serveImage(name)` を持つ。note の system の Job も task と同じく `@tania/note/server` の `systemJobs(noteLedger)` で出し、名前は `note.image-cleanup`、24 時間おきに `cleanImages()` を呼ぶ。
 
 `NoteLedger` はほかに `repoCandidates()` だけを持ち、note の router の `repo.candidates` が呼ぶ。router の context に渡るのは `db` と Ledger だけなので、ghq は Ledger が持つ。
 
@@ -179,7 +184,7 @@ Bun.spawn は `env` を渡さないと、子に起動時の environ を渡し、
 
 1. `$TANIA_HOME/tania.db` を開き、`locking_mode=EXCLUSIVE` → `journal_mode=WAL` → `foreign_keys=ON` の順に設定する（ADR-0007）。
 2. `migrate()` を workbench → task → job → note の順に呼ぶ。`migrationsTable` は各 package の `migrations.table` を渡す。
-3. `createWorkbenchLedger` → `createTaskLedger` → `createJobLedger` → `createNoteLedger` の順に作る。`createWorkbenchLedger` には、env の `TANIA_PTYD_PATH`（`ptydPath`）、stdout に通知の行を書く `notify`、`@tania/task/server` の `nameAgentSession` を渡す。`createTaskLedger` と `createJobLedger` と `createNoteLedger` には同じ `home` を渡す。`createJobLedger` の `systemJobs` には、`@tania/task/server` の `systemJobs(taskLedger)` の戻り値を渡す。`TANIA_PTYD_PATH` が無ければ stderr に 1 行出して exit 1 する。
+3. `createWorkbenchLedger` → `createTaskLedger` → `createNoteLedger` → `createJobLedger` の順に作る。`createWorkbenchLedger` には、env の `TANIA_PTYD_PATH`（`ptydPath`）、stdout に通知の行を書く `notify`、`@tania/task/server` の `nameAgentSession` を渡す。`createTaskLedger` と `createNoteLedger` と `createJobLedger` には同じ `home` を渡す。`createJobLedger` の `systemJobs` には、`@tania/task/server` の `systemJobs(taskLedger)` と `@tania/note/server` の `systemJobs(noteLedger)` の戻り値をこの順につないで渡す。Job Ledger が両方の Ledger を呼ぶので、Note Ledger を先に作る。`TANIA_PTYD_PATH` が無ければ stderr に 1 行出して exit 1 する。
 4. router を `{ workbench: workbenchRouter, task: taskRouter, job: jobRouter }` で mount し、context は `{ db, workbenchLedger, taskLedger, jobLedger }`。note の router はこの口に載せず、notes の口だけに載せる（下の「notes の口」）。
 5. hono に CORS（`tauri://localhost`・`http://tauri.localhost`。env の `TANIA_DEV_URL` があればその origin も。`docs/packages/dev-loop.md` の「dev loop」）、`/health`（token 無し）、`/rpc/*` の bearer を載せ、`Bun.serve({ hostname: "127.0.0.1", port: 0, idleTimeout: 0 })` で立てる。
 6. `start()` を Workbench Ledger → Task Ledger → Job Ledger → Note Ledger の順に呼び、notes の口を立てる。Workbench Ledger の `start()`（ptyd への接続と reconcile）を最大 3 秒待ってから、`backend.json` と stdout の endpoint 行を書く（ADR-0007 / 0011）。
@@ -197,7 +202,7 @@ domain は 4 つしかないので、汎用の「domain の登録」機構は作
 - GET 以外の request は `Sec-Fetch-Site: same-origin` を求め、ほかは 403 で断る（CSRF）。`same-site` は site が port を見ないので、`localhost` の別の port の app からの request も含む。
 - 載せるもの:
   - `/rpc` の `{ note }` の router。context は `{ db, noteLedger }`。workbench・task・job は載せない。`openTab` の `input` は shell に打鍵されるので、token の無い口では任意のコマンドになる。
-  - 画像の素の GET（`/api/assets/<file>`、`@tania/note/contract` の `IMAGE_URL_PREFIX`）。今は 404 を返す。
+  - 画像の素の GET（`/api/assets/<file>`、`@tania/note/contract` の `IMAGE_URL_PREFIX`）。prefix の後ろを Note Ledger の `serveImage` に渡し、応答をそのまま返す。oRPC の RPCHandler は File を必ず multipart に包むので、`<img src>` が読む生のバイト列は procedure では返せない（ADR-0019）。
   - SPA の静的ファイル。`/rpc` と画像以外の GET は、build の出力に在る file ならそれを、無ければ `index.html` を返す。path は file system の path として解かず、起動時に集めた file の一覧から引く。`assets/` の下（Vite が hash を付けた file）は `public, max-age=31536000, immutable`、ほかは `no-cache`。
 - SPA は compiled binary に `--asset` で同梱した `apps/web/dist` を、entry の隣（`/$bunfs/root/dist`）から読む（`docs/packages/dev-loop.md` の「release build と install」）。`bun run` の Backend には無いので、dev の Backend は SPA の GET に 404 を返し、画面は `apps/web` の Vite が配る。
 
@@ -214,7 +219,7 @@ package ごとに in-memory の SQLite に自分の migration を当てる（tas
 - 一定の間隔で走る処理は、`setInterval` を `spyOn` で捕まえ、間隔を確かめてから callback を手で呼ぶ。Bun の `jest.useFakeTimers()` は `Bun.sleep` と `setTimeout` も止め、一部の timer だけを偽にできないので、HTTP の応答を待つテストが進まなくなる。
 - 終わった行のように procedure に出ない行は、`@tania/workbench/schema` の table を SELECT して確かめてよい。他の domain が読むのと同じ面だから。
 - CLI は remote client を `createRouterClient` に差し替えて回す（ADR-0003。fixture は `apps/cli/src/testing.ts`）。Backend 側のエラーの形と接続拒否の retry だけは、router を `Bun.serve` に載せて確かめる。in-process の client は handler の生の Error を投げ、HTTP のように `ORPCError`（`INTERNAL_SERVER_ERROR`）に包まないため。
-- Backend の組み立て（`apps/backend/src/main.ts`）は、Shell と同じく process として起こし、fake の ptyd の home を渡して確かめる。token の口と notes の口に同じ path を投げ、口ごとに載る procedure を見る。notes の口の照合と SPA は `listenNotes` を直に呼んで確かめる。
+- Backend の組み立て（`apps/backend/src/main.ts`）は、Shell と同じく process として起こし、fake の ptyd の home を渡して確かめる。token の口と notes の口に同じ path を投げ、口ごとに載る procedure を見る。notes の口の照合と SPA と画像の GET は `listenNotes` を直に呼んで確かめる。
 - hook の CLI（`tania workbench hook claude`）は例外で、`apps/cli/src/main.ts` を subprocess で起こし、router を `Bun.serve` に載せて確かめる。claude から見た約束（stdin の payload、stdout の allow、exit code）と 2 秒の打ち切り、trpc-cli より前の振り分けは、process の外からしか見えないため。
 
 ## contract の規約

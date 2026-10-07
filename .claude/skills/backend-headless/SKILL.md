@@ -21,7 +21,7 @@ Backend を本物の ptyd に繋いで起こす。Shell の役（親として生
    - stdin は無名 pipe にする。Bun は fifo の EOF を拾わないので、fifo では stdin の EOF で抜ける振る舞いを確かめられない。
    - `.app` でだけ起きること（gh や ghq が見つからないなど）を確かめるときは、`env -i HOME=$HOME USER=$USER SHELL=/bin/zsh LANG=$LANG TMPDIR=$TMPDIR PATH=/usr/bin:/bin:/usr/sbin:/sbin` を前に付け、bun を絶対 path（`~/.bun/bin/bun`）で起こす。PATH が launchd の渡すものと同じになり、Backend が login shell から取った PATH が効いているかを見られる。
    - release の build の Backend（同梱した SPA や migrations）を確かめるときは、`bun run build` の後に `target/release/bundle/macos/tania.app/Contents/MacOS/` の `tania-backend` を bun の代わりに起こし、同じ directory の `tania-ptyd` を `TANIA_PTYD_PATH` に渡す。`.app` そのものは起こさない。identifier が release と同じなので、single-instance が手元の release の窓に回すか、release が居なければ `~/.tania` で Backend を起こす。
-   - Monica の tab・tania の Tab・Claude Code の中（`env | grep -E '^(MONICA_|TANIA_|CLAUDECODE)'` が出る）から起こすときは、`env -i HOME=$HOME USER=$USER SHELL=/bin/zsh TERM=xterm-256color LANG=$LANG TMPDIR=$TMPDIR PATH=<monica を含む dir を除いた PATH>` を前に付ける。ptyd は Backend の env から `TANIA_*` と Claude Code の env を落として tab に渡すが、`MONICA_*` は残すので、tab の claude に Monica の hook が付き、Monica 側に記録される。ユーザーの Job は Backend の env をそのまま受けるので、外側の `TANIA_TERMINAL_SESSION_ID` や `CLAUDECODE` も Job に届く。
+   - Monica の tab・tania の Tab・Claude Code の中（`env | grep -E '^(MONICA_|TANIA_|CLAUDECODE)'` が出る）から起こすときは、`env -i HOME="$HOME" USER="$USER" SHELL=/bin/zsh TERM=xterm-256color LANG="$LANG" TMPDIR="$TMPDIR" PATH="$(printf %s "$PATH" | tr : '\n' | grep -v -E 'monica|\.tania' | paste -sd: -)"` を前に付ける。PATH は `Application Support` のように空白を含む dir を持つことがあるので、引用を外すと `env` が残りを command と読んで落ちる。ptyd は Backend の env から `TANIA_*` と Claude Code の env を落として tab に渡すが、`MONICA_*` は残すので、tab の claude に Monica の hook が付き、Monica 側に記録される。ユーザーの Job は Backend の env をそのまま受けるので、外側の `TANIA_TERMINAL_SESSION_ID` や `CLAUDECODE` も Job に届く。
 
 4. tab の claude の hook を確かめるなら、起動した後に `ln -s $PWD/scripts/tania-dev ${TMPDIR%/}/tania-s2/bin/tania` を張る。hook の settings の command はこの path を指し、desktop では Shell が張る。
 
@@ -165,6 +165,8 @@ Backend を本物の ptyd に繋いで起こす。Shell の役（親として生
    ```
 
    エディタの中の文字は `find text … click` では押せないので、`click '[data-block-id="<id>"] [data-block-content]'` のように CSS の selector で押す。
+
+   画像の貼り付けは、`DataTransfer` に `File` を `items.add` して送る。ドロップは `new DragEvent("drop", { dataTransfer: dt, clientX, clientY, bubbles: true, cancelable: true })` を送る。page は手元の file を読めないので、画像のバイト列は base64 で js に埋める。他の site の画像は、別の port で立てた Bun.serve の fake を `<img src>` に書く。
 
 片付けでは `agent-browser --session tania-s2 close` で browser を閉じ、Vite の pid（`lsof -ti tcp:<Vite の port> -sTCP:LISTEN`）に `kill` を送ってから、下の手順で Backend を止める。
 

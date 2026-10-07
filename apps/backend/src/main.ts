@@ -10,7 +10,11 @@ import {
   migrations as jobMigrations,
   router as jobRouter,
 } from '@tania/job/server'
-import { createNoteLedger, migrations as noteMigrations } from '@tania/note/server'
+import {
+  createNoteLedger,
+  migrations as noteMigrations,
+  systemJobs as noteSystemJobs,
+} from '@tania/note/server'
 import {
   createTaskLedger,
   migrations as taskMigrations,
@@ -69,8 +73,12 @@ const workbenchLedger = createWorkbenchLedger({
   nameAgentSession,
 })
 const taskLedger = createTaskLedger({ db, workbenchLedger, home })
-const jobLedger = createJobLedger({ db, home, systemJobs: taskSystemJobs(taskLedger) })
 const noteLedger = createNoteLedger({ db, home })
+const jobLedger = createJobLedger({
+  db,
+  home,
+  systemJobs: [...taskSystemJobs(taskLedger), ...noteSystemJobs(noteLedger)],
+})
 
 const context = { db, workbenchLedger, taskLedger, jobLedger }
 const router = os

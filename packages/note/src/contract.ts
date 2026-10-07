@@ -2,6 +2,7 @@ import { oc } from '@orpc/contract'
 import { createSchemaFactory } from 'drizzle-zod'
 import { z } from 'zod'
 
+import { IMAGE_URL_PREFIX } from './body/image-url.ts'
 import { note } from './schema.ts'
 
 // notes の口にだけ載せ、CLI には出さないので、meta に cli を持たない。
@@ -10,7 +11,7 @@ const { createSelectSchema } = createSchemaFactory({ coerce: { date: true } })
 
 const NoteRowSchema = createSelectSchema(note)
 
-export { IMAGE_URL_PREFIX } from './body/image-url.ts'
+export { IMAGE_URL_PREFIX }
 
 // notes の口は Host がこれ以外の request を断る（DNS rebinding）ので、名前を足すとその口に届く経路も増える。
 // 保存される link は tania.localhost で書かれるが、ユーザーが同じ Backend を別の名前で開くこともある。
@@ -47,6 +48,8 @@ export const NoteSchema = z.discriminatedUnion('kind', [
   z.object({ kind: z.literal('repo_note'), repo: z.string(), title: z.string(), ...common }),
   z.object({ kind: z.literal('scratch'), repo: z.string(), ...common }),
 ])
+
+const ImageUrlSchema = z.string().describe(`${IMAGE_URL_PREFIX}<uuid>.<ext> on the notes listener`)
 
 export const RepoNoteSummarySchema = z.object({
   id: NoteIdSchema,
@@ -208,6 +211,22 @@ export const contract = {
       })
       .input(z.object({ repo: RepoSchema, after: RepoNotesCursorSchema.optional() }))
       .output(RepoNotesPageSchema),
+  },
+  image: {
+    upload: meta
+      .meta({
+        description:
+          'Place a png, jpg, gif or webp image of up to 20MB for a body to show, and give its URL',
+      })
+      .input(z.object({ file: z.file() }))
+      .output(z.object({ url: ImageUrlSchema })),
+    import: meta
+      .meta({
+        description:
+          'Fetch the image at an http or https URL within 10s and place it like an uploaded one, giving its URL',
+      })
+      .input(z.object({ url: z.url({ protocol: /^https?$/ }) }))
+      .output(z.object({ url: ImageUrlSchema })),
   },
   noteMention: {
     search: meta

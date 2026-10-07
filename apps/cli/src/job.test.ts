@@ -18,6 +18,7 @@ test('job list prints the system Jobs with their schedules', async () => {
       'NAME                    SCHEDULE   STATE   LAST  NEXT',
       'task.sync               every 5m   active  -     -',
       'task.setup-log-cleanup  every 24h  active  -     -',
+      'note.image-cleanup      every 24h  active  -     -',
       '',
     ].join('\n'),
     stderr: '',
@@ -79,7 +80,9 @@ test('job add registers a user Job that job list shows with its cron expression'
     stdout: expect.stringMatching(/^added dreaming; it runs next at \d{4}-\d\d-\d\d 03:00:00\n$/),
     stderr: '',
   })
-  expect(listed.stdout.split('\n')[3]).toMatch(/^dreaming +0 3 \* \* \* +active +- +/)
+  expect(listed.stdout.split('\n').find((line) => line.startsWith('dreaming '))).toMatch(
+    /^dreaming +0 3 \* \* \* +active +- +/,
+  )
   expect(JSON.parse(shown.stdout).shell).toEqual({
     command: 'echo "$HOME"',
     cwd,
