@@ -211,7 +211,7 @@ monica の `to_markdown` は素の文字を escape せず、copy した markdown
 - preview と markdown の変換は monica の fixture（`src/body/fixtures/` の `full-doc.json`・`unknown-nodes.json`）で確かめる。
 - markdown の変換のテストは、monica の import の 33 本と export の 11 本から、展開・循環・plain text のものを除いて写してある。`full-doc.json` の書き出しは monica の golden（`FULL_DOC_MD`）と一字ずつ比べる。
 - monica の Rust を写した関数は、monica の `crates/monica-domain` を path 依存で読む scratch の crate に、テストの入力と部品を乱択で組み合わせた入力を流し、TS の出力と突き合わせる。空白の判定（Rust の `trim` は Unicode の White_Space）や `str::lines` の `\r` のような境界の振る舞いは、golden と写したテストだけでは写し漏れを拾えないため。
-- escape は、行頭と inline の構文を素の文字として持たせた doc を、block の種類ごとに `toMarkdown` → `fromMarkdown` に通し、元の doc に戻るかで確かめる。escape の規則を変えたら、記号の多い文字・mark・hardBreak・Note Mention・入れ子の list・表を乱択で組んだ doc を scratch で往復させる。記号の組み合わせは固定のテストでは数え尽くせないため。
+- escape は、行頭と inline の構文を素の文字として持たせた doc を、block の種類ごとに `toMarkdown` → `fromMarkdown` に通し、元の doc に戻るかで確かめる。記号の組み合わせは固定のテストでは数え尽くせないので、`src/body/markdown-roundtrip.test.ts` が、記号の多い文字・mark・hardBreak・Note Mention・入れ子の list・表を固定の seed で乱択に組んだ doc も往復させる。乱択から外す組み合わせは、escape を入れる前のコードでも同じく往復しなかったものに限り、外す理由をそこに書く。
 - 画像は `image.test.ts` が、一時 directory の home で確かめる。取り込みの相手は Bun.serve の fake で、終わらない body、始まらない応答、途中で止まる body を作る。10 秒の打ち切りは、task の sync と同じく `importImage` に短い timeout を渡して確かめる。GC の 48 時間は時計を止めず、画像の mtime を `utimesSync` で過去と未来に置く。
 - 画像の GET と multipart の輸送は、apps/backend の `notes-listener.test.ts` が RPCLink で upload してから GET して確かめる。
 - OGP の行き先は `src/fake-site.ts` の fake の site に差し替える。fake は Bun.serve で path ごとに status・header・body を返し、届いた request の path と User-Agent を記録し、header の保留（`hold()`）、body の後に送り続けるか止まったままでいること、client が body を読みやめたこと（`cancelled`）を記録する。task の `fake-github.ts` と同じ形。
