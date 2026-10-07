@@ -10,7 +10,7 @@ import {
   type JumpModeActions,
   moveActiveRunspaceAtom,
   moveActiveTabAtom,
-  pickTileAtom,
+  pickTileByNumberAtom,
   setUiZoomAtom,
   sidebarOpenAtom,
   toggleTabPinAtom,
@@ -66,7 +66,7 @@ export function useShortcuts() {
   const setUiZoom = useSetAtom(setUiZoomAtom)
   const toggleTabPin = useSetAtom(toggleTabPinAtom)
   const copyActiveAgentSessionId = useSetAtom(copyActiveAgentSessionIdAtom)
-  const pickTile = useSetAtom(pickTileAtom)
+  const pickTile = useSetAtom(pickTileByNumberAtom)
 
   useEffect(() => {
     if (!jumpActive) return

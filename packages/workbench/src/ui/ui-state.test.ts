@@ -9,7 +9,7 @@ import {
   activateTerminalTabAtom,
   activeRunspaceAtom,
   activeTerminalTabAtom,
-  pickTileAtom,
+  pickTileByNumberAtom,
   reloadAtom,
   sidebarAtom,
   toggleSectionAtom,
@@ -118,7 +118,7 @@ test('a number brings back the Runspace that was active at a restart, even after
     await store.set(reloadAtom)
     await until(store, sidebarAtom, (s) => s.tileKeys[inLib.runspaceId] === 'acme/lib')
     return numbers.map((n) => {
-      store.set(pickTileAtom, n)
+      store.set(pickTileByNumberAtom, n)
       return store.get(activeRunspaceAtom)?.id
     })
   }

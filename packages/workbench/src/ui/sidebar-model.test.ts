@@ -24,7 +24,7 @@ import {
   cycleRunspaceAtom,
   layoutAtom,
   moveActiveRunspaceAtom,
-  pickTileAtom,
+  pickTileByNumberAtom,
   reloadAgentSessionsAtom,
   reloadAtom,
   sidebarAtom,
@@ -329,7 +329,7 @@ test('a branch switched in a terminal that reports nothing reaches the row on a 
   expect(rowOf(sidebar, runspaceId)?.branch).toBe('feature/renamed')
 })
 
-test('keys cycle through the rows shown under the selected Tile without going into another Repo, and picking a Tile leaves the active Runspace alone until a key moves into the rows shown there', async () => {
+test('keys cycle through the rows shown under the selected Tile without going into another Repo, and while another Tile is shown, the active Runspace stays until a key moves into the rows shown there', async () => {
   const { client, store } = bench()
   const app = ghqCheckout('acme/app')
   const lib = ghqCheckout('acme/lib')
@@ -375,9 +375,9 @@ test('a number brings up the Tile of the Repo at that place from the top, with t
     store.get(activeTerminalTabAtom)?.id,
   ]
 
-  store.set(pickTileAtom, 2)
+  store.set(pickTileByNumberAtom, 2)
   const firstVisit = onScreen()
-  store.set(pickTileAtom, 1)
+  store.set(pickTileByNumberAtom, 1)
 
   expect(firstVisit).toEqual(['acme/lib', inLib.runspaceId, inLib.tab.id])
   expect(onScreen()).toEqual(['acme/app', last.runspaceId, back.id])
@@ -394,7 +394,7 @@ test('a number brings back the Tile of the active Runspace while another Tile is
   store.set(activateRunspaceAtom, inApp.runspaceId)
   store.set(tileChoiceAtom, 'acme/lib')
 
-  store.set(pickTileAtom, 1)
+  store.set(pickTileByNumberAtom, 1)
 
   expect(store.get(sidebarAtom).selected.key).toBe('acme/app')
   expect(store.get(activeRunspaceAtom)?.id).toBe(inApp.runspaceId)
@@ -410,7 +410,7 @@ test('a Runspace brought up by a number takes the selected Tile along when its s
   const inLib = await client.runspace.create({ cwd: lib.checkout, ...size })
   await store.set(reloadAtom)
   await untilListed(store, 'acme/lib', [inLib.runspaceId])
-  store.set(pickTileAtom, 1)
+  store.set(pickTileByNumberAtom, 1)
 
   await store.set(updateTabCwdAtom, inApp.tab.id, lib.checkout)
   await store.set(reloadAtom)
@@ -426,7 +426,7 @@ test('0 picks the Tile for outside the Repos, below their Tiles, and keeps the a
   await store.set(reloadAtom)
   await untilListed(store, 'acme/app', [runspaceId])
 
-  const picked = [0, 2].map((n) => [n, store.set(pickTileAtom, n)])
+  const picked = [0, 2].map((n) => [n, store.set(pickTileByNumberAtom, n)])
 
   expect(picked).toEqual([
     [0, true],

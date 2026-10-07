@@ -327,26 +327,29 @@ export const sidebarAtom = atom((get): Sidebar =>
   }),
 )
 
-// Tile の click は一覧を覗くだけにしてあるので、Runspace まで移るのは数字のキーだけにする。
-export const pickTileAtom = atom(null, (get, set, n: number): boolean => {
-  const sidebar = get(sidebarAtom)
-  const tile = tileAt(sidebar, n)
-  if (!tile) return false
+export const pickTileAtom = atom(null, (get, set, key: string) => {
+  const { tileKeys } = get(sidebarAtom)
   const underTile = (id: string | undefined): id is string =>
-    id !== undefined && sidebar.tileKeys[id] === tile.key
+    id !== undefined && tileKeys[id] === key
   const runspaceId =
     [get(activeRunspaceAtom)?.id, ...get(recentRunspaceIdsAtom)].find(underTile) ??
     get(layoutAtom)
       ?.runspaces.map((r) => r.id)
       .find(underTile)
   if (!runspaceId) {
-    set(tileChoiceAtom, tile.key)
-    return true
+    set(tileChoiceAtom, key)
+    return
   }
   set(setActiveAtom, { runspaceId })
   set(terminalFocusRequestAtom, (c) => c + 1)
   // 開いた Runspace が既に active でも、覗いていた Tile から戻すために従わせ直す。
   set(tileChoiceAtom, null)
+})
+
+export const pickTileByNumberAtom = atom(null, (get, set, n: number): boolean => {
+  const tile = tileAt(get(sidebarAtom), n)
+  if (!tile) return false
+  set(pickTileAtom, tile.key)
   return true
 })
 
