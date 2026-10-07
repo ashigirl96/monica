@@ -245,7 +245,7 @@ test('changes signals every Agent Session a hook changed', async () => {
 })
 
 test("a question asked through both of its hooks notifies once, after the commit, titled by the last two parts of the agent's cwd", async () => {
-  const sent: { title: string; body: string; committed: boolean }[] = []
+  const sent: { title: string; body: string; terminalSessionId: string; committed: boolean }[] = []
   const { db, client } = setup({
     notify: (n) => sent.push({ ...n, committed: !db.$client.inTransaction }),
   })
@@ -261,7 +261,9 @@ test("a question asked through both of its hooks notifies once, after the commit
   await record('PreToolUse', { tool_name: 'AskUserQuestion' })
   await record('PermissionRequest', { tool_name: 'AskUserQuestion' })
 
-  expect(sent).toEqual([{ title: 'src/tania', body: '質問', committed: true }])
+  expect(sent).toEqual([
+    { title: 'src/tania', body: '質問', terminalSessionId: 'ts-a', committed: true },
+  ])
 })
 
 test.each([
@@ -280,7 +282,7 @@ test.each([
       ]),
     )
 
-    expect(sent).toEqual([{ title: 'src/tania', body }])
+    expect(sent).toEqual([{ title: 'src/tania', body, terminalSessionId: 'ts-a' }])
   },
 )
 
@@ -294,7 +296,9 @@ test('the last ai-title in the Agent Session Transcript is the Agent Session tit
     ]),
   )
 
-  expect(sent).toEqual([{ title: 'src/tania', body: '手空き · 今の名前' }])
+  expect(sent).toEqual([
+    { title: 'src/tania', body: '手空き · 今の名前', terminalSessionId: 'ts-a' },
+  ])
 })
 
 test('an ai-title near the end of an Agent Session Transcript longer than 64 KiB is the Agent Session title', async () => {
@@ -307,7 +311,9 @@ test('an ai-title near the end of an Agent Session Transcript longer than 64 KiB
     ]),
   )
 
-  expect(sent).toEqual([{ title: 'src/tania', body: '手空き · 今の名前' }])
+  expect(sent).toEqual([
+    { title: 'src/tania', body: '手空き · 今の名前', terminalSessionId: 'ts-a' },
+  ])
 })
 
 test.each([
@@ -334,7 +340,7 @@ test.each([
 ])('a notification still goes out with the reason alone when %s', async (_case, transcript) => {
   const sent = await notificationsOn('Stop', {}, transcript)
 
-  expect(sent).toEqual([{ title: 'src/tania', body: '手空き' }])
+  expect(sent).toEqual([{ title: 'src/tania', body: '手空き', terminalSessionId: 'ts-a' }])
 })
 
 test('the name the Task gives an Agent Session titles its notification, and the Agent Session title stays in the body', async () => {
@@ -355,7 +361,25 @@ test('the name the Task gives an Agent Session titles its notification, and the 
     }),
   })
 
-  expect(sent).toEqual([{ title: 'tania#43 骨格 (8)', body: '許可: Bash · 通知のTab名表示' }])
+  expect(sent).toEqual([
+    { title: 'tania#43 骨格 (8)', body: '許可: Bash · 通知のTab名表示', terminalSessionId: 'ts-a' },
+  ])
+})
+
+test('the notification of an Agent Session that moved to another Terminal Session carries the one it waits in', async () => {
+  const sent: { terminalSessionId: string }[] = []
+  const { db, client } = setup({ notify: (n) => sent.push(n) })
+  seedTerminalSession(db, 'ts-a', 'running')
+  seedTerminalSession(db, 'ts-b', 'running')
+  const record = (terminalSessionId: string, hookEventName: string) =>
+    client.agentSession.recordHook({ terminalSessionId, payload: payload('s-1', hookEventName) })
+  await record('ts-a', 'UserPromptSubmit')
+  await record('ts-a', 'Stop')
+  await record('ts-b', 'UserPromptSubmit')
+
+  await record('ts-b', 'Stop')
+
+  expect(sent.map((n) => n.terminalSessionId)).toEqual(['ts-a', 'ts-b'])
 })
 
 test('a notification that cannot be named still leaves the hook recorded and signalled, with one line on stderr', async () => {

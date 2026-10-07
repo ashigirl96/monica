@@ -10,11 +10,10 @@ use serde::Serialize;
 use shared_child::unix::SharedChildExt;
 use shared_child::SharedChild;
 use tauri::{AppHandle, Emitter, Manager};
-use tauri_plugin_notification::NotificationExt;
 
-use crate::announcement::{self, Announcement, Endpoint, Notification, UnreadCount};
+use crate::announcement::{self, Announcement, Endpoint, UnreadCount};
 use crate::respawn::Respawn;
-use crate::{locations, orphan, STOP_GRACE};
+use crate::{locations, notification, orphan, STOP_GRACE};
 
 pub struct Supervisor {
     home: PathBuf,
@@ -188,7 +187,7 @@ fn relay(app: AppHandle, stdout: ChildStdout, child: Arc<SharedChild>) {
                 Some(Announcement::Endpoint(endpoint)) => {
                     app.state::<Supervisor>().announce(&app, &child, endpoint);
                 }
-                Some(Announcement::Notify(notice)) => notify(&app, notice),
+                Some(Announcement::Notify(notice)) => notification::post(&app, notice),
                 Some(Announcement::Badge(unread)) => {
                     app.state::<Supervisor>().badge(&app, &child, unread);
                 }
@@ -196,13 +195,6 @@ fn relay(app: AppHandle, stdout: ChildStdout, child: Arc<SharedChild>) {
             }
         }
     });
-}
-
-fn notify(app: &AppHandle, Notification { title, body }: Notification) {
-    let shown = app.notification().builder().title(title).body(body).show();
-    if let Err(error) = shown {
-        eprintln!("[shell] failed to post a notification: {error}");
-    }
 }
 
 fn show_badge(app: &AppHandle, count: Option<i64>) {

@@ -32,7 +32,7 @@ export type WorkbenchLedger = {
 }
 
 export type NotificationDeps = {
-  notify: (n: { title: string; body: string }) => void
+  notify: (n: { title: string; body: string; terminalSessionId: string }) => void
   nameAgentSession: (db: Db, agentSessionId: string) => string | null
 }
 
@@ -202,7 +202,11 @@ export function notifyWaiting(
   try {
     const title = nameAgentSession(db, agentSession.sessionId) ?? shortPath(agentSession.cwd)
     const agentSessionTitle = readAgentSessionTitle(agentSession.transcriptPath)
-    notify({ title, body: agentSessionTitle ? `${reason} · ${agentSessionTitle}` : reason })
+    notify({
+      title,
+      body: agentSessionTitle ? `${reason} · ${agentSessionTitle}` : reason,
+      terminalSessionId: agentSession.terminalSessionId,
+    })
   } catch (error) {
     console.error(`[workbench] could not notify for ${agentSession.sessionId}: ${error}`)
   }

@@ -173,8 +173,15 @@ export const copyActiveAgentSessionIdAtom = atom(null, (get): boolean => {
 // Runspace の Tile は repo.of を待って後から決まるので、Tile ごとではなく Runspace の id を新しい順に覚えておく。
 const recentRunspaceIdsAtom = atom<string[]>([])
 
+type Activation = {
+  runspaceId: string
+  tabId?: string
+  // 既に active な Runspace でも、覗いている Tile からその Runspace の Tile に戻す。
+  revealTile?: boolean
+}
+
 // 切り替えはすべてここを通るので、jump hint を閉じるのも、選んだ Tile を active な Runspace の Tile に合わせるのもここで行う。
-const setActiveAtom = atom(null, (get, set, next: { runspaceId: string; tabId?: string }) => {
+const setActiveAtom = atom(null, (get, set, next: Activation) => {
   const before = [get(activeRunspaceAtom)?.id, get(activeTerminalTabAtom)?.id]
   // layout が入れ替わった直後は、消えた Runspace の代わりに先頭が active に見えるので、選んでいた id と比べる。
   const chosenBefore = get(activeRunspaceIdAtom)
@@ -188,13 +195,13 @@ const setActiveAtom = atom(null, (get, set, next: { runspaceId: string; tabId?: 
   if (tabId) set(activeTabIdsAtom, (prev) => ({ ...prev, [next.runspaceId]: tabId }))
   const after = [get(activeRunspaceAtom)?.id, get(activeTerminalTabAtom)?.id]
   if (before[0] !== after[0] || before[1] !== after[1]) set(jumpHintsActiveAtom, false)
-  if (!after[0] || chosenBefore === next.runspaceId) return
+  if (!after[0] || (chosenBefore === next.runspaceId && !next.revealTile)) return
   // Repo は repo.of を待って決まるので、Tile の key を書かずに active な Runspace に従わせる。
   // Pinned はどの Tile を選んでも見えているので、そのとき見えていた Tile に留める。
   set(tileChoiceAtom, after[0] in get(sidebarAtom).tileKeys ? null : shownTile)
 })
 
-// 通知を click しても Tab へは移れないので、Runspace を選ぶと未読の Tab へ 1 手で着くようにする。
+// 通知を押さずに sidebar から来ても、未読の Tab へ 1 手で着くようにする。
 export const activateRunspaceAtom = atom(null, (get, set, runspaceId: string) => {
   const unreadOf = get(unreadOfTerminalSessionAtom)
   const unread = get(layoutAtom)
@@ -209,6 +216,16 @@ export const activateTerminalTabAtom = atom(null, (get, set, tabId: string) => {
   if (!runspace?.tabs.some((t) => t.id === tabId)) return
   set(setActiveAtom, { runspaceId: runspace.id, tabId })
   set(terminalFocusRequestAtom, (c) => c + 1)
+})
+
+export const showTerminalSessionAtom = atom(null, (get, set, terminalSessionId: string) => {
+  for (const runspace of get(layoutAtom)?.runspaces ?? []) {
+    const tab = runspace.tabs.find((t) => t.terminalSessionId === terminalSessionId)
+    if (!tab) continue
+    set(setActiveAtom, { runspaceId: runspace.id, tabId: tab.id, revealTile: true })
+    set(terminalFocusRequestAtom, (c) => c + 1)
+    return
+  }
 })
 
 // OSC 0/2 の title は shell が prompt のたびに書き換えるので、Workbench Ledger に書かず memory にだけ持つ。

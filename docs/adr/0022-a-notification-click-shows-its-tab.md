@@ -17,7 +17,7 @@ ADR-0013 は tauri-plugin-notification で通知を出し、クリックは OS �
 ## Consequences
 
 - Backend が stdout に書く notify の行に、通知を出した Agent Session の `terminalSessionId` を足す。Shell はそれを通知の `userInfo` に載せる。
-- 識別子は Tab ではなく Terminal Session の id にする。Tab を別の Runspace へ移しても変わらず、通知を出す時点で Agent Session の行が持っているため。claude が終わって shell だけが残った Tab にも移れる。クリックした時にその Terminal Session を表示する Tab が無ければ（Tab を閉じて detached になった、Terminal Session が終わった、pin の張り直しで Terminal Session が替わった）、Tab は選ばず、OS が tania を前面に出すだけになる。
+- 識別子は Tab ではなく Terminal Session の id にする。Tab を別の Runspace へ移しても変わらず、通知を出す時点で Agent Session の行が持っているため。claude が終わって shell だけが残った Tab にも移れる。クリックした時にその Terminal Session を表示する Tab が無ければ（Tab を閉じた、Terminal Session が終わった、pin の張り直しで Terminal Session が替わった）、Tab は選ばず、OS が tania を前面に出すだけになる。
 - delegate は Tauri の `setup` で置く。`setup` は `applicationDidFinishLaunching:` の中で同期的に走り、Apple が求める「起動完了の前」に間に合う。tania が起動していない間に通知センターの通知を押して起こした場合も、クリックは `didReceive` に届く。ptyd は tania より長生きする（ADR-0011）ので、同じ Tab に移れることがある。webview が listen を張る前に届いたクリックは Shell が持っておき、webview が後から訊く。
 - .app の外の process で `currentNotificationCenter` を呼ぶと、catch できない例外で abort する。Shell は main bundle が .app かどうかで経路を分け、.app の外では UNUserNotificationCenter に触らない。
 - release は初回の起動で通知の許可を求める。Keychain の自己署名 identity で codesign した .app で許可が通り、クリックで `userInfo` が届くことを確かめた。release は通知を出すのに plugin を使わない。
