@@ -135,6 +135,7 @@ export const router = os.router({ ... });          // context は { db, noteLedg
 export function createNoteLedger(deps: {
   db: Db;
   home: string;
+  ghq?: Ghq;
 }): NoteLedger;
 ```
 
@@ -142,12 +143,14 @@ export function createNoteLedger(deps: {
 
 job の `home` はユーザーの Job の log を置く場所。`systemJobs` は system の Job の並びで、名前は `<domain>.<name>`、`run` は失敗なら reject する。`now` はテストが時計を進めるための口（`docs/packages/job-ledger.md`）。
 
-note の `home` は画像の置き場所に使う（後続の issue）。
+note の `home` は画像の置き場所に使う（後続の issue）。`ghq` は `list(signal)` で、省けば `ghq list` の command を呼ぶ。Repo の候補（`docs/packages/note-ledger.md`）に使い、テストは偽の ghq を渡す。task の `Ghq` とは別の型で、note は task を import しない。
 
 `WorkbenchLedger` と `TaskLedger` と `JobLedger` と `NoteLedger` は、Backend が 1 つずつ作り、`GLOSSARY.md` の Workbench Ledger と Task Ledger と Job Ledger と Note Ledger を扱う部品で、どれも `start()` / `stop()` を持つ。`WorkbenchLedger` と `TaskLedger` は `events` も持つ。
 
 - `events`: その domain の変更を知らせる in-process の publisher。job と note は change stream を持たないので無い（ADR-0016・0018）。
 - `start()` / `stop()`: 起動時と終了時の処理。`WorkbenchLedger` は ptyd への接続（無ければ spawn、版違いは入れ替え）と reconcile（ADR-0011）、`TaskLedger` は起動時に preparing のまま残った Bench を失敗にすることと、終了時に走っている setup の process group を kill すること、`JobLedger` は起動時に途中で止まった Job Execution を中断にして system の Job を 1 回走らせ、tick の timer を張ることと、終了時にそれを止めること。`NoteLedger` は終了時に走っている OGP の fetch を打ち切ること。
+
+`NoteLedger` はほかに `repoCandidates()` と `linkMetadata(url)` だけを持ち、note の router の `repo.candidates` と `linkMetadata` が呼ぶ。router の context に渡るのは `db` と Ledger だけなので、ghq と、`stop()` で OGP の fetch を打ち切る signal は Ledger が持つ。
 
 `TaskLedger` はほかに `syncInBackground()` と `cleanSetupLogs()` だけを持ち、どちらも task の system の Job が呼ぶ。task は timer を持たず、system の Job の並び（名前・間隔・`run`）を `@tania/task/server` の `systemJobs(taskLedger)` で出し、Backend の組み立てがそれを `createJobLedger` に渡す。task は job を import しないので、戻り値は `createJobLedger` の `systemJobs` と同じ構造の素のオブジェクトにし、job の型を注記しない（#18、ADR-0016）。
 

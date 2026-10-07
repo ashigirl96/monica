@@ -1,33 +1,28 @@
 import type { BunSQLiteDatabase } from 'drizzle-orm/bun-sqlite'
 
+import type { LinkMetadata } from './contract.ts'
+import { defaultGhq, type Ghq } from './ghq.ts'
+import { readLinkMetadata } from './link-metadata.ts'
+import { repoCandidates } from './repo.ts'
+
 export type Db = BunSQLiteDatabase
 
 export type NoteLedger = {
   start(): void
   stop(): void
+  repoCandidates(): Promise<string[]>
+  linkMetadata(url: string): Promise<LinkMetadata>
 }
 
-type Internals = {
-  stopped: AbortSignal
-}
-
-// NoteLedger の型は start / stop だけに保ち、procedure が使う中身は NoteLedger を key にここへ置く。
-const internalsOf = new WeakMap<NoteLedger, Internals>()
-
-export function internals(noteLedger: NoteLedger): Internals {
-  const found = internalsOf.get(noteLedger)
-  if (!found) throw new Error('this NoteLedger was not made by createNoteLedger')
-  return found
-}
-
-export function createNoteLedger(_deps: { db: Db; home: string }): NoteLedger {
+export function createNoteLedger(deps: { db: Db; home: string; ghq?: Ghq }): NoteLedger {
+  const ghq = deps.ghq ?? defaultGhq
   const stopped = new AbortController()
-  const noteLedger: NoteLedger = {
+  return {
     start() {},
     stop() {
       stopped.abort()
     },
+    repoCandidates: () => repoCandidates(deps.db, ghq),
+    linkMetadata: (url) => readLinkMetadata(url, stopped.signal),
   }
-  internalsOf.set(noteLedger, { stopped: stopped.signal })
-  return noteLedger
 }

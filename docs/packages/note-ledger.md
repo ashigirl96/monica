@@ -1,6 +1,6 @@
 # Note Ledger
 
-`packages/note` の contract と、Note の種類ごとの不変条件、保存、削除と取り消し、OGP の規則。決定の理由は ADR-0017・0018・0019 にある。今あるのは Note を 1 件ずつ扱う procedure と本文の中の参照（Note Mention の候補と解決、block の取得）と OGP で、一覧と画像は後続の issue で足す。
+`packages/note` の contract と、Note の種類ごとの不変条件、保存、削除と取り消し、OGP の規則。決定の理由は ADR-0017・0018・0019 にある。今あるのは Note を 1 件ずつ扱う procedure、Repo の Note の一覧と Repo の候補、本文の中の参照（Note Mention の候補と解決、block の取得）、OGP で、Essay の一覧と画像は後続の issue で足す。
 
 ## contract（root は `note`）
 
@@ -11,10 +11,12 @@ remove           { id } → void
 restore          { id } → Note
 daily.open       { date } → Note
 daily.dates      → string[]
+repo.candidates  → string[]
 scratch.open     { repo } → Note
 essay.create     → Note
 essay.setStatus  { id, status } → Note
 repoNote.create  { repo } → Note
+repoNote.list    { repo, after? } → { notes, next }
 noteMention.search   { q } → { id, displayName, preview }[]
 noteMention.resolve  { id } → { displayName }
 block.get            { id, blockId } → block
@@ -62,6 +64,18 @@ Note は `note` table に 1 件 1 行で持つ。種類と列の対応を CHECK 
 - `title` を受けるのは Essay と Repo Note だけ。省けば今の title のまま。Daily と Scratch に渡すと `BAD_REQUEST`。
 - 保存のたびに preview を作り直す。preview は最初の空でない block の text を 200 文字まで切ったもので、一覧が本文の代わりに返す。文字は見た目の 1 文字（grapheme）で数え、つないだ絵文字を途中で切らない。Note Mention・link mention・hard break・画像・bookmark・Synced Block は text に数えず、表のセルは空白で区切る。作るのは `@tania/note/body` の `preview`。
 - `updatedAt` を進めるのは、本文と title の保存と Essay の状態の変更だけ。削除と取り消しは進めない。進めるときは前の値より 1 ms 以上後にする。同じ ms のうちに 2 度書くと版が区別できず、古い版からの保存が通るため。
+
+## Repo の Note の一覧と Repo の候補
+
+- `repoNote.list` は Repo の Repo Note（Scratch と削除した Note は除く）を、`date` の新しい順、同じ日は id の大きい順に 1 頁 100 件ずつ返す。Repo は大文字と小文字を区別せずに比べる。
+- 頁は `(date, id)` の keyset で切る。`after` に前の頁の `next`（その頁の最後の行の `date` と `id`）を渡すと、それより後ろの行を返す。最後の頁の `next` は null。monica の offset は、読み込みの途中で Note が増えると同じ行を次の頁にも出した。keyset なら、途中で作った Note は 1 頁目の前に入り、読み込み済みの頁の後ろには混ざらない。
+- 行は content ではなく `id`・`date`・`title`・`preview`・`updatedAt` を持つ。`preview` は本文を一度も保存していない Note では null。
+- `repo.candidates` は picker に出す Repo の並び。Note のある Repo を、その Repo の Note を最後に更新した順に先に並べ、残りの ghq の checkout を後に並べる。
+  - 削除した Note は数えない。削除した Note しか無い Repo は、ghq の checkout でなければ出ない。
+  - 綴りが大文字と小文字だけ違う Repo は 1 つにまとめ、一番最近に更新した Note の綴りで出す。ghq の checkout も、Note のある Repo と大文字と小文字を区別せずに重ねない。
+  - ghq の checkout は `ghq list` の行のうち `github.com/` の下だけ（ADR-0004）で、`owner/repo` の形でないものは除く。並びは `ghq list` の順。
+  - ghq が失敗したら Note のある Repo だけを返す。5 秒で返らなければ ghq を kill し、その終わりを待たずに Note のある Repo だけを返す。ghq の子が stdout を握って残ると、ghq を kill しても `ghq list` の出力が読み終わらないため。
+  - ghq の checkout だけでは、改名した Repo と checkout を消した Repo の Note に辿り着けない。Note は書いた時点の `owner/repo` を持ち続け、改名に追従しないため。
 
 ## 削除と取り消し
 
@@ -117,9 +131,7 @@ monica から変えたのは次の 4 つ。
 
 ## createNoteLedger
 
-`createNoteLedger({ db, home })` は `start()` / `stop()` を持つ。`start()` は何もしない。`stop()` は走っている OGP の fetch を打ち切る。`home` は画像の置き場所に使う。後続の issue で、Repo の候補のための ghq、`cleanImages()` と画像を配る handler を足す。router の context は `{ db, noteLedger }`。
-
-`NoteLedger` の型は `start()` / `stop()` だけに保ち、procedure が使う中身（`stop()` で abort する signal）は `NoteLedger` を key にした WeakMap に置いて `internals()` で引く。task の `TaskLedger` と同じ形。
+`createNoteLedger({ db, home, ghq? })` は `start()` / `stop()` と `repoCandidates()`・`linkMetadata(url)` を持つ。`start()` は何もしない。`stop()` は走っている OGP の fetch を打ち切る。`home` は画像の置き場所に使う。`ghq` は `list(signal)` を持ち、省けば `ghq list` を `env: process.env` で spawn する。`signal` で打ち切ると ghq を kill する。task の `Ghq`（`packages/task/src/prepare.ts`）は import しない。`repoCandidates()` は `repo.candidates` の、`linkMetadata(url)` は `linkMetadata` の中身で、router の handler が呼ぶ。後続の issue で、`cleanImages()` と画像を配る handler を足す。router の context は `{ db, noteLedger }`。
 
 note は他の domain を import せず、他の domain からも import されない。前者は `.oxlintrc.json` の override が、後者は package.json が守る。Repo は `owner/repo` の値で持つだけ。
 
@@ -132,6 +144,7 @@ note は他の domain を import せず、他の domain からも import され�
 - in-memory の SQLite に note の migration だけを当てる。note は他の domain の table を持たない。
 - procedure は `createRouterClient` で呼ぶ。preview は procedure に出ないので、`note` table を SELECT して確かめる。
 - 時計は bun:test の `setSystemTime` で止める。止まるのは Date だけで、timer は動く。
+- ghq は `createNoteLedger` に偽の `list` を渡して差し替える。CI の ts job に ghq は無い。5 秒の打ち切りは、`setTimeout` を `spyOn` して 5000ms の callback を捕まえ、手で呼ぶ。偽の `list` は終わらない promise を返し、ghq の終わりを待たずに返ることを確かめる。
 - 種類と列の対応と、1 つだけある Note は、table に直に insert して確かめる。
 - preview は monica の fixture（`src/body/fixtures/` の `full-doc.json`・`unknown-nodes.json`）で確かめる。fixture は後続の markdown の変換のテストも使う。
 - OGP の行き先は `src/fake-site.ts` の fake の site に差し替える。fake は Bun.serve で path ごとに status・header・body を返し、届いた request の path と User-Agent を記録し、header の保留（`hold()`）、body の後に送り続けるか止まったままでいること、client が body を読みやめたこと（`cancelled`）を記録する。task の `fake-github.ts` と同じ形。
