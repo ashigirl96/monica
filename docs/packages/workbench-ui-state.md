@@ -9,6 +9,7 @@ Workbench Ledger に載せない Workbench の画面の状態と、sidebar の R
 - 書き込みは 500ms の debounce。localStorage は同期で読めるので、monica の render 前の hydrate は要らない。
 - 保存した id が `layout.get` に無ければ、先頭の Runspace と、その先頭の Tab に戻す（monica の `resolveWorkbenchActive`）。読めないか壊れていれば既定値で始める。
 - 見たこと（未読）は UI 状態に置かず、Workbench Ledger に置く（ADR-0021、下の「未読」）。
+- webview が持つ Backend の写し（layout、Terminal Session と Agent Session の一覧）は、`changes` の合図の後に読み直すまで古く、起動の直後は空。Tab を閉じるような取り消せない操作の条件は、その場で Backend に聞いて決める（Ctrl+T → d の確認。`docs/packages/workbench-ledger.md` の「Runspace と Tab」）。
 
 ## sidebar
 
