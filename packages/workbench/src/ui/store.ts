@@ -460,6 +460,8 @@ export const toggleTabPinAtom = action(async (get, set, tabId?: string) => {
   if (!found) return
   const { id, pinned } = found.tab
   const client = clientOf(get)
+  // pin した Runspace は札から抜けて札が従う先を失うので、見えていた札に留める。
+  if (!pinned) set(railChoiceAtom, get(sidebarAtom).selected.key)
   await (pinned ? client.tab.unpin({ id }) : client.tab.pin({ id }))
   await set(reloadAtom)
 })
@@ -514,6 +516,8 @@ export const terminateTabTerminalSessionAtom = action(async (get, set, tabId: st
 
 function cycle<T>(items: T[], current: T | null | undefined, step: 1 | -1): T | undefined {
   const index = current === null || current === undefined ? -1 : items.indexOf(current)
+  // 畳んだ行のように一覧に無いところからは、上へ巡るときも端から始める。
+  if (index === -1) return step === 1 ? items[0] : items.at(-1)
   return items[(index + step + items.length) % items.length]
 }
 

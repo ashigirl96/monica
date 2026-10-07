@@ -25,6 +25,7 @@ import {
   reloadAtom,
   sidebarAtom,
   toggleSectionAtom,
+  toggleTabPinAtom,
   updateTabTitleAtom,
   workbenchClientAtom,
 } from './store.ts'
@@ -391,6 +392,57 @@ test('making a Pinned Runspace active leaves the rail that was shown', async () 
   store.set(activateRunspaceAtom, pinned.runspaceId)
 
   expect(store.get(sidebarAtom).selected.key).toBe('acme/app')
+})
+
+test('pinning the only Tab of the active Runspace keeps the rail that was shown', async () => {
+  const { client, store } = bench()
+  const app = ghqCheckout('acme/app')
+  const lib = ghqCheckout('acme/lib')
+  await client.runspace.create({ cwd: app.checkout, ...size })
+  const toPin = await client.runspace.create({ cwd: lib.checkout, ...size })
+  await client.runspace.create({ cwd: lib.checkout, ...size })
+  await store.set(reloadAtom)
+  await untilListed(store, 'acme/lib', [toPin.runspaceId])
+  store.set(activateRunspaceAtom, toPin.runspaceId)
+
+  await store.set(toggleTabPinAtom)
+
+  const sidebar = store.get(sidebarAtom)
+  expect(sidebar.pinned.map((r) => r.id)).toEqual([toPin.runspaceId])
+  expect(sidebar.selected.key).toBe('acme/lib')
+})
+
+test("a Bench and a checkout of the same Repo share a rail whatever the case of the Repo's name", async () => {
+  const { db, workbenchLedger, client, store } = bench()
+  const app = ghqCheckout('acme/app')
+  const plain = await client.runspace.create({ cwd: app.checkout, ...size })
+  // Task は GitHub の nameWithOwner で Repo を持つので、checkout の path と大小文字が違うことがある。
+  const shipIt = db.transaction((tx) => workbenchLedger.createRunspace(tx, { cwd: app.worktree }))
+  const label: BenchLabel = { repo: 'Acme/App', number: 1, title: 'Ship it', note: null }
+  store.set(benchLabelOfAtom, () => (runspaceId: string) => (runspaceId === shipIt ? label : null))
+  await store.set(reloadAtom)
+
+  const sidebar = await untilListed(store, 'acme/app', [plain.runspaceId, shipIt])
+
+  expect(sidebar.rails.map((r) => r.key)).toEqual(['acme/app', OUTSIDE])
+})
+
+test('keys going up from an active row hidden in a collapsed section start from the last row shown', async () => {
+  const { db, workbenchLedger, client, store } = bench()
+  const app = ghqCheckout('acme/app')
+  const shipIt = db.transaction((tx) => workbenchLedger.createRunspace(tx, { cwd: app.worktree }))
+  const label: BenchLabel = { repo: 'acme/app', number: 1, title: 'Ship it', note: null }
+  store.set(benchLabelOfAtom, () => (runspaceId: string) => (runspaceId === shipIt ? label : null))
+  await client.runspace.create({ cwd: app.checkout, ...size })
+  const last = await client.runspace.create({ cwd: app.checkout, ...size })
+  await store.set(reloadAtom)
+  await untilListed(store, 'acme/app', [last.runspaceId])
+  store.set(activateRunspaceAtom, shipIt)
+  store.set(toggleSectionAtom, 'acme/app:bench')
+
+  store.set(cycleRunspaceAtom, 'up')
+
+  expect(store.get(activeRunspaceAtom)?.id).toBe(last.runspaceId)
 })
 
 test('moving a Runspace down past another of its Repo by key keeps the rails in their order', async () => {

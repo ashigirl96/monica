@@ -168,7 +168,8 @@ function railOf(input: SidebarInput, key: string, rows: SidebarRow[]): Rail {
       rows: collapsed ? [] : part.rows,
     }
   })
-  return { key, repo: key === OUTSIDE ? null : key, unreadCount: sum(sections), sections }
+  const repo = key === OUTSIDE ? null : (rows[0]?.repo ?? key)
+  return { key, repo, unreadCount: sum(sections), sections }
 }
 
 export function buildSidebar(input: SidebarInput): Sidebar {
@@ -180,7 +181,8 @@ export function buildSidebar(input: SidebarInput): Sidebar {
     ...runspaces.filter((r) => !r.pinned).map((r) => r.row),
     ...input.detached.map((s) => detachedRow(input, s)),
   ]
-  const railKey = (row: SidebarRow) => row.repo ?? OUTSIDE
+  // GitHub の Repo 名は大小文字を区別しないので、Task の nameWithOwner と checkout の path が違っても同じ札にする。
+  const railKey = (row: SidebarRow) => row.repo?.toLowerCase() ?? OUTSIDE
   const keys = new Set(listed.map(railKey))
   keys.delete(OUTSIDE)
   const rails = [...keys, OUTSIDE].map((key) =>
