@@ -1,8 +1,8 @@
 /// <reference types="bun" />
 import { describe, expect, test } from 'bun:test'
 
-import type { Note } from '../../contract.ts'
-import { noteLabel, summaryTitle } from './summary.ts'
+import type { Note, NoteSummary } from '../../contract.ts'
+import { noteLabel, summaryTitle, withSavedPreview } from './summary.ts'
 
 type Kind =
   | { kind: 'daily' }
@@ -49,5 +49,48 @@ describe('summaryTitle', () => {
     expect(summaryTitle({ title: 'Spec', preview: 'first line' })).toBe('Spec')
     expect(summaryTitle({ title: '', preview: 'first line' })).toBe('first line')
     expect(summaryTitle({ title: '', preview: null })).toBe('Untitled')
+  })
+})
+
+function summary(title: string, preview: string | null): NoteSummary {
+  const at = new Date('2026-08-29T10:00:00.000Z')
+  return {
+    kind: 'essay',
+    id: 'note-1',
+    title,
+    status: 'writing',
+    date: '2026-08-29',
+    preview,
+    createdAt: at,
+    updatedAt: at,
+  }
+}
+
+describe('withSavedPreview', () => {
+  test('保存した Note の preview だけを、保存した本文から作り直す', () => {
+    const other = { ...summary('', 'kept'), id: 'note-2' }
+    const content = {
+      type: 'doc' as const,
+      content: [
+        {
+          type: 'blockGroup',
+          content: [
+            {
+              type: 'blockContainer',
+              content: [{ type: 'paragraph', content: [{ type: 'text', text: 'first line' }] }],
+            },
+          ],
+        },
+      ],
+    }
+
+    expect(withSavedPreview([summary('', null), other], 'note-1', content)).toEqual([
+      summary('', 'first line'),
+      other,
+    ])
+  })
+
+  test('一覧をまだ取っていなければ、取っていないまま', () => {
+    expect(withSavedPreview(undefined, 'note-1', { type: 'doc' })).toBeUndefined()
   })
 })

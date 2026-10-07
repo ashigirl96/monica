@@ -4,7 +4,14 @@ import { contract } from './contract.ts'
 import { IMPORT_TIMEOUT_MS, importImage, uploadImage } from './image.ts'
 import { readLinkMetadata } from './link-metadata.ts'
 import { type Db, internals, type NoteLedger } from './note.ts'
-import { createEssay, createRepoNote, dailyDates, openDaily, openScratch } from './open.ts'
+import {
+  createEssay,
+  createRepoNote,
+  dailyDates,
+  listEssays,
+  openDaily,
+  openScratch,
+} from './open.ts'
 import { noteBlock, resolveNoteMention, searchNoteMentions } from './reference.ts'
 import { removeNote, restoreNote } from './remove.ts'
 import { listRepoNotes } from './repo.ts'
@@ -34,6 +41,7 @@ export const router = os.router({
   },
   essay: {
     create: os.essay.create.handler(({ context }) => createEssay(context.db)),
+    list: os.essay.list.handler(({ context }) => listEssays(context.db)),
     setStatus: os.essay.setStatus.handler(({ context, input }) =>
       setEssayStatus(context.db, input.id, input.status),
     ),

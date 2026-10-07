@@ -18,10 +18,7 @@ export function NoteRedirect({ id }: { id: string }) {
     let cancelled = false
     client.get({ id }).then(
       (note) => {
-        if (cancelled) return
-        const path = notePagePath(note)
-        if (path === null) setError('Not found')
-        else navigate(path, { replace: true })
+        if (!cancelled) navigate(notePagePath(note), { replace: true })
       },
       () => {
         if (!cancelled) setError('Note not found')

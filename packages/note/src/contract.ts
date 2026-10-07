@@ -49,6 +49,30 @@ export const NoteSchema = z.discriminatedUnion('kind', [
   z.object({ kind: z.literal('scratch'), repo: z.string(), ...common }),
 ])
 
+const summaryCommon = {
+  id: common.id,
+  date: common.date,
+  preview: NoteRowSchema.shape.preview.describe(
+    'the text of the first block that has any, up to 200 characters; null when the body has none',
+  ),
+  createdAt: common.createdAt,
+  updatedAt: common.updatedAt,
+}
+
+export const EssaySummarySchema = z.object({
+  kind: z.literal('essay'),
+  title: z.string(),
+  status: EssayStatusSchema,
+  ...summaryCommon,
+})
+
+export const NoteSummarySchema = z.discriminatedUnion('kind', [
+  z.object({ kind: z.literal('daily'), ...summaryCommon }),
+  EssaySummarySchema,
+  z.object({ kind: z.literal('repo_note'), repo: z.string(), title: z.string(), ...summaryCommon }),
+  z.object({ kind: z.literal('scratch'), repo: z.string(), ...summaryCommon }),
+])
+
 const ImageUrlSchema = z.string().describe(`${IMAGE_URL_PREFIX}<uuid>.<ext> on the notes listener`)
 
 export const RepoNoteSummarySchema = z.object({
@@ -97,6 +121,8 @@ export const saveErrors = {
 export type EssayStatus = z.infer<typeof EssayStatusSchema>
 export type Doc = z.infer<typeof DocSchema>
 export type Note = z.infer<typeof NoteSchema>
+export type NoteSummary = z.infer<typeof NoteSummarySchema>
+export type EssaySummary = z.infer<typeof EssaySummarySchema>
 export type RepoNoteSummary = z.infer<typeof RepoNoteSummarySchema>
 export type RepoNotesCursor = z.infer<typeof RepoNotesCursorSchema>
 export type RepoNotesPage = z.infer<typeof RepoNotesPageSchema>
@@ -204,6 +230,9 @@ export const contract = {
   },
   essay: {
     create: meta.meta({ description: 'Make an Essay with no title, writing' }).output(NoteSchema),
+    list: meta
+      .meta({ description: 'List the Essays with the preview of each body, newest made first' })
+      .output(z.array(EssaySummarySchema)),
     setStatus: meta
       .meta({ description: 'Set an Essay to writing or finished' })
       .input(z.object({ id, status: EssayStatusSchema }))

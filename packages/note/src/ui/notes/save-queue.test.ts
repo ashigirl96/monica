@@ -271,7 +271,7 @@ test('a change to the errors or the conflicts is told to the subscribers', async
   expect(queue.errors()).not.toBe(errors)
 })
 
-test('the unsaved body of a Note is its newest edit, whether it waits, is on its way or is left by a CONFLICT, and there is none once saved', async () => {
+test('the unsaved edit of a Note is its newest draft, whether it waits, is on its way or is left by a CONFLICT, and there is none once saved', async () => {
   const { queue, answers } = setup()
   let release = noop
   answers.push(
@@ -282,25 +282,25 @@ test('the unsaved body of a Note is its newest edit, whether it waits, is on its
   )
   answers.push(() => Promise.reject(new ORPCError('CONFLICT', { message: 'stale' })))
 
-  expect(queue.unsavedContent('note-1')).toBeNull()
+  expect(queue.unsavedDraft('note-1')).toBeNull()
   queue.schedule('note-1', draft('a'), 'TUE 10.6')
-  expect(queue.unsavedContent('note-1')).toEqual(doc('a'))
+  expect(queue.unsavedDraft('note-1')).toEqual({ content: doc('a') })
 
   const sending = queue.flush()
   await Promise.resolve()
-  expect(queue.unsavedContent('note-1')).toEqual(doc('a'))
-  queue.schedule('note-1', draft('ab'), 'TUE 10.6')
-  expect(queue.unsavedContent('note-1')).toEqual(doc('ab'))
+  expect(queue.unsavedDraft('note-1')).toEqual({ content: doc('a') })
+  queue.schedule('note-1', { ...draft('ab'), title: 'On ledgers' }, 'On ledgers')
+  expect(queue.unsavedDraft('note-1')).toEqual({ content: doc('ab'), title: 'On ledgers' })
   release()
   await sending
-  expect(queue.unsavedContent('note-1')).toEqual(doc('ab'))
+  expect(queue.unsavedDraft('note-1')).toEqual({ content: doc('ab'), title: 'On ledgers' })
 
   await queue.flush()
   expect(queue.conflicts()).toHaveLength(1)
-  expect(queue.unsavedContent('note-1')).toEqual(doc('ab'))
+  expect(queue.unsavedDraft('note-1')).toEqual({ content: doc('ab'), title: 'On ledgers' })
 
   queue.dropPending('note-1')
-  expect(queue.unsavedContent('note-1')).toBeNull()
+  expect(queue.unsavedDraft('note-1')).toBeNull()
 })
 
 test('each edit of a Note moves its edit mark, and an edit of another Note does not', () => {

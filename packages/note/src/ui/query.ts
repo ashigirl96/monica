@@ -2,6 +2,7 @@ import { focusManager, QueryClient } from '@tanstack/react-query'
 
 export const queryKeys = {
   note: (id: string) => ['note', id] as const,
+  essays: () => ['essays'] as const,
   dailyNote: (date: string) => ['daily-note', date] as const,
   dailyDates: () => ['daily-dates'] as const,
   repoCandidates: () => ['repo-candidates'] as const,

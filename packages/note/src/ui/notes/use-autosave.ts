@@ -1,7 +1,11 @@
+import { useQueryClient } from '@tanstack/react-query'
 import { useCallback, useEffect, useState, useSyncExternalStore } from 'react'
 
+import type { EssaySummary } from '../../contract.ts'
 import { reach, useNoteClient } from '../client.ts'
+import { queryKeys } from '../query.ts'
 import { SaveQueue } from './save-queue.ts'
+import { withSavedPreview } from './summary.ts'
 
 export type { NoteDraft } from './save-queue.ts'
 
@@ -11,8 +15,17 @@ export type { NoteDraft } from './save-queue.ts'
  */
 export function useAutosave() {
   const client = useNoteClient()
+  const queryClient = useQueryClient()
   const [queue] = useState(
-    () => new SaveQueue((input, keepalive) => client.save(input, { context: { keepalive } })),
+    () =>
+      new SaveQueue(async (input, keepalive) => {
+        const saved = await client.save(input, { context: { keepalive } })
+        // 一覧を取り直すと、打っている途中の title が保存済みの古い値へ戻るので、preview だけを写す
+        queryClient.setQueryData(queryKeys.essays(), (list: EssaySummary[] | undefined) =>
+          withSavedPreview(list, input.id, input.content),
+        )
+        return saved
+      }),
   )
   const errors = useSyncExternalStore(queue.subscribe, queue.errors)
   const conflicts = useSyncExternalStore(queue.subscribe, queue.conflicts)
@@ -54,7 +67,7 @@ export function useAutosave() {
     baseVersion: queue.baseVersion,
     setBase: queue.setBase,
     hasUnsaved: queue.hasUnsaved,
-    unsavedContent: queue.unsavedContent,
+    unsavedDraft: queue.unsavedDraft,
     editMark: queue.editMark,
     hasConflict,
     saveError,

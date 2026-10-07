@@ -17,6 +17,8 @@ const RETRY_MS = 5000
  * kind（daily）は title を省く。 */
 export type NoteDraft = { content: { toJSON: () => Doc }; title?: string }
 
+export type UnsavedDraft = { content: Doc; title?: string }
+
 export type SaveInput = { id: string; content: Doc; title?: string; expectedUpdatedAt: Date }
 
 export type SaveNote = (input: SaveInput, keepalive: boolean) => Promise<{ updatedAt: Date }>
@@ -81,10 +83,10 @@ export class SaveQueue {
   hasUnsaved = (id: string): boolean =>
     this.#pending.has(id) || this.#inflight.has(id) || this.#conflicted.has(id)
 
-  /** 未保存の編集のうち一番新しい本文。開き直した画面が、cache の古い本文の代わりに出す。 */
-  unsavedContent = (id: string): Doc | null => {
+  /** 未保存の編集のうち一番新しいもの。開き直した画面が、cache の古い本文と title の代わりに出す。 */
+  unsavedDraft = (id: string): UnsavedDraft | null => {
     const draft = this.#pending.get(id) ?? this.#inflight.get(id) ?? this.#conflicted.get(id)
-    return draft === undefined ? null : draft.content.toJSON()
+    return draft === undefined ? null : { ...draft, content: draft.content.toJSON() }
   }
 
   /** 編集のたびに変わる印。待っている間に編集があったかを見るのに使う。 */
