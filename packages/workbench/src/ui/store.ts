@@ -11,10 +11,10 @@ import {
   buildSidebar,
   isPathTitle,
   OUTSIDE,
-  railAt,
   sectionPeersOf,
   shownRunspaceIds,
   type Sidebar,
+  tileAt,
 } from './sidebar-model.ts'
 import { getTabTerminal, releaseTabConnection } from './terminal-connections.ts'
 import {
@@ -27,7 +27,7 @@ import {
   terminalSessionStatusAtom,
 } from './terminal-sessions.ts'
 import { terminalDetach } from './terminal.ts'
-import { collapsedSectionsAtom, railChoiceAtom, savedUiStateAtom } from './ui-state.ts'
+import { collapsedSectionsAtom, savedUiStateAtom, tileChoiceAtom } from './ui-state.ts'
 
 export type WorkbenchClient = ContractRouterClient<typeof contract>
 export type Runspace = Layout['runspaces'][number]
@@ -170,15 +170,15 @@ export const copyActiveAgentSessionIdAtom = atom(null, (get): boolean => {
   return true
 })
 
-// 札の Repo は repo.of を待って後から決まるので、札ごとではなく Runspace の id を新しい順に覚えておく。
+// Runspace の Tile は repo.of を待って後から決まるので、Tile ごとではなく Runspace の id を新しい順に覚えておく。
 const recentRunspaceIdsAtom = atom<string[]>([])
 
-// 切り替えはすべてここを通るので、jump hint を閉じるのも、選んだ札を active な Runspace の札に合わせるのもここで行う。
+// 切り替えはすべてここを通るので、jump hint を閉じるのも、選んだ Tile を active な Runspace の Tile に合わせるのもここで行う。
 const setActiveAtom = atom(null, (get, set, next: { runspaceId: string; tabId?: string }) => {
   const before = [get(activeRunspaceAtom)?.id, get(activeTerminalTabAtom)?.id]
   // layout が入れ替わった直後は、消えた Runspace の代わりに先頭が active に見えるので、選んでいた id と比べる。
   const chosenBefore = get(activeRunspaceIdAtom)
-  const shownRail = get(sidebarAtom).selected.key
+  const shownTile = get(sidebarAtom).selected.key
   set(activeRunspaceIdAtom, next.runspaceId)
   // 起動時に戻した active な Runspace はここを通っていないので、離れるときに積む。
   set(recentRunspaceIdsAtom, (prev) => [
@@ -189,9 +189,9 @@ const setActiveAtom = atom(null, (get, set, next: { runspaceId: string; tabId?: 
   const after = [get(activeRunspaceAtom)?.id, get(activeTerminalTabAtom)?.id]
   if (before[0] !== after[0] || before[1] !== after[1]) set(jumpHintsActiveAtom, false)
   if (!after[0] || chosenBefore === next.runspaceId) return
-  // Repo は repo.of を待って決まるので、札の key を書かずに active な Runspace に従わせる。
-  // Pinned はどの札でも見えているので、そのとき見えていた札に留める。
-  set(railChoiceAtom, after[0] in get(sidebarAtom).railKeys ? null : shownRail)
+  // Repo は repo.of を待って決まるので、Tile の key を書かずに active な Runspace に従わせる。
+  // Pinned はどの Tile を選んでも見えているので、そのとき見えていた Tile に留める。
+  set(tileChoiceAtom, after[0] in get(sidebarAtom).tileKeys ? null : shownTile)
 })
 
 // 通知を click しても Tab へは移れないので、Runspace を選ぶと未読の Tab へ 1 手で着くようにする。
@@ -322,31 +322,31 @@ export const sidebarAtom = atom((get): Sidebar =>
     unreadOf: get(unreadOfTerminalSessionAtom),
     benchLabelOf: get(benchLabelOfAtom) ?? (() => null),
     detached: get(detachedTerminalSessionsAtom),
-    railChoice: get(railChoiceAtom),
+    tileChoice: get(tileChoiceAtom),
     collapsed: get(collapsedSectionsAtom),
   }),
 )
 
-// 札の click は一覧を覗くだけにしてあるので、Runspace まで移るのは数字のキーだけにする。
-export const pickRailAtom = atom(null, (get, set, n: number): boolean => {
+// Tile の click は一覧を覗くだけにしてあるので、Runspace まで移るのは数字のキーだけにする。
+export const pickTileAtom = atom(null, (get, set, n: number): boolean => {
   const sidebar = get(sidebarAtom)
-  const rail = railAt(sidebar, n)
-  if (!rail) return false
-  const underRail = (id: string | undefined): id is string =>
-    id !== undefined && sidebar.railKeys[id] === rail.key
+  const tile = tileAt(sidebar, n)
+  if (!tile) return false
+  const underTile = (id: string | undefined): id is string =>
+    id !== undefined && sidebar.tileKeys[id] === tile.key
   const runspaceId =
-    [get(activeRunspaceAtom)?.id, ...get(recentRunspaceIdsAtom)].find(underRail) ??
+    [get(activeRunspaceAtom)?.id, ...get(recentRunspaceIdsAtom)].find(underTile) ??
     get(layoutAtom)
       ?.runspaces.map((r) => r.id)
-      .find(underRail)
+      .find(underTile)
   if (!runspaceId) {
-    set(railChoiceAtom, rail.key)
+    set(tileChoiceAtom, tile.key)
     return true
   }
   set(setActiveAtom, { runspaceId })
   set(terminalFocusRequestAtom, (c) => c + 1)
-  // 開いた Runspace が既に active でも、覗いていた札から戻すために従わせ直す。
-  set(railChoiceAtom, null)
+  // 開いた Runspace が既に active でも、覗いていた Tile から戻すために従わせ直す。
+  set(tileChoiceAtom, null)
   return true
 })
 
@@ -492,8 +492,8 @@ export const toggleTabPinAtom = action(async (get, set, tabId?: string) => {
   if (!found) return
   const { id, pinned } = found.tab
   const client = clientOf(get)
-  // pin した Runspace は札から抜けて札が従う先を失うので、見えていた札に留める。
-  if (!pinned) set(railChoiceAtom, get(sidebarAtom).selected.key)
+  // pin した Runspace はどの Tile からも抜け、選んだ Tile が従う先を失うので、見えていた Tile に留める。
+  if (!pinned) set(tileChoiceAtom, get(sidebarAtom).selected.key)
   await (pinned ? client.tab.unpin({ id }) : client.tab.pin({ id }))
   await set(reloadAtom)
 })
@@ -553,7 +553,7 @@ function cycle<T>(items: T[], current: T | null | undefined, step: 1 | -1): T | 
   return items[(index + step + items.length) % items.length]
 }
 
-// 別の Repo の札へは ⌘ の数字で移るので、巡るのは見えている行だけにする。
+// 別の Repo の Tile へは ⌘ の数字で移るので、巡るのは見えている行だけにする。
 export const cycleRunspaceAtom = atom(null, (get, set, direction: 'up' | 'down') => {
   const active = get(activeRunspaceAtom)?.id
   const next = cycle(shownRunspaceIds(get(sidebarAtom)), active, direction === 'up' ? -1 : 1)
@@ -567,7 +567,7 @@ export const cycleTerminalTabAtom = atom(null, (get, set, direction: 'left' | 'r
   if (next) set(setActiveAtom, { runspaceId: runspace.id, tabId: next.id })
 })
 
-// 札とセクションは Workbench Ledger の並びより先に効くので、セクションをまたいで動かしても見た目の位置にならない。
+// Tile とセクションは Workbench Ledger の並びより先に効くので、セクションをまたいで動かしても見た目の位置にならない。
 async function moveRunspace(get: Getter, set: Setter, id: string, index: number) {
   await clientOf(get).runspace.move({ id, index })
   await set(reloadAtom)
@@ -590,22 +590,22 @@ const moveRunspaceToEndAtom = atom(null, (get, set, id: string) =>
   moveRunspace(get, set, id, (get(layoutAtom)?.runspaces.length ?? 0) - 1),
 )
 
-// 札も札の中の行も Workbench Ledger の並びで決まるので、別の Repo に入った Runspace は末尾へ送って一番下に出す。
-export function appendRunspacesJoiningRail(store: Store): () => void {
+// Tile の順も Tile の中の行の順も Workbench Ledger の並びで決まるので、別の Repo に入った Runspace は末尾へ送って一番下に出す。
+export function appendRunspacesJoiningTile(store: Store): () => void {
   // まだどの Repo にも入っていない Runspace は OUTSIDE を持つ。
-  const lastRepoRails: Record<string, string> = {}
+  const lastTileKeys: Record<string, string> = {}
   const check = () => {
-    const { cwdRailKeys } = store.get(sidebarAtom)
+    const { cwdTileKeys } = store.get(sidebarAtom)
     const joined: string[] = []
-    for (const [id, key] of Object.entries(cwdRailKeys)) {
+    for (const [id, key] of Object.entries(cwdTileKeys)) {
       // Repo の外への出入りでも動かすと、cd ~ して戻るだけで drag で並べた位置が崩れる。
       if (key === OUTSIDE) {
-        lastRepoRails[id] ??= OUTSIDE
+        lastTileKeys[id] ??= OUTSIDE
         continue
       }
       // Repo が初めて引けたときに動かすと、起動のたびに並びが崩れる。
-      if (id in lastRepoRails && lastRepoRails[id] !== key) joined.push(id)
-      lastRepoRails[id] = key
+      if (id in lastTileKeys && lastTileKeys[id] !== key) joined.push(id)
+      lastTileKeys[id] = key
     }
     for (const id of joined) {
       store.set(moveRunspaceToEndAtom, id).catch((e: unknown) => {
@@ -629,7 +629,7 @@ export const moveActiveRunspaceAtom = action(async (get, set, direction: 'up' | 
   const peers = sectionPeersOf(get(sidebarAtom), active.id)
   const neighbor = peers[peers.indexOf(active.id) + (direction === 'up' ? -1 : 1)]
   if (!neighbor) return
-  // 札の順はセクションの先頭の行の位置で決まるので、後ろの行を前の行の位置へ動かし、前の位置を保つ。
+  // Tile の順はセクションの先頭の行の位置で決まるので、後ろの行を前の行の位置へ動かし、前の位置を保つ。
   if (direction === 'up') await moveRunspaceTo(get, set, active.id, neighbor)
   else await moveRunspaceTo(get, set, neighbor, active.id)
 })

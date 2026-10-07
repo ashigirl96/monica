@@ -58,7 +58,7 @@ function untilUnread(store: Store, terminalSessionId: string, unread: boolean) {
 function unreadCountsOfRows(store: Store) {
   return store
     .get(sidebarAtom)
-    .rails.flatMap((r) => r.sections.flatMap((s): SidebarRow[] => s.rows))
+    .tiles.flatMap((tile) => tile.sections.flatMap((s): SidebarRow[] => s.rows))
     .map((row) => ({ id: row.id, unreadCount: row.unreadCount }))
 }
 

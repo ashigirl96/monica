@@ -1,10 +1,10 @@
 # Workbench の UI 状態と sidebar と status dot
 
-Workbench Ledger に載せない Workbench の画面の状態と、sidebar の Repo のレール、Agent Session の状態と未読の見せ方。どれも `packages/workbench/src/ui` に置く。
+Workbench Ledger に載せない Workbench の画面の状態と、sidebar の Rail、Agent Session の状態と未読の見せ方。どれも `packages/workbench/src/ui` に置く。
 
 ## UI 状態
 
-- webview の localStorage に置く（ADR-0014）。中身は active な Runspace とその active Tab、sidebar の開閉と幅（160〜360、既定 200）、UI zoom（0.8〜1.6、既定 1）、選んだ札（`owner/repo`、Repo の外は `outside`、active な Runspace の札に従うときは null）、畳んだセクション（`<札>:<bench|runspaces|detached>` の一覧）。monica の `ui-state.json` から、Space、Work Board、window ごとの入れ子を除き、札とセクションを足した形。
+- webview の localStorage に置く（ADR-0014）。中身は active な Runspace とその active Tab、sidebar の開閉と幅（160〜360、既定 200）、UI zoom（0.8〜1.6、既定 1）、選んだ Tile（field は `tile`。値は `owner/repo`、Repo の外は `outside`、active な Runspace の Tile に従うときは null）、畳んだセクション（`<Tile の key>:<bench|runspaces|detached>` の一覧）。monica の `ui-state.json` から、Space、Work Board、window ごとの入れ子を除き、Tile とセクションを足した形。
 - 端末の font size と、active でない Runspace の active Tab は保存しない（monica どおり）。
 - 書き込みは 500ms の debounce。localStorage は同期で読めるので、monica の render 前の hydrate は要らない。
 - 保存した id が `layout.get` に無ければ、先頭の Runspace と、その先頭の Tab に戻す（monica の `resolveWorkbenchActive`）。読めないか壊れていれば既定値で始める。
@@ -12,32 +12,32 @@ Workbench Ledger に載せない Workbench の画面の状態と、sidebar の R
 
 ## sidebar
 
-左端に Repo の札を縦に並べたレールを置き、選んだ札の Runspace を右の一覧に出す。見た目は #191 の canvas の E3。
+左端に Tile（`GLOSSARY.md`）を縦に並べた Rail を置き、選んだ Tile の Runspace を右の一覧に出す。見た目は #191 の canvas の E3。
 
-- Runspace の Repo（`GLOSSARY.md`）は、Bench なら slot `benchLabelOf` が返す Task の Repo、ほかは一番左の Tab の cwd（Tab が無ければ Runspace の cwd）を `repo.of` で引いたもの（`docs/packages/desktop.md`）。active な Tab で決めないのは、Tab を切り替えても行が別の札へ移らないようにするため。Detached の Terminal Session は、その行の cwd（Tab が閉じる前に最後に知らせた cwd。`docs/packages/workbench-ledger.md` の `tab.cwd`）で引く。
-- 札は Repo ごとに 1 つ置き、Pinned を除いた Runspace の並び、続いて Detached の並びで最初に出てきた順に並べる。drag での並べ替えは無い。札の key は Repo 名を小文字にしたもので、Task の Repo（GitHub の nameWithOwner）と checkout の path の大小文字が違っても同じ札にまとめる。GitHub の Repo 名は大小文字を区別しないため。Repo の外の札（「その他」、folder の icon）は区切り線の下の一番下に置き、行が無くても出す。
-- 札の字は repo 名の頭文字、色は repo 名から 8 色の 1 つを決まって選ぶ。dot の緑・琥珀・赤は使わない。
-- 選んだ札の repo 名と owner は、sidebar の上端の Workbench の札の右に出す。Repo の外の札を選んでいるときは何も出さない。
-- ⌘1〜⌘9 は上から 1〜9 番目の Repo の札を、⌘0 は Repo の外の札を選ぶ（Slack の workspace の切り替えにならう）。札を押すのと違い、その札で最後に active だった Runspace を、その Runspace で active だった Tab ごと active にし（未読の Tab へは移らない）、選んだ札を active な Runspace に従わせる。「最後に active」は、この session で active にした順と、起動したときに戻した active な Runspace から決める。その札の Runspace をどれも active にしていなければ、札の Ledger の並びで先頭の Runspace を、札に Runspace が無ければ札だけを選び、active な Runspace は変えない。番号の札が無ければ何もしない。札の title に番号を出す。⌘ だけを 0.1 秒押し続けると、Repo の各札の右上に repo 名を、9 番目までの札には番号も添えて出し（Repo の外の札には出さない）、⌘ を離すか、ほかのキー・click・窓の focus が外れると消す。⌘ を押したまま札の列を scroll しても、名前は付いていかない。
-- cd や Tab の移動で一番左の Tab の Repo が替わり、Pinned でも Bench でもない Runspace が前にいた Repo と別の Repo に入ったら、webview がその Runspace を Workbench Ledger の並びの末尾へ動かす（`runspace.move`）。Repo の外で始まった Runspace が初めて Repo に入ったときも動かす。行は入った札の一番下に出て、札の無かった Repo の札は、ほかの Runspace のある Repo の札の下に足される。抜けた札は、その Runspace が札の並びを決めていた（札の先頭の行だった）なら、下がって ⌘ の番号が変わることがある。Repo が初めて引けて札が決まるとき（起動したときや Runspace を作ったとき）、Repo の外へ出たとき、外から前と同じ Repo へ戻ったときは、drag で並べた位置を崩さないよう動かさない。
-- 一覧の上には、どの札を選んでも Pinned（pin された Tab を持つ Runspace）を出す。Pinned の行はどの札にも入らない。
-- 選んだ札の中は、上から Bench・Runspaces・Detached のセクションに分け、行の無いセクションは出さない。セクションが 2 つ以上あるときだけ見出しを出し、見出しを押すと畳む。畳むと行を全部隠し、見出しに行の数と未読の Tab の数を出す。見出しの無いセクションは、前に畳んでいても行を出す。
-- Runspace を active にする経路（行、jump hint、key で巡る、Runspace を作る、Tab が移る）が Pinned でない Runspace へ移すと、選んだ札はその Runspace の札に従う（UI 状態の札を null にする）。札の key を書き込まないのは、Repo が `repo.of` を待って後から決まるので、決まる前の「Repo の外」に札を固定しないため。Pinned の Runspace へ移すときと、Tab を pin して active な Runspace が Pinned になるときは、そのとき見えていた札に留める。札を押すとその札に固定し、active な Runspace は変えない。選んだ札が無くなっていれば active な Runspace の札を、それも無ければ先頭の札を出す。起動の直後に保存した札がまだ無くても、保存した値は消さない。
-- 札とセクションの見出しは、押しても端末から focus を外さない（mousedown の既定の動作を止める）。どちらも表示する Tab を変えないので、押した後もそのまま Tab の claude に打てるようにするため。押した後に focus を戻す形にしないのは、一度 blur すると xterm が focus を知らせる mode（DECSET 1004）を立てた app に focus out と in を送るため。行は Runspace を active にして端末に focus を戻す。
-- key で巡る（⌥J / ⌥K）のと jump hint は、画面に見えている行（Pinned と、選んだ札の開いたセクション）を上から順に扱い、畳んだセクションの行は飛ばす。active な行が見えていないとき（畳んだセクションにあるときや、ほかの札を覗いているとき）は、下へは先頭の行から、上へは末尾の行から巡る。別の Repo の札へは ⌘ の数字で移り、巡っても札をまたがない（Repo の札が 9 を超えると、10 番目からの Repo の札へはキーで移れない）。
-- Runspace の並べ替え（drag と ⌃⇧↑↓）は同じセクションの中に限る。Workbench Ledger の並びは 1 本なので、セクションをまたいで動かしても見た目の位置にならないため。key で下へ動かすときは、自分を下の行の位置へ動かさず、下の行を自分の位置へ動かす。札の順はセクションの先頭の行の位置で決まるので、間にある別の Repo の Runspace を越えると札の順が入れ替わるため。
+- Runspace の Repo（`GLOSSARY.md`）は、Bench なら slot `benchLabelOf` が返す Task の Repo、ほかは一番左の Tab の cwd（Tab が無ければ Runspace の cwd）を `repo.of` で引いたもの（`docs/packages/desktop.md`）。active な Tab で決めないのは、Tab を切り替えても行が別の Tile へ移らないようにするため。Detached の Terminal Session は、その行の cwd（Tab が閉じる前に最後に知らせた cwd。`docs/packages/workbench-ledger.md` の `tab.cwd`）で引く。
+- Tile は Repo ごとに 1 つ置き、Pinned を除いた Runspace の並び、続いて Detached の並びで最初に出てきた順に並べる。drag での並べ替えは無い。Tile の key は Repo 名を小文字にしたもので、Task の Repo（GitHub の nameWithOwner）と checkout の path の大小文字が違っても同じ Tile にまとめる。GitHub の Repo 名は大小文字を区別しないため。Repo の外の Tile（「その他」、folder の icon）は区切り線の下の一番下に置き、行が無くても出す。
+- Tile の字は repo 名の頭文字、色は repo 名から 8 色の 1 つを決まって選ぶ。dot の緑・琥珀・赤は使わない。
+- 選んだ Tile の repo 名と owner は、sidebar の上端の WORKBENCH の表示の右に出す。Repo の外の Tile を選んでいるときは何も出さない。
+- ⌘1〜⌘9 は上から 1〜9 番目の Repo の Tile を、⌘0 は Repo の外の Tile を選ぶ（Slack の workspace の切り替えにならう）。Tile を押すのと違い、その Tile で最後に active だった Runspace を、その Runspace で active だった Tab ごと active にし（未読の Tab へは移らない）、選んだ Tile を active な Runspace に従わせる。「最後に active」は、この session で active にした順と、起動したときに戻した active な Runspace から決める。その Tile の Runspace をどれも active にしていなければ、Tile の Ledger の並びで先頭の Runspace を、Tile に Runspace が無ければ Tile だけを選び、active な Runspace は変えない。番号の Tile が無ければ何もしない。Tile の title に番号を出す。⌘ だけを 0.1 秒押し続けると、Repo の各 Tile の右上に repo 名を、9 番目までの Tile には番号も添えて出し（Repo の外の Tile には出さない）、⌘ を離すか、ほかのキー・click・窓の focus が外れると消す。⌘ を押したまま Rail を scroll しても、名前は付いていかない。
+- cd や Tab の移動で一番左の Tab の Repo が替わり、Pinned でも Bench でもない Runspace が前にいた Repo と別の Repo に入ったら、webview がその Runspace を Workbench Ledger の並びの末尾へ動かす（`runspace.move`）。Repo の外で始まった Runspace が初めて Repo に入ったときも動かす。行は入った Tile の一番下に出て、Tile の無かった Repo の Tile は、ほかの Runspace のある Repo の Tile の下に足される。抜けた Tile は、その Runspace が Tile の並びを決めていた（Tile の先頭の行だった）なら、下がって ⌘ の番号が変わることがある。Repo が初めて引けて Tile が決まるとき（起動したときや Runspace を作ったとき）、Repo の外へ出たとき、外から前と同じ Repo へ戻ったときは、drag で並べた位置を崩さないよう動かさない。
+- 一覧の上には、どの Tile を選んでも Pinned（pin された Tab を持つ Runspace）を出す。Pinned の行はどの Tile にも入らない。
+- 選んだ Tile の中は、上から Bench・Runspaces・Detached のセクションに分け、行の無いセクションは出さない。セクションが 2 つ以上あるときだけ見出しを出し、見出しを押すと畳む。畳むと行を全部隠し、見出しに行の数と未読の Tab の数を出す。見出しの無いセクションは、前に畳んでいても行を出す。
+- Runspace を active にする経路（行、jump hint、key で巡る、Runspace を作る、Tab が移る）が Pinned でない Runspace へ移すと、選んだ Tile はその Runspace の Tile に従う（UI 状態の `tile` を null にする）。Tile の key を書き込まないのは、Repo が `repo.of` を待って後から決まるので、決まる前の「Repo の外」に Tile を固定しないため。Pinned の Runspace へ移すときと、Tab を pin して active な Runspace が Pinned になるときは、そのとき見えていた Tile に留める。Tile を押すとその Tile に固定し、active な Runspace は変えない。選んだ Tile が無くなっていれば active な Runspace の Tile を、それも無ければ先頭の Tile を出す。起動の直後に保存した Tile がまだ無くても、保存した値は消さない。
+- Tile とセクションの見出しは、押しても端末から focus を外さない（mousedown の既定の動作を止める）。どちらも表示する Tab を変えないので、押した後もそのまま Tab の claude に打てるようにするため。押した後に focus を戻す形にしないのは、一度 blur すると xterm が focus を知らせる mode（DECSET 1004）を立てた app に focus out と in を送るため。行は Runspace を active にして端末に focus を戻す。
+- key で巡る（⌥J / ⌥K）のと jump hint は、画面に見えている行（Pinned と、選んだ Tile の開いたセクション）を上から順に扱い、畳んだセクションの行は飛ばす。active な行が見えていないとき（畳んだセクションにあるときや、ほかの Tile を覗いているとき）は、下へは先頭の行から、上へは末尾の行から巡る。別の Repo の Tile へは ⌘ の数字で移り、巡っても Tile をまたがない（Repo の Tile が 9 を超えると、10 番目からの Repo の Tile へはキーで移れない）。
+- Runspace の並べ替え（drag と ⌃⇧↑↓）は同じセクションの中に限る。Workbench Ledger の並びは 1 本なので、セクションをまたいで動かしても見た目の位置にならないため。key で下へ動かすときは、自分を下の行の位置へ動かさず、下の行を自分の位置へ動かす。Tile の順はセクションの先頭の行の位置で決まるので、間にある別の Repo の Runspace を越えると Tile の順が入れ替わるため。
 
 ### 行
 
 - 1 行目は title、2 行目はその他の情報。title は `...` で切らず全文を折り返す（`overflow-wrap: anywhere` と `text-wrap: pretty`。WKWebView では `word-break: auto-phrase` が効かない）。title の横には未読の数だけを置き、行頭の icon は出さない。
 - title は、Bench なら Issue の title、ほかは active な Tab の端末の title。Claude Code が頭に付ける spinner の記号（`·✢✳✶✻✽`）も、Agent が動いているかの印として落とさずに出す。端末の title が無いか path（`/`・`~`・`~/` で始まる）なら、active な Tab の cwd を等幅で出す。形は `repo.of` の `path` で、Repo の中なら checkout か worktree の top からの相対 path（top ならその directory の名前）、外なら home を `~` に畳んだ path。`repo.of` が答えるまでは cwd の末尾の 2 つを出す。
-- 2 行目は、Bench が準備中・準備失敗の枠付きの札と、端末の title（path でないとき。1 行で切る）と `#<n>`。Repo の外の札の行は cwd（title が path なら出さない）。Pinned は Repo の色札と repo 名（Bench は `<repo>#<n>` と端末の title）で、Repo の外なら cwd。普通の Runspace の行は、active な Tab が linked worktree にいるときの branch だけを出し、ほかは 2 行目を出さない（`N Tabs` も出さない）。Bench を使わずに作った worktree の branch を sidebar から読めるようにするため。
+- 2 行目は、Bench が準備中・準備失敗なら、枠で囲んだその文字と、端末の title（path でないとき。1 行で切る）と `#<n>`。Repo の外の Tile の行は cwd（title が path なら出さない）。Pinned は Repo の Tile の色の四角と repo 名（Bench は `<repo>#<n>` と端末の title）で、Repo の外なら cwd。普通の Runspace の行は、active な Tab が linked worktree にいるときの branch だけを出し、ほかは 2 行目を出さない（`N Tabs` も出さない）。Bench を使わずに作った worktree の branch を sidebar から読めるようにするため。
 - Detached の行は cwd（形は title の path と同じ）とその Terminal Session の id を出し、hover で Reattach と Kill を行の右に重ねて出す。sidebar は狭いので、button に path の幅を取らせないため。
 
 ### 数
 
 - 行の数は「未読」の節のとおり。
-- 札の角には、その札を押して出てくる行（Bench・Runspaces・Detached）の未読の Tab の数の和を出し、0 なら何も出さない。Pinned は常に見えているので数えない。待ちの理由ごとの数や手空きの印は出さない。
+- Tile の角には、その Tile を押して出てくる行（Bench・Runspaces・Detached）の未読の Tab の数の和を出し、0 なら何も出さない。Pinned は常に見えているので数えない。待ちの理由ごとの数や手空きの印は出さない。
 - 畳んだセクションの見出しには、その行の未読の Tab の数の和を出す。
 
 ## status dot
