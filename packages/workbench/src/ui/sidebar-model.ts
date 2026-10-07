@@ -6,14 +6,14 @@ type Runspace = Layout['runspaces'][number]
 // Repo の Tile の key は owner/repo で必ず `/` を含むので、`/` の無い語は Repo と重ならない。
 export const OUTSIDE = 'outside'
 
-export type BenchNote = { text: string; error: boolean }
+export type BenchSetup = { text: string; error: boolean }
 
 // workbench は Task を知らないので、Bench の Task の Repo と Issue は task の ui から slot で受ける（ADR-0005）。
 export type BenchLabel = {
   repo: string
   number: number
   title: string
-  note: BenchNote | null
+  setup: BenchSetup | null
 }
 
 export type BenchLabelOf = (runspaceId: string) => BenchLabel | null
@@ -252,7 +252,7 @@ export function sectionPeersOf(sidebar: Sidebar, runspaceId: string): string[] {
 export type ListedIn = 'pinned' | 'repo' | 'outside'
 
 export type RowMeta = {
-  note: BenchNote | null
+  setup: BenchSetup | null
   info: string
   infoMono: boolean
   chip: string | null
@@ -261,7 +261,7 @@ export type RowMeta = {
 }
 
 export function rowMetaOf(row: RunspaceRow, listedIn: ListedIn): RowMeta | null {
-  const note = row.bench?.note ?? null
+  const setup = row.bench?.setup ?? null
   const info = row.bench ? row.terminalTitle : (row.branch ?? '')
   let chip: string | null = null
   let where = ''
@@ -273,9 +273,9 @@ export function rowMetaOf(row: RunspaceRow, listedIn: ListedIn): RowMeta | null 
   } else if (listedIn !== 'repo' && !row.titleIsPath) {
     where = row.path
   }
-  if (!note && !info && !where) return null
+  if (!setup && !info && !where) return null
   return {
-    note,
+    setup,
     info,
     infoMono: !row.bench,
     chip,
