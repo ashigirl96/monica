@@ -46,18 +46,35 @@ async function bench() {
   store.set(workbenchClientAtom, () => backend.client)
   const { runspaceId } = await backend.client.runspace.create(size)
   const waiting = await backend.client.tab.open({ runspaceId, ...size })
-  return { ...backend, store, waiting }
+  return { ...backend, store, runspaceId, waiting }
 }
 
-test('a click the Shell held before the webview listened brings up its Tab once the layout is read', async () => {
-  const { store, waiting } = await bench()
+test('a click the Shell held before the webview reached the Backend brings up its Tab once the layout is read', async () => {
+  const { client, store, waiting } = await bench()
+  store.set(workbenchClientAtom, null)
   heldClick = waiting.terminalSessionId
 
   onCleanup(followNotificationClicks(store))
   await untilTrue(() => heldClick === null)
+  store.set(workbenchClientAtom, () => client)
   await store.set(reloadAtom)
 
-  expect(store.get(activeTerminalTabAtom)?.id).toBe(waiting.id)
+  const shown = await until(store, activeTerminalTabAtom, (tab) => tab?.id === waiting.id)
+  expect(shown?.id).toBe(waiting.id)
+})
+
+test('a click on a Tab opened since the layout was last read brings up that Tab', async () => {
+  const { client, store, runspaceId } = await bench()
+  await store.set(reloadAtom)
+  const opened = await client.tab.open({ runspaceId, ...size })
+  onCleanup(followNotificationClicks(store))
+  await untilTrue(() => listeners.has('notification-clicked'))
+
+  heldClick = opened.terminalSessionId
+  listeners.get('notification-clicked')?.()
+
+  const shown = await until(store, activeTerminalTabAtom, (tab) => tab?.id === opened.id)
+  expect(shown?.id).toBe(opened.id)
 })
 
 test('a click heard while listening is taken from the Shell and brings up its Tab', async () => {
