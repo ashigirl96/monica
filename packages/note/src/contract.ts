@@ -68,6 +68,15 @@ export const RepoNotesPageSchema = z.object({
   next: RepoNotesCursorSchema.nullable().describe('null on the last page'),
 })
 
+// 中の node の形は Note の本文と同じくエディタの schema が決める。
+export const BlockSchema = z.looseObject({ type: z.literal('blockContainer') })
+
+export const NoteMentionCandidateSchema = z.object({
+  id: NoteIdSchema,
+  displayName: z.string(),
+  preview: NoteRowSchema.shape.preview,
+})
+
 export const saveErrors = {
   CONFLICT: {
     status: 409,
@@ -81,6 +90,7 @@ export type Note = z.infer<typeof NoteSchema>
 export type RepoNoteSummary = z.infer<typeof RepoNoteSummarySchema>
 export type RepoNotesCursor = z.infer<typeof RepoNotesCursorSchema>
 export type RepoNotesPage = z.infer<typeof RepoNotesPageSchema>
+export type NoteMentionCandidate = z.infer<typeof NoteMentionCandidateSchema>
 
 export type Named =
   | { kind: 'daily'; date: string }
@@ -119,6 +129,11 @@ function pad(n: number): string {
 }
 
 const id = NoteIdSchema
+
+// 本文の attrs の id には、貼った URL から緩く抜き出したものもあるので、形を問わず受ける。
+const referencedId = z
+  .string()
+  .describe('a Note id as a body holds it; one no Note has is not found')
 
 export const contract = {
   get: meta
@@ -194,5 +209,29 @@ export const contract = {
       })
       .input(z.object({ repo: RepoSchema, after: RepoNotesCursorSchema.optional() }))
       .output(RepoNotesPageSchema),
+  },
+  noteMention: {
+    search: meta
+      .meta({
+        description:
+          'Find up to 20 Notes whose title, name, preview or Repo has q, ignoring case, the most recently updated first; a deleted Note is not among them',
+      })
+      .input(z.object({ q: z.string() }))
+      .output(z.array(NoteMentionCandidateSchema)),
+    resolve: meta
+      .meta({
+        description:
+          'Read the name the Note a Note Mention points at has now; a deleted Note is not found',
+      })
+      .input(z.object({ id: referencedId }))
+      .output(z.object({ displayName: z.string() })),
+  },
+  block: {
+    get: meta
+      .meta({
+        description: 'Read a block of a Note with the blocks nested in it; a deleted Note has none',
+      })
+      .input(z.object({ id: referencedId, blockId: z.string() }))
+      .output(BlockSchema),
   },
 }

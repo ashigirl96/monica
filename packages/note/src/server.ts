@@ -3,6 +3,7 @@ import { implement } from '@orpc/server'
 import { contract } from './contract.ts'
 import type { Db, NoteLedger } from './note.ts'
 import { createEssay, createRepoNote, dailyDates, openDaily, openScratch } from './open.ts'
+import { noteBlock, resolveNoteMention, searchNoteMentions } from './reference.ts'
 import { removeNote, restoreNote } from './remove.ts'
 import { listRepoNotes } from './repo.ts'
 import { toNote, undeletedNote } from './row.ts'
@@ -41,6 +42,19 @@ export const router = os.router({
     ),
     list: os.repoNote.list.handler(({ context, input }) =>
       listRepoNotes(context.db, input.repo, input.after),
+    ),
+  },
+  noteMention: {
+    search: os.noteMention.search.handler(({ context, input }) =>
+      searchNoteMentions(context.db, input.q),
+    ),
+    resolve: os.noteMention.resolve.handler(({ context, input }) =>
+      resolveNoteMention(context.db, input.id),
+    ),
+  },
+  block: {
+    get: os.block.get.handler(({ context, input }) =>
+      noteBlock(context.db, input.id, input.blockId),
     ),
   },
 })
