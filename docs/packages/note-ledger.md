@@ -193,6 +193,24 @@ monica の Rust（`note_markdown.rs`・`note_markdown_import.rs`）を TypeScrip
 - 字下げは 64 段で打ち切り、それより深い行は兄弟にする。1 段ごとに再帰するため。
 - 持ち込まないもの: Synced Block の展開（`FULL_DOC_EXPANDED_MD`）、循環の打ち切り、全文検索の plain text。どれも CLI の `note show --expand` と全文検索のためのもの。
 
+## monica からの移行
+
+monica の notes（本文・画像・project との紐づけ）は、一度きりの script の `scripts/migrate-monica-notes.ts` で写す。切り替えが済んだら、script とそのテスト、この節、root の `package.json` の `drizzle-orm`（script とそのテストだけが使う）を一緒に消す。git の履歴に残る。
+
+- Backend の外で tania.db を直に開き、1 つの transaction で書く。ADR-0003 の「DB を開くのは Backend の 1 プロセスだけ」の例外になる。この規範が防いでいる migrate の競合と SQLITE_BUSY は、Backend が居ない間は起きない。移行のコードは release の binary と contract に入らない。
+- script は note の schema・migrations・body・エディタの schema を、entry を通さずに相対 path で読む。これも entry の表の例外になる。root の `package.json` に `@tania/note` を足すと、root の `node_modules` を経て他の package からも `@tania/note` を解決できるようになり、package.json が守る依存の向きが崩れるため。
+- `TANIA_HOME=<home> bun scripts/migrate-monica-notes.ts <monica.db のコピー> <monica の assets>` で走らせる。`TANIA_HOME` が無ければ Backend と同じく `~/.tania`。monica 側には何も書かない。WAL の monica.db は readonly では `-shm` 無しに開けないので、渡されたコピー（と在れば `-wal`・`-shm`）を一時 directory に写してから開く。
+- `backend.json` の pid が生きているとき、tania.db の note の migration が checkout の `migrations.latest` でないとき、note の表に行があるとき（2 回目の実行）は、何も書かずに止まる。script は migrate しない。note の表を作るのは Backend の起動。
+- 写す前に画像を写し、commit の前に、件数・Note Mention と Synced Block の参照先・画像・monica の URL・Scratch・エディタの schema で開けるか・block の id が Note の中で重ならないかを確かめる。1 つでも外れたら rollback し、写した画像を消して理由を出す。終わると種類ごとの件数の表を出す。
+
+切り替えの順（release の home。ユーザーが行う）:
+
+1. notes を含む release を入れて起動し、Backend に note の表を作らせる。**notes の画面は開かない。** 開くと今日の Daily が `note-1` で作られて monica の id とぶつかり、script が止まる。
+2. tania desktop と monica desktop を閉じる。Terminal Session は ptyd が持っているので残る。
+3. `~/monica/db/monica.db`（と在れば `-wal`・`-shm`）をコピーする。
+4. release と同じ版の checkout で、`bun scripts/migrate-monica-notes.ts <コピーした monica.db> ~/monica/assets` を走らせる。
+5. tania desktop を起動し、画面で確かめる（今日の Daily、画像のある Essay、Synced Block のある note-28、Note Mention を含む Daily）。以後 notes は tania で書く。
+
 ## テスト
 
 - in-memory の SQLite に note の migration だけを当てる。note は他の domain の table を持たない。
