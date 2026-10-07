@@ -13,7 +13,7 @@ monica は Claude Code の hook を受けるたびに TaskRun と TerminalSessio
 - **プラン承認を専用の理由にする**（monica の ExitPlanMode 理由）: 自動承認が常時 on の v1 では数 ms で解消する flap になる。自動承認は hook CLI の PermissionRequest(ExitPlanMode) handler の方針として状態機械の外に置き、将来 off にしたら decision 無しで通過して普通の許可待ち（tool = ExitPlanMode）になる。
 - **再起動後も最後の既知状態を信じる**: 動作中だったものが止まっていても次の hook まで動作中と出る。未観測を置けば #17 が「要確認」を出せる。
 - **pid で生死を探る**: hook payload に pid は無く、hook は sh 経由で起動されるので ppid を遡る必要があり、分かるのは生死だけで動作中か手空きかは分からない。
-- **transcript を読んで復元する**: 正確だが非公開フォーマットへの依存。
+- **Agent Session Transcript を読んで復元する**: 正確だが非公開フォーマットへの依存。
 - **SubagentStart / SubagentStop を数える**: monica が実際に drift させて捨てた方式で、SubagentStop は prompt suggestion などの内部の agent でも来る。Stop の payload の `background_tasks`（公式の field）をその場で読み、無ければ background の仕事は無いとみなす。
 - **`background_tasks` の type を問わず Stop を保留する**: `run_in_background` の Bash も載るので、dev server を起こしたまま turn を終えた agent がずっと動作中に見える。
 - **SubagentStop で保留を解く**: 終わった subagent の SubagentStop の直後に Claude Code が自分で turn を起こすので、手空き → 動作中 → 手空きと揺れ、手空きの通知が 2 回出る。
