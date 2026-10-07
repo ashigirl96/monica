@@ -153,15 +153,6 @@ export function EssaysListPage() {
     return () => window.removeEventListener('keydown', onKey, true)
   }, [client, undoDelete])
 
-  useEffect(() => {
-    if (menu === null) return
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') closeMenu()
-    }
-    window.addEventListener('keydown', onKey)
-    return () => window.removeEventListener('keydown', onKey)
-  }, [menu, closeMenu])
-
   const openMenu = (e: ReactMouseEvent, target: EssaySummary) => {
     e.preventDefault()
     setMenu({ x: e.clientX, y: e.clientY, target })
