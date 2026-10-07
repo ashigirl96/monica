@@ -21,7 +21,7 @@ PR の codex review を往復で回す。1 往復は「依頼 → 返却を待�
 gh pr comment <PR> --body "@codex review"
 ```
 
-出力される URL の `#issuecomment-` の後ろがコメントの id で、`gh api repos/<owner>/<repo>/issues/comments/<id> --jq .created_at` が requested_at になる。ScheduleWakeup(delaySeconds: 90, noop: false) で、上の形の prompt を予約する。codex は、指摘ゼロなら多くは 1〜2.5 分、指摘ありなら 2.5〜5 分で返す。
+出力される URL の `#issuecomment-` の後ろがコメントの id で、`gh api repos/<owner>/<repo>/issues/comments/<id> --jq .created_at` が requested_at になる。ScheduleWakeup(delaySeconds: 180, noop: false) で、上の形の prompt を予約する。codex は指摘の有無によらず多くは 2.5〜4.5 分で返し、長いと 8 分かかる。
 
 ## 3. 返却を確かめる（wakeup 後）
 

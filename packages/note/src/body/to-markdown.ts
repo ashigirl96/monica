@@ -1,18 +1,24 @@
+import { isDelimiterLine } from './from-markdown.ts'
+import { type LineStart, type Piece, writeEscaped } from './markdown-escape.ts'
 import { allText, attrOf, childrenOf, isNode, stringAttr, typeOf } from './node.ts'
-import { lines, trim } from './text.ts'
+import { isSpacePadded, lines, trim } from './text.ts'
 
 /** Note Mention が指す Note の表示名。分からなければ null を返し、`[[note-N]]` で書き出させる。 */
 type NoteName = (noteId: string) => string | null
 
 type Block = { text: string; list: boolean }
 
+const BLOCK: LineStart = { kind: 'block' }
+const INLINE: LineStart = { kind: 'inline' }
+const CELL: LineStart = { kind: 'cell' }
+
 /**
  * 本文の JSON を markdown に書き出す。失敗せず、知らない node は text だけを拾う。
- * 型の違う field は無いものとして読む。
+ * 型の違う field は無いものとして読む。素の文字のうち fromMarkdown が構文として読むものは、backslash で escape する。
  */
 export function toMarkdown(doc: unknown, noteName: NoteName = () => null): string {
   if (!isNode(doc)) return ''
-  if (doc.type !== 'doc') return trim(allText(doc))
+  if (doc.type !== 'doc') return writeEscaped([plain(trim(allText(doc)))], BLOCK)
   const blocks: Block[] = []
   renderGroup(childrenOf(doc), blocks, noteName)
   return joinBlocks(blocks)
@@ -91,33 +97,35 @@ function renderBlockContent(
   marker: string | null,
   noteName: NoteName,
 ): Block | null {
-  const inline = () => renderInlines(childrenOf(node), noteName)
+  const inline = (lineStart: LineStart) =>
+    writeEscaped(renderInlines(childrenOf(node), noteName), lineStart)
+  const afterMarker = (head: string) => `${head}${inline({ kind: 'afterMarker', marker: head })}`
   switch (typeOf(node)) {
     case 'paragraph': {
-      const text = inline()
+      const text = inline(BLOCK)
       return text ? { text, list: false } : null
     }
     case 'heading': {
       const level = attrOf(node, 'level')
       const hashes = Number.isInteger(level) ? Math.min(Math.max(level as number, 1), 6) : 1
-      return { text: `${'#'.repeat(hashes)} ${inline()}`, list: false }
+      return { text: afterMarker(`${'#'.repeat(hashes)} `), list: false }
     }
     case 'todo':
       return {
-        text: `- ${attrOf(node, 'checked') === true ? '[x]' : '[ ]'} ${inline()}`,
+        text: afterMarker(`- ${attrOf(node, 'checked') === true ? '[x]' : '[ ]'} `),
         list: true,
       }
     case 'bullet':
-      return { text: `- ${inline()}`, list: true }
+      return { text: afterMarker('- '), list: true }
     case 'numbered':
-      return { text: `${marker ?? '1.'} ${inline()}`, list: true }
+      return { text: afterMarker(`${marker ?? '1.'} `), list: true }
     case 'quote':
     case 'toggle': {
-      const text = inline()
+      const text = inline(INLINE)
       return text ? { text: prefixLines(text, '> '), list: false } : null
     }
     case 'callout': {
-      const body = inline()
+      const body = inline(INLINE)
       const head = `> [!${stringAttr(node, 'kind') ?? 'note'}]`
       return { text: body ? `${head}\n${prefixLines(body, '> ')}` : head, list: false }
     }
@@ -143,8 +151,8 @@ function renderBlockContent(
     case 'bookmark': {
       const href = stringAttr(node, 'href')
       const title = stringAttr(node, 'title') || undefined
-      if (href !== undefined) return { text: linkTo(href, title), list: false }
-      return title ? { text: title, list: false } : null
+      if (href !== undefined) return { text: writeEscaped(linkTo(href, title), BLOCK), list: false }
+      return title ? { text: writeEscaped([plain(title)], BLOCK), list: false } : null
     }
     case 'image': {
       const src = stringAttr(node, 'src')
@@ -163,23 +171,31 @@ function renderBlockContent(
     }
     default: {
       const text = trim(allText(node))
-      return text ? { text, list: false } : null
+      return text ? { text: writeEscaped([plain(text)], BLOCK), list: false } : null
     }
   }
 }
 
 // 先頭の行が header のセルを持つときだけ delimiter の行を挟む。header の無い表に挟むと、読み戻したときに先頭の行が header になる。
+// 同じ理由で、header の無い表の 2 行目が delimiter の行に見えるときは、先頭のセルの記号を escape する。
 function renderTable(rows: unknown[], noteName: NoteName): Block | null {
   const out: string[] = []
   rows.forEach((row, index) => {
     if (typeOf(row) !== 'tableRow') return
     const cells = childrenOf(row)
-    out.push(tableRowLine(cells, noteName))
+    const line = tableRowLine(cells, noteName)
+    out.push(out.length === 1 && isDelimiterLine(line) ? escapeFirstCell(line) : line)
     if (index === 0 && cells.some((cell) => isHeaderCell(cell))) {
       out.push(`| ${cells.map(() => '---').join(' | ')} |`)
     }
   })
   return out.length > 0 ? { text: out.join('\n'), list: false } : null
+}
+
+// delimiter の行のセルは `-` と `:` と空白だけなので、行で最初の `-` か `:` は先頭のセルにある。
+function escapeFirstCell(line: string): string {
+  const at = line.search(/[-:]/)
+  return `${line.slice(0, at)}\\${line.slice(at)}`
 }
 
 function isHeaderCell(cell: unknown): boolean {
@@ -193,12 +209,8 @@ function tableRowLine(cells: unknown[], noteName: NoteName): string {
   return `| ${texts.join(' | ')} |`
 }
 
-// `|` は行の区切りになるので escape する。`\` も重ねないと、セル末尾の `\` が続く `\|` の escape を食い、読み戻すとセルが増える。
 function tableCellText(cell: unknown, noteName: NoteName): string {
-  return renderInlines(childrenOf(cell), noteName)
-    .replaceAll('\\', '\\\\')
-    .replaceAll('|', '\\|')
-    .replaceAll('\n', ' ')
+  return writeEscaped(renderInlines(childrenOf(cell), noteName), CELL)
 }
 
 function blockIdsOf(node: unknown): string[] {
@@ -213,53 +225,64 @@ function syncedReference(noteId: string, blockIds: string[]): string {
   return blockIds.map((blockId) => `![[${noteId}#^${blockId}]]`).join('\n')
 }
 
-function renderInlines(inlines: unknown[], noteName: NoteName): string {
-  let out = ''
+function plain(text: string): Piece {
+  return { text, kind: 'plain' }
+}
+
+function syntax(text: string): Piece {
+  return { text, kind: 'syntax' }
+}
+
+function renderInlines(inlines: unknown[], noteName: NoteName): Piece[] {
+  const out: Piece[] = []
   for (const inline of inlines) {
     if (!isNode(inline)) continue
     switch (inline.type) {
       case 'text':
-        if (typeof inline.text === 'string') out += applyMarks(inline.text, inline.marks)
+        if (typeof inline.text === 'string') {
+          out.push(...applyMarks([plain(inline.text)], inline.marks))
+        }
         break
       case 'linkMention': {
-        const base = linkMentionText(inline)
-        if (base) out += applyMarks(base, inline.marks)
+        const base = linkMentionPieces(inline)
+        if (base) out.push(...applyMarks(base, inline.marks))
         break
       }
       case 'noteMention': {
-        const base = noteMentionText(inline, noteName)
-        if (base) out += applyMarks(base, inline.marks)
+        const base = noteMentionPieces(inline, noteName)
+        if (base) out.push(...applyMarks(base, inline.marks))
         break
       }
       case 'hardBreak':
-        out += '\n'
+        out.push(syntax('\n'))
         break
       default:
-        out += allText(inline)
+        out.push(plain(allText(inline)))
     }
   }
   return out
 }
 
-function linkMentionText(node: unknown): string {
+function linkMentionPieces(node: unknown): Piece[] | null {
   const href = stringAttr(node, 'href')
   const title = stringAttr(node, 'title') || undefined
-  return href === undefined ? (title ?? '') : linkTo(href, title)
+  if (href !== undefined) return linkTo(href, title)
+  return title ? [plain(title)] : null
 }
 
-function linkTo(href: string, title: string | undefined): string {
-  return `[${title ?? href}](${href})`
+function linkTo(href: string, title: string | undefined): Piece[] {
+  return [syntax('['), plain(title ?? href), syntax(`](${href})`)]
 }
 
-function noteMentionText(node: unknown, noteName: NoteName): string {
+function noteMentionPieces(node: unknown, noteName: NoteName): Piece[] | null {
   const noteId = stringAttr(node, 'noteId')
-  if (noteId === undefined) return ''
+  if (noteId === undefined) return null
   const name = noteName(noteId)
-  return name ? `[[${noteId}|${name}]]` : `[[${noteId}]]`
+  return name ? [syntax(`[[${noteId}|`), plain(name), syntax(']]')] : [syntax(`[[${noteId}]]`)]
 }
 
 // code を一番内側、link を一番外側に入れ子にする。underline は markdown に記法が無いので HTML で書く（`__` は CommonMark では bold）。
-function applyMarks(base: string, marks: unknown): string {
+function applyMarks(base: Piece[], marks: unknown): Piece[] {
   let bold = false
   let italic = false
   let underline = false
@@ -288,14 +311,25 @@ function applyMarks(base: string, marks: unknown): string {
         break
     }
   }
-  let text = base
-  if (code) text = `\`${text}\``
-  if (italic) text = `*${text}*`
-  if (bold) text = `**${text}**`
-  if (underline) text = `<u>${text}</u>`
-  if (strike) text = `~~${text}~~`
-  if (link !== null) text = `[${text}](${link})`
-  return text
+  let pieces = base
+  if (code) pieces = [{ text: codeSpan(pieces.map((piece) => piece.text).join('')), kind: 'code' }]
+  if (italic) pieces = wrap('*', pieces, '*')
+  if (bold) pieces = wrap('**', pieces, '**')
+  if (underline) pieces = wrap('<u>', pieces, '</u>')
+  if (strike) pieces = wrap('~~', pieces, '~~')
+  if (link !== null) pieces = wrap('[', pieces, `](${link})`)
+  return pieces
+}
+
+function wrap(open: string, pieces: Piece[], close: string): Piece[] {
+  return [syntax(open), ...pieces, syntax(close)]
+}
+
+// fromMarkdown は空白で挟んだ中身の空白を 1 つずつ外すので、包む backtick とつながる中身と、もとから空白で挟まれた中身は空白で挟む。
+function codeSpan(code: string): string {
+  const fence = '`'.repeat(longestBacktickRun(code) + 1)
+  const pad = code.startsWith('`') || code.endsWith('`') || isSpacePadded(code) ? ' ' : ''
+  return `${fence}${pad}${code}${pad}${fence}`
 }
 
 function rawText(inlines: unknown[]): string {

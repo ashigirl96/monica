@@ -1,5 +1,14 @@
 import { IMAGE_URL_PREFIX } from './image-url.ts'
-import { hasSpace, isSpace, lines, trim, trimEnd } from './text.ts'
+import {
+  hasSpace,
+  isAlphanumeric,
+  isAsciiPunctuation,
+  isSpace,
+  isSpacePadded,
+  lines,
+  trim,
+  trimEnd,
+} from './text.ts'
 
 type Mark =
   | { type: 'bold' | 'italic' | 'underline' | 'strike' | 'code' }
@@ -45,6 +54,18 @@ export function fromMarkdown(markdown: string): {
 } {
   const parser = new Parser(lines(markdown).map(toLine))
   return { type: 'doc', content: [{ type: 'blockGroup', content: parser.parseBlocks(0, 0) }] }
+}
+
+/** 本文の 1 行を読んだとき、paragraph の行ではなく block を始めるか。表は続く行 `next` と合わせて決まる。 */
+export function opensBlockAt(text: string, next: string | undefined): boolean {
+  const line = toLine(text)
+  return new Parser(next === undefined ? [line] : [line, toLine(next)]).opensBlock(line)
+}
+
+/** 表の delimiter の行（`| --- |`・`--- | ---`）として読むか。 */
+export function isDelimiterLine(text: string): boolean {
+  const cells = tableRowCells(toLine(text).rest, true)
+  return cells !== null && isDelimiterRow(cells)
 }
 
 function toLine(raw: string): Line {
@@ -116,7 +137,7 @@ class Parser {
   }
 
   // 実際に読んでみて位置を戻すので、新しい block を始めるかの判定が読む側とずれない。
-  private opensBlock(line: Line): boolean {
+  opensBlock(line: Line): boolean {
     const saved = this.pos
     const multiline = this.tryMultilineBlock(line) !== null
     this.pos = saved
@@ -539,7 +560,7 @@ function emphasis(
   const inner = rest.slice(delimiter.length)
   let from = 0
   for (;;) {
-    const end = inner.indexOf(delimiter, from)
+    const end = indexOfUnescaped(inner, delimiter, from)
     if (end <= 0) return null
     const content = inner.slice(0, end)
     if (isSpace(content[0])) return null
@@ -553,43 +574,50 @@ function emphasis(
   }
 }
 
-// CommonMark と同じく、開いたのと同じ長さの backtick の連なりで閉じる。
 function codeSpan(rest: string, marks: Mark[]): Construct | null {
+  const span = measureCodeSpan(rest)
+  if (!span) return null
+  const code = rest.slice(span.ticks, span.ticks + span.length)
+  return {
+    nodes: [textNode(unpadCode(code), [...marks, { type: 'code' }])],
+    consumed: span.ticks * 2 + span.length,
+  }
+}
+
+/** 先頭の backtick の連なりで開く code span の、連なりの長さと中身の長さ。CommonMark と同じく、同じ長さの連なりで閉じる。 */
+function measureCodeSpan(rest: string): { ticks: number; length: number } | null {
   let ticks = 0
   while (rest[ticks] === '`') ticks++
-  const inner = rest.slice(ticks)
-  let index = 0
-  let end = -1
-  while (index < inner.length) {
-    if (inner[index] !== '`') {
+  let index = ticks
+  while (index < rest.length) {
+    if (rest[index] !== '`') {
       index++
       continue
     }
     const runStart = index
-    while (inner[index] === '`') index++
-    if (index - runStart === ticks) {
-      end = runStart
-      break
-    }
+    while (rest[index] === '`') index++
+    if (index - runStart === ticks) return { ticks, length: runStart - ticks }
   }
-  if (end <= 0) return null
-  return {
-    nodes: [textNode(inner.slice(0, end), [...marks, { type: 'code' }])],
-    consumed: ticks + end + ticks,
-  }
+  return null
+}
+
+// backtick で始まるか終わる中身は、包む backtick とつながらないよう空白で挟んで書かれる（CommonMark と同じ）。
+function unpadCode(code: string): string {
+  return isSpacePadded(code) ? code.slice(1, -1) : code
 }
 
 // `[[note-N|名前]]` の名前は捨てる。表示名はエディタが引く。
 function noteMention(rest: string, marks: Mark[]): Construct | null {
   if (!rest.startsWith('[[')) return null
   const inner = rest.slice(2)
-  const end = inner.indexOf(']]')
+  const end = indexOfUnescaped(inner, ']]')
   if (end === -1) return null
   const body = inner.slice(0, end)
-  if (body === '' || body.includes('[') || body.includes(']')) return null
   const bar = body.indexOf('|')
   const noteId = bar === -1 ? body : body.slice(0, bar)
-  if (noteId === '' || noteId.includes('#^')) return null
+  const name = bar === -1 ? '' : body.slice(bar + 1)
+  if (noteId === '' || /[[\]]/.test(noteId) || noteId.includes('#^')) return null
+  if (indexOfUnescaped(name, '[') !== -1 || indexOfUnescaped(name, ']') !== -1) return null
   const sorted = sortMarks(marks)
   return {
     nodes: [{ type: 'noteMention', attrs: { noteId }, ...(sorted ? { marks: sorted } : {}) }],
@@ -600,7 +628,7 @@ function noteMention(rest: string, marks: Mark[]): Construct | null {
 function link(rest: string, marks: Mark[]): Construct | null {
   if (!rest.startsWith('[')) return null
   const inner = rest.slice(1)
-  const close = inner.indexOf(']')
+  const close = indexOfUnescaped(inner, ']')
   if (close === -1) return null
   const label = inner.slice(0, close)
   const after = inner.slice(close + 1)
@@ -633,11 +661,27 @@ function hrefEnd(target: string): number {
 function underline(rest: string, marks: Mark[]): Construct | null {
   if (!rest.startsWith('<u>')) return null
   const inner = rest.slice(3)
-  const end = inner.indexOf('</u>')
+  const end = indexOfUnescaped(inner, '</u>')
   if (end <= 0) return null
   const nodes: Inline[] = []
   parseInlineInto(inner.slice(0, end), [...marks, { type: 'underline' }], nodes)
   return { nodes, consumed: 3 + end + 4 }
+}
+
+// CommonMark と同じく、閉じ記号を探すときは backslash で escape した文字と code span の中を飛ばす。
+function indexOfUnescaped(text: string, search: string, from = 0): number {
+  let index = from
+  while (index < text.length) {
+    if (text[index] === '\\' && isAsciiPunctuation(text.charAt(index + 1))) {
+      index += 2
+      continue
+    }
+    if (text.startsWith(search, index)) return index
+    // 閉じない backtick は parseInlineInto と同じく 1 文字ずつ進め、続きの短い連なりで開くかを見る。
+    const span = text[index] === '`' ? measureCodeSpan(text.slice(index)) : null
+    index += span ? span.ticks * 2 + span.length : 1
+  }
+  return -1
 }
 
 function flushPlain(plain: string, marks: Mark[], out: Inline[]): void {
@@ -674,20 +718,6 @@ function sameMarks(a: Mark[] | undefined, b: Mark[] | undefined): boolean {
 function sameMark(a: Mark | undefined, b: Mark | undefined): boolean {
   if (a === undefined || b === undefined || a.type !== b.type) return false
   return a.type !== 'link' || (b.type === 'link' && a.attrs.href === b.attrs.href)
-}
-
-function isAsciiPunctuation(char: string): boolean {
-  const code = char.charCodeAt(0)
-  return (
-    (code >= 0x21 && code <= 0x2f) ||
-    (code >= 0x3a && code <= 0x40) ||
-    (code >= 0x5b && code <= 0x60) ||
-    (code >= 0x7b && code <= 0x7e)
-  )
-}
-
-function isAlphanumeric(char: string): boolean {
-  return /^[\p{Alphabetic}\p{N}]$/u.test(char)
 }
 
 /** offset の直前の 1 文字。surrogate pair は 2 つで 1 文字に数える。 */

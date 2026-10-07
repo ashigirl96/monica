@@ -5,6 +5,25 @@ export function isSpace(char: string | undefined): boolean {
   return char !== undefined && SPACE.test(char)
 }
 
+export function isAsciiPunctuation(char: string): boolean {
+  const code = char.charCodeAt(0)
+  return (
+    (code >= 0x21 && code <= 0x2f) ||
+    (code >= 0x3a && code <= 0x40) ||
+    (code >= 0x5b && code <= 0x60) ||
+    (code >= 0x7b && code <= 0x7e)
+  )
+}
+
+export function isAlphanumeric(char: string): boolean {
+  return /^[\p{Alphabetic}\p{N}]$/u.test(char)
+}
+
+/** 空白（U+0020）で始まって終わり、空白だけではない。CommonMark はこの形の code span の中身から両端の空白を 1 つずつ外す。 */
+export function isSpacePadded(text: string): boolean {
+  return text.startsWith(' ') && text.endsWith(' ') && /[^ ]/.test(text)
+}
+
 export function hasSpace(text: string): boolean {
   return SPACE.test(text)
 }
