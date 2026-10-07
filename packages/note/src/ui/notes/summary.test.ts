@@ -2,7 +2,7 @@
 import { describe, expect, test } from 'bun:test'
 
 import type { Note, NoteSummary } from '../../contract.ts'
-import { noteLabel, summaryTitle } from './summary.ts'
+import { noteLabel, summaryTitle, withSavedPreview } from './summary.ts'
 
 type Kind =
   | { kind: 'daily' }
@@ -66,5 +66,34 @@ describe('summaryTitle', () => {
   test('無題は preview を、preview も無ければ Untitled を使う', () => {
     expect(summaryTitle(summary('', 'first line'))).toBe('first line')
     expect(summaryTitle(summary('', null))).toBe('Untitled')
+  })
+})
+
+describe('withSavedPreview', () => {
+  test('保存した Note の preview だけを、保存した本文から作り直す', () => {
+    const other = { ...summary('', 'kept'), id: 'note-2' }
+    const content = {
+      type: 'doc' as const,
+      content: [
+        {
+          type: 'blockGroup',
+          content: [
+            {
+              type: 'blockContainer',
+              content: [{ type: 'paragraph', content: [{ type: 'text', text: 'first line' }] }],
+            },
+          ],
+        },
+      ],
+    }
+
+    expect(withSavedPreview([summary('', null), other], 'note-1', content)).toEqual([
+      summary('', 'first line'),
+      other,
+    ])
+  })
+
+  test('一覧をまだ取っていなければ、取っていないまま', () => {
+    expect(withSavedPreview(undefined, 'note-1', { type: 'doc' })).toBeUndefined()
   })
 })

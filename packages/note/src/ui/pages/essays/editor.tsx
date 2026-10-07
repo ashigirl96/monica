@@ -20,7 +20,7 @@ import {
 import { SaveStatus } from '../../notes/save-status.tsx'
 import { noteLabel } from '../../notes/summary.ts'
 import { navigate } from '../../router.ts'
-import { ESSAYS_PATH, essayPath } from '../../routes.ts'
+import { ESSAYS_PATH, essayPath, routeOf } from '../../routes.ts'
 import { removeOpenEssay, setOpenEssayStatus } from './actions.ts'
 import { EssaysSidebar } from './sidebar.tsx'
 import {
@@ -31,6 +31,12 @@ import {
   restoreLastDeletedEssay,
   splitEssaysByStatus,
 } from './support.ts'
+
+// navigate は URL をその場で書き換えるが、prop の id が追いつくのは描画の後なので、URL で見る。
+function isOpenEssay(id: string): boolean {
+  const route = routeOf(window.location.pathname)
+  return route.page === 'essay' && route.id === id
+}
 
 function StatusChip({ status, onToggle }: { status: EssayStatus; onToggle: () => void }) {
   const writing = status === 'writing'
@@ -73,11 +79,6 @@ export function EssayEditorPage({ id }: { id: string }) {
   // onDocChange は BlockEditor の再レンダーより先に呼ばれうるので、closure の note ではなく
   // 常に最新を持つ ref から保存を組み立てる
   const noteRef = useRef<Note | null>(null)
-  const openIdRef = useRef(id)
-
-  useEffect(() => {
-    openIdRef.current = id
-  }, [id])
 
   const noteQuery = useNoteQuery(id)
   const { note, generation, reload, patch, adopt } = useServerDoc({
@@ -156,7 +157,7 @@ export function EssayEditorPage({ id }: { id: string }) {
   const deleteCurrent = useCallback(async () => {
     const removed = await removeOpenEssay({
       gate: noteRef,
-      isOpen: (essayId) => openIdRef.current === essayId,
+      isOpen: isOpenEssay,
       flush,
       hasUnsaved,
       remove: (essayId) => client.remove({ id: essayId }),
@@ -168,7 +169,7 @@ export function EssayEditorPage({ id }: { id: string }) {
     forgetNote(removed.id)
     pushDeletedEssay(removed.id)
     patchEssays((list) => dropEssay(list, removed.id))
-    if (openIdRef.current !== removed.id) return
+    if (!isOpenEssay(removed.id)) return
     // 表示中のタブにあった Essay はタブの次へ送って書く流れを切らない。タブの外の Essay は
     // 送り先が画面に見えていないので一覧へ帰す
     const next = cycleIds.includes(removed.id) ? cycleSelect(cycleIds, removed.id, 1) : undefined
