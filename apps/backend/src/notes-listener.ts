@@ -39,7 +39,9 @@ export function listenNotes(
     const { matched, response } = await handler.handle(c.req.raw, { prefix: '/rpc', context })
     return matched ? c.newResponse(response.body, response) : c.notFound()
   })
-  app.get(`${IMAGE_URL_PREFIX}*`, (c) => c.notFound())
+  app.get(`${IMAGE_URL_PREFIX}*`, (c) =>
+    context.noteLedger.serveImage(c.req.path.slice(IMAGE_URL_PREFIX.length)),
+  )
   app.get('*', spa(webDist))
 
   // 両方の loopback で bind し、片方だけを他の process が握っている衝突も EADDRINUSE で見つける。
