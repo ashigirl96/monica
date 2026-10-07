@@ -60,9 +60,19 @@ function withUnread(label: string, count: number): string {
   return count > 0 ? `${label}、未読の Tab ${count}` : label
 }
 
-// Tile と見出しは、押した後に focus を戻すと xterm が DECSET 1004 を立てた app に focus out と in を送るので、mousedown の既定の動作を止めて focus を動かさない。
-function keepTerminalFocus(e: MouseEvent) {
-  e.preventDefault()
+// WKWebView は trackpad の tap を up、down の順で届け、click は 1 つ前の tap の down と組んで共通の祖先に飛ぶので、押した要素に届く mousedown で動かす。
+function pressHandlers(action: () => void) {
+  return {
+    onMouseDown: (e: MouseEvent) => {
+      // 押した後に focus を戻すと xterm が DECSET 1004 を立てた app に focus out と in を送るので、既定の動作を止めて端末から focus を外さない。
+      e.preventDefault()
+      if (e.button === 0) action()
+    },
+    onClick: (e: MouseEvent) => {
+      const fromKeyboard = e.detail === 0
+      if (fromKeyboard) action()
+    },
+  }
 }
 
 function UnreadCount({ count, className }: { count: number; className?: string }) {
@@ -108,8 +118,7 @@ function TileButton({
         aria-label={withUnread(label, tile.unreadCount)}
         aria-keyshortcuts={number === null ? undefined : `Meta+${number}`}
         title={number === null ? label : `${label} (⌘${number})`}
-        onMouseDown={keepTerminalFocus}
-        onClick={onPick}
+        {...pressHandlers(onPick)}
         className={cn(
           'relative flex size-[30px] shrink-0 items-center justify-center text-xs leading-none font-bold',
           'transition-[border-radius,filter] duration-150 hover:brightness-125 motion-reduce:transition-none',
@@ -310,8 +319,7 @@ function SectionHeader({ tileKey, section }: { tileKey: string; section: Sidebar
       type="button"
       aria-expanded={!section.collapsed}
       aria-label={section.collapsed ? withUnread(label, section.unreadCount) : label}
-      onMouseDown={keepTerminalFocus}
-      onClick={() => toggle(sectionKey(tileKey, section.kind))}
+      {...pressHandlers(() => toggle(sectionKey(tileKey, section.kind)))}
       className="flex h-6 w-full shrink-0 items-center gap-1.5 rounded-md px-2 text-[11px] font-semibold text-white/55 transition-colors hover:bg-white/[0.04] hover:text-white/85"
     >
       <span className="flex-1 text-left">{label}</span>
