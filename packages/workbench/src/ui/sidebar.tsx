@@ -22,13 +22,13 @@ import {
   activateRunspaceAtom,
   draggedTabIdAtom,
   moveTabToRunspaceAtom,
+  pickTileAtom,
   reattachTerminalSessionAtom,
   reorderRunspacesAtom,
   sidebarAtom,
   terminateTerminalSessionAtom,
   toggleSectionAtom,
 } from './store.ts'
-import { tileChoiceAtom } from './ui-state.ts'
 
 const OUTSIDE_LABEL = 'その他'
 
@@ -356,7 +356,7 @@ export function WorkbenchSidebar() {
   const sidebar = useAtomValue(sidebarAtom)
   const { pinned, tiles, selected } = sidebar
   const activate = useSetAtom(activateRunspaceAtom)
-  const selectTile = useSetAtom(tileChoiceAtom)
+  const pickTile = useSetAtom(pickTileAtom)
   const reorder = useSetAtom(reorderRunspacesAtom)
   const jumpHints = useAtomValue(jumpHintTargetsAtom)
   const { dragOverId, handlersFor } = useDragReorder(reorder)
@@ -378,7 +378,7 @@ export function WorkbenchSidebar() {
       tile={tile}
       number={tileNumberOf(sidebar, tile.key)}
       selected={tile.key === selected.key}
-      onPick={() => selectTile(tile.key)}
+      onPick={() => pickTile(tile.key)}
     />
   )
 
