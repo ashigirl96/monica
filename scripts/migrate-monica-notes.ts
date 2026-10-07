@@ -6,6 +6,7 @@ import {
   mkdtempSync,
   readdirSync,
   readFileSync,
+  renameSync,
   rmSync,
   statSync,
   writeFileSync,
@@ -176,7 +177,14 @@ function copyImages(from: string, to: string): string[] {
       if (existsSync(path) && !readFileSync(path).equals(bytes)) {
         throw new Error(`${path} already exists with different bytes from ${join(from, name)}`)
       }
-      writeFileSync(path, bytes)
+      // 書く途中で殺されても、画像の名前の file は中身が揃ったものだけになるよう、隣に書いてから rename する。
+      const staging = `${path}.migrating`
+      try {
+        writeFileSync(staging, bytes)
+        renameSync(staging, path)
+      } finally {
+        rmSync(staging, { force: true })
+      }
       copied.push(path)
     }
   } catch (error) {
