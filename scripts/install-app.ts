@@ -3,8 +3,8 @@ import { join } from 'node:path'
 
 import { $ } from 'bun'
 
-const built = join(import.meta.dir, '../target/release/bundle/macos/tania.app')
-const installed = '/Applications/tania.app'
+const built = join(import.meta.dir, '../target/release/bundle/macos/Tania.app')
+const installed = '/Applications/Tania.app'
 
 if (!existsSync(built)) {
   console.error(`${built} がありません。先に bun run build を流してください`)
