@@ -6,13 +6,10 @@ import { decodeHook } from './hook-decoder.ts'
 import { agentSession, terminalSession } from './schema.ts'
 import { isLive } from './terminal-session.ts'
 import { notificationFor, supersede, takesOverTerminal, transition } from './transition.ts'
+import { isUnread } from './unread.ts'
 import { type Db, notifyWaiting, type Tx, type WorkbenchContext } from './workbench.ts'
 
 const notEnded = ne(agentSession.state, 'ended')
-
-function isUnread(row: Pick<AgentSession, 'notifiedAt' | 'seenAt'>): boolean {
-  return row.notifiedAt !== null && row.seenAt === null
-}
 
 export function listAgentSessions(db: Db): ListedAgentSession[] {
   return db

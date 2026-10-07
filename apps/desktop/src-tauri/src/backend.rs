@@ -12,7 +12,7 @@ use shared_child::SharedChild;
 use tauri::{AppHandle, Emitter, Manager};
 use tauri_plugin_notification::NotificationExt;
 
-use crate::announcement::{self, Announcement, Endpoint, Notification};
+use crate::announcement::{self, Announcement, Endpoint, Notification, UnreadCount};
 use crate::respawn::Respawn;
 use crate::{locations, orphan, STOP_GRACE};
 
@@ -119,6 +119,8 @@ impl Supervisor {
             // emit は lock の中で行い、endpoint の event が state と同じ順で webview に届くようにする。
             state.endpoint = None;
             let _ = app.emit("backend-endpoint", None::<Endpoint>);
+            // 数は起き直した Backend が書き直すので、居ない間は古い数を残さない。
+            show_badge(app, None);
             let Some(delay) = state.respawn.after_failure(Instant::now()) else {
                 state.supervising = false;
                 state.failed = true;
@@ -151,19 +153,31 @@ impl Supervisor {
     fn announce(&self, app: &AppHandle, from: &Arc<SharedChild>, endpoint: Endpoint) {
         let mut state = self.lock();
         // 終わった Backend の書き残しで、次の Backend の endpoint を上書きしない。
-        if !state
-            .running
-            .as_ref()
-            .is_some_and(|running| Arc::ptr_eq(&running.child, from))
-        {
+        if !state.is_running(from) {
             return;
         }
         state.endpoint = Some(endpoint.clone());
         let _ = app.emit("backend-endpoint", Some(endpoint));
     }
 
+    fn badge(&self, app: &AppHandle, from: &Arc<SharedChild>, unread: UnreadCount) {
+        let state = self.lock();
+        // 終わった Backend の書き残しで、消した後の Dock に数を戻さない。
+        if state.is_running(from) {
+            show_badge(app, unread.dock_count());
+        }
+    }
+
     fn lock(&self) -> MutexGuard<'_, State> {
         self.state.lock().unwrap()
+    }
+}
+
+impl State {
+    fn is_running(&self, child: &Arc<SharedChild>) -> bool {
+        self.running
+            .as_ref()
+            .is_some_and(|running| Arc::ptr_eq(&running.child, child))
     }
 }
 
@@ -175,6 +189,9 @@ fn relay(app: AppHandle, stdout: ChildStdout, child: Arc<SharedChild>) {
                     app.state::<Supervisor>().announce(&app, &child, endpoint);
                 }
                 Some(Announcement::Notify(notice)) => notify(&app, notice),
+                Some(Announcement::Badge(unread)) => {
+                    app.state::<Supervisor>().badge(&app, &child, unread);
+                }
                 None => eprintln!("[shell] unrecognized Backend stdout: {line}"),
             }
         }
@@ -185,6 +202,15 @@ fn notify(app: &AppHandle, Notification { title, body }: Notification) {
     let shown = app.notification().builder().title(title).body(body).show();
     if let Err(error) = shown {
         eprintln!("[shell] failed to post a notification: {error}");
+    }
+}
+
+fn show_badge(app: &AppHandle, count: Option<i64>) {
+    let Some(window) = app.get_webview_window("main") else {
+        return;
+    };
+    if let Err(error) = window.set_badge_count(count) {
+        eprintln!("[shell] failed to badge the Dock icon: {error}");
     }
 }
 

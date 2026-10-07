@@ -1,4 +1,4 @@
-import { afterEach, expect, setSystemTime, spyOn, test } from 'bun:test'
+import { afterEach, expect, setSystemTime, test } from 'bun:test'
 import { writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 
@@ -7,7 +7,7 @@ import { eq } from 'drizzle-orm'
 import { startFakePtyd } from './fake-ptyd.ts'
 import { agentSession, terminalSession } from './schema.ts'
 import type { Db } from './server.ts'
-import { cleanUp, onCleanup, setup } from './testing.ts'
+import { cleanUp, onCleanup, setup, stderrLines } from './testing.ts'
 
 afterEach(cleanUp)
 
@@ -77,12 +77,6 @@ async function notificationsOn(
     }),
   })
   return sent
-}
-
-function stderrLines() {
-  const spy = spyOn(console, 'error').mockImplementation(() => {})
-  onCleanup(() => spy.mockRestore())
-  return () => spy.mock.calls.map((args) => args.join(' '))
 }
 
 test('a claude started in a Tab is listed idle, then follows its hooks until it leaves the list on /exit', async () => {

@@ -10,6 +10,7 @@ import { shortPath } from './paths.ts'
 import { openDaemon, type PtydClient } from './ptyd.ts'
 import { writeTabFiles } from './tab-env.ts'
 import { createTerminalSessions, type Size, type TerminalSessions } from './terminal-session.ts'
+import { followUnread } from './unread.ts'
 
 export type Db = BunSQLiteDatabase
 export type Tx = Parameters<Parameters<Db['transaction']>[0]>[0]
@@ -35,6 +36,9 @@ export type NotificationDeps = {
   nameAgentSession: (db: Db, agentSessionId: string) => string | null
 }
 
+/** 未読の数。start() で 1 回、以降は数が変わるたびに呼ぶ。 */
+export type Badge = (count: number) => void
+
 type Internals = NotificationDeps & {
   db: Db
   terminalSessions: TerminalSessions
@@ -54,12 +58,13 @@ export function terminalSessionsOf(workbenchLedger: WorkbenchLedger): TerminalSe
 }
 
 export function createWorkbenchLedger(
-  deps: NotificationDeps & { db: Db; home: string; ptydPath: string },
+  deps: NotificationDeps & { db: Db; home: string; ptydPath: string; badge: Badge },
 ): WorkbenchLedger {
-  const { db, home, ptydPath, notify, nameAgentSession } = deps
+  const { db, home, ptydPath, notify, nameAgentSession, badge } = deps
   const events = new EventPublisher<{ change: WorkbenchChange }>()
   const publish = (change: WorkbenchChange) => events.publish('change', change)
 
+  let stopBadging: (() => void) | null = null
   let client: PtydClient | null = null
   let connection: Promise<PtydClient> | null = null
   // List を待つ間に届いた Exit は、まだ取り込んでいない行に当たらず Reap する接続も無いので、reconcile の後で当てる。
@@ -156,10 +161,12 @@ export function createWorkbenchLedger(
       } catch (error) {
         console.error(`[workbench] could not write the Tab's shell files: ${error}`)
       }
+      stopBadging = followUnread({ db, events, badge })
       await ready()
     },
     stop() {
       stopping = true
+      stopBadging?.()
       client?.close()
     },
     createRunspace(tx, { cwd }) {
