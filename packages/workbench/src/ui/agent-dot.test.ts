@@ -1,7 +1,7 @@
 import { expect, test } from 'bun:test'
 
 import type { AgentSession } from '../contract.ts'
-import { agentDotOf } from './agent-dot.ts'
+import { agentDotOf, tallyAgentDots } from './agent-dot.ts'
 
 const at = new Date(0)
 
@@ -48,4 +48,15 @@ test.each([
 
 test('a Tab without an Agent Session shows no dot', () => {
   expect(agentDotOf(undefined)).toBeNull()
+})
+
+test('dots are counted by color, questions and permissions as one amber, from running to unobserved, leaving out colors no Tab shows', () => {
+  const dots = ['unobserved', 'idle', null, 'permission', 'question', 'running', 'idle'] as const
+
+  expect(tallyAgentDots([...dots])).toEqual([
+    { kind: 'running', count: 1 },
+    { kind: 'questionOrPermission', count: 2 },
+    { kind: 'idle', count: 2 },
+    { kind: 'unobserved', count: 1 },
+  ])
 })

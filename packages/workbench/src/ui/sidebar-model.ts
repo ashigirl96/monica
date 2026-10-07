@@ -1,5 +1,6 @@
 import type { Layout, RepoPlace, Tab, TerminalSession } from '../contract.ts'
 import { shortPath } from '../paths.ts'
+import { type AgentDot, type AgentTally, tallyAgentDots } from './agent-dot.ts'
 
 type Runspace = Layout['runspaces'][number]
 
@@ -18,11 +19,14 @@ export type BenchLabel = {
 
 export type BenchLabelOf = (runspaceId: string) => BenchLabel | null
 
+// 普通の Runspace は Tab の dot を色ごとに数えた agentTallies を、Bench は代表の Tab の agentDot を持つ。
 export type RunspaceRow = {
   type: 'runspace'
   id: string
   isActive: boolean
   unreadCount: number
+  agentTallies: AgentTally[]
+  agentDot: AgentDot | null
   repo: string | null
   bench: BenchLabel | null
   title: string
@@ -37,6 +41,7 @@ export type DetachedRow = {
   id: string
   terminalSession: TerminalSession
   unreadCount: number
+  agentDot: AgentDot | null
   repo: string | null
   path: string
 }
@@ -79,6 +84,7 @@ export type SidebarInput = {
   titles: Record<string, string>
   places: Record<string, RepoPlace | undefined>
   unreadOf: (terminalSessionId: string) => boolean
+  agentDotOf: (terminalSessionId: string) => AgentDot | null
   benchLabelOf: BenchLabelOf
   detached: TerminalSession[]
   tileChoice: string | null
@@ -111,12 +117,39 @@ function leftmostCwd(runspace: Runspace): string {
   return runspace.tabs[0]?.cwd ?? runspace.cwd
 }
 
+// 動いている claude を手空きで隠さないよう、Task の表示状態の集約（手空き > 未観測 > 動作中）とは違う順で選ぶ。
+const REPRESENTATIVE_RANK: Record<AgentDot, number> = {
+  question: 0,
+  permission: 0,
+  error: 1,
+  running: 2,
+  idle: 3,
+  unobserved: 4,
+}
+
+// 同じ順位なら左の Tab を選び、Tab の並びと合わせて行の端末の title が飛び回らないようにする。
+function representativeOf(
+  input: SidebarInput,
+  runspace: Runspace,
+): { tab: Tab; dot: AgentDot } | null {
+  let chosen: { tab: Tab; dot: AgentDot } | null = null
+  for (const tab of runspace.tabs) {
+    const dot = input.agentDotOf(tab.terminalSessionId)
+    if (dot && (!chosen || REPRESENTATIVE_RANK[dot] < REPRESENTATIVE_RANK[chosen.dot])) {
+      chosen = { tab, dot }
+    }
+  }
+  return chosen
+}
+
 function runspaceRow(input: SidebarInput, runspace: Runspace): RunspaceRow {
   const bench = runspace.owned ? input.benchLabelOf(runspace.id) : null
   const leftmost = leftmostCwd(runspace)
   const tab = input.activeTabOf(runspace)
+  const representative = bench ? representativeOf(input, runspace) : null
+  const titleTab = representative?.tab ?? tab
   const cwd = tab?.cwd ?? runspace.cwd
-  const raw = (tab && input.titles[tab.id]) ?? ''
+  const raw = (titleTab && input.titles[titleTab.id]) ?? ''
   const terminalTitle = isPathTitle(raw) ? '' : raw
   const place = input.places[cwd]
   const path = pathOf(cwd, place)
@@ -125,6 +158,10 @@ function runspaceRow(input: SidebarInput, runspace: Runspace): RunspaceRow {
     id: runspace.id,
     isActive: runspace.id === input.activeRunspaceId,
     unreadCount: runspace.tabs.filter((t) => input.unreadOf(t.terminalSessionId)).length,
+    agentTallies: bench
+      ? []
+      : tallyAgentDots(runspace.tabs.map((t) => input.agentDotOf(t.terminalSessionId))),
+    agentDot: representative?.dot ?? null,
     repo: bench?.repo ?? input.places[leftmost]?.repo ?? null,
     bench,
     title: bench?.title || terminalTitle || path,
@@ -142,6 +179,7 @@ function detachedRow(input: SidebarInput, terminalSession: TerminalSession): Det
     id: terminalSession.id,
     terminalSession,
     unreadCount: input.unreadOf(terminalSession.id) ? 1 : 0,
+    agentDot: input.agentDotOf(terminalSession.id),
     repo: place?.repo ?? null,
     path: pathOf(terminalSession.cwd, place),
   }
@@ -253,6 +291,8 @@ export type ListedIn = 'pinned' | 'repo' | 'outside'
 
 export type RowMeta = {
   setup: BenchSetup | null
+  tallies: AgentTally[]
+  dot: AgentDot | null
   info: string
   infoMono: boolean
   chip: string | null
@@ -262,6 +302,8 @@ export type RowMeta = {
 
 export function rowMetaOf(row: RunspaceRow, listedIn: ListedIn): RowMeta | null {
   const setup = row.bench?.setup ?? null
+  const tallies = row.agentTallies
+  const dot = row.agentDot
   const info = row.bench ? row.terminalTitle : (row.branch ?? '')
   let chip: string | null = null
   let where = ''
@@ -273,9 +315,11 @@ export function rowMetaOf(row: RunspaceRow, listedIn: ListedIn): RowMeta | null 
   } else if (listedIn !== 'repo' && !row.titleIsPath) {
     where = row.path
   }
-  if (!setup && !info && !where) return null
+  if (!setup && tallies.length === 0 && !dot && !info && !where) return null
   return {
     setup,
+    tallies,
+    dot,
     info,
     infoMono: !row.bench,
     chip,
