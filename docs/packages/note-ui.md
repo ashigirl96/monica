@@ -10,6 +10,8 @@ notes の ui は monica の `web/` と `shared/` を移して作る。
 - 手で入れた変更だけをレビューに見せるには、import の書き換えと oxfmt だけを当てた状態を repo の外に控え、`git diff --no-index <控え> <移した先>` で比べる。
 - 振る舞いを変えずに移す slice でも、セキュリティ（スクリプトの実行など）と本文の消失につながる不具合は直し、PR に書く。それ以外の monica の振る舞いはそのまま移し、直すなら別の issue にする。
 - monica の画面の判断（保存・競合・取り直し・開き直し）は hook の中にあり、DOM を入れない bun test では守れない。移すときは判断を React に依らない module か純関数に出し、hook はそれを React の状態と event につなぐだけにする（`notes/save-queue.ts`、`notes/note-sync.ts` の `noteToOpen` と `reloadLatest`）。monica の hook には、画面を移る・取り直す間に本文を失う経路が残っていた。
+- monica は change stream で cache を取り直していたが、tania が取り直すのは focus のときだけ（ADR-0018）。移すときは、monica の画面が change stream で新しくしていた表示（一覧の preview や title）を数え、手元の cache に写す（`notes/summary.ts` の `withSavedPreview`）。
+- 種類ごとの画面を足すときは、Note に紐づく手元の状態（autosave の予約と基準版、draft の本文と title、本文の cache、一覧の cache）を数え、Note を消す経路と開き直す経路のそれぞれで、捨てるか重ねるかを決める（`pages/essays/editor.tsx` の削除、`notes/note-sync.ts` の `noteToOpen`）。種類ごとの route は別の種類の id でも開くので、削除のように戻しにくい操作は、開いている Note の種類を確かめてから行う。
 - oxlint の React の規則も monica より厳しい。render 中の `Date` は effect か `useState` の初期化に移し、自分を呼ぶ `useCallback` は名前付きの関数式にする。latch に要る render 中の ref の書き換えと、effect の中での採用は、理由を付けて止める（`notes/note-sync.ts`）。
 
 ## エディタ
