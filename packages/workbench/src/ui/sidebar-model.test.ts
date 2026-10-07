@@ -522,6 +522,31 @@ test('a clicked notification of a Pinned Tab brings up that Tab and leaves the T
   expect(store.get(sidebarAtom).selected.key).toBe('acme/app')
 })
 
+test('a clicked notification of an unpinned Tab in a Bench holding a pin leaves the Tile that was shown, as the Bench stays among the Pinned', async () => {
+  const { db, workbenchLedger, client, store } = bench()
+  const app = ghqCheckout('acme/app')
+  const lib = ghqCheckout('acme/lib')
+  const inApp = await client.runspace.create({ cwd: app.checkout, ...size })
+  const benchRunspace = db.transaction((tx) =>
+    workbenchLedger.createRunspace(tx, { cwd: app.checkout }),
+  )
+  const pinned = await client.tab.open({ runspaceId: benchRunspace, cwd: app.checkout, ...size })
+  const waiting = await client.tab.open({ runspaceId: benchRunspace, cwd: app.checkout, ...size })
+  await client.tab.pin({ id: pinned.id })
+  const inLib = await client.runspace.create({ cwd: lib.checkout, ...size })
+  await store.set(reloadAtom)
+  await untilListed(store, 'acme/app', [inApp.runspaceId])
+  await untilListed(store, 'acme/lib', [inLib.runspaceId])
+  store.set(activateRunspaceAtom, inLib.runspaceId)
+
+  store.set(showTerminalSessionAtom, waiting.terminalSessionId)
+
+  const sidebar = store.get(sidebarAtom)
+  expect(store.get(activeTerminalTabAtom)?.id).toBe(waiting.id)
+  expect(sidebar.pinned.map((r) => r.id)).toEqual([benchRunspace])
+  expect(sidebar.selected.key).toBe('acme/lib')
+})
+
 test('a clicked notification of a Terminal Session no Tab shows leaves the view as it is', async () => {
   const { client, store } = bench()
   const app = ghqCheckout('acme/app')
