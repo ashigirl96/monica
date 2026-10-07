@@ -5,9 +5,11 @@ import { join } from 'node:path'
 import { createStore, type Store } from 'jotai'
 
 import { cleanUp, ghqCheckout, git, onCleanup, setup, until } from '../testing.ts'
+import type { AgentDot } from './agent-dot.ts'
 import { jumpHintsActiveAtom, jumpHintTargetsAtom } from './jump-hints.ts'
 import {
   type BenchLabel,
+  buildSidebar,
   OUTSIDE,
   type RunspaceRow,
   type Sidebar,
@@ -47,15 +49,26 @@ function bench() {
   const backend = setup()
   const store = createStore()
   store.set(workbenchClientAtom, () => backend.client)
-  // 通知を受けた Agent Session は、見たと記録されるまで未読のまま残る。
-  const leaveUnread = async (terminalSessionId: string) => {
+  const record = async (terminalSessionId: string, hookEventName: string, fields: object = {}) => {
     await backend.client.agentSession.recordHook({
       terminalSessionId,
-      payload: { session_id: `s-${terminalSessionId}`, cwd: '/work', hook_event_name: 'Stop' },
+      payload: {
+        session_id: `s-${terminalSessionId}`,
+        cwd: '/work',
+        hook_event_name: hookEventName,
+        ...fields,
+      },
     })
     await store.set(reloadAgentSessionsAtom)
   }
-  return { ...backend, store, leaveUnread }
+  // 通知を受けた Agent Session は、見たと記録されるまで未読のまま残る。
+  const leaveUnread = (terminalSessionId: string) => record(terminalSessionId, 'Stop')
+  return { ...backend, store, record, leaveUnread }
+}
+
+function secondLineOf(sidebar: Sidebar, runspaceId: string) {
+  const row = rowOf(sidebar, runspaceId)
+  return row && rowMetaOf(row, 'repo')
 }
 
 function idsIn(sidebar: Sidebar, key: string): string[] {
@@ -78,9 +91,12 @@ function shown(sidebar: Sidebar) {
   return sidebar.selected.sections.map((s) => [s.kind, s.rows.map((r) => r.id)])
 }
 
+function listedRows(sidebar: Sidebar): SidebarRow[] {
+  return sidebar.tiles.flatMap((tile) => tile.sections.flatMap((s) => s.rows))
+}
+
 function rowOf(sidebar: Sidebar, runspaceId: string): RunspaceRow | undefined {
-  const listed = sidebar.tiles.flatMap((tile) => tile.sections.flatMap((s): SidebarRow[] => s.rows))
-  return [...sidebar.pinned, ...listed]
+  return [...sidebar.pinned, ...listedRows(sidebar)]
     .filter((row): row is RunspaceRow => row.type === 'runspace')
     .find((row) => row.id === runspaceId)
 }
@@ -171,6 +187,24 @@ test('a detached Terminal Session is listed in the Detached section of the Repo 
   store.set(tileChoiceAtom, 'acme/app')
 
   expect(shown(store.get(sidebarAtom))).toEqual([['detached', [closed.terminalSessionId]]])
+})
+
+test("a detached Terminal Session's row carries the dot of the claude running in it", async () => {
+  const { client, store, record } = bench()
+  const { runspaceId } = await client.runspace.create(size)
+  const shell = await client.tab.open({ runspaceId, ...size })
+  const claude = await client.tab.open({ runspaceId, ...size })
+  await client.tab.close({ id: shell.id })
+  await client.tab.close({ id: claude.id })
+  await store.set(reloadAtom)
+
+  await record(claude.terminalSessionId, 'PreToolUse', { tool_name: 'AskUserQuestion' })
+
+  const rows = listedRows(store.get(sidebarAtom))
+  expect(rows.filter((row) => row.type === 'detached')).toMatchObject([
+    { id: shell.terminalSessionId, agentDot: null },
+    { id: claude.terminalSessionId, agentDot: 'question' },
+  ])
 })
 
 test('collapsing a section hides its rows and leaves their count and unread Tabs on its header, and expanding brings them back', async () => {
@@ -274,6 +308,113 @@ test("a Bench's row reads its Issue's title, then its terminal's title with Clau
   })
 })
 
+test("a Bench's second line shows the dot and the terminal's title of the Tab whose claude most needs a hand, the leftmost among equals", async () => {
+  const { db, workbenchLedger, client, store, record } = bench()
+  const runspaceId = db.transaction((tx) => workbenchLedger.createRunspace(tx, { cwd: '/work' }))
+  const front = await client.tab.open({ runspaceId, ...size })
+  const behind = await client.tab.open({ runspaceId, ...size })
+  const label = { repo: 'acme/app', number: 12, title: 'Ship it', setup: null }
+  store.set(benchLabelOfAtom, () => (id: string) => (id === runspaceId ? label : null))
+  await store.set(reloadAtom)
+  store.set(activateRunspaceAtom, runspaceId)
+  store.set(activateTerminalTabAtom, front.id)
+  await store.set(updateTabTitleAtom, front.id, '✳ Fix the flaky test')
+  await store.set(updateTabTitleAtom, behind.id, '✻ Read the tile')
+  await record(front.terminalSessionId, 'UserPromptSubmit')
+  await record(behind.terminalSessionId, 'UserPromptSubmit')
+
+  await record(behind.terminalSessionId, 'PermissionRequest', { tool_name: 'Bash' })
+  const asking = secondLineOf(store.get(sidebarAtom), runspaceId)
+  await record(behind.terminalSessionId, 'PostToolUse', { tool_name: 'Bash' })
+
+  expect(asking).toMatchObject({
+    tallies: [],
+    dot: 'permission',
+    info: '✻ Read the tile',
+    where: '#12',
+  })
+  expect(secondLineOf(store.get(sidebarAtom), runspaceId)).toMatchObject({
+    dot: 'running',
+    info: '✳ Fix the flaky test',
+  })
+})
+
+// 未観測は Backend の起こし直しでしか作れないので、順位は sidebar の入力に dot を直に渡して確かめる。
+function benchRowWith(dots: (AgentDot | null)[], activeIndex = 0): RunspaceRow | undefined {
+  const tabs = dots.map((_, i) => ({
+    id: `tab-${i}`,
+    cwd: '/work',
+    sortOrder: i,
+    terminalSessionId: `ts-${i}`,
+    pinned: false,
+  }))
+  const runspace = { id: 'rs-bench', cwd: '/work', sortOrder: 0, owned: true, tabs }
+  const sidebar = buildSidebar({
+    runspaces: [runspace],
+    activeRunspaceId: runspace.id,
+    activeTabOf: () => tabs[activeIndex] ?? null,
+    titles: Object.fromEntries(tabs.map((t, i) => [t.id, `claude ${i}`])),
+    places: {},
+    unreadOf: () => false,
+    agentDotOf: (id) => dots[tabs.findIndex((t) => t.terminalSessionId === id)] ?? null,
+    benchLabelOf: () => ({ repo: 'acme/app', number: 12, title: 'Ship it', setup: null }),
+    detached: [],
+    tileChoice: null,
+    collapsed: new Set(),
+  })
+  return rowOf(sidebar, runspace.id)
+}
+
+test.each([
+  ['question', 'error'],
+  ['permission', 'error'],
+  ['error', 'running'],
+  ['running', 'idle'],
+  ['idle', 'unobserved'],
+] as const)(
+  "a Bench's second line follows a Tab showing %s over one showing %s, on either side",
+  (over, under) => {
+    const rows = [benchRowWith([under, over]), benchRowWith([over, under])]
+
+    expect(rows.map((row) => [row?.agentDot, row?.terminalTitle])).toEqual([
+      [over, 'claude 1'],
+      [over, 'claude 0'],
+    ])
+  },
+)
+
+test("a Bench's second line follows the leftmost of Tabs whose claudes need a hand alike, even while another is active", () => {
+  const row = benchRowWith(['permission', 'question'], 1)
+
+  expect([row?.agentDot, row?.terminalTitle]).toEqual(['permission', 'claude 0'])
+})
+
+test("a Bench with no claude shows no dot and takes its terminal's title from the active Tab", () => {
+  const row = benchRowWith([null, null], 1)
+
+  expect([row?.agentDot, row?.terminalTitle]).toEqual([null, 'claude 1'])
+})
+
+test('a Bench being prepared, with no Tab yet, has only the setup and its number on its second line', async () => {
+  const { db, workbenchLedger, store } = bench()
+  const runspaceId = db.transaction((tx) => workbenchLedger.createRunspace(tx, { cwd: '/work' }))
+  const preparing = { text: 'preparing', error: false }
+  const label = { repo: 'acme/app', number: 12, title: 'Ship it', setup: preparing }
+  store.set(benchLabelOfAtom, () => (id: string) => (id === runspaceId ? label : null))
+  await store.set(reloadAtom)
+
+  expect(secondLineOf(store.get(sidebarAtom), runspaceId)).toEqual({
+    setup: preparing,
+    tallies: [],
+    dot: null,
+    info: '',
+    infoMono: false,
+    chip: null,
+    where: '#12',
+    whereMono: true,
+  })
+})
+
 test("a plain Runspace's row reads its terminal's title, or where the shell is inside the Repo while the title is a path", async () => {
   const { client, store } = bench()
   const app = ghqCheckout('acme/app')
@@ -312,6 +453,47 @@ test("a plain Runspace's row carries the branch only while its active Tab is in 
 
   expect(rowOf(sidebar, inWorktree.runspaceId)?.branch).toBe('issue-1')
   expect(rowOf(sidebar, inCheckout.runspaceId)?.branch).toBeNull()
+})
+
+test("a plain Runspace's second line starts with how many of its Tabs show each color of dot", async () => {
+  const { client, store, record } = bench()
+  const app = ghqCheckout('acme/app')
+  const { runspaceId, tab } = await client.runspace.create({ cwd: app.worktree, ...size })
+  const second = await client.tab.open({ runspaceId, cwd: app.worktree, ...size })
+  const asking = await client.tab.open({ runspaceId, cwd: app.worktree, ...size })
+  await client.tab.open({ runspaceId, cwd: app.worktree, ...size })
+  await store.set(reloadAtom)
+  await until(store, sidebarAtom, (s) => rowOf(s, runspaceId)?.branch === 'issue-1')
+
+  await record(tab.terminalSessionId, 'UserPromptSubmit')
+  await record(second.terminalSessionId, 'UserPromptSubmit')
+  await record(asking.terminalSessionId, 'PreToolUse', { tool_name: 'AskUserQuestion' })
+
+  expect(secondLineOf(store.get(sidebarAtom), runspaceId)).toMatchObject({
+    tallies: [
+      { kind: 'running', count: 2 },
+      { kind: 'questionOrPermission', count: 1 },
+    ],
+    info: 'issue-1',
+  })
+})
+
+test('a plain Runspace with no branch has a second line from when its claude starts until it ends, even while the claude waits for the next prompt', async () => {
+  const { client, store, record } = bench()
+  const app = ghqCheckout('acme/app')
+  const { runspaceId, tab } = await client.runspace.create({ cwd: app.checkout, ...size })
+  await client.tab.open({ runspaceId, cwd: app.checkout, ...size })
+  await store.set(reloadAtom)
+  await untilListed(store, 'acme/app', [runspaceId])
+  const lines = [secondLineOf(store.get(sidebarAtom), runspaceId)]
+
+  await record(tab.terminalSessionId, 'UserPromptSubmit')
+  await record(tab.terminalSessionId, 'Stop')
+  lines.push(secondLineOf(store.get(sidebarAtom), runspaceId))
+  await record(tab.terminalSessionId, 'SessionEnd', { reason: 'prompt_input_exit' })
+  lines.push(secondLineOf(store.get(sidebarAtom), runspaceId))
+
+  expect(lines).toMatchObject([null, { tallies: [{ kind: 'idle', count: 1 }], info: '' }, null])
 })
 
 test('a branch switched in a terminal that reports nothing reaches the row on a layout reload 5 seconds later', async () => {
@@ -635,6 +817,8 @@ const shell: RunspaceRow = {
   id: 'rs-1',
   isActive: false,
   unreadCount: 0,
+  agentTallies: [],
+  agentDot: null,
   repo: 'acme/app',
   bench: null,
   title: 'Read the tile',
@@ -643,8 +827,16 @@ const shell: RunspaceRow = {
   path: 'packages/ui',
   branch: null,
 }
+const withClaudes: RunspaceRow = {
+  ...shell,
+  agentTallies: [
+    { kind: 'running', count: 2 },
+    { kind: 'questionOrPermission', count: 1 },
+  ],
+}
 const benchRow: RunspaceRow = {
   ...shell,
+  agentDot: 'question',
   bench: { repo: 'acme/app', number: 12, title: 'Ship it', setup: null },
   title: 'Ship it',
 }
@@ -653,11 +845,16 @@ test.each([
   ['a plain row in its Repo', shell, 'repo', null],
   [
     'a plain row in a linked worktree',
-    { ...shell, branch: 'feature/tile' },
+    { ...withClaudes, branch: 'feature/tile' },
     'repo',
-    { info: 'feature/tile', where: '' },
+    { tallies: withClaudes.agentTallies, dot: null, info: 'feature/tile', where: '' },
   ],
-  ['a Bench', benchRow, 'repo', { info: 'Read the tile', where: '#12', chip: null }],
+  [
+    'a Bench',
+    benchRow,
+    'repo',
+    { tallies: [], dot: 'question', info: 'Read the tile', where: '#12', chip: null },
+  ],
   [
     'a Bench being prepared',
     { ...benchRow, bench: { ...benchRow.bench!, setup: { text: 'preparing', error: false } } },
@@ -666,9 +863,9 @@ test.each([
   ],
   [
     'a row in no Repo',
-    { ...shell, repo: null },
+    { ...withClaudes, repo: null },
     'outside',
-    { info: '', where: 'packages/ui', whereMono: true },
+    { tallies: withClaudes.agentTallies, info: '', where: 'packages/ui', whereMono: true },
   ],
   [
     'a row in no Repo titled by its path',
@@ -676,12 +873,23 @@ test.each([
     'outside',
     null,
   ],
-  ['a Pinned row', shell, 'pinned', { chip: 'acme/app', where: 'app', whereMono: false }],
+  [
+    'a Pinned row',
+    withClaudes,
+    'pinned',
+    {
+      tallies: withClaudes.agentTallies,
+      dot: null,
+      chip: 'acme/app',
+      where: 'app',
+      whereMono: false,
+    },
+  ],
   [
     'a Pinned Bench',
     benchRow,
     'pinned',
-    { info: 'Read the tile', chip: 'acme/app', where: 'app#12' },
+    { tallies: [], dot: 'question', info: 'Read the tile', chip: 'acme/app', where: 'app#12' },
   ],
 ] as const)('the second line of %s', (_, row, place, meta) => {
   if (meta === null) expect(rowMetaOf(row, place)).toBeNull()

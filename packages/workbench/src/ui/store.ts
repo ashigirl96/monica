@@ -320,6 +320,7 @@ export const sidebarAtom = atom((get): Sidebar =>
     titles: get(tabTitlesAtom),
     places: get(placesAtom),
     unreadOf: get(unreadOfTerminalSessionAtom),
+    agentDotOf: get(agentDotOfTerminalSessionAtom),
     benchLabelOf: get(benchLabelOfAtom) ?? (() => null),
     detached: get(detachedTerminalSessionsAtom),
     tileChoice: get(tileChoiceAtom),

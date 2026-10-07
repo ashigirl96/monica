@@ -2,7 +2,8 @@ import { ChevronRightIcon, cn, FolderIcon, PinIcon, useDragReorder } from '@tani
 import { useAtomValue, useSetAtom } from 'jotai'
 import { type MouseEvent, type RefObject, useLayoutEffect, useRef, useState } from 'react'
 
-import { UNREAD_LABEL_STYLE } from './agent-dot.ts'
+import { AgentDotMark, AgentTallyMark } from './agent-dot-mark.tsx'
+import { AGENT_DOT_STYLE, agentTallyLabel, UNREAD_LABEL_STYLE } from './agent-dot.ts'
 import { JumpHint } from './jump-hint.tsx'
 import { jumpHintTargetsAtom } from './jump-hints.ts'
 import { metaHeldAtom } from './meta-hold.ts'
@@ -38,12 +39,12 @@ const SECTION_LABELS: Record<SidebarSection['kind'], string> = {
   detached: 'Detached',
 }
 
-// Tile の色は dot の緑・琥珀・赤と紛れない色から、repo ごとに決まった 1 つを選ぶ。
+// Tile の色は dot の緑・琥珀・赤・灰と紛れない色から、repo ごとに決まった 1 つを選ぶ。
 const TILE_HUES = [
   { bg: 'rgba(56,189,248,.2)', fg: '#7dd3fc' },
   { bg: 'rgba(167,139,250,.22)', fg: '#c4b5fd' },
   { bg: 'rgba(244,114,182,.2)', fg: '#f9a8d4' },
-  { bg: 'rgba(148,163,184,.22)', fg: '#cbd5e1' },
+  { bg: 'rgba(192,132,252,.2)', fg: '#d8b4fe' },
   { bg: 'rgba(99,102,241,.28)', fg: '#a5b4fc' },
   { bg: 'rgba(34,211,238,.18)', fg: '#67e8f9' },
   { bg: 'rgba(232,121,249,.2)', fg: '#f0abfc' },
@@ -58,6 +59,13 @@ function hueOf(repo: string) {
 
 function withUnread(label: string, count: number): string {
   return count > 0 ? `${label}、未読の Tab ${count}` : label
+}
+
+function rowLabel(title: string, meta: RowMeta | null, unreadCount: number): string {
+  const agent = meta
+    ? [...meta.tallies.map(agentTallyLabel), ...(meta.dot ? [AGENT_DOT_STYLE[meta.dot].label] : [])]
+    : []
+  return withUnread([title, ...agent].join('、'), unreadCount)
 }
 
 // WKWebView は trackpad の tap を up、down の順で届け、click は 1 つ前の tap の down と組んで共通の祖先に飛ぶので、押した要素に届く mousedown で動かす。
@@ -173,7 +181,7 @@ function TileName({
 
 function RowMetaLine({ meta }: { meta: RowMeta }) {
   return (
-    <span className="flex h-[15px] min-w-0 items-center gap-1.5 text-[11px] text-white/50">
+    <span className="flex h-[15px] min-w-0 items-center gap-1.5 overflow-hidden text-[11px] text-white/50">
       {meta.setup && (
         <span
           className={cn(
@@ -184,6 +192,10 @@ function RowMetaLine({ meta }: { meta: RowMeta }) {
           {meta.setup.text}
         </span>
       )}
+      {meta.tallies.map((tally) => (
+        <AgentTallyMark key={tally.kind} tally={tally} />
+      ))}
+      <AgentDotMark dot={meta.dot} />
       <span className={cn('min-w-0 flex-1 truncate', meta.infoMono && 'font-mono text-[10.5px]')}>
         {meta.info}
       </span>
@@ -197,7 +209,7 @@ function RowMetaLine({ meta }: { meta: RowMeta }) {
       {meta.where && (
         <span
           className={cn(
-            'max-w-[60%] shrink-0 truncate text-white/45',
+            'max-w-[60%] min-w-0 truncate text-white/45',
             meta.whereMono && 'font-mono text-[10.5px]',
           )}
         >
@@ -241,7 +253,7 @@ function RunspaceItem({
         if (draggedTabId) void moveTab(draggedTabId, row.id)
       }}
       data-runspace-id={row.id}
-      aria-label={withUnread(row.title, row.unreadCount)}
+      aria-label={rowLabel(row.title, meta, row.unreadCount)}
       className={cn(
         'flex w-full cursor-pointer flex-col items-stretch gap-[5px] rounded-lg px-2 py-[7px] text-left',
         'transition-colors duration-100',
@@ -288,8 +300,11 @@ function DetachedItem({ row }: { row: DetachedRow }) {
         </span>
         <UnreadCount count={row.unreadCount} className="mt-px" />
       </div>
-      <span className="block truncate font-mono text-[10px] text-muted-foreground/60">
-        {row.id}
+      <span className="flex min-w-0 items-center gap-1.5">
+        <AgentDotMark dot={row.agentDot} />
+        <span className="min-w-0 truncate font-mono text-[10px] text-muted-foreground/60">
+          {row.id}
+        </span>
       </span>
       <div className="absolute inset-y-0 right-1 flex items-center gap-0.5 opacity-0 transition-opacity group-focus-within:opacity-100 group-hover:opacity-100">
         <button
