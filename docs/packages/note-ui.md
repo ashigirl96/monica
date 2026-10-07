@@ -104,7 +104,8 @@ monica の `pages/essays` を移したもの（`pages/essays/`）。
 - 編集（`editor.tsx`）は NotesShell に載せる。サイドバー（`sidebar.tsx`）は `writing N` と `finished N` のタブと、そのタブの Essay の一覧（title、無題なら preview、それも無ければ `Untitled`。`notes/summary.ts` の `summaryTitle`）。タブは開いた Essay の status に合わせ、⌥H / ⌥L で移す。合わせるのは開いた時と status が変わった時だけで、⌥H / ⌥L で移したタブは引き戻さない。
 - 本文の上に title の入力欄（空なら placeholder の `Untitled`）、status の StatusChip、日付、保存の状態を置く。title は本文と同じ autosave で保存する。title で Enter・↓・Tab・⌃N を押すと本文の先頭へ、本文の先頭で ↑ を押すと title へ移る。
 - 状態は StatusChip のクリックか ⌃W で切り替える。次の status は画面が今の status から導き（`support.ts` の `nextEssayStatus`）、`essay.setStatus` に値で渡す。連打は直列にし、2 回目は 1 回目の結果から導く。
-- 削除と状態の切り替えは、先に flush して未保存が残れば中止する（`pages/essays/actions.ts`）。⌥Z で戻せるのは Backend に届いた本文までで、状態の切り替えで進んだ版を基準版にすると、競合で残った古い本文が次の保存で外の変更を上書きするため。一覧の右クリックは monica どおり flush しない。
+- 削除と状態の切り替えは、先に flush して未保存が残れば中止する（`pages/essays/actions.ts`）。⌥Z で戻せるのは Backend に届いた本文までで、状態の切り替えで進んだ版を基準版にすると、競合で残った古い本文が次の保存で外の変更を上書きするため。一覧の右クリックでも、削除は同じく flush してから消す。状態の切り替えは monica どおり flush しない。
+- 消した Essay は、autosave の予約（`discard`）と本文の cache（`useForgetNote`）を捨てる。予約が残ると保存が NOT_FOUND で再試行を繰り返し、cache が残ると履歴で戻ったときに消した Essay を cache から開いて、保存だけが失敗し続ける。消す前に flush して未保存が無いのを確かめてあるので、予約を捨てても編集は失われない。
 - 状態を切り替えた版を基準版にする。status だけが変わった版なので、手元の本文はその上に積んでよい。往復の間に本文か title を書いていたら、返った Note の status だけを取り、本文と title は手元のまま残す（monica は title も返った値で上書きした）。往復の間に別の Note へ移っていたら、返った Note を画面に採用しない。
 - 削除は、往復を待つ間の打鍵を保存に予約しない。中止したときは、まだ同じ Essay を開いていれば予約を戻す。別の Note へ移った後に戻すと、その Note の本文を消そうとした Essay に保存してしまう（monica にあった不具合）。消せたときも、往復の間に別の Note へ移っていれば送り先へは移らない。
 - ⌥N と ⌥Z は、往復の間に別の画面へ移っていても、作った Essay と戻した Essay を開く（monica どおり）。開くことがその操作の目的で、画面を移っても autosave は router の上で保存を続けるので、本文は失われない。

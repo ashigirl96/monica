@@ -4,10 +4,32 @@ import { nextEssayStatus } from './support.ts'
 /** 保存を予約する経路（本文と title の変更）が読む、開いている Note。null の間は予約しない。 */
 export type Gate = { current: Note | null }
 
+type Saving = {
+  flush: () => Promise<void>
+  hasUnsaved: (id: string) => boolean
+}
+
 /**
- * 開いている Essay を消す。消した Essay を返し、消さなかったら null を返す。
- * ⌥Z で戻せるのは Backend に届いた本文までなので、flush しても未保存が残れば消さない。
+ * Essay を消し、消せたかを返す。⌥Z で戻せるのは Backend に届いた本文までなので、
+ * flush しても未保存が残れば消さない。
  */
+export async function removeEssay({
+  id,
+  flush,
+  hasUnsaved,
+  remove,
+}: Saving & { id: string; remove: (id: string) => Promise<void> }): Promise<boolean> {
+  await flush()
+  if (hasUnsaved(id)) return false
+  try {
+    await remove(id)
+  } catch {
+    return false
+  }
+  return true
+}
+
+/** 開いている Essay を `removeEssay` で消す。消した Essay を返し、消さなかったら null を返す。 */
 export async function removeOpenEssay({
   gate,
   isOpen,
@@ -15,11 +37,9 @@ export async function removeOpenEssay({
   hasUnsaved,
   remove,
   reschedule,
-}: {
+}: Saving & {
   gate: Gate
   isOpen: (id: string) => boolean
-  flush: () => Promise<void>
-  hasUnsaved: (id: string) => boolean
   remove: (id: string) => Promise<void>
   reschedule: (note: Note) => void
 }): Promise<Note | null> {
@@ -27,24 +47,13 @@ export async function removeOpenEssay({
   if (target === null) return null
   // 往復の間に打った分を予約させない。予約すると flush の成否に入らず、消した後に保存が 404 を繰り返す。
   gate.current = null
-  const keep = () => {
-    // 別の Note へ移った後に戻すと、その Note の本文を target に保存してしまう。
-    if (gate.current !== null || !isOpen(target.id)) return
+  if (await removeEssay({ id: target.id, flush, hasUnsaved, remove })) return target
+  // 別の Note へ移った後に戻すと、その Note の本文を target に保存してしまう。
+  if (gate.current === null && isOpen(target.id)) {
     gate.current = target
     reschedule(target)
   }
-  await flush()
-  if (hasUnsaved(target.id)) {
-    keep()
-    return null
-  }
-  try {
-    await remove(target.id)
-  } catch {
-    keep()
-    return null
-  }
-  return target
+  return null
 }
 
 /**
@@ -60,11 +69,9 @@ export async function setOpenEssayStatus({
   setBase,
   adopt,
   patchStatus,
-}: {
+}: Saving & {
   targetId: string
   gate: Gate
-  flush: () => Promise<void>
-  hasUnsaved: (id: string) => boolean
   setStatus: (id: string, status: EssayStatus) => Promise<Note>
   setBase: (id: string, updatedAt: Date) => void
   adopt: (note: Note) => void

@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test'
 
 import type { EssayStatus, Note } from '../../../contract.ts'
-import { type Gate, removeOpenEssay, setOpenEssayStatus } from './actions.ts'
+import { type Gate, removeEssay, removeOpenEssay, setOpenEssayStatus } from './actions.ts'
 
 const before = new Date('2026-10-07T10:00:00.000Z')
 const after = new Date('2026-10-07T10:00:01.000Z')
@@ -48,6 +48,26 @@ function removal(gate: Gate, overrides: Partial<Parameters<typeof removeOpenEssa
   })
   return { run, calls }
 }
+
+describe('removeEssay', () => {
+  test('removes the Essay once its pending edit is saved, and keeps it while an edit is left unsaved', async () => {
+    const removed: string[] = []
+    const remove = async (id: string) => {
+      removed.push(id)
+    }
+    const save = slowSave()
+    const saved = removeEssay({ id: 'note-1', ...save, remove })
+    await Bun.sleep(0)
+    expect(removed).toEqual([])
+    save.settle()
+
+    expect(await saved).toBe(true)
+    expect(
+      await removeEssay({ id: 'note-2', flush: async () => {}, hasUnsaved: () => true, remove }),
+    ).toBe(false)
+    expect(removed).toEqual(['note-1'])
+  })
+})
 
 describe('removeOpenEssay', () => {
   test('flushes before removing, and stops saving the Essay while waiting', async () => {

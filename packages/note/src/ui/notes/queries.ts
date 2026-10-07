@@ -39,6 +39,15 @@ export function useSeedNote() {
   )
 }
 
+/** 消した Note の本文の cache を捨てる。残すと、履歴で戻ったときに消した Note を cache から開く。 */
+export function useForgetNote() {
+  const queryClient = useQueryClient()
+  return useCallback(
+    (id: string) => queryClient.removeQueries({ queryKey: queryKeys.note(id), exact: true }),
+    [queryClient],
+  )
+}
+
 /** Essay の一覧の cache を手で直す。一覧の画面と編集の画面のサイドバーが共有する。 */
 export function useEssaysCache() {
   const queryClient = useQueryClient()

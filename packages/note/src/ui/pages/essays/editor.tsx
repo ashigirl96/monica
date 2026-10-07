@@ -10,7 +10,13 @@ import { cycleSelect, persistableContent, titleFieldKeyDown } from '../../notes/
 import { NoteBlockEditor } from '../../notes/note-block-editor.tsx'
 import { useServerDoc } from '../../notes/note-sync.ts'
 import { NotesShell } from '../../notes/notes-shell.tsx'
-import { useEssaysCache, useEssaysQuery, useNoteQuery, useSeedNote } from '../../notes/queries.ts'
+import {
+  useEssaysCache,
+  useEssaysQuery,
+  useForgetNote,
+  useNoteQuery,
+  useSeedNote,
+} from '../../notes/queries.ts'
 import { SaveStatus } from '../../notes/save-status.tsx'
 import { noteLabel } from '../../notes/summary.ts'
 import { navigate } from '../../router.ts'
@@ -58,6 +64,7 @@ export function EssayEditorPage({ id }: { id: string }) {
   const { data: essays = null } = useEssaysQuery()
   const { patchEssays, invalidateEssays } = useEssaysCache()
   const seedNote = useSeedNote()
+  const forgetNote = useForgetNote()
   const editorHandleRef = useRef<BlockEditorHandle | null>(null)
   const titleRef = useRef<HTMLInputElement>(null)
   // ⌥N で作った Essay は本文ではなく title から書き始める。title を離れたら手放す
@@ -158,6 +165,7 @@ export function EssayEditorPage({ id }: { id: string }) {
     if (removed === null) return
     // 消した Essay への保存の再試行が NOT_FOUND を繰り返さないよう止める
     discard(removed.id)
+    forgetNote(removed.id)
     pushDeletedEssay(removed.id)
     patchEssays((list) => dropEssay(list, removed.id))
     if (openIdRef.current !== removed.id) return
@@ -167,7 +175,7 @@ export function EssayEditorPage({ id }: { id: string }) {
     navigate(next !== undefined && next !== removed.id ? essayPath(next) : ESSAYS_PATH, {
       replace: true,
     })
-  }, [client, flush, hasUnsaved, discard, scheduleSave, cycleIds, patchEssays])
+  }, [client, flush, hasUnsaved, discard, forgetNote, scheduleSave, cycleIds, patchEssays])
 
   const undoDelete = useCallback(async () => {
     const restored = await restoreLastDeletedEssay((essayId) => client.restore({ id: essayId }))
