@@ -10,13 +10,7 @@ spec または ticket でユーザーが記述した作業を実装する。tick
 
 型チェックと単一テストファイルの実行は定期的に、テストスイート全体の実行は最後に 1 回行う。
 
-完了したら `mattpocock-skills:code-review` で、Standards と Spec の 2 軸のレビューを受ける。この時点の変更はまだコミットしていないので、diff は `git diff $(git merge-base origin/main HEAD)` で渡す。worktree のローカルの `main` は古いことがあり、他の PR の変更が diff に混ざるため。新しいファイルはこの diff に出ないので、先に `git add -N` で載せる。Spec 軸には、受け入れ条件ごとに、それを破る変異を入れるとテストが落ちるかも確かめさせる。競合や量で決まる経路は、テストが通っていてもその経路を通っていないことがあるため。
-
-2 つの reviewer は同じ worktree で並行に動き、Spec 軸は変異を入れては戻すので、次の段取りで渡す。
-
-- diff は scratchpad の file に保存して両方に渡し、Standards 軸にはその file から読ませる。worktree を読むと、変異が入った途中の状態を見ることがある。
-- Spec 軸には、変異の前に対象の file を scratchpad に `cp` で控えさせ、戻すのもその控えから行わせる。`git checkout`・`git restore`・`git stash` は、コミットしていない変更ごと消す。
-- 終わったら、Spec 軸に今の diff と保存した diff を突き合わせ、差が無いことを報告させる。
+完了したら `mattpocock-skills:code-review` で、Standards と Spec の 2 軸のレビューを受ける。この時点の変更はまだコミットしていないので、diff は `git diff $(git merge-base origin/main HEAD)` で渡す。worktree のローカルの `main` は古いことがあり、他の PR の変更が diff に混ざるため。新しいファイルはこの diff に出ないので、先に `git add -N` で載せる。Spec 軸には、受け入れ条件ごとに、それを破る変異を入れるとテストが落ちるかも確かめさせる。競合や量で決まる経路は、テストが通っていてもその経路を通っていないことがあるため。変異は、merge-base から `git worktree add --detach` で作った一時の worktree に、`git diff <merge-base> --binary` を `git apply` して `bun install` してから入れさせ、終わったら worktree を消させる。同じ作業ツリーを Standards 軸の agent が並行して読むため。
 
 作業を /create-pr でコミットし、PR を出す。
 

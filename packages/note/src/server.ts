@@ -4,6 +4,7 @@ import { contract } from './contract.ts'
 import { readLinkMetadata } from './link-metadata.ts'
 import { type Db, internals, type NoteLedger } from './note.ts'
 import { createEssay, createRepoNote, dailyDates, openDaily, openScratch } from './open.ts'
+import { noteBlock, resolveNoteMention, searchNoteMentions } from './reference.ts'
 import { removeNote, restoreNote } from './remove.ts'
 import { toNote, undeletedNote } from './row.ts'
 import { saveNote, setEssayStatus } from './save.ts'
@@ -34,6 +35,19 @@ export const router = os.router({
   repoNote: {
     create: os.repoNote.create.handler(({ context, input }) =>
       createRepoNote(context.db, input.repo),
+    ),
+  },
+  noteMention: {
+    search: os.noteMention.search.handler(({ context, input }) =>
+      searchNoteMentions(context.db, input.q),
+    ),
+    resolve: os.noteMention.resolve.handler(({ context, input }) =>
+      resolveNoteMention(context.db, input.id),
+    ),
+  },
+  block: {
+    get: os.block.get.handler(({ context, input }) =>
+      noteBlock(context.db, input.id, input.blockId),
     ),
   },
   linkMetadata: os.linkMetadata.handler(({ context, input }) =>
