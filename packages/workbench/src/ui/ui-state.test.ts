@@ -9,6 +9,7 @@ import {
   activateTerminalTabAtom,
   activeRunspaceAtom,
   activeTerminalTabAtom,
+  pickRailAtom,
   reloadAtom,
   sidebarAtom,
   toggleSectionAtom,
@@ -102,6 +103,28 @@ test('the active Runspace and Tab, the sidebar, and the UI zoom come back after 
     sidebarWidth: 280,
     uiZoom: 1.1,
   })
+})
+
+test('a number brings back the Runspace that was active at a restart, even after visiting another rail', async () => {
+  const { client } = setup()
+  const app = ghqCheckout('acme/app')
+  const lib = ghqCheckout('acme/lib')
+  await client.runspace.create({ cwd: app.checkout, ...size })
+  const restored = await client.runspace.create({ cwd: app.checkout, ...size })
+  const inLib = await client.runspace.create({ cwd: lib.checkout, ...size })
+  await saveFrom(client, (store) => store.set(activateRunspaceAtom, restored.runspaceId))
+  const pickAfterRestart = async (...numbers: number[]) => {
+    const store = workbenchStore(client)
+    await store.set(reloadAtom)
+    await until(store, sidebarAtom, (s) => s.railKeys[inLib.runspaceId] === 'acme/lib')
+    return numbers.map((n) => {
+      store.set(pickRailAtom, n)
+      return store.get(activeRunspaceAtom)?.id
+    })
+  }
+
+  expect(await pickAfterRestart(1)).toEqual([restored.runspaceId])
+  expect(await pickAfterRestart(2, 1)).toEqual([inLib.runspaceId, restored.runspaceId])
 })
 
 test('the selected rail and the collapsed sections come back after a restart', async () => {

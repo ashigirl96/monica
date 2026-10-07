@@ -3,10 +3,12 @@ import { useAtomValue, useSetAtom, useStore } from 'jotai'
 import { lazy, Suspense, useEffect } from 'react'
 
 import { WorkbenchHeader } from './header.tsx'
+import { followMetaHold } from './meta-hold.ts'
 import { ResizeHandle } from './resize-handle.tsx'
 import type { BenchLabelOf } from './sidebar-model.ts'
-import { WorkbenchSidebar } from './sidebar.tsx'
+import { RailHeading, WorkbenchSidebar } from './sidebar.tsx'
 import {
+  appendRunspacesJoiningRail,
   benchLabelOfAtom,
   lastTabClosedAtom,
   reloadAgentSessionsAtom,
@@ -71,6 +73,8 @@ export function Workbench({
   useEffect(() => persistUiState(store), [store])
   useEffect(() => followWindowFocus(store), [store])
   useEffect(() => markSeenWhileShown(store), [store])
+  useEffect(() => appendRunspacesJoiningRail(store), [store])
+  useEffect(() => followMetaHold(store), [store])
   const setLastTabClosed = useSetAtom(lastTabClosedAtom)
   useEffect(
     () => setLastTabClosed(() => onLastTabClosed ?? null),
@@ -96,19 +100,20 @@ export function Workbench({
       >
         <div className="flex h-full flex-col" style={{ minWidth: sidebarWidth }}>
           <div
-            className="flex flex-shrink-0 items-center"
+            className="flex flex-shrink-0 items-center gap-2.5 pr-2"
             style={{
               height: TRAFFIC_LIGHT_ZONE_HEIGHT,
               paddingLeft: TRAFFIC_LIGHT_ZONE_WIDTH - 8,
             }}
             data-tauri-drag-region
           >
-            <div className="flex items-center gap-1.5 rounded-md bg-white/[0.08] px-2 py-0.5">
+            <div className="flex shrink-0 items-center gap-1.5 rounded-md bg-white/[0.08] px-2 py-0.5">
               <PromptIcon size={12} strokeWidth={2} />
               <span className="text-[10px] font-semibold tracking-[0.08em] text-muted-foreground uppercase">
                 Workbench
               </span>
             </div>
+            <RailHeading />
           </div>
           <WorkbenchSidebar />
         </div>
