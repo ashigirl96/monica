@@ -51,7 +51,7 @@ _Avoid_: DisplayStatus, status, Task の状態（Task 自身の状態は open / 
 _Avoid_: Work Bench, terminal view
 
 **Runspace**:
-Workbench のサイドバーの 1 項目。新しい Tab が開く cwd を共有する Tab の束。環境変数は持たない。Bench 以外は常に Tab を 1 つ以上持ち、最後の Tab を閉じるか外へ移すと消える。
+Workbench のサイドバーの 1 項目。新しい Tab が開く cwd を共有する Tab の束。環境変数は持たない。Bench 以外は常に Tab を 1 つ以上持ち、最後の Tab を閉じるか外へ移すと消える。一番左の Tab の cwd が Repo の checkout か worktree の中にあれば、その Repo を Runspace の Repo と呼ぶ（Bench は Task の Repo）。どの Repo にも属さない Runspace は Repo の外にある。
 _Avoid_: workspace
 
 **Tab**:
@@ -83,6 +83,10 @@ _Avoid_: Tab の title（shell や claude 以外の program も出す、Tab の�
 **通知**:
 Agent Session がユーザー待ちに入ったことを知らせる macOS の通知。質問とエラーはその理由の待ちに入るたびに出し、許可は許可を求められるたびに出し（許可待ちの間に次の許可を求められても出す）、手空きは turn が終わった時だけ出す。claude の起動や resume の直後の手空きでは出さない。Task に属する Agent Session は Task の Issue の参照と title で、それ以外は agent の cwd で呼ぶ。本文は待ちの理由に Agent Session の title を添え、title が無ければ理由だけにする。desktop が動いている間だけ出し、待ちが解けても取り下げない。
 _Avoid_: 待ち通知, alert
+
+**未読**:
+通知を出した Agent Session の待ちを、私がまだ見ていないこと。見たとは、desktop の窓が前面にあり、Workbench がその Agent Session の Tab を表示したこと。見るか、待ちが解ける（動作中か終了になる）と未読でなくなる。同じ待ちの間に通知が何度出ても、1 つの Agent Session の未読は 1 つと数える。
+_Avoid_: 未観測（Backend の不在の語）, unseen, 未確認
 
 ### Job
 
