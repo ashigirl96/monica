@@ -1,4 +1,4 @@
-import { childrenOf, isNode } from './node.ts'
+import { allText, childrenOf, isNode } from './node.ts'
 
 const PREVIEW_MAX_CHARS = 200
 const graphemes = new Intl.Segmenter()
@@ -74,10 +74,4 @@ function inlineText(node: unknown, out: string): string {
   if (node.type === 'text') return typeof node.text === 'string' ? out + node.text : out
   if (typeof node.type === 'string' && ATOM_INLINES.has(node.type)) return out
   return out + allText(node)
-}
-
-function allText(node: unknown): string {
-  if (!isNode(node)) return ''
-  const own = typeof node.text === 'string' ? node.text : ''
-  return own + childrenOf(node).map(allText).join('')
 }

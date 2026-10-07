@@ -1,11 +1,5 @@
 import { DOMSerializer, Fragment, Node as PMNode, Slice } from 'prosemirror-model'
-import {
-  type EditorState,
-  Plugin,
-  PluginKey,
-  TextSelection,
-  type Transaction,
-} from 'prosemirror-state'
+import { type EditorState, Plugin, TextSelection, type Transaction } from 'prosemirror-state'
 import type { EditorView } from 'prosemirror-view'
 
 import { deleteRange } from './commands.ts'
@@ -37,8 +31,8 @@ export function serializeBlocksPayload(
   return JSON.stringify(payload)
 }
 
-// Rust `to_markdown` と同じ GFM 形にする。この plain text は先読みミス時の代替なので、
-// ここだけ表の形が違うと外部へ出したあと貼り戻したときに表に戻らない。
+// `@tania/note/body` の toMarkdown と同じ GFM 形にする。この plain text は renderMarkdown を
+// 渡さないときの代わりで、ここだけ表の形が違うと外部へ出したあと貼り戻したときに表に戻らない。
 function tableToGfm(table: PMNode): string {
   const lines: string[] = []
   table.forEach((row, _offset, index) => {
@@ -145,34 +139,12 @@ function selectedContainers(state: EditorState): PMNode[] {
     .filter((node): node is PMNode => !!node)
 }
 
-/** 選択範囲 → to_markdown が食える doc JSON。block 選択は container 群を単一 blockGroup に包む。 */
+/** block 選択の container 群を単一 blockGroup に包んだ doc JSON。 */
 function docJsonFromContainers(containers: readonly PMNode[]): unknown {
   return {
     type: 'doc',
     content: [{ type: 'blockGroup', content: containers.map((node) => node.toJSON()) }],
   }
-}
-
-/**
- * 現在の選択範囲を to_markdown が食える doc JSON にする。block 選択は container 群を、
- * text 選択は slice の fragment をそのまま doc に載せる（to_markdown はどちらの形にも寛容）。
- */
-function selectionJson(state: EditorState): unknown {
-  const containers = selectedContainers(state)
-  if (containers.length > 0) return docJsonFromContainers(containers)
-  const sel = state.selection
-  if (!sel.empty) return { type: 'doc', content: sel.content().content.toJSON() ?? [] }
-  return null
-}
-
-/**
- * 選択範囲を doc JSON + signature に変換する（prefetch と copy で共有する単一経路）。
- * signature が一致することがキャッシュヒットの前提。copy 側は必ず view.state から再計算する
- * （transformCopied で id を潰した slice を使わない）ので prefetch と同一署名になる。
- */
-function selectionDocJson(state: EditorState): { json: unknown; signature: string } | null {
-  const json = selectionJson(state)
-  return json ? { json, signature: JSON.stringify(json) } : null
 }
 
 /** 単一トークンの http(s) URL の paste なら URL を返す（note-mention-menu と共有） */
@@ -215,8 +187,8 @@ function writeBlocksToClipboard(
   event: ClipboardEvent,
   containers: readonly PMNode[],
   sourceNoteId?: string,
-  // 先読み markdown がヒットしていれば text/plain に載せる（ミス時はインデント plain text に縮退）。
-  // BLOCKS_MIME / html は常に同期で共存させ、paste-and-sync 経路を壊さない。
+  // markdown があれば text/plain に載せる（renderMarkdown が無ければインデント plain text）。
+  // BLOCKS_MIME / html は常に共存させ、paste-and-sync 経路を壊さない。
   markdownPlain?: string,
 ): void {
   if (!event.clipboardData) return
@@ -226,11 +198,11 @@ function writeBlocksToClipboard(
   event.clipboardData.setData('text/plain', markdownPlain ?? blocksToPlainText(containers))
 }
 
-/** 選択範囲の doc JSON を markdown へ投影する（Rust `to_markdown` への口）。失敗しない前提。 */
-export type RenderMarkdown = (docJson: unknown) => Promise<string>
+/** 選択範囲の doc JSON を markdown へ書き出す。copy の同期 handler から呼ぶので同期で返す。 */
+export type RenderMarkdown = (docJson: unknown) => string
 
-/** markdown text を doc JSON へ解釈する（Rust `from_markdown` への口）。 */
-export type ParseMarkdown = (markdown: string) => Promise<unknown>
+/** markdown text を doc JSON へ読む。 */
+export type ParseMarkdown = (markdown: string) => unknown
 
 export type ClipboardOptions = {
   /** copy 時に payload へ載せる現在ノートの id（paste-and-sync のミラー参照元）。 */
@@ -243,26 +215,8 @@ export type ClipboardOptions = {
   parseMarkdown?: ParseMarkdown
 }
 
-/**
- * paste の適用位置。`from`〜`to` が非空ならそこを置換し、`blockIds` は paste 時の block 選択。
- * async な markdown paste では paste 時のこの値を保持して適用するため、選択を直接見ない。
- */
-type PasteTarget = { from: number; to: number; blockIds: readonly string[] }
-
-function pasteTargetOf(state: EditorState): PasteTarget {
-  return {
-    from: state.selection.from,
-    to: state.selection.to,
-    blockIds: blockSelectionKey.getState(state)?.selectedIds ?? [],
-  }
-}
-
-/** tr の選択を target の範囲に戻す。位置は doc 内へ丸める（stale な保持位置の防衛）。 */
-function selectTarget(tr: Transaction, target: PasteTarget): void {
-  const limit = tr.doc.content.size
-  const from = Math.min(Math.max(target.from, 0), limit)
-  const to = Math.min(Math.max(target.to, from), limit)
-  tr.setSelection(TextSelection.between(tr.doc.resolve(from), tr.doc.resolve(to)))
+function selectedBlockIds(state: EditorState): readonly string[] {
+  return blockSelectionKey.getState(state)?.selectedIds ?? []
 }
 
 /**
@@ -273,19 +227,18 @@ function selectTarget(tr: Transaction, target: PasteTarget): void {
 function insertBlocksTr(
   state: EditorState,
   blocks: readonly PMNode[],
-  target: PasteTarget,
 ): { tr: Transaction; start: number } | null {
   const tr = state.tr
+  const blockIds = selectedBlockIds(state)
   let start: number
-  if (target.blockIds.length > 0) {
-    const range = rangeFromIds(state, target.blockIds)
+  if (blockIds.length > 0) {
+    const range = rangeFromIds(state, blockIds)
     if (!range) return null
     start = rangePositions(range).end
     tr.insert(start, [...blocks])
   } else {
     // 非空の text 選択は通常の paste と同じく置換対象。残すと選択されたテキストが
     // 消えないまま block が後ろに増える。
-    selectTarget(tr, target)
     if (!tr.selection.empty) tr.deleteSelection()
     const ctx = getBlockContext(tr.selection.$from)
     if (!ctx) return null
@@ -320,67 +273,37 @@ export function containersFromDocJson(docJson: unknown): PMNode[] | null {
   }
 }
 
-function insertPlainText(view: EditorView, text: string, target: PasteTarget): void {
-  const tr = view.state.tr
-  selectTarget(tr, target)
-  view.dispatch(tr.insertText(text).scrollIntoView())
+function insertPlainText(view: EditorView, text: string): void {
+  view.dispatch(view.state.tr.insertText(text).scrollIntoView())
 }
 
 // parse 済み markdown の挿入。単一の paragraph（子なし）だけは block を増やさず
 // カーソル位置へ inline 挿入する（文中への語句 paste が block を割らないように）。
-function applyParsedMarkdown(
-  view: EditorView,
-  docJson: unknown,
-  rawText: string,
-  target: PasteTarget,
-): void {
+function applyParsedMarkdown(view: EditorView, docJson: unknown, rawText: string): void {
   const containers = containersFromDocJson(docJson)
-  if (!containers) return insertPlainText(view, rawText, target)
+  if (!containers) return insertPlainText(view, rawText)
   // markdown として空（空白のみ・改行のみ）でも paste は落とさず素のテキストで入れる
-  if (containers.length === 0) return insertPlainText(view, rawText, target)
+  if (containers.length === 0) return insertPlainText(view, rawText)
   const blocks = containers.map(preparePasted)
   const only = blocks.length === 1 ? blocks[0] : undefined
   // block 選択中は inline 挿入だと選択範囲の中へ潜り込む。block 経路で選択の後ろへ入れる
   if (
-    target.blockIds.length === 0 &&
+    selectedBlockIds(view.state).length === 0 &&
     only &&
     only.childCount === 1 &&
     only.child(0).type === nodes.paragraph
   ) {
-    const tr = view.state.tr
-    selectTarget(tr, target)
     const inline = new Slice(only.child(0).content, 0, 0)
-    view.dispatch(tr.replaceSelection(inline).scrollIntoView())
+    view.dispatch(view.state.tr.replaceSelection(inline).scrollIntoView())
     return
   }
-  const inserted = insertBlocksTr(view.state, blocks, target)
-  if (!inserted) return insertPlainText(view, rawText, target)
-  // 待機中の paste の貼り先を、今入れた最後の block の直後へ寄せる。位置の mapping だけでは
-  // 貼り先 block が変わらないため、後発の paste が今回の挿入より前へ潜り込む。
-  // blocks は非空（上の early return）かつ preparePasted → reissueIds 済みなので id は必ずある。
-  const anchor: ClipboardMeta = {
-    type: 'anchor',
-    afterBlockId: blocks[blocks.length - 1]!.attrs.id as string,
-  }
-  view.dispatch(inserted.tr.setMeta(clipboardKey, anchor).scrollIntoView())
+  const inserted = insertBlocksTr(view.state, blocks)
+  if (!inserted) return insertPlainText(view, rawText)
+  view.dispatch(inserted.tr.scrollIntoView())
 }
 
-/** async parse を待っている paste。id ごとに適用位置を plugin state 側で mapping 追従させる。 */
-let nextPasteId = 0
-
-/**
- * view ごとの適用キュー。応答順に適用すると、変換の速い後発 paste が先に着地して
- * 貼り順が入れ替わる（先発の貼り先はその挿入の後ろへ mapping される）。変換要求自体は
- * 待たずに投げ、挿入だけを paste を握った順に直列化する。
- */
-const pasteChains = new WeakMap<EditorView, Promise<void>>()
-
 // plain text paste の markdown 取り込み。text/html を持つ rich paste は ProseMirror の
-// parseDOM に任せ、text/plain のみのときだけ Rust `from_markdown` へ回す。
-// 変換は async（handlePaste は同期）なので、先に true を返して paste を握る。応答を
-// 待つ間にユーザーが入力・クリックしても貼り先がずれないよう、paste 時の位置を
-// plugin state に預け、mapping で追従させた位置に対して挿入する。連続 paste は応答順に
-// 依らず握った順で着地させる（pasteChains）。失敗時は素のテキスト挿入に縮退する。
+// parseDOM に任せ、text/plain のみのときだけ parseMarkdown へ回す。
 function handleMarkdownPaste(
   view: EditorView,
   event: ClipboardEvent,
@@ -393,152 +316,28 @@ function handleMarkdownPaste(
   const ctx = getBlockContext(view.state.selection.$from)
   // codeBlock 内は markdown 解釈せず素のテキストのまま（default 挿入）
   if (!ctx || ctx.contentNode.type === nodes.codeBlock) return false
-  const id = nextPasteId++
-  const hold: ClipboardMeta = { type: 'hold', id, target: pasteTargetOf(view.state) }
-  view.dispatch(view.state.tr.setMeta(clipboardKey, hold).setMeta('addToHistory', false))
-  const resume = (apply: (target: PasteTarget) => void) => {
-    if (view.isDestroyed) return
-    // plugin state が失われている場合（state 差し替え等）だけ現在の選択に落とす
-    const target = clipboardKey.getState(view.state)?.pending.get(id) ?? pasteTargetOf(view.state)
-    apply(target)
-    const release: ClipboardMeta = { type: 'release', id }
-    view.dispatch(view.state.tr.setMeta(clipboardKey, release).setMeta('addToHistory', false))
-  }
-  const applier = parseMarkdown(text).then(
-    (docJson) => (target: PasteTarget) => applyParsedMarkdown(view, docJson, text, target),
-    () => (target: PasteTarget) => insertPlainText(view, text, target),
-  )
-  const prev = pasteChains.get(view) ?? Promise.resolve()
-  // 1 つの適用が投げても後続の paste を落とさない（キューは常に決着した promise を持つ）
-  pasteChains.set(
-    view,
-    prev
-      .then(() => applier)
-      .then(resume)
-      .catch(() => {}),
-  )
+  applyParsedMarkdown(view, parseMarkdown(text), text)
   return true
 }
 
-/** async parse 中の paste の適用位置。plugin state で後続編集の mapping に追従させる。 */
-type ClipboardState = { pending: ReadonlyMap<number, PasteTarget> }
-
-type ClipboardMeta =
-  | { type: 'hold'; id: number; target: PasteTarget }
-  | { type: 'release'; id: number }
-  /** 待機中の paste の貼り先を、この block の直後へ付け替える。 */
-  | { type: 'anchor'; afterBlockId: string }
-
-const clipboardKey = new PluginKey<ClipboardState>('journalClipboard')
-
-const NO_PENDING_PASTE: ClipboardState = { pending: new Map() }
-
-/** 選択が落ち着いてから先読み POST するまでの猶予。 */
-const CLIPBOARD_PREFETCH_DEBOUNCE_MS = 150
-/** 先読み markdown キャッシュの上限（現在選択分だけ効けば十分なので小さくてよい）。 */
-const MARKDOWN_CACHE_MAX = 16
-
 export function clipboardPlugin(options: ClipboardOptions = {}): Plugin {
   const { renderMarkdown } = options
+  const markdownOf = (containers: readonly PMNode[]) =>
+    renderMarkdown?.(docJsonFromContainers(containers))
 
-  // 非同期 clipboard の制約回避: 選択が変わるたびに markdown を先読みしておき、copy/cut の同期
-  // ハンドラでは同期にキャッシュ参照するだけにする。ヒットしなければ従来の plain text に縮退。
-  const cache = new Map<string, string>()
-  const inflight = new Set<string>()
-
-  const remember = (signature: string, markdown: string) => {
-    cache.set(signature, markdown)
-    // 1 回で 1 件しか増えないので上限超過は高々 1 件。最古（挿入順先頭）を落とす。
-    if (cache.size > MARKDOWN_CACHE_MAX) {
-      const oldest = cache.keys().next().value
-      if (oldest !== undefined) cache.delete(oldest)
-    }
-  }
-
-  const prefetch = (signature: string, json: unknown) => {
-    if (!renderMarkdown || cache.has(signature) || inflight.has(signature)) return
-    inflight.add(signature)
-    renderMarkdown(json)
-      .then((markdown) => remember(signature, markdown))
-      .catch(() => {})
-      .finally(() => inflight.delete(signature))
-  }
-
-  // copy 側は必ず view.state から署名を引き直す（transformCopied で id を潰した slice ではなく）。
-  const lookupMarkdown = (state: EditorState): string | undefined => {
-    const selected = selectionDocJson(state)
-    return selected ? cache.get(selected.signature) : undefined
-  }
-
-  return new Plugin<ClipboardState>({
-    key: clipboardKey,
-    state: {
-      init: () => NO_PENDING_PASTE,
-      apply(tr, value) {
-        const meta = tr.getMeta(clipboardKey) as ClipboardMeta | undefined
-        if (!meta && (!tr.docChanged || value.pending.size === 0)) return value
-        const pending = new Map(value.pending)
-        if (tr.docChanged) {
-          for (const [id, target] of pending) {
-            pending.set(id, {
-              ...target,
-              from: tr.mapping.map(target.from),
-              to: tr.mapping.map(target.to),
-            })
-          }
-        }
-        if (meta?.type === 'anchor') {
-          for (const [id, target] of pending) {
-            // 非空の text 選択は置換対象なので付け替えない（block 経路にすると選択が残る）
-            if (target.from !== target.to) continue
-            pending.set(id, { ...target, blockIds: [meta.afterBlockId] })
-          }
-        }
-        if (meta?.type === 'hold') pending.set(meta.id, meta.target)
-        if (meta?.type === 'release') pending.delete(meta.id)
-        return { pending }
-      },
-    },
-    view: renderMarkdown
-      ? (editorView) => {
-          let timer: ReturnType<typeof setTimeout> | null = null
-          // 選択が落ち着いてから 1 回だけ選択を直列化して先読みする（毎トランザクションで
-          // O(選択サイズ) の JSON.stringify を走らせない）。prefetch が cache/inflight で二重 POST を防ぐ。
-          const settle = () => {
-            timer = null
-            const selected = selectionDocJson(editorView.state)
-            if (selected) prefetch(selected.signature, selected.json)
-          }
-          return {
-            update(view, prevState) {
-              // doc・text 選択・block 選択（blockSelectionKey は変更時のみ新参照）のいずれかが
-              // 変わったときだけタイマーを張り直す。すべて O(1) の参照/位置比較。
-              const changed =
-                view.state.doc !== prevState.doc ||
-                !view.state.selection.eq(prevState.selection) ||
-                blockSelectionKey.getState(view.state) !== blockSelectionKey.getState(prevState)
-              if (!changed) return
-              if (timer) clearTimeout(timer)
-              timer = setTimeout(settle, CLIPBOARD_PREFETCH_DEBOUNCE_MS)
-            },
-            destroy() {
-              if (timer) clearTimeout(timer)
-            },
-          }
-        }
-      : undefined,
+  return new Plugin({
     props: {
       // text mode copy は ProseMirror 標準に任せつつ、外部へ出る HTML から ID を剥がす
       transformCopied: (slice) => mapSliceNodes(slice, stripIds),
       // 外部・copy 由来 paste は ID 再発行（重複 ID は normalizer の防衛もある）
       transformPasted: (slice) => mapSliceNodes(slice, preparePasted),
-      // text 選択の text/plain を markdown に差し替える（ヒット時のみ。ミス時は ProseMirror 標準と
-      // 同じ textBetween に縮退）。block 選択は copy ハンドラが preventDefault するのでここは通らない。
+      // text 選択の text/plain を markdown に差し替える。slice は selection.content() なので
+      // doc から続く形のまま doc JSON に載る。block 選択は copy ハンドラが preventDefault するので
+      // ここは通らない。
       ...(renderMarkdown
         ? {
-            clipboardTextSerializer: (slice: Slice, view: EditorView) =>
-              lookupMarkdown(view.state) ??
-              slice.content.textBetween(0, slice.content.size, '\n\n'),
+            clipboardTextSerializer: (slice: Slice) =>
+              renderMarkdown({ type: 'doc', content: slice.content.toJSON() ?? [] }),
           }
         : {}),
 
@@ -546,12 +345,7 @@ export function clipboardPlugin(options: ClipboardOptions = {}): Plugin {
         copy(view, event) {
           const containers = selectedContainers(view.state)
           if (containers.length === 0) return false
-          writeBlocksToClipboard(
-            event,
-            containers,
-            options.sourceNoteId,
-            lookupMarkdown(view.state),
-          )
+          writeBlocksToClipboard(event, containers, options.sourceNoteId, markdownOf(containers))
           return true
         },
         cut(view, event) {
@@ -559,7 +353,7 @@ export function clipboardPlugin(options: ClipboardOptions = {}): Plugin {
           if (containers.length === 0) return false
           // cut は元ブロックを削除するので sourceNoteId を載せない。載せると paste-and-sync
           // が「消えたブロック」を指す dangling ミラーになる（cut は move であって参照元にならない）。
-          writeBlocksToClipboard(event, containers, undefined, lookupMarkdown(view.state))
+          writeBlocksToClipboard(event, containers, undefined, markdownOf(containers))
           const selection = blockSelectionKey.getState(view.state)
           const range = selection ? rangeFromIds(view.state, selection.selectedIds) : null
           if (range) view.dispatch(deleteRange(view.state, range))
@@ -580,7 +374,7 @@ export function clipboardPlugin(options: ClipboardOptions = {}): Plugin {
         // originals は synced mirror が元 ID で参照するので触らない。
         const plain = originals.map(preparePasted)
 
-        const inserted = insertBlocksTr(view.state, plain, pasteTargetOf(view.state))
+        const inserted = insertBlocksTr(view.state, plain)
         if (!inserted) return false
         const { tr, start } = inserted
 

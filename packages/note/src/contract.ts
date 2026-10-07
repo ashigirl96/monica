@@ -2,6 +2,7 @@ import { oc } from '@orpc/contract'
 import { createSchemaFactory } from 'drizzle-zod'
 import { z } from 'zod'
 
+import { IMAGE_URL_PREFIX } from './body/image-url.ts'
 import { note } from './schema.ts'
 
 // notes の口にだけ載せ、CLI には出さないので、meta に cli を持たない。
@@ -10,8 +11,7 @@ const { createSelectSchema } = createSchemaFactory({ coerce: { date: true } })
 
 const NoteRowSchema = createSelectSchema(note)
 
-// monica の本文が持つ src の形のまま（ADR-0019）。
-export const IMAGE_URL_PREFIX = '/api/assets/'
+export { IMAGE_URL_PREFIX }
 
 // notes の口は Host がこれ以外の request を断る（DNS rebinding）ので、名前を足すとその口に届く経路も増える。
 // 保存される link は tania.localhost で書かれるが、ユーザーが同じ Backend を別の名前で開くこともある。

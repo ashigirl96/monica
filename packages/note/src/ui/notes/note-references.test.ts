@@ -156,3 +156,17 @@ test('a Synced Block asks for its block only once the unsaved edits are saved; a
   answers.set('/rpc/block/get', unreachable)
   await expect(resolveBlock('note-3', 'b1')).rejects.toBeInstanceOf(TypeError)
 })
+
+test('the names a copy writes for Note Mentions are those already resolved, and none for the rest', async () => {
+  const { answers, open } = setup()
+  answers.set('/rpc/noteMention/resolve', answer(200, { displayName: 'On ledgers' }))
+  const opened = open()
+
+  expect(opened.noteName('note-3')).toBeNull()
+  await opened.resolveNoteMention('note-3')
+  expect(opened.noteName('note-3')).toBe('On ledgers')
+
+  answers.set('/rpc/noteMention/resolve', notFound)
+  await opened.resolveNoteMention('note-9')
+  expect(opened.noteName('note-9')).toBeNull()
+})
