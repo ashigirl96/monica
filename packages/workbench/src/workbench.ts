@@ -36,8 +36,8 @@ export type NotificationDeps = {
   nameAgentSession: (db: Db, agentSessionId: string) => string | null
 }
 
-/** 未読の数。start() で 1 回、以降は数が変わるたびに呼ぶ。 */
-export type Badge = (count: number) => void
+/** start() で 1 回、以降は未読の Agent Session が居る Terminal Session の集合が変わるたびに呼ぶ。 */
+export type Unread = (terminalSessionIds: string[]) => void
 
 type Internals = NotificationDeps & {
   db: Db
@@ -58,13 +58,13 @@ export function terminalSessionsOf(workbenchLedger: WorkbenchLedger): TerminalSe
 }
 
 export function createWorkbenchLedger(
-  deps: NotificationDeps & { db: Db; home: string; ptydPath: string; badge: Badge },
+  deps: NotificationDeps & { db: Db; home: string; ptydPath: string; unread: Unread },
 ): WorkbenchLedger {
-  const { db, home, ptydPath, notify, nameAgentSession, badge } = deps
+  const { db, home, ptydPath, notify, nameAgentSession, unread } = deps
   const events = new EventPublisher<{ change: WorkbenchChange }>()
   const publish = (change: WorkbenchChange) => events.publish('change', change)
 
-  let stopBadging: (() => void) | null = null
+  let stopFollowingUnread: (() => void) | null = null
   let client: PtydClient | null = null
   let connection: Promise<PtydClient> | null = null
   // List を待つ間に届いた Exit は、まだ取り込んでいない行に当たらず Reap する接続も無いので、reconcile の後で当てる。
@@ -161,12 +161,12 @@ export function createWorkbenchLedger(
       } catch (error) {
         console.error(`[workbench] could not write the Tab's shell files: ${error}`)
       }
-      stopBadging = followUnread({ db, events, badge })
+      stopFollowingUnread = followUnread({ db, events, unread })
       await ready()
     },
     stop() {
       stopping = true
-      stopBadging?.()
+      stopFollowingUnread?.()
       client?.close()
     },
     createRunspace(tx, { cwd }) {

@@ -9,9 +9,9 @@ afterEach(cleanUp)
 
 const size = { rows: 24, cols: 80 }
 
-function setupBadged() {
-  const badged: number[] = []
-  return { badged, ...setup({ badge: (count) => badged.push(count) }) }
+function setupUnread() {
+  const passed: string[][] = []
+  return { passed, ...setup({ unread: (terminalSessionIds) => passed.push(terminalSessionIds) }) }
 }
 
 function waitIn(terminalSessionId: string, sessionId: string) {
@@ -26,19 +26,19 @@ function waitIn(terminalSessionId: string, sessionId: string) {
   }
 }
 
-test('the Workbench Ledger badges the unread count once when it starts and again when a notified wait adds one', async () => {
-  const { badged, workbenchLedger, client, settled } = setupBadged()
+test('the Workbench Ledger passes the unread Terminal Sessions once when it starts and again when a notified wait adds one', async () => {
+  const { passed, workbenchLedger, client, settled } = setupUnread()
   const { tab } = await client.runspace.create(size)
   await settled(tab.terminalSessionId)
 
   await workbenchLedger.start()
   await client.agentSession.recordHook(waitIn(tab.terminalSessionId, 's-1'))
 
-  expect(badged).toEqual([0, 1])
+  expect(passed).toEqual([[], [tab.terminalSessionId]])
 })
 
-test('seeing the last unread Agent Session badges 0', async () => {
-  const { badged, workbenchLedger, client, settled } = setupBadged()
+test('seeing the last unread Agent Session passes no Terminal Session', async () => {
+  const { passed, workbenchLedger, client, settled } = setupUnread()
   const { tab } = await client.runspace.create(size)
   await settled(tab.terminalSessionId)
   await client.agentSession.recordHook(waitIn(tab.terminalSessionId, 's-1'))
@@ -47,25 +47,29 @@ test('seeing the last unread Agent Session badges 0', async () => {
 
   await client.agentSession.markSeen({ sessionId: 's-1', notifiedAt: listed!.notifiedAt! })
 
-  expect(badged).toEqual([1, 0])
+  expect(passed).toEqual([[tab.terminalSessionId], []])
 })
 
-test('an unread Agent Session in a pinned Tab counts like any other', async () => {
-  const { badged, workbenchLedger, client, settled } = setupBadged()
+test('an unread Agent Session in a pinned Tab counts like any other, in the order of the Terminal Session ids', async () => {
+  const { passed, workbenchLedger, client, settled } = setupUnread()
   const pinned = (await client.runspace.create(size)).tab
   const other = (await client.runspace.create(size)).tab
   await client.tab.pin({ id: pinned.id })
   for (const tab of [pinned, other]) await settled(tab.terminalSessionId)
   await workbenchLedger.start()
 
-  await client.agentSession.recordHook(waitIn(pinned.terminalSessionId, 's-pinned'))
   await client.agentSession.recordHook(waitIn(other.terminalSessionId, 's-other'))
+  await client.agentSession.recordHook(waitIn(pinned.terminalSessionId, 's-pinned'))
 
-  expect(badged).toEqual([0, 1, 2])
+  expect(passed).toEqual([
+    [],
+    [other.terminalSessionId],
+    [pinned.terminalSessionId, other.terminalSessionId].toSorted(),
+  ])
 })
 
-test('a change that leaves the count as it was badges nothing', async () => {
-  const { badged, workbenchLedger, client, settled } = setupBadged()
+test('a change that leaves the unread Terminal Sessions as they were passes nothing', async () => {
+  const { passed, workbenchLedger, client, settled } = setupUnread()
   const { runspaceId, tab } = await client.runspace.create(size)
   await settled(tab.terminalSessionId)
   await client.agentSession.recordHook(waitIn(tab.terminalSessionId, 's-1'))
@@ -73,11 +77,27 @@ test('a change that leaves the count as it was badges nothing', async () => {
 
   await client.tab.open({ runspaceId, ...size })
 
-  expect(badged).toEqual([1])
+  expect(passed).toEqual([[tab.terminalSessionId]])
 })
 
-test('closing the Tab of an unread Agent Session takes it out of the count once its shell exits', async () => {
-  const { badged, ptyd, workbenchLedger, client, settled } = setupBadged()
+test('an unread Agent Session whose hook arrives from another Tab passes the new Terminal Session though the count stays', async () => {
+  const { passed, workbenchLedger, client, settled } = setupUnread()
+  const before = (await client.runspace.create(size)).tab
+  const after = (await client.runspace.create(size)).tab
+  for (const tab of [before, after]) await settled(tab.terminalSessionId)
+  await client.agentSession.recordHook(waitIn(before.terminalSessionId, 's-1'))
+  await workbenchLedger.start()
+
+  await client.agentSession.recordHook(waitIn(after.terminalSessionId, 's-1'))
+
+  expect(await client.agentSession.list()).toEqual([
+    expect.objectContaining({ sessionId: 's-1', unread: true }),
+  ])
+  expect(passed).toEqual([[before.terminalSessionId], [after.terminalSessionId]])
+})
+
+test('closing the Tab of an unread Agent Session takes it out once its shell exits', async () => {
+  const { passed, ptyd, workbenchLedger, client, settled } = setupUnread()
   const { runspaceId, tab } = await client.runspace.create(size)
   await client.tab.open({ runspaceId, ...size })
   await settled(tab.terminalSessionId)
@@ -89,11 +109,11 @@ test('closing the Tab of an unread Agent Session takes it out of the count once 
   ptyd.exit(tab.terminalSessionId, null)
   await ptyd.received((op) => op.op === 'reap' && op.session_id === tab.terminalSessionId)
 
-  expect(badged).toEqual([1, 0])
+  expect(passed).toEqual([[tab.terminalSessionId], []])
 })
 
-test('a transaction that signals a change and then rolls back badges nothing', async () => {
-  const { badged, db, workbenchLedger, client, settled } = setupBadged()
+test('a transaction that signals a change and then rolls back passes nothing', async () => {
+  const { passed, db, workbenchLedger, client, settled } = setupUnread()
   const { tab } = await client.runspace.create(size)
   await settled(tab.terminalSessionId)
   await client.agentSession.recordHook(waitIn(tab.terminalSessionId, 's-1'))
@@ -111,23 +131,23 @@ test('a transaction that signals a change and then rolls back badges nothing', a
   ).toThrow()
   await Promise.resolve()
 
-  expect(badged).toEqual([1])
+  expect(passed).toEqual([[tab.terminalSessionId]])
 })
 
-test('a restarted Backend badges the unread count it finds before monica-ptyd answers', async () => {
-  const { badged, client, restartBackend, settled } = setupBadged()
+test('a restarted Backend passes the unread Terminal Sessions it finds before monica-ptyd answers', async () => {
+  const { passed, client, restartBackend, settled } = setupUnread()
   const { tab } = await client.runspace.create(size)
   await settled(tab.terminalSessionId)
   await client.agentSession.recordHook(waitIn(tab.terminalSessionId, 's-1'))
 
   const started = restartBackend().workbenchLedger.start()
 
-  expect(badged).toEqual([1])
+  expect(passed).toEqual([[tab.terminalSessionId]])
   await started
 })
 
-test('a shell that exits takes its unread Agent Session out of the count', async () => {
-  const { badged, ptyd, workbenchLedger, client, settled } = setupBadged()
+test('a shell that exits takes its unread Agent Session out', async () => {
+  const { passed, ptyd, workbenchLedger, client, settled } = setupUnread()
   const { tab } = await client.runspace.create(size)
   await settled(tab.terminalSessionId)
   await client.agentSession.recordHook(waitIn(tab.terminalSessionId, 's-1'))
@@ -136,12 +156,12 @@ test('a shell that exits takes its unread Agent Session out of the count', async
   ptyd.exit(tab.terminalSessionId, 0)
   await ptyd.received((op) => op.op === 'reap' && op.session_id === tab.terminalSessionId)
 
-  expect(badged).toEqual([1, 0])
+  expect(passed).toEqual([[tab.terminalSessionId], []])
 })
 
-test('a badge that throws leaves the hook recorded, with one line on stderr', async () => {
+test('failing to pass the unread Terminal Sessions leaves the hook recorded, with one line on stderr', async () => {
   const { workbenchLedger, client, settled } = setup({
-    badge: () => {
+    unread: () => {
       throw new Error('stdout is closed')
     },
   })

@@ -116,7 +116,7 @@ ADR-0008 の「Backend 起動時」と ADR-0011 の reconcile の規則のうち
 - 同じ待ちの間の通知は 1 つの未読と数える。許可を 2 回求めると待ちに入り直すので、1 回目を見た後でも未読に戻る。
 - `agentSession.markSeen { sessionId, notifiedAt }` は、未読の行の `notified_at` が渡された `notifiedAt`（webview が見た通知の時刻）と同じときだけ、`seen_at` に今の時刻を書き、`{ type: "agentSession", sessionId }` を publish する。webview が見てから届くまでの間に同じ Agent Session に次の通知が出ても、まだ見ていないその通知を既読にしないため。それ以外の行には何も書かず、合図も出さない。webview が同じ未読に重ねて呼んでも、読み直しが連鎖しないようにするため。無い session は `NOT_FOUND`。
 - 未読は Backend の再起動をまたいで残る。reconcile は待ちの行を動かさない（未観測にするのは動作中の行だけ）。
-- 未読の数は Workbench Ledger が数え、`badge` で Backend に渡す。数え方と渡す時は `docs/packages/notifications.md` の「Dock の数」にある。
+- 未読の Agent Session が居る Terminal Session の id の集合は Workbench Ledger が数え直し、`unread` で Backend に渡す。Shell はそれで Dock の数を出し、通知を取り下げる。数え直しと渡す時は `docs/packages/notifications.md` の「未読の集合」にある。
 
 ## Tab の外から来た hook
 
