@@ -114,6 +114,7 @@ notes の ui は旧 Monica の `web/` と `shared/` を移して作る。
 - path の文字列と route の解釈は `routes.ts` に集める。router は旧 Monica の自作を移したもの（`router.ts`、History API）。
 - 今日は `/daily` を開くたびに `logicalDate(new Date())` で導く（`todayPath`）。開いたまま 5 時を越えても、次に `/daily` を開けば次の日になる。今日を返す procedure は無い。Daily の画面の TODAY は画面を作った時に導き、`/daily` を開き直すと作り直される。
 - `/notes/:id` は `get` で引いた Note の種類から行き先を決める（`notePagePath`）。Daily は `/daily/:date`、Essay は `/essays/:id`、Scratch は `/repos/:owner/:repo`、Repo Note は `/repos/:owner/:repo/notes/:id` に移る。
+- `/notes/:id` は行き先へ replace する前に `NoteRedirect` を描くので、Note Mention・↗・競合の通知で同じ画面の中を移るときも、route の木の位置で持つ状態（provider と画面の component の state）は一度 unmount される。画面にいる間の状態を持たせるときは、この中継も同じ位置で囲む（「Essay の画面」の取り消しの stack）。
 - rail は Daily / Essay / Repo で、⌃1 / ⌃2 / ⌃3 で移る。Library と Settings は持ち込まない。
 - NotesShell のサイドバーは既定 400px で、境界のドラッグで 260〜720px、ダブルクリックで 400px に戻る。幅は画面の間で共有し、localStorage の `monica-notes-sidebar-w` に持つ。
 - Daily の表示名の書式は `notes/dates.ts` が持つ。サイドバーは今日が `TODAY · TUE 10.6`、ほかは `TUE 10.6`、今年以外は `TUE 2025.10.6`。見出しと競合の通知は年付きの `dayLabelWithYear`（今年なら年を省く）。
@@ -161,7 +162,7 @@ notes の ui は旧 Monica の `web/` と `shared/` を移して作る。
   - ⌥Backspace と ⌥Delete: 開いている Repo Note を確認なしで削除して Scratch に移る。Scratch の上では素通しし、エディタの単語の削除になる。
   - ⌥Z: 削除を取り消してその Repo Note を開く。
   - ⌥J / ⌥K: Scratch と Repo Note を巡回する。
-- 削除と取り消しは「削除と取り消し」の `Removals` を `RepoEditor` が mount ごとに持つ。取り消しの stack は `RepoEditor` の寿命の間だけ持ち、Repo を切り替えると画面ごと作り直すので空になる（旧 Monica と同じ）。頁を読み込み直しても空になる。
+- 削除と取り消しは「削除と取り消し」の `Removals` を `RepoEditor` が mount ごとに持つ。取り消しの stack は `RepoEditor` の寿命の間だけ持ち、Repo を切り替えると画面ごと作り直すので空になる（旧 Monica と同じ）。Note Mention などで同じ Repo の Repo Note へ移るときも、`/notes/:id` の中継で作り直すので空になる。頁を読み込み直しても空になる。
 - 消せたら、待った後の URL が消した Note を指すときだけ Scratch へ replace で移る。サイドバーの × で消している間に、その Note を開いて書くことがあるため。
 - 別のタブで消された Repo Note は、取り直しの `NOT_FOUND` で、このタブで消したときと同じく保存の予約を捨てて Scratch へ移る。開いた本文を出し続けると、書いた分の保存が `NOT_FOUND` で再試行され続ける。開いた本文の無い（URL から直に開いた）消えた Note は、エラーを出す。
 - Scratch の保存は title を省く。server は title の付いた Scratch の保存を本文ごと断る。
