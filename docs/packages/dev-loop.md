@@ -41,14 +41,23 @@
 
 - `bun run build` が `scripts/build.ts` を走らせる。3 つの binary は `apps/desktop/src-tauri/binaries/<name>-<rust triple>` に置く（Backend と CLI は `--outfile` で直に書く）。
   1. `cargo build --release -p monica-ptyd` の後、`binaries/` に copy する。
-  2. Backend: `apps/web` を `vite build` してから、`bun build --compile --minify-whitespace --minify-syntax --bytecode --format=esm --asset packages/<d>/migrations/<d> … --asset apps/web/dist apps/backend/src/main.ts`。`--asset` には `meta/_journal.json` のある migrations folder をすべて渡す。build.ts が glob で集めるので、domain の package を足しても build.ts は直さない。並べ忘れても検査は通り、release の Backend だけが migrate で落ちるため。`--asset` は folder を basename の位置（`/$bunfs/root/<basename>`）に置き、Backend は SPA を `dist` で引く。
-  3. CLI: `bun build --compile --minify-whitespace --minify-syntax --bytecode --format=esm apps/cli/src/main.ts`
-  4. `tauri build --bundles app --config '{"bundle":{"externalBin":[…]}}'`
+  2. `apps/web` を `vite build` し、続けて `apps/extension` を `vite build` する。Chrome Extension は `apps/extension/dist/production` に作り直される（Vite が outDir を空にしてから書く）。`.app` には tauri の bundle で入れず、`install-app` が写す。
+  3. Backend: `bun build --compile --minify-whitespace --minify-syntax --bytecode --format=esm --asset packages/<d>/migrations/<d> … --asset apps/web/dist apps/backend/src/main.ts`。`--asset` には `meta/_journal.json` のある migrations folder をすべて渡す。build.ts が glob で集めるので、domain の package を足しても build.ts は直さない。並べ忘れても検査は通り、release の Backend だけが migrate で落ちるため。`--asset` は folder を basename の位置（`/$bunfs/root/<basename>`）に置き、Backend は SPA を `dist` で引く。
+  4. CLI: `bun build --compile --minify-whitespace --minify-syntax --bytecode --format=esm apps/cli/src/main.ts`
+  5. `tauri build --bundles app --config '{"bundle":{"externalBin":[…]}}'`
 - externalBin を base の `tauri.conf.json` に書かないのは、tauri-build が cargo の build のたびに `binaries/` の存在を求め、`binaries/monica-ptyd-<triple>` で `target/<profile>/monica-ptyd` を上書きするため。base に書くと dev と CI の clippy にも `binaries/` が要り、空の placeholder は cargo が作った ptyd を潰す。
 - `--minify` は使わない。trpc-cli が class 名で instanceof を判定しており、名前が潰れると起動しない。`--bytecode` は top-level await があるので `--format=esm` が要る。
 - compiled binary は 1 つ約 70MB（Bun の runtime だけで約 60MB）あり、Backend と CLI で約 140MB になる。
-- `bun run install-app` は 起きている Monica を終了させ、`.app` を一時の場所にコピーして codesign と quarantine の解除を済ませてから `/Applications` に置く。署名する前の `.app` を開かせないため。Tab の shell と claude は ptyd が持ち続けるので、終了させても切れない。codesign の identity は Keychain Access で作った自己署名の `Monica`。ad-hoc と違い、build をまたいで署名の同一性が保たれる。
-- 署名と notarization（hardenedRuntime 下の Bun の JIT entitlements。Bun の binary は Backend と CLI の 2 つ）は配布を始めるときに決める。
+- `bun run install-app`（`scripts/install-app.ts`）は、build した `.app` を一時の場所に `cp -R` し、Chat の claude と Chrome Extension を写して、codesign と quarantine の解除を済ませる。そのあと起きている Monica を終了させ、`/Applications` の `.app` を入れ替える。起動はしない。
+  - 署名する前の `.app` を開かせないよう、一時の場所で署名してから置く。
+  - claude は `scripts/bundled-claude.ts` の `bundledClaude()` が解く。`packages/chat` から SDK を解き、その場所から platform package（`@anthropic-ai/claude-agent-sdk-<platform>-<arch>`）の `claude` を解く。bun の isolated linker では root から SDK を解けず、`packages/chat` から platform package も直には解けないため。SDK も自分の場所から同じ名前を解くので、dev の Backend が使う claude と同じ file になる。PATH の `~/.local/bin/claude` は使わない（ADR-0032）。これを `cp` で `Contents/MacOS/claude` に写す。`.app` は約 236MB 増える。
+  - Chrome Extension は `apps/extension/dist/production` を `cp -R` で `Contents/Resources/extension` に写す。ユーザーはそこを一度だけ Brave に読み込み、`install-app` の後は reload する（`docs/packages/extension.md` の「release の読み込み方」）。
+  - build した `.app`、`apps/extension/dist/production/manifest.json`、claude の path のどれかが無ければ、何も写さず Monica も終了させずに 1 行出して exit 1 する。足りないまま入れ替えて、Monica を起こせなくしないため。
+  - 写しと署名は Monica を終了させる前に済ませ、終了させた後は `/Applications` の入れ替えだけを行う。claude の写しの分だけ、Monica が止まっている時間を延ばさないため。
+  - `--stage <dir>` を付けると、写しと署名まで済ませた `.app` を `<dir>/Monica.app` に置いて抜ける。Monica を終了させず、`/Applications` にも触れない。入れ替える前の確かめが install-app と同じ code を通る（`release-app` skill）。
+  - Tab の shell と claude は ptyd が持ち続けるので、終了させても切れない。
+  - codesign の identity は Keychain Access で作った自己署名の `Monica`。ad-hoc と違い、build をまたいで署名の同一性が保たれる。`--deep` は付けない。付けると claude の Anthropic の署名（`Developer ID Application: Anthropic PBC`）が Monica のものに置き換わる。付けなければ外側の署名は `Contents/MacOS/claude` を Anthropic の designated requirement で記録する（ADR-0032）。
+- 署名と notarization（hardenedRuntime 下の Bun の JIT entitlements。Bun の binary は Backend と CLI の 2 つ）は配布を始めるときに決める。そのときも claude と Bun の binary を `--deep` で一括に署名し直さない。`--deep --options runtime` では entitlements の無い hardened runtime になり、Backend も claude も `SharedArrayBuffer is not defined` で起きない（ADR-0032、#268）。
 
 ## 検査と CI
 

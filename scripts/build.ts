@@ -28,6 +28,8 @@ mkdirSync(binaries, { recursive: true })
 await $`cargo build --release -p monica-ptyd`.cwd(repo)
 copyFileSync(join(repo, 'target/release/monica-ptyd'), binary('monica-ptyd'))
 await $`bun run --cwd apps/web build`.cwd(repo)
+// Chrome Extension は Backend に同梱せず、install-app が .app の Contents/Resources/extension に写す。
+await $`bun run --cwd apps/extension build`.cwd(repo)
 await $`bun build ${compile} ${assets.flatMap((dir) => ['--asset', dir])} apps/backend/src/main.ts --outfile ${binary('monica-backend')}`.cwd(
   repo,
 )

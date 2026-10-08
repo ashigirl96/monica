@@ -8,13 +8,15 @@
 
 PATH を取った後、DB を開く前に env の `MONICA_PTYD_PATH` を見て、無ければ stderr に 1 行出して exit 1 する。
 
+env の `MONICA_CLAUDE_PATH`（Chat の claude の場所。release の Shell だけが渡す）は検めず、そのまま `createChatAgent` の `claudePath` に渡す。無くても、指す file が無くても止まらない。Chat が使えなくても Workbench は動くべきで、claude を起こせなかったことは質問の答えの場所に出る。
+
 Bun.spawn は `env` を渡さないと、子に起動時の environ を渡し、実行ファイルも起動時の PATH で探す。そのため Backend で動くコードの spawn は `env` を渡す。ふつうは `process.env` で、Bench の setup のように変数を落とすときは workbench の `inheritableEnv()` を使う。lint の `monica/spawn-env`（`scripts/oxlint/monica.js`）は、PATH で実行ファイルを探す spawn に `env` の key があるかを見る。ptyd は `process.env` から組んだ env を渡すので、Tab にも届く。
 
 ## 起動と終了
 
 1. `$MONICA_HOME/monica.db` を開き、`locking_mode=EXCLUSIVE` → `journal_mode=WAL` → `foreign_keys=ON` の順に設定する（ADR-0007）。
 2. `migrate()` を workbench → task → job → note → chat の順に呼ぶ。chat は table を持たず、空の journal だけを持つ。`migrationsTable` は各 package の `migrations.table` を渡す（`docs/packages/migration.md`）。
-3. `createWorkbenchLedger` → `createTaskLedger` → `createNoteLedger` → `createJobLedger` の順に作る。`createWorkbenchLedger` には、env の `MONICA_PTYD_PATH`（`ptydPath`）、stdout に通知の行を書く `notify`、`@monica/task/server` の `nameAgentSession`、stdout に未読の Terminal Session の集合の行を書く `unread` を渡す。`createTaskLedger` と `createNoteLedger` と `createJobLedger` には同じ `home` を渡す。`createJobLedger` の `systemJobs` には、`@monica/task/server` の `systemJobs(taskLedger)` と `@monica/note/server` の `systemJobs(noteLedger)` の戻り値をこの順につないで渡す。Job Ledger が両方の Ledger を呼ぶので、Note Ledger を先に作る。続けて `createChatAgent({ home })` で ChatAgent を作る。claude の場所（`claudePath`）は渡さず、SDK が node_modules の claude を使う（`docs/packages/chat.md`）。
+3. `createWorkbenchLedger` → `createTaskLedger` → `createNoteLedger` → `createJobLedger` の順に作る。`createWorkbenchLedger` には、env の `MONICA_PTYD_PATH`（`ptydPath`）、stdout に通知の行を書く `notify`、`@monica/task/server` の `nameAgentSession`、stdout に未読の Terminal Session の集合の行を書く `unread` を渡す。`createTaskLedger` と `createNoteLedger` と `createJobLedger` には同じ `home` を渡す。`createJobLedger` の `systemJobs` には、`@monica/task/server` の `systemJobs(taskLedger)` と `@monica/note/server` の `systemJobs(noteLedger)` の戻り値をこの順につないで渡す。Job Ledger が両方の Ledger を呼ぶので、Note Ledger を先に作る。続けて `createChatAgent({ home, claudePath })` で ChatAgent を作る。`claudePath` は env の `MONICA_CLAUDE_PATH` で、dev では無いので SDK が node_modules の claude を使う（`docs/packages/chat.md`）。
 4. router を `{ workbench: workbenchRouter, task: taskRouter, job: jobRouter }` で mount し、context は `{ db, workbenchLedger, taskLedger, jobLedger }`。note と chat の router はこの口に載せず、ブラウザの口だけに載せる（下の「ブラウザの口」）。
 5. hono に CORS（`tauri://localhost`・`http://tauri.localhost`。env の `MONICA_DEV_URL` があればその origin も。`docs/packages/dev-loop.md` の「dev loop」）、`/health`（token 無し）、`/rpc/*` の bearer を載せ、`Bun.serve({ hostname: "127.0.0.1", port: 0, idleTimeout: 0 })` で立てる。
 6. `start()` を Workbench Ledger → Task Ledger → Job Ledger → Note Ledger の順に呼び、ブラウザの口を立てる。ChatAgent は `start()` を持たない。Workbench Ledger の `start()`（ptyd への接続と reconcile）を最大 3 秒待ってから、`backend.json` と stdout の endpoint 行を書く（ADR-0007 / 0011）。
@@ -45,4 +47,5 @@ Backend の stdout は Shell 宛ての JSON 行専用で、log は stderr に出
 ## テスト
 
 - 組み立て（`src/main.ts`）は、Shell と同じく process として起こし、fake の ptyd の home を渡して確かめる。token の口とブラウザの口に同じ path を投げ、口ごとに載る procedure を見る。chat は不正な input を送り、ブラウザの口の 400 と token の口の 404 で見る。不正な input は handler の前で断られるので、claude を起こさない。
+- `MONICA_CLAUDE_PATH` は、`@monica/chat/testing` の `writeFakeClaude` が書いた偽の claude を渡して起こし、ブラウザの口の `chat.ask` がその答えを返すことで見る。この Backend には `USER` を渡さない。渡し忘れて node_modules の本物の claude を起こしても、keychain の login を読めずに API を呼ばないため（ADR-0033）。
 - ブラウザの口の照合と SPA と画像の GET と body の上限は `listenBrowser` を直に呼んで確かめる。

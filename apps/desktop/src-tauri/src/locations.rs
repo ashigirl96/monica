@@ -43,6 +43,11 @@ pub fn browser_port() -> Option<&'static str> {
     (!cfg!(debug_assertions)).then_some("19380")
 }
 
+/// dev の Backend は渡されなければ、SDK が node_modules から解く、lockfile で SDK と揃った claude を使う（ADR-0032）。
+pub fn claude() -> Option<PathBuf> {
+    (!cfg!(debug_assertions)).then(|| bundled_binary("claude"))
+}
+
 pub fn cli() -> Option<PathBuf> {
     std::env::var_os("MONICA_BIN")
         .map(PathBuf::from)
