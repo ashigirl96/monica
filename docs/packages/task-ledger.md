@@ -39,7 +39,7 @@ changes     → { type: "task", ref } | { type: "synced" }
 
 ## Attach
 
-`GLOSSARY.md` の Attach。CLI の `tania task attach <ref>` は呼び手の Tab を、Tab のメニューの picker は選んだ Tab を、同じ `attach` で移す。GUI の drag は `tab.move` で移し、Run は「Run」の節の `layout` の経路が作る。
+`GLOSSARY.md` の Attach。CLI の `monica task attach <ref>` は呼び手の Tab を、Tab のメニューの picker は選んだ Tab を、同じ `attach` で移す。GUI の drag は `tab.move` で移し、Run は「Run」の節の `layout` の経路が作る。
 
 - `terminalSessionId` が無ければ `BAD_REQUEST`、未 track は `NOT_FOUND`、closed な Task は `BAD_REQUEST`（`run` と同じ）。
 - 1 つの transaction で次の順に進める。
@@ -58,10 +58,10 @@ changes     → { type: "task", ref } | { type: "synced" }
 `run` の前半。Bench を確保し、準備が終わるのを待つ。後半は「Run の起動」の節。
 
 - `run` は open な Task だけを受ける（closed は `BAD_REQUEST`、未 track は `NOT_FOUND`）。Bench が無ければ、tx で Task が open かを引き直してから `bench` の行（`preparing`）と `workbenchLedger.createRunspace(tx, { cwd })` を作って commit し（`--in-place` の ghq root を待つ間に close が走り終えることがあるため。Tab を開く tx も同じく引き直す）、準備を Backend の中で始める。準備中の Bench は sidebar にすぐ出る。
-- cwd は作る前に決め、その後は変えない。worktree は `$TANIA_HOME/worktrees/<owner>/<repo>/issue-<n>`、`--in-place` は `$(ghq root)/github.com/<owner>/<repo>`。`--in-place` で ghq root が引けなければ、Bench を作らずに `PRECONDITION_FAILED`。worktree の Bench に `--in-place` を打つと `BAD_REQUEST`、flag の無い `run` は今の Bench の mode に従う。
+- cwd は作る前に決め、その後は変えない。worktree は `$MONICA_HOME/worktrees/<owner>/<repo>/issue-<n>`、`--in-place` は `$(ghq root)/github.com/<owner>/<repo>`。`--in-place` で ghq root が引けなければ、Bench を作らずに `PRECONDITION_FAILED`。worktree の Bench に `--in-place` を打つと `BAD_REQUEST`、flag の無い `run` は今の Bench の mode に従う。
 - 準備: in-place は、checkout（cwd）が無ければ `ghq get <owner>/<repo>` して終わる。ghq は repo の今の名前の場所に clone するので、改名の後で cwd に来なければ失敗にする。worktree は、cwd が linked worktree ならそのまま使う。repo が改名されても、作った worktree は作った時の checkout に登録されているので、checkout を引き直さない。cwd が worktree でなければ、checkout が無いときに `ghq get` する。ただし、改名の前に作った worktree が消えていたら（cwd が今の名前の path と違えば）失敗にする。元の branch は改名前の checkout にしか無く、新しい名前の clone から作り直すと黙って別の branch になるため。そのうえで、path が消えていればその登録だけを `git worktree remove <path>` で外し（`prune` は外付けの disk の上の worktree のような、関係の無い登録まで外すので使わない）、branch `issue-<n>` があれば `git worktree add <path> issue-<n>`。無ければ default branch（`refs/remotes/origin/HEAD`、取れなければ `git remote set-head origin --auto` を 1 回）を求め、`git fetch origin <default>` を best-effort で打ってから `git worktree add -b issue-<n> <path> origin/<default>`。fetch の失敗は output の `warnings` に載せる。git と ghq には `GIT_TERMINAL_PROMPT=0` を渡す。Backend が端末から起こされていると、git は認証を /dev/tty で尋ねて止まるため。
-- setup は `<worktree>/.tania/setup.sh` を直接 exec する（shebang と実行権限が要る）。無ければ ready。cwd は worktree、stdin は null、env は Backend の env から `TANIA_*`・`CLAUDECODE`・`CLAUDE_CODE_*` を落としたもの。自分の process group（`detached`）で起こし、600 秒で group に SIGTERM を送り、group が空になるか 2 秒たったら SIGKILL を送る。script が先に抜けても、後始末をしている子孫に猶予を残すため。env の除外は workbench の `inheritableEnv()` を ptyd と共有する。
-- log は `$TANIA_HOME/logs/setup/<owner>/<repo>/issue-<n>.log` に試行ごとに上書きで書く。setup の stdout と stderr のほかに、失敗の理由を `tania: <理由>` の 1 行で足す。
+- setup は `<worktree>/.monica/setup.sh` を直接 exec する（shebang と実行権限が要る）。無ければ ready。cwd は worktree、stdin は null、env は Backend の env から `MONICA_*`・`CLAUDECODE`・`CLAUDE_CODE_*` を落としたもの。自分の process group（`detached`）で起こし、600 秒で group に SIGTERM を送り、group が空になるか 2 秒たったら SIGKILL を送る。script が先に抜けても、後始末をしている子孫に猶予を残すため。env の除外は workbench の `inheritableEnv()` を ptyd と共有する。
+- log は `$MONICA_HOME/logs/setup/<owner>/<repo>/issue-<n>.log` に試行ごとに上書きで書く。setup の stdout と stderr のほかに、失敗の理由を `monica: <理由>` の 1 行で足す。
 - log は、system の Job `task.setup-log-cleanup` が起動時と 24 時間おきに `cleanSetupLogs()` で消す。消すのは、最後に書かれて（mtime）から 14 日たった log のうち、Bench の無い Task の log で、close した Task の log と、Task に対応しない log（repo の改名で path が変わった古い log など）が当たる。14 日は ptyd の log（`crates/logfile`）の保持にそろえる。Bench のある Task の log は古くても残す。準備に失敗した `run` は log の path を返すので、それを指したまま消えないようにするため。Bench の Task の log かは、今の repo の名前から作った path と小文字にそろえて比べる。repo の名前の大小だけを変えた改名の後も、macOS の file system では同じ log を指すため。
 - 最後に書かれた時刻は消す直前に見る。掃除は同期の fs で 1 回で走らせる。reopen の後の `run` は Bench を作り直して log を書き直すので、掃除を async にすると、Bench の有無を見てから消すまでの間に書き直された log を消すため。Bench の準備は Bench の行を書いてから log を空にするまでを同期で進めるので、掃除はその間に割り込まない。log を消した後、空になった `<owner>/<repo>` と `<owner>` の directory も消す。消せなかった log か directory があれば、残りを消してから reject する。Job Execution は `failed` になり、エラーの 1 行に理由が出る。
 - 成功したら `ready` と `prepared_at`、失敗したら `failed` と `setup_error`（`exit 1`、`timed out after 600s`、`spawn failed: <message>`、git の失敗の最後の行）を書く。`run` は `PRECONDITION_FAILED` で `setup_error` と log の path を出す。

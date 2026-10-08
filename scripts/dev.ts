@@ -47,7 +47,7 @@ function bridgePortOf(desktop: number): string | undefined {
   return addresses.length > 0 ? addresses.map((a) => a.split(':').at(-1)).join(',') : undefined
 }
 
-// ptyd は <repo>/target/debug/tania-ptyd。headless の Backend は相対 path で起こすので cwd から解く。
+// ptyd は <repo>/target/debug/monica-ptyd。headless の Backend は相対 path で起こすので cwd から解く。
 function repoOf(ptydBinary: string, pid: number): string | undefined {
   const cwd = isAbsolute(ptydBinary) ? '/' : cwdOf(pid)
   return cwd && dirname(dirname(dirname(resolve(cwd, ptydBinary))))
@@ -63,9 +63,9 @@ function entriesWithPrefix(dir: string, prefix: string): string[] {
 
 function homesOnDisk(): string[] {
   return [
-    ...entriesWithPrefix(userHome, '.tania-'),
-    ...entriesWithPrefix(scratch, 'tania-'),
-  ].filter((home) => ['tania.db', 'ptyd.pid'].some((file) => existsSync(join(home, file))))
+    ...entriesWithPrefix(userHome, '.monica-'),
+    ...entriesWithPrefix(scratch, 'monica-'),
+  ].filter((home) => ['monica.db', 'ptyd.pid'].some((file) => existsSync(join(home, file))))
 }
 
 // 落ちた Backend の backend.json は残り、その pid が別の process に使い回されていることがある。
@@ -87,7 +87,7 @@ function devs(): Dev[] {
     return dev
   }
   for (const proc of procs.values()) {
-    const [, binary, home] = proc.command.match(/^(\S*tania-ptyd) --tania-home (.+)$/) ?? []
+    const [, binary, home] = proc.command.match(/^(\S*monica-ptyd) --monica-home (.+)$/) ?? []
     if (!binary || !home || home === RELEASE_HOME) continue
     const dev = devAt(home)
     dev.ptyd = proc.pid
@@ -97,7 +97,7 @@ function devs(): Dev[] {
   for (const dev of byHome.values()) {
     dev.backend = backendOf(dev.home, procs)
     const parent = procs.get(procs.get(dev.backend ?? -1)?.ppid ?? -1)
-    if (parent?.command.includes('target/debug/tania-desktop')) {
+    if (parent?.command.includes('target/debug/monica-desktop')) {
       dev.desktop = parent.pid
       dev.bridgePort = bridgePortOf(parent.pid)
     }

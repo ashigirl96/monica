@@ -20,7 +20,7 @@ use crate::announcement::Notification;
 
 const TERMINAL_SESSION_ID: &str = "terminalSessionId";
 
-/// 通知で起こした tania では webview が listen を張る前にクリックが届くので、webview が取り出すまで持つ。
+/// 通知で起こした monica では webview が listen を張る前にクリックが届くので、webview が取り出すまで持つ。
 #[derive(Default)]
 pub struct PendingClick(Mutex<Option<String>>);
 
@@ -125,7 +125,7 @@ fn clicked(app: &AppHandle, terminal_session_id: String) {
 define_class!(
     #[unsafe(super(NSObject))]
     #[ivars = AppHandle]
-    #[name = "TaniaNotificationDelegate"]
+    #[name = "MonicaNotificationDelegate"]
     struct Delegate;
 
     unsafe impl NSObjectProtocol for Delegate {}
@@ -179,8 +179,8 @@ mod tests {
 
     #[test]
     fn only_a_process_inside_an_app_bundle_posts_to_the_notification_center() {
-        assert!(is_app_bundle("/Applications/Tania.app"));
-        assert!(!is_app_bundle("/Users/me/src/tania/target/debug"));
-        assert!(!is_app_bundle("/Users/me/src/tania.apps"));
+        assert!(is_app_bundle("/Applications/Monica.app"));
+        assert!(!is_app_bundle("/Users/me/src/monica/target/debug"));
+        assert!(!is_app_bundle("/Users/me/src/monica.apps"));
     }
 }

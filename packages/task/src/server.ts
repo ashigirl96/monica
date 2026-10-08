@@ -1,5 +1,5 @@
+import type { Db } from '@monica/workbench/server'
 import { implement } from '@orpc/server'
-import type { Db } from '@tania/workbench/server'
 
 import { attachTab } from './attach.ts'
 import { listBenches } from './bench.ts'

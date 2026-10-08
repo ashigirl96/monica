@@ -4,10 +4,10 @@ Workbench Ledger に載せない Workbench の画面の状態と、sidebar の R
 
 ## UI 状態
 
-- webview の localStorage に置く（ADR-0014）。中身は active な Runspace とその active Tab、sidebar の開閉と幅（160〜360、既定 200）、UI zoom（0.8〜1.6、既定 1）、選んだ Tile（field は `tile`。値は `owner/repo`、Repo の外は `outside`、active な Runspace の Tile に従うときは null）、畳んだセクション（`<Tile の key>:<bench|runspaces>` の一覧）。monica の `ui-state.json` から、Space、Work Board、window ごとの入れ子を除き、Tile とセクションを足した形。
-- 端末の font size と、active でない Runspace の active Tab は保存しない（monica どおり）。
-- 書き込みは 500ms の debounce。localStorage は同期で読めるので、monica の render 前の hydrate は要らない。
-- 保存した id が `layout.get` に無ければ、先頭の Runspace と、その先頭の Tab に戻す（monica の `resolveWorkbenchActive`）。読めないか壊れていれば既定値で始める。
+- webview の localStorage に置く（ADR-0014）。中身は active な Runspace とその active Tab、sidebar の開閉と幅（160〜360、既定 200）、UI zoom（0.8〜1.6、既定 1）、選んだ Tile（field は `tile`。値は `owner/repo`、Repo の外は `outside`、active な Runspace の Tile に従うときは null）、畳んだセクション（`<Tile の key>:<bench|runspaces>` の一覧）。旧 Monica の `ui-state.json` から、Space、Work Board、window ごとの入れ子を除き、Tile とセクションを足した形。
+- 端末の font size と、active でない Runspace の active Tab は保存しない（旧 Monica どおり）。
+- 書き込みは 500ms の debounce。localStorage は同期で読めるので、旧 Monica の render 前の hydrate は要らない。
+- 保存した id が `layout.get` に無ければ、先頭の Runspace と、その先頭の Tab に戻す（旧 Monica の `resolveWorkbenchActive`）。読めないか壊れていれば既定値で始める。
 - 見たこと（未読）は UI 状態に置かず、Workbench Ledger に置く（ADR-0021、下の「未読」）。
 - webview が持つ Backend の写し（layout、Terminal Session と Agent Session の一覧）は、`changes` の合図の後に読み直すまで古く、起動の直後は空。Tab を閉じるような取り消せない操作の条件は、その場で Backend に聞いて決める（Ctrl+T → d の確認。`docs/packages/workbench-ledger.md` の「Runspace と Tab」）。
 
@@ -62,9 +62,9 @@ Tab の dot（label の左）は、その Tab の Terminal Session の live な 
 - hover の title は状態の語にし、質問と許可はそこで見分ける。
 - 手空きは灰の塗りにし、未観測の灰の輪とは塗りで分ける。琥珀の薄い版では、行の数として質問・許可の琥珀の隣に並ぶと見分けにくいため。灰は Tile の色（上の「sidebar」）にも未読の印にも使わない。
 - plan 承認の色は持たない。plan の承認は許可の一種で、ExitPlanMode は自動承認されて待ちにならない（#16）。
-- Terminal Session の dot（label の右。exited / lost / failed）は monica のまま残す。
+- Terminal Session の dot（label の右。exited / lost / failed）は旧 Monica のまま残す。
 - sidebar の行も、2 行目に Tab の帯と同じ色と点滅の dot で Agent の状態を出す（上の「行」と「数」）。普通の Runspace の行は Tab の dot を 1 つに畳まず色ごとに数え、Bench の行は dot と端末の title を同じ代表の Tab から取る。1 つに畳むと、1 つの Runspace に Tab と claude が複数あるときに何が起きているか読めないため。
-- 状態と色の対応は Task の型を借りない。monica の `lib/status-config` は Task の `DisplayStatus` を借りていたが、workbench は task を import しない（ADR-0005）。
+- 状態と色の対応は Task の型を借りない。旧 Monica の `lib/status-config` は Task の `DisplayStatus` を借りていたが、workbench は task を import しない（ADR-0005）。
 
 ## 未読
 
@@ -77,13 +77,13 @@ Tab の dot（label の左）は、その Tab の Terminal Session の live な 
 - 窓が前面にあり、表示している Tab（active な Runspace の active な Tab）の Agent Session が未読なら、webview は一覧で読んだその通知の `notifiedAt` を添えて `agentSession.markSeen` を呼ぶ。見た瞬間に既読にし、見ていた時間は問わない。Tab を切り替えるたびには呼ばない。
 - 窓が前面かどうかは、Tauri の `getCurrentWindow()` の `onFocusChanged` の購読が張れてから `isFocused()` で読む（`core:default` の権限で足りる）。読む間に event が届いたら、読んだ値は捨てる。別の app が前面にあるときも、窓を最小化したときも event が届くことを実機で確かめた。前面でない間は、表示している Tab でも見たことにしない。前面に戻ったときに、表示している Tab を見たことにする。
 - `agentSession.list` を読み直すたびに Agent Session は別の値になるので、表示している間に届いた次の通知も、読み直した時点で見たことにする。`markSeen` が重なっても、Backend は未読でない行に何も書かない。
-- tania が前面にある間は通知のバナーが出ない（ADR-0013、ADR-0022）。active でない Runspace の通知には、行の数で気づく。
+- monica が前面にある間は通知のバナーが出ない（ADR-0013、ADR-0022）。active でない Runspace の通知には、行の数で気づく。
 
 ## 通知のクリック
 
 release で通知を押すと、Shell がその通知の Terminal Session を webview に渡し（`docs/packages/notifications.md` の「クリック」）、webview はその Terminal Session を表示している Tab を選ぶ（ADR-0022）。
 
-- webview は `notification-clicked` の listen を張ってから、Shell の `take_notification_click` command で持っている Terminal Session を取り出す。event を受けたときも同じ command で取り出す。通知で起こした tania では、webview が listen を張る前にクリックが届くため。
+- webview は `notification-clicked` の listen を張ってから、Shell の `take_notification_click` command で持っている Terminal Session を取り出す。event を受けたときも同じ command で取り出す。通知で起こした monica では、webview が listen を張る前にクリックが届くため。
 - 取り出すと Shell から消えるので、effect を片付けた後に届いた答えも捨てずに Tab を選ぶ（dev の StrictMode が effect を張り直しても取りこぼさない）。
 - layout を読み直してから選ぶ。窓が隠れている間は webview の JS が止まり、その間に CLI などで開いた Tab が layout に載っていないため。Backend に繋がっていなければ（通知で起こした直後や Backend の再起動中）、繋がって次に読めた layout で選ぶ。再起動中も layout は前の値のまま残り、その間に開いた Tab が載っていないため。
 - その Terminal Session を表示している Tab があれば、その Runspace と Tab を active にし、端末に focus を移す。その Runspace が Pinned（pin された Tab を持つ）でなければ、別の Tile を覗いていても、その Runspace の Tile に戻す。Pinned の Runspace はどの Tile を選んでも一覧の上に見えているので、そのとき見えていた Tile に留める。Bench は pin しても Tab を切り出さないので、押された Tab が pin されていなくても、同じ Runspace の別の Tab が pin されていれば留める。

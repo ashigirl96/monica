@@ -6,7 +6,7 @@
 export const NOTE_EXTRA_MAX = 520
 export const NOTE_EXTRA_STEP = 8
 
-const STORAGE_KEY = 'tania-note-extra-w'
+const STORAGE_KEY = 'monica-note-extra-w'
 
 const clamp = (n: number) => Math.min(NOTE_EXTRA_MAX, Math.max(0, Math.round(n)))
 

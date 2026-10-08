@@ -3,30 +3,30 @@ import { chmodSync, mkdirSync, renameSync, unlinkSync, writeFileSync } from 'nod
 import { homedir } from 'node:os'
 import { join } from 'node:path'
 
-import { os } from '@orpc/server'
-import { RPCHandler } from '@orpc/server/fetch'
 import {
   createJobLedger,
   migrations as jobMigrations,
   router as jobRouter,
-} from '@tania/job/server'
+} from '@monica/job/server'
 import {
   createNoteLedger,
   migrations as noteMigrations,
   systemJobs as noteSystemJobs,
-} from '@tania/note/server'
+} from '@monica/note/server'
 import {
   createTaskLedger,
   migrations as taskMigrations,
   nameAgentSession,
   router as taskRouter,
   systemJobs as taskSystemJobs,
-} from '@tania/task/server'
+} from '@monica/task/server'
 import {
   createWorkbenchLedger,
   migrations as workbenchMigrations,
   router as workbenchRouter,
-} from '@tania/workbench/server'
+} from '@monica/workbench/server'
+import { os } from '@orpc/server'
+import { RPCHandler } from '@orpc/server/fetch'
 import { drizzle } from 'drizzle-orm/bun-sqlite'
 import { migrate } from 'drizzle-orm/bun-sqlite/migrator'
 import { Hono } from 'hono'
@@ -45,16 +45,16 @@ try {
   console.error(`[backend] keeping the PATH it started with: ${(error as Error).message}`)
 }
 
-const ptydPath = process.env.TANIA_PTYD_PATH
+const ptydPath = process.env.MONICA_PTYD_PATH
 if (!ptydPath) {
-  console.error('[backend] TANIA_PTYD_PATH is not set; it names the tania-ptyd to spawn')
+  console.error('[backend] MONICA_PTYD_PATH is not set; it names the monica-ptyd to spawn')
   process.exit(1)
 }
-const home = process.env.TANIA_HOME || join(homedir(), '.tania')
+const home = process.env.MONICA_HOME || join(homedir(), '.monica')
 mkdirSync(home, { recursive: true, mode: 0o700 })
 chmodSync(home, 0o700)
 
-const sqlite = new Database(join(home, 'tania.db'))
+const sqlite = new Database(join(home, 'monica.db'))
 // EXCLUSIVE を WAL より先にすると WAL-index が heap に載り、2 つ目の Backend は最初のクエリで SQLITE_BUSY になって落ちる。
 sqlite.run('PRAGMA locking_mode = EXCLUSIVE')
 sqlite.run('PRAGMA journal_mode = WAL')
@@ -90,13 +90,13 @@ const handler = new RPCHandler(router)
 
 const origins = ['tauri://localhost', 'http://tauri.localhost']
 // dev の webview は vite から読まれ、vite の port は home ごとに変わる。
-if (process.env.TANIA_DEV_URL) origins.push(new URL(process.env.TANIA_DEV_URL).origin)
+if (process.env.MONICA_DEV_URL) origins.push(new URL(process.env.MONICA_DEV_URL).origin)
 
 const token = crypto.randomUUID()
 const startedAt = new Date().toISOString()
 const app = new Hono()
 app.use('*', cors({ origin: origins }))
-app.get('/health', (c) => c.json({ name: 'tania-backend', pid: process.pid, startedAt }))
+app.get('/health', (c) => c.json({ name: 'monica-backend', pid: process.pid, startedAt }))
 app.use('/rpc/*', bearerAuth({ token }))
 app.use('/rpc/*', async (c, next) => {
   const { matched, response } = await handler.handle(c.req.raw, { prefix: '/rpc', context })
@@ -112,12 +112,12 @@ taskLedger.start()
 jobLedger.start()
 noteLedger.start()
 // compiled binary の --asset は entry の隣に置かれ、bun run の Backend には無い。
-const notesListener = listenNotes(process.env.TANIA_NOTES_PORT, {
+const notesListener = listenNotes(process.env.MONICA_NOTES_PORT, {
   context: { db, noteLedger },
   webDist: join(import.meta.dir, 'dist'),
 })
 if (!(await Promise.race([workbenchStarted, Bun.sleep(3000).then(() => false)]))) {
-  console.error('[backend] tania-ptyd is not ready after 3s; announcing the endpoint anyway')
+  console.error('[backend] monica-ptyd is not ready after 3s; announcing the endpoint anyway')
 }
 
 const endpointPath = join(home, 'backend.json')

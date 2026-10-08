@@ -1,16 +1,16 @@
 {
   "$schema": "./node_modules/oxlint/configuration_schema.json",
   "plugins": ["typescript", "unicorn", "oxc", "import", "react"],
-  "jsPlugins": ["./scripts/oxlint/tania.js"],
+  "jsPlugins": ["./scripts/oxlint/monica.js"],
   "options": { "typeAware": true },
   "categories": {
     "correctness": "error",
     "suspicious": "error"
   },
   "rules": {
-    "tania/sync-transaction": "error",
-    "tania/disable-reason": "error",
-    "tania/atom-deferred-get": "error",
+    "monica/sync-transaction": "error",
+    "monica/disable-reason": "error",
+    "monica/atom-deferred-get": "error",
     // jsx: react-jsx では JSX を書く file が React を import しなくてよい。
     "react/react-in-jsx-scope": "off",
     // 名前の _ だけで判断するので、xterm の _core のような外が決めた名前にも当たる。
@@ -37,11 +37,11 @@
           {
             "patterns": [
               {
-                "group": ["@tania/*/cli"],
+                "group": ["@monica/*/cli"],
                 "message": "cli entry を import するのは apps/cli だけ（docs/packages.md の entry）"
               },
               {
-                "group": ["@tania/task", "@tania/task/*"],
+                "group": ["@monica/task", "@monica/task/*"],
                 "message": "workbench は task を import しない（ADR-0005）"
               }
             ]
@@ -58,21 +58,21 @@
             "paths": [{ "name": "bun:sqlite", "message": "ui は browser で動く（ADR-0009）" }],
             "patterns": [
               {
-                "group": ["@tania/*/cli"],
+                "group": ["@monica/*/cli"],
                 "message": "cli entry を import するのは apps/cli だけ（docs/packages.md の entry）"
               },
               {
-                "group": ["@tania/task", "@tania/task/*"],
+                "group": ["@monica/task", "@monica/task/*"],
                 "message": "workbench は task を import しない（ADR-0005）"
               },
               {
-                "group": ["@tania/*/server", "../server", "../server.ts"],
+                "group": ["@monica/*/server", "../server", "../server.ts"],
                 "allowTypeImports": true,
                 "message": "ui は browser で動くので server entry を import しない（ADR-0009）"
               },
               {
                 "group": [
-                  "@tania/*/schema",
+                  "@monica/*/schema",
                   "../schema",
                   "../schema.ts",
                   "drizzle-orm",
@@ -100,17 +100,17 @@
             ],
             "patterns": [
               {
-                "group": ["@tania/*/cli"],
+                "group": ["@monica/*/cli"],
                 "message": "cli entry を import するのは apps/cli だけ（docs/packages.md の entry）"
               },
               {
-                "group": ["@tania/task", "@tania/task/*"],
+                "group": ["@monica/task", "@monica/task/*"],
                 "message": "workbench は task を import しない（ADR-0005）"
               },
               {
                 "group": [
-                  "@tania/*/server",
-                  "@tania/*/schema",
+                  "@monica/*/server",
+                  "@monica/*/schema",
                   "./server",
                   "./server.ts",
                   "./schema",
@@ -134,7 +134,7 @@
           {
             "patterns": [
               {
-                "group": ["@tania/*/cli"],
+                "group": ["@monica/*/cli"],
                 "message": "cli entry を import するのは apps/cli だけ（docs/packages.md の entry）"
               }
             ]
@@ -151,17 +151,17 @@
             "paths": [{ "name": "bun:sqlite", "message": "ui は browser で動く（ADR-0009）" }],
             "patterns": [
               {
-                "group": ["@tania/*/cli"],
+                "group": ["@monica/*/cli"],
                 "message": "cli entry を import するのは apps/cli だけ（docs/packages.md の entry）"
               },
               {
-                "group": ["@tania/*/server", "../server", "../server.ts"],
+                "group": ["@monica/*/server", "../server", "../server.ts"],
                 "allowTypeImports": true,
                 "message": "ui は browser で動くので server entry を import しない（ADR-0009）"
               },
               {
                 "group": [
-                  "@tania/*/schema",
+                  "@monica/*/schema",
                   "../schema",
                   "../schema.ts",
                   "drizzle-orm",
@@ -189,13 +189,13 @@
             ],
             "patterns": [
               {
-                "group": ["@tania/*/cli"],
+                "group": ["@monica/*/cli"],
                 "message": "cli entry を import するのは apps/cli だけ（docs/packages.md の entry）"
               },
               {
                 "group": [
-                  "@tania/*/server",
-                  "@tania/*/schema",
+                  "@monica/*/server",
+                  "@monica/*/schema",
                   "./server",
                   "./server.ts",
                   "./schema",
@@ -219,11 +219,16 @@
           {
             "patterns": [
               {
-                "group": ["@tania/*/cli"],
+                "group": ["@monica/*/cli"],
                 "message": "cli entry を import するのは apps/cli だけ（docs/packages.md の entry）"
               },
               {
-                "group": ["@tania/task", "@tania/task/*", "@tania/workbench", "@tania/workbench/*"],
+                "group": [
+                  "@monica/task",
+                  "@monica/task/*",
+                  "@monica/workbench",
+                  "@monica/workbench/*"
+                ],
                 "message": "job は task も workbench も import しない（ADR-0016）"
               }
             ]
@@ -245,17 +250,22 @@
             ],
             "patterns": [
               {
-                "group": ["@tania/*/cli"],
+                "group": ["@monica/*/cli"],
                 "message": "cli entry を import するのは apps/cli だけ（docs/packages.md の entry）"
               },
               {
-                "group": ["@tania/task", "@tania/task/*", "@tania/workbench", "@tania/workbench/*"],
+                "group": [
+                  "@monica/task",
+                  "@monica/task/*",
+                  "@monica/workbench",
+                  "@monica/workbench/*"
+                ],
                 "message": "job は task も workbench も import しない（ADR-0016）"
               },
               {
                 "group": [
-                  "@tania/*/server",
-                  "@tania/*/schema",
+                  "@monica/*/server",
+                  "@monica/*/schema",
                   "./server",
                   "./server.ts",
                   "./schema",
@@ -279,17 +289,17 @@
           {
             "patterns": [
               {
-                "group": ["@tania/*/cli"],
+                "group": ["@monica/*/cli"],
                 "message": "cli entry を import するのは apps/cli だけ（docs/packages.md の entry）"
               },
               {
                 "group": [
-                  "@tania/task",
-                  "@tania/task/*",
-                  "@tania/workbench",
-                  "@tania/workbench/*",
-                  "@tania/job",
-                  "@tania/job/*"
+                  "@monica/task",
+                  "@monica/task/*",
+                  "@monica/workbench",
+                  "@monica/workbench/*",
+                  "@monica/job",
+                  "@monica/job/*"
                 ],
                 "message": "note は他の domain を import しない（docs/packages/note-ledger.md）"
               }
@@ -307,28 +317,28 @@
             "paths": [{ "name": "bun:sqlite", "message": "ui は browser で動く（ADR-0009）" }],
             "patterns": [
               {
-                "group": ["@tania/*/cli"],
+                "group": ["@monica/*/cli"],
                 "message": "cli entry を import するのは apps/cli だけ（docs/packages.md の entry）"
               },
               {
                 "group": [
-                  "@tania/task",
-                  "@tania/task/*",
-                  "@tania/workbench",
-                  "@tania/workbench/*",
-                  "@tania/job",
-                  "@tania/job/*"
+                  "@monica/task",
+                  "@monica/task/*",
+                  "@monica/workbench",
+                  "@monica/workbench/*",
+                  "@monica/job",
+                  "@monica/job/*"
                 ],
                 "message": "note は他の domain を import しない（docs/packages/note-ledger.md）"
               },
               {
-                "group": ["@tania/*/server", "../server", "../server.ts"],
+                "group": ["@monica/*/server", "../server", "../server.ts"],
                 "allowTypeImports": true,
                 "message": "ui は browser で動くので server entry を import しない（ADR-0009）"
               },
               {
                 "group": [
-                  "@tania/*/schema",
+                  "@monica/*/schema",
                   "../schema",
                   "../schema.ts",
                   "drizzle-orm",
@@ -356,24 +366,24 @@
             ],
             "patterns": [
               {
-                "group": ["@tania/*/cli"],
+                "group": ["@monica/*/cli"],
                 "message": "cli entry を import するのは apps/cli だけ（docs/packages.md の entry）"
               },
               {
                 "group": [
-                  "@tania/task",
-                  "@tania/task/*",
-                  "@tania/workbench",
-                  "@tania/workbench/*",
-                  "@tania/job",
-                  "@tania/job/*"
+                  "@monica/task",
+                  "@monica/task/*",
+                  "@monica/workbench",
+                  "@monica/workbench/*",
+                  "@monica/job",
+                  "@monica/job/*"
                 ],
                 "message": "note は他の domain を import しない（docs/packages/note-ledger.md）"
               },
               {
                 "group": [
-                  "@tania/*/server",
-                  "@tania/*/schema",
+                  "@monica/*/server",
+                  "@monica/*/schema",
                   "../server",
                   "../server.ts",
                   "../schema",
@@ -398,7 +408,7 @@
             "paths": [{ "name": "bun:sqlite", "message": "ui は browser で動く（ADR-0009）" }],
             "patterns": [
               {
-                "group": ["@tania/*"],
+                "group": ["@monica/*"],
                 "message": "packages/ui は domain を持たない部品なので、domain の package を import しない"
               }
             ]
@@ -430,7 +440,7 @@
           {
             "patterns": [
               {
-                "group": ["*", "!drizzle-orm/sqlite-core", "!@tania/workbench/schema"],
+                "group": ["*", "!drizzle-orm/sqlite-core", "!@monica/workbench/schema"],
                 "message": "schema entry は drizzle-orm/sqlite-core と、FK のための workbench の schema だけを import する"
               }
             ]
@@ -478,17 +488,17 @@
           {
             "patterns": [
               {
-                "group": ["@tania/*/cli"],
+                "group": ["@monica/*/cli"],
                 "message": "cli entry を import するのは apps/cli だけ（docs/packages.md の entry）"
               },
               {
                 "group": [
-                  "@tania/cli",
-                  "@tania/cli/*",
-                  "@tania/desktop",
-                  "@tania/desktop/*",
-                  "@tania/web",
-                  "@tania/web/*"
+                  "@monica/cli",
+                  "@monica/cli/*",
+                  "@monica/desktop",
+                  "@monica/desktop/*",
+                  "@monica/web",
+                  "@monica/web/*"
                 ],
                 "message": "apps どうしは import しない（ADR-0002）"
               }
@@ -506,12 +516,12 @@
             "patterns": [
               {
                 "group": [
-                  "@tania/backend",
-                  "@tania/backend/*",
-                  "@tania/desktop",
-                  "@tania/desktop/*",
-                  "@tania/web",
-                  "@tania/web/*"
+                  "@monica/backend",
+                  "@monica/backend/*",
+                  "@monica/desktop",
+                  "@monica/desktop/*",
+                  "@monica/web",
+                  "@monica/web/*"
                 ],
                 "message": "apps どうしは import しない（ADR-0002）"
               }
@@ -536,17 +546,17 @@
             "patterns": [
               {
                 "group": [
-                  "@tania/backend",
-                  "@tania/backend/*",
-                  "@tania/desktop",
-                  "@tania/desktop/*",
-                  "@tania/web",
-                  "@tania/web/*"
+                  "@monica/backend",
+                  "@monica/backend/*",
+                  "@monica/desktop",
+                  "@monica/desktop/*",
+                  "@monica/web",
+                  "@monica/web/*"
                 ],
                 "message": "apps どうしは import しない（ADR-0002）"
               },
               {
-                "group": ["@tania/*/server", "@tania/*/schema", "drizzle-orm", "drizzle-orm/**"],
+                "group": ["@monica/*/server", "@monica/*/schema", "drizzle-orm", "drizzle-orm/**"],
                 "allowTypeImports": true,
                 "message": "DB に触るのは Backend だけで、CLI は procedure を呼ぶ（ADR-0003）"
               }
@@ -569,22 +579,22 @@
             ],
             "patterns": [
               {
-                "group": ["@tania/*/cli"],
+                "group": ["@monica/*/cli"],
                 "message": "cli entry を import するのは apps/cli だけ（docs/packages.md の entry）"
               },
               {
                 "group": [
-                  "@tania/backend",
-                  "@tania/backend/*",
-                  "@tania/cli",
-                  "@tania/cli/*",
-                  "@tania/web",
-                  "@tania/web/*"
+                  "@monica/backend",
+                  "@monica/backend/*",
+                  "@monica/cli",
+                  "@monica/cli/*",
+                  "@monica/web",
+                  "@monica/web/*"
                 ],
                 "message": "apps どうしは import しない（ADR-0002）"
               },
               {
-                "group": ["@tania/*/server", "@tania/*/schema", "drizzle-orm", "drizzle-orm/**"],
+                "group": ["@monica/*/server", "@monica/*/schema", "drizzle-orm", "drizzle-orm/**"],
                 "allowTypeImports": true,
                 "message": "DB に触るのは Backend だけで、webview は procedure を呼ぶ（ADR-0003）"
               }
@@ -607,22 +617,22 @@
             ],
             "patterns": [
               {
-                "group": ["@tania/*/cli"],
+                "group": ["@monica/*/cli"],
                 "message": "cli entry を import するのは apps/cli だけ（docs/packages.md の entry）"
               },
               {
                 "group": [
-                  "@tania/backend",
-                  "@tania/backend/*",
-                  "@tania/cli",
-                  "@tania/cli/*",
-                  "@tania/desktop",
-                  "@tania/desktop/*"
+                  "@monica/backend",
+                  "@monica/backend/*",
+                  "@monica/cli",
+                  "@monica/cli/*",
+                  "@monica/desktop",
+                  "@monica/desktop/*"
                 ],
                 "message": "apps どうしは import しない（ADR-0002）"
               },
               {
-                "group": ["@tania/*/server", "@tania/*/schema", "drizzle-orm", "drizzle-orm/**"],
+                "group": ["@monica/*/server", "@monica/*/schema", "drizzle-orm", "drizzle-orm/**"],
                 "allowTypeImports": true,
                 "message": "DB に触るのは Backend だけで、ブラウザは procedure を呼ぶ（ADR-0003）"
               }
@@ -634,17 +644,17 @@
     {
       "files": ["packages/*/src/**", "apps/backend/src/**"],
       "excludeFiles": ["**/*.test.ts", "**/testing.ts", "**/fake-*.ts"],
-      "rules": { "tania/spawn-env": "error" }
+      "rules": { "monica/spawn-env": "error" }
     },
     {
       // apps/cli は自分の domain を持たず、テストが task の table に fixture を書くので入れない。
       "files": ["packages/*/src/**", "apps/backend/src/**"],
-      "rules": { "tania/cross-domain-write": "error" }
+      "rules": { "monica/cross-domain-write": "error" }
     },
     {
       "files": ["**/*.ts", "**/*.tsx"],
       "excludeFiles": ["**/*.test.ts", "**/testing.ts"],
-      "rules": { "tania/testing-entry": "error" }
+      "rules": { "monica/testing-entry": "error" }
     },
     {
       // bun-types が `expect(…).rejects` の matcher を void を返す型にしているための誤検知。rule に従って await を外すと、test が reject を待たなくなる。

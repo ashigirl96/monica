@@ -4,8 +4,8 @@ import {
   PopoverMenuItem,
   PopoverMenuSeparator,
   pushErrorToast,
-} from '@tania/ui'
-import type { MenuTab, TabMenuItems } from '@tania/workbench/ui'
+} from '@monica/ui'
+import type { MenuTab, TabMenuItems } from '@monica/workbench/ui'
 import { useCallback, useEffect, useState } from 'react'
 
 import type { CurrentOutput, ListItem } from '../contract.ts'

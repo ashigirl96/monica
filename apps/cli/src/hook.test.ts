@@ -14,8 +14,8 @@ afterEach(() => {
   cleanUp()
 })
 
-function taniaHome(): string {
-  const home = mkdtempSync(join(tmpdir(), 'tania-'))
+function monicaHome(): string {
+  const home = mkdtempSync(join(tmpdir(), 'monica-'))
   cleanups.push(() => rmSync(home, { recursive: true, force: true }))
   return home
 }
@@ -68,7 +68,7 @@ async function hook(home: string, payload: object, env: Record<string, string> =
   const child = Bun.spawn(
     ['bun', join(import.meta.dir, 'main.ts'), 'workbench', 'hook', 'claude'],
     {
-      env: { PATH: process.env.PATH!, TANIA_HOME: home, ...env },
+      env: { PATH: process.env.PATH!, MONICA_HOME: home, ...env },
       stdin: new Blob([JSON.stringify(payload)]),
       stdout: 'pipe',
       stderr: 'pipe',
@@ -79,14 +79,14 @@ async function hook(home: string, payload: object, env: Record<string, string> =
   return { code, stdout, elapsedMs: performance.now() - startedAt }
 }
 
-const inTab = { TANIA_TERMINAL_SESSION_ID: 'ts-a' }
+const inTab = { MONICA_TERMINAL_SESSION_ID: 'ts-a' }
 
 test("a hook from a Tab is recorded by the Backend under the Tab's Terminal Session", async () => {
-  const home = taniaHome()
+  const home = monicaHome()
   const { client } = serveBackend(home)
   const terminalSessionId = await openTabOutsideBench(client)
 
-  const result = await hook(home, prompt, { TANIA_TERMINAL_SESSION_ID: terminalSessionId })
+  const result = await hook(home, prompt, { MONICA_TERMINAL_SESSION_ID: terminalSessionId })
 
   expect(result).toMatchObject({ code: 0, stdout: '' })
   expect(await client.workbench.agentSession.list()).toEqual([
@@ -95,7 +95,7 @@ test("a hook from a Tab is recorded by the Backend under the Tab's Terminal Sess
 })
 
 test('a hook outside any Tab is not sent to the Backend', async () => {
-  const home = taniaHome()
+  const home = monicaHome()
   const { client } = serveBackend(home)
 
   const result = await hook(home, prompt)
@@ -105,7 +105,7 @@ test('a hook outside any Tab is not sent to the Backend', async () => {
 })
 
 test('ExitPlanMode is allowed into auto mode with its input handed back, without waiting for a Backend', async () => {
-  const home = taniaHome()
+  const home = monicaHome()
 
   const result = await hook(home, exitPlanMode, inTab)
 
@@ -123,10 +123,10 @@ test('ExitPlanMode is allowed into auto mode with its input handed back, without
 })
 
 test('without a Backend, or with one that fails or refuses, the hook exits 0 at once', async () => {
-  const absent = taniaHome()
-  const failing = taniaHome()
+  const absent = monicaHome()
+  const failing = monicaHome()
   serveBackend(failing).sqlite.close()
-  const refusing = taniaHome()
+  const refusing = monicaHome()
   const closed = Bun.serve({ hostname: '127.0.0.1', port: 0, fetch: () => new Response() })
   writeEndpoint(refusing, closed.port!)
   void closed.stop(true)
@@ -140,7 +140,7 @@ test('without a Backend, or with one that fails or refuses, the hook exits 0 at 
 })
 
 test('a Backend that does not answer is given up after 2 seconds and the hook exits 0', async () => {
-  const home = taniaHome()
+  const home = monicaHome()
   const hung = Bun.serve({
     hostname: '127.0.0.1',
     port: 0,

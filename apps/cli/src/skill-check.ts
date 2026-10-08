@@ -31,7 +31,7 @@ export function inspectSkills(root: string): string[] {
 const skillsDirOf = (path: string) => dirname(dirname(path))
 const skillNameOf = (path: string) => basename(dirname(path))
 
-// plugin の Skill は `/tania:<name>` で呼ぶので、package をまたぐ同名は片方が隠れる。
+// plugin の Skill は `/monica:<name>` で呼ぶので、package をまたぐ同名は片方が隠れる。
 function duplicateNames(paths: string[]): string[] {
   return [...Map.groupBy(paths, skillNameOf)]
     .filter(([, same]) => same.length > 1)
@@ -48,7 +48,7 @@ function inspectSkill(path: string, markdown: string, program: Command): string[
   if (name !== dir) {
     problems.push(`${path}: name is ${describeName(name)}, not the directory name '${dir}'`)
   }
-  for (const command of taniaCommands(markdown)) {
+  for (const command of monicaCommands(markdown)) {
     const problem = checkCommand(program, command)
     if (problem) problems.push(`${path}: \`${command.text}\`: ${problem}`)
   }
@@ -71,18 +71,18 @@ function cliProgram(): Command {
   return createProgram([], { connect: () => null, stdout() {}, stderr() {} }).program
 }
 
-type TaniaCommand = { text: string; inShell: boolean }
+type MonicaCommand = { text: string; inShell: boolean }
 
-const startsWithTania = /^tania(\s|$)/
+const startsWithMonica = /^monica(\s|$)/
 
 // 長い fence の中の短い fence は例として書いたものなので、外の fence を閉じない。
-function taniaCommands(markdown: string): TaniaCommand[] {
-  const found: TaniaCommand[] = []
+function monicaCommands(markdown: string): MonicaCommand[] {
+  const found: MonicaCommand[] = []
   let fence: { marker: string; shell: boolean } | null = null
   for (const line of markdown.split('\n').map((raw) => raw.trimStart())) {
     if (fence) {
       if (line.startsWith(fence.marker) && /^(`+|~+)\s*$/.test(line)) fence = null
-      else if (fence.shell && startsWithTania.test(line)) found.push({ text: line, inShell: true })
+      else if (fence.shell && startsWithMonica.test(line)) found.push({ text: line, inShell: true })
       continue
     }
     const opened = /^(`{3,}|~{3,})\s*(\w*)/.exec(line)
@@ -91,16 +91,16 @@ function taniaCommands(markdown: string): TaniaCommand[] {
       continue
     }
     for (const [, code] of line.matchAll(/`([^`]+)`/g)) {
-      if (startsWithTania.test(code!)) found.push({ text: code!, inShell: false })
+      if (startsWithMonica.test(code!)) found.push({ text: code!, inShell: false })
     }
   }
   return found
 }
 
 // commander は親の option も子の後ろで受けるので、辿った command の option をすべて数える。
-function checkCommand(program: Command, { text, inShell }: TaniaCommand): string | null {
+function checkCommand(program: Command, { text, inShell }: MonicaCommand): string | null {
   let command = program
-  const path = ['tania']
+  const path = ['monica']
   const options = [...program.createHelp().visibleOptions(program)]
   const words = text.trim().split(/\s+/)
   const comment = words.findIndex((word) => word.startsWith('#'))

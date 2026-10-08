@@ -71,7 +71,7 @@ async function notificationsOn(
   await client.agentSession.recordHook({
     terminalSessionId: 'ts-a',
     payload: payload('s-1', hookEventName, {
-      cwd: '/Users/me/src/tania',
+      cwd: '/Users/me/src/monica',
       transcript_path: transcript(home),
       ...fields,
     }),
@@ -253,7 +253,7 @@ test("a question asked through both of its hooks notifies once, after the commit
   const record = (hookEventName: string, fields?: object) =>
     client.agentSession.recordHook({
       terminalSessionId: 'ts-a',
-      payload: payload('s-1', hookEventName, { cwd: '/Users/me/src/tania', ...fields }),
+      payload: payload('s-1', hookEventName, { cwd: '/Users/me/src/monica', ...fields }),
     })
 
   await record('SessionStart', { source: 'startup' })
@@ -262,27 +262,27 @@ test("a question asked through both of its hooks notifies once, after the commit
   await record('PermissionRequest', { tool_name: 'AskUserQuestion' })
 
   expect(sent).toEqual([
-    { title: 'src/tania', body: '質問', terminalSessionId: 'ts-a', committed: true },
+    { title: 'src/monica', body: '質問', terminalSessionId: 'ts-a', committed: true },
   ])
 })
 
 test.each([
-  ['Stop', '手空き · Tania通知の問題', {}],
-  ['PreToolUse', '質問 · Tania通知の問題', { tool_name: 'AskUserQuestion' }],
-  ['PermissionRequest', '許可: Bash · Tania通知の問題', { tool_name: 'Bash' }],
-  ['StopFailure', 'エラー: rate_limit · Tania通知の問題', { error: 'rate_limit' }],
-  ['StopFailure', 'エラー · Tania通知の問題', {}],
+  ['Stop', '手空き · Monica通知の問題', {}],
+  ['PreToolUse', '質問 · Monica通知の問題', { tool_name: 'AskUserQuestion' }],
+  ['PermissionRequest', '許可: Bash · Monica通知の問題', { tool_name: 'Bash' }],
+  ['StopFailure', 'エラー: rate_limit · Monica通知の問題', { error: 'rate_limit' }],
+  ['StopFailure', 'エラー · Monica通知の問題', {}],
 ])(
   'a notification on %s puts the Agent Session title from the Agent Session Transcript after the reason: %s',
   async (hookEventName, body, fields) => {
     const sent = await notificationsOn(hookEventName, fields, (home) =>
       writeTranscript(home, [
         JSON.stringify({ type: 'user', message: { role: 'user', content: '通知を直したい' } }),
-        aiTitle('Tania通知の問題'),
+        aiTitle('Monica通知の問題'),
       ]),
     )
 
-    expect(sent).toEqual([{ title: 'src/tania', body, terminalSessionId: 'ts-a' }])
+    expect(sent).toEqual([{ title: 'src/monica', body, terminalSessionId: 'ts-a' }])
   },
 )
 
@@ -297,7 +297,7 @@ test('the last ai-title in the Agent Session Transcript is the Agent Session tit
   )
 
   expect(sent).toEqual([
-    { title: 'src/tania', body: '手空き · 今の名前', terminalSessionId: 'ts-a' },
+    { title: 'src/monica', body: '手空き · 今の名前', terminalSessionId: 'ts-a' },
   ])
 })
 
@@ -312,7 +312,7 @@ test('an ai-title near the end of an Agent Session Transcript longer than 64 KiB
   )
 
   expect(sent).toEqual([
-    { title: 'src/tania', body: '手空き · 今の名前', terminalSessionId: 'ts-a' },
+    { title: 'src/monica', body: '手空き · 今の名前', terminalSessionId: 'ts-a' },
   ])
 })
 
@@ -340,7 +340,7 @@ test.each([
 ])('a notification still goes out with the reason alone when %s', async (_case, transcript) => {
   const sent = await notificationsOn('Stop', {}, transcript)
 
-  expect(sent).toEqual([{ title: 'src/tania', body: '手空き', terminalSessionId: 'ts-a' }])
+  expect(sent).toEqual([{ title: 'src/monica', body: '手空き', terminalSessionId: 'ts-a' }])
 })
 
 test('the name the Task gives an Agent Session titles its notification, and the Agent Session title stays in the body', async () => {
@@ -348,7 +348,7 @@ test('the name the Task gives an Agent Session titles its notification, and the 
   const { home, db, client } = setup({
     notify: (n) => sent.push(n),
     nameAgentSession: (_db, agentSessionId) =>
-      agentSessionId === 's-1' ? 'tania#43 骨格 (8)' : null,
+      agentSessionId === 's-1' ? 'monica#43 骨格 (8)' : null,
   })
   seedTerminalSession(db, 'ts-a', 'running')
   const transcriptPath = writeTranscript(home, [aiTitle('通知のTab名表示')])
@@ -362,7 +362,11 @@ test('the name the Task gives an Agent Session titles its notification, and the 
   })
 
   expect(sent).toEqual([
-    { title: 'tania#43 骨格 (8)', body: '許可: Bash · 通知のTab名表示', terminalSessionId: 'ts-a' },
+    {
+      title: 'monica#43 骨格 (8)',
+      body: '許可: Bash · 通知のTab名表示',
+      terminalSessionId: 'ts-a',
+    },
   ])
 })
 

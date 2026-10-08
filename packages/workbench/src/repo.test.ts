@@ -47,9 +47,9 @@ test('a git repo outside the ghq layout, a directory outside any repo, and a mis
 test('a directory under the home outside any Repo is shown from ~', async () => {
   const { client } = setup()
 
-  expect(await client.repo.of({ cwd: join(homedir(), 'tania-missing', 'Downloads') })).toEqual({
+  expect(await client.repo.of({ cwd: join(homedir(), 'monica-missing', 'Downloads') })).toEqual({
     repo: null,
-    path: '~/tania-missing/Downloads',
+    path: '~/monica-missing/Downloads',
     branch: null,
   })
 })

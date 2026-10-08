@@ -6,12 +6,12 @@ import { kebabCase } from 'trpc-cli'
 import type { Client } from './backend.ts'
 import { completers } from './contract.ts'
 import { createProgram } from './program.ts'
-import { backendWithTasks, cleanUp, tania } from './testing.ts'
+import { backendWithTasks, cleanUp, monica } from './testing.ts'
 
 afterEach(cleanUp)
 
 test('__complete lists the subcommands with their descriptions for zsh', async () => {
-  const result = await tania(['__complete', '--', 'task', ''], () => null)
+  const result = await monica(['__complete', '--', 'task', ''], () => null)
 
   expect(result).toEqual({
     code: 0,
@@ -30,7 +30,7 @@ test('__complete lists the subcommands with their descriptions for zsh', async (
 })
 
 test('__complete lists the options of the command and of its parents for a word starting with -', async () => {
-  const result = await tania(['__complete', '--', 'task', 'run', '-'], () => null)
+  const result = await monica(['__complete', '--', 'task', 'run', '-'], () => null)
 
   expect(result.stdout).toBe(
     "--in-place:use the Repo's checkout as the cwd, with no worktree and no setup\n" +
@@ -41,9 +41,9 @@ test('__complete lists the options of the command and of its parents for a word 
 })
 
 test('__complete lists the choices after an option that takes a value, and skips the value after it', async () => {
-  const value = await tania(['__complete', '--', 'task', 'list', '--format', ''], () => null)
-  const joined = await tania(['__complete', '--', 'task', 'list', '--format='], () => null)
-  const after = await tania(['__complete', '--', '--format', 'json', 'workbench', ''], () => null)
+  const value = await monica(['__complete', '--', 'task', 'list', '--format', ''], () => null)
+  const joined = await monica(['__complete', '--', 'task', 'list', '--format='], () => null)
+  const after = await monica(['__complete', '--', '--format', 'json', 'workbench', ''], () => null)
 
   expect(value.stdout).toBe('text\njson\n')
   expect(joined.stdout).toBe('--format=text\n--format=json\n')
@@ -57,8 +57,8 @@ test('__complete lists the choices after an option that takes a value, and skips
 test('__complete lists the open Tasks with their titles for the ref, and the closed ones for reopen', async () => {
   const connect = backendWithTasks()
 
-  const run = await tania(['__complete', '--', 'task', 'run', ''], connect)
-  const reopen = await tania(['__complete', '--', 'task', 'reopen', 'acme/'], connect)
+  const run = await monica(['__complete', '--', 'task', 'run', ''], connect)
+  const reopen = await monica(['__complete', '--', 'task', 'reopen', 'acme/'], connect)
 
   expect(run).toEqual({ code: 0, stdout: 'acme/app#12:Ship it\n', stderr: '' })
   expect(reopen.stdout).toBe('acme/app#1:Shipped\n')
@@ -68,13 +68,13 @@ test('__complete lists nothing without a Backend, when it fails, after the last 
   const connect = backendWithTasks()
   const failing = { task: { list: () => Promise.reject(new Error('the Backend broke')) } }
 
-  const noBackend = await tania(['__complete', '--', 'task', 'run', ''], () => null)
-  const failed = await tania(
+  const noBackend = await monica(['__complete', '--', 'task', 'run', ''], () => null)
+  const failed = await monica(
     ['__complete', '--', 'task', 'run', ''],
     () => failing as unknown as Client,
   )
-  const afterRef = await tania(['__complete', '--', 'task', 'run', 'acme/app#12', ''], connect)
-  const afterForce = await tania(['__complete', '--', 'task', 'close', '--force', ''], connect)
+  const afterRef = await monica(['__complete', '--', 'task', 'run', 'acme/app#12', ''], connect)
+  const afterForce = await monica(['__complete', '--', 'task', 'close', '--force', ''], connect)
 
   expect(noBackend).toEqual({ code: 0, stdout: '', stderr: '' })
   expect(failed).toEqual({ code: 0, stdout: '', stderr: '' })
@@ -82,12 +82,12 @@ test('__complete lists nothing without a Backend, when it fails, after the last 
   expect(afterForce.stdout).toBe('')
 })
 
-test('completions zsh prints a script that asks the tania typed for the candidates', async () => {
-  const script = await tania(['completions', 'zsh'], () => null)
-  const shells = await tania(['__complete', '--', 'completions', ''], () => null)
+test('completions zsh prints a script that asks the monica typed for the candidates', async () => {
+  const script = await monica(['completions', 'zsh'], () => null)
+  const shells = await monica(['__complete', '--', 'completions', ''], () => null)
 
   expect(script.code).toBe(0)
-  expect(script.stdout).toStartWith('#compdef tania\n')
+  expect(script.stdout).toStartWith('#compdef monica\n')
   expect(script.stdout).toContain('"${words[1]}" __complete -- "${(@)words[2,CURRENT]}"')
   expect(shells.stdout).toBe('zsh\n')
 })
@@ -116,7 +116,7 @@ function leafPaths(node: unknown, path: string[] = []): string[][] {
 }
 
 test('completions refuses a shell other than zsh with exit 1', async () => {
-  const result = await tania(['completions', 'bash'], () => null)
+  const result = await monica(['completions', 'bash'], () => null)
 
   expect(result.code).toBe(1)
   expect(result.stdout).toBe('')

@@ -4,8 +4,8 @@ import { join } from 'node:path'
 
 // toast は画面の外にあるので、出した文言だけを記録する。
 const toasts: { type: 'info' | 'error'; message: string }[] = []
-const ui = await import('@tania/ui')
-await mock.module('@tania/ui', () => ({
+const ui = await import('@monica/ui')
+await mock.module('@monica/ui', () => ({
   ...ui,
   pushInfoToast: (message: string) => {
     toasts.push({ type: 'info', message })
@@ -32,7 +32,7 @@ async function tracked(setupScript?: string) {
   const fixture = setup()
   fixture.ghq.origin(
     'acme/app',
-    setupScript ? { '.tania/setup.sh': { content: setupScript, mode: 0o755 } } : {},
+    setupScript ? { '.monica/setup.sh': { content: setupScript, mode: 0o755 } } : {},
   )
   fixture.taskLedger.start()
   fixture.github.issue(ref, { title: 'Ship it' })

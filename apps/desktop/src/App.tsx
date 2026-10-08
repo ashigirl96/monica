@@ -1,6 +1,6 @@
-import { useBenchLabels, useCloseTaskOfBench, useTabMenuItems } from '@tania/task/ui'
-import { Toaster } from '@tania/ui'
-import { Workbench } from '@tania/workbench/ui'
+import { useBenchLabels, useCloseTaskOfBench, useTabMenuItems } from '@monica/task/ui'
+import { Toaster } from '@monica/ui'
+import { Workbench } from '@monica/workbench/ui'
 import { useMemo } from 'react'
 
 import { useBackend } from './backend-provider.tsx'

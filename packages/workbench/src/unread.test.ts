@@ -114,7 +114,7 @@ test('a transaction that signals a change and then rolls back badges nothing', a
   expect(badged).toEqual([1])
 })
 
-test('a restarted Backend badges the unread count it finds before tania-ptyd answers', async () => {
+test('a restarted Backend badges the unread count it finds before monica-ptyd answers', async () => {
   const { badged, client, restartBackend, settled } = setupBadged()
   const { tab } = await client.runspace.create(size)
   await settled(tab.terminalSessionId)

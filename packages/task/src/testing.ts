@@ -3,13 +3,13 @@ import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
-import { createRouterClient } from '@orpc/server'
 import {
   createWorkbenchLedger,
   router as workbenchRouter,
   migrations as workbenchMigrations,
-} from '@tania/workbench/server'
-import { startFakePtyd, tempHome, untilSettled } from '@tania/workbench/testing'
+} from '@monica/workbench/server'
+import { startFakePtyd, tempHome, untilSettled } from '@monica/workbench/testing'
+import { createRouterClient } from '@orpc/server'
 import { eq } from 'drizzle-orm'
 import { drizzle } from 'drizzle-orm/bun-sqlite'
 import { migrate } from 'drizzle-orm/bun-sqlite/migrator'
@@ -62,7 +62,7 @@ export function setup() {
   })
   const github = startFakeGitHub()
   onCleanup(() => github.stop())
-  const scratch = mkdtempSync(join(tmpdir(), 'tania-task-'))
+  const scratch = mkdtempSync(join(tmpdir(), 'monica-task-'))
   onCleanup(() => rmSync(scratch, { recursive: true, force: true }))
   const ghq = fakeGhq(scratch)
 

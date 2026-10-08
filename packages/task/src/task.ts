@@ -1,5 +1,5 @@
+import type { Db, WorkbenchLedger } from '@monica/workbench/server'
 import { EventPublisher } from '@orpc/server'
-import type { Db, WorkbenchLedger } from '@tania/workbench/server'
 
 import { type BenchDeps, failInterruptedPreparations } from './bench.ts'
 import type { BackgroundSyncError, TaskChange } from './contract.ts'

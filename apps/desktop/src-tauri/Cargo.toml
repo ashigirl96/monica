@@ -1,11 +1,11 @@
 [package]
-name = "tania-desktop"
+name = "monica-desktop"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 
 [lib]
-name = "tania_desktop_lib"
+name = "monica_desktop_lib"
 
 # tauri と tauri-build は workspace.dependencies に上げない。Tauri CLI は tauri.conf.json から
 # tauri の features を書き戻すが、workspace 継承にするとその同期を諦めるため。
@@ -44,8 +44,8 @@ objc2-user-notifications = { version = "0.3", default-features = false, features
 serde = { workspace = true, features = ["derive"] }
 serde_json.workspace = true
 shared_child = "1"
-tania-terminal-client.workspace = true
-tania-terminal-protocol.workspace = true
+monica-terminal-client.workspace = true
+monica-terminal-protocol.workspace = true
 tauri = { version = "2", features = ["macos-private-api"] }
 tauri-plugin-opener = "2"
 tauri-plugin-notification = "2"

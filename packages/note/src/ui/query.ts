@@ -11,7 +11,7 @@ export const queryKeys = {
 }
 
 // TanStack Query v5 は visibilitychange しか購読しない（v4 で focus を意図的に外した）。
-// tania デスクトップやエディタからブラウザへ戻るときウィンドウは可視のままなので
+// monica デスクトップやエディタからブラウザへ戻るときウィンドウは可視のままなので
 // visibilitychange が発火せず、復帰時の再フェッチが不発になる。focus を足して起点を増やす。
 // blur が要るのは dedupe の再武装のため: focusManager は状態が「変化」したときだけ購読者に
 // 通知するので、false へ戻す機会が無いと内部フラグが true に張り付き、2 回目以降の focus が

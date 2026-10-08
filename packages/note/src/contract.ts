@@ -14,8 +14,8 @@ const NoteRowSchema = createSelectSchema(note)
 export { IMAGE_URL_PREFIX }
 
 // notes の口は Host がこれ以外の request を断る（DNS rebinding）ので、名前を足すとその口に届く経路も増える。
-// 保存される link は tania.localhost で書かれるが、ユーザーが同じ Backend を別の名前で開くこともある。
-export const NOTES_HOSTNAMES = ['tania.localhost', 'localhost', '127.0.0.1']
+// 保存される link は monica.localhost で書かれるが、ユーザーが同じ Backend を別の名前で開くこともある。
+export const NOTES_HOSTNAMES = ['monica.localhost', 'localhost', '127.0.0.1']
 
 export const NoteIdSchema = z
   .string()

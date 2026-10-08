@@ -1,5 +1,5 @@
-//! End-to-end tests against a real tania-ptyd process: spawn the binary with a temp
-//! TANIA_HOME, drive it through PtydClient, and assert sessions survive client
+//! End-to-end tests against a real monica-ptyd process: spawn the binary with a temp
+//! MONICA_HOME, drive it through PtydClient, and assert sessions survive client
 //! reconnects. PTY-backed, so like run::tests these can be environment-sensitive.
 
 use std::path::PathBuf;
@@ -8,8 +8,8 @@ use std::sync::mpsc;
 use std::time::{Duration, Instant};
 
 use base64::Engine;
-use tania_terminal_client::{ClientEvent, PtydClient};
-use tania_terminal_protocol::{CreateParams, RequestOp, ResponseBody, PROTOCOL_VERSION};
+use monica_terminal_client::{ClientEvent, PtydClient};
+use monica_terminal_protocol::{CreateParams, RequestOp, ResponseBody, PROTOCOL_VERSION};
 
 struct DaemonGuard {
     child: Child,
@@ -36,7 +36,7 @@ fn fresh_dir(name: &str) -> PathBuf {
 }
 
 fn daemon_command() -> Command {
-    let mut command = Command::new(env!("CARGO_BIN_EXE_tania-ptyd"));
+    let mut command = Command::new(env!("CARGO_BIN_EXE_monica-ptyd"));
     command.arg("--foreground");
     command
 }
@@ -54,7 +54,7 @@ fn spawn_daemon(mut command: Command, dir: PathBuf, socket: PathBuf) -> DaemonGu
 fn start_daemon(name: &str) -> DaemonGuard {
     let home = fresh_dir(name);
     let mut command = daemon_command();
-    command.arg("--tania-home").arg(&home);
+    command.arg("--monica-home").arg(&home);
     let socket = home.join("ptyd.sock");
     spawn_daemon(command, home, socket)
 }
@@ -350,7 +350,7 @@ fn second_daemon_instance_exits_immediately() {
     let daemon = start_daemon("single-instance");
 
     let status = daemon_command()
-        .arg("--tania-home")
+        .arg("--monica-home")
         .arg(&daemon.dir)
         .status()
         .expect("second daemon should run");
@@ -362,11 +362,11 @@ fn second_daemon_instance_exits_immediately() {
 }
 
 #[test]
-fn without_tania_home_the_daemon_lives_in_dot_tania_under_home() {
+fn without_monica_home_the_daemon_lives_in_dot_monica_under_home() {
     let user_home = fresh_dir("default-home");
     let mut command = daemon_command();
-    command.env("HOME", &user_home).env_remove("TANIA_HOME");
-    let socket = user_home.join(".tania").join("ptyd.sock");
+    command.env("HOME", &user_home).env_remove("MONICA_HOME");
+    let socket = user_home.join(".monica").join("ptyd.sock");
     let daemon = spawn_daemon(command, user_home, socket);
 
     let (client, _rx) = connect(&daemon);

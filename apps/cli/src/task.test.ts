@@ -3,20 +3,20 @@ import { mkdirSync, mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
+import { bench, issue, issueBlocker, run, task } from '@monica/task/schema'
+import type { Ghq } from '@monica/task/server'
 import { createRouterClient } from '@orpc/server'
-import { bench, issue, issueBlocker, run, task } from '@tania/task/schema'
-import type { Ghq } from '@tania/task/server'
 
 import {
   backendWithTasks,
   cleanUp,
   inMemoryBackend,
   openTabOutsideBench,
-  tania,
+  monica,
 } from './testing.ts'
 
 test('task list prints the open Tasks as text', async () => {
-  const result = await tania(['task', 'list'], backendWithTasks())
+  const result = await monica(['task', 'list'], backendWithTasks())
 
   expect(result).toEqual({
     code: 0,
@@ -28,7 +28,7 @@ test('task list prints the open Tasks as text', async () => {
 })
 
 test('task list --closed prints only the closed Tasks', async () => {
-  const result = await tania(['task', 'list', '--closed'], backendWithTasks())
+  const result = await monica(['task', 'list', '--closed'], backendWithTasks())
 
   expect(result.code).toBe(0)
   expect(result.stdout).toContain('acme/app#1 ')
@@ -36,7 +36,7 @@ test('task list --closed prints only the closed Tasks', async () => {
 })
 
 test('task list --format json prints the procedure output as it is', async () => {
-  const result = await tania(['task', 'list', '--format', 'json'], backendWithTasks())
+  const result = await monica(['task', 'list', '--format', 'json'], backendWithTasks())
 
   expect(result.code).toBe(0)
   expect(JSON.parse(result.stdout)).toEqual({
@@ -55,21 +55,21 @@ test('task list --format json prints the procedure output as it is', async () =>
 })
 
 test('task track takes the ref as an argument and refuses a bare #n with exit 1', async () => {
-  const result = await tania(['task', 'track', '#12'], backendWithTasks())
+  const result = await monica(['task', 'track', '#12'], backendWithTasks())
 
   expect(result.code).toBe(1)
   expect(result.stderr).toMatch(/^BAD_REQUEST: "#12" is not owner\/repo#n[^\n]*\n$/)
 })
 
 test('task track exits 1 when GitHub cannot be reached', async () => {
-  const result = await tania(['task', 'track', 'acme/app#99'], backendWithTasks())
+  const result = await monica(['task', 'track', 'acme/app#99'], backendWithTasks())
 
   expect(result.code).toBe(1)
   expect(result.stderr).toMatch(/^BAD_GATEWAY: could not sync from GitHub: `gh auth token`/)
 })
 
 test('task sync takes an optional ref and exits 1 for one that is not tracked', async () => {
-  const result = await tania(['task', 'sync', 'acme/app#99'], backendWithTasks())
+  const result = await monica(['task', 'sync', 'acme/app#99'], backendWithTasks())
 
   expect(result).toEqual({
     code: 1,
@@ -100,7 +100,7 @@ function backendWithBench({ home, ghq }: { home?: string; ghq?: Ghq } = {}) {
 }
 
 function inScratch() {
-  const scratch = mkdtempSync(join(tmpdir(), 'tania-cli-'))
+  const scratch = mkdtempSync(join(tmpdir(), 'monica-cli-'))
   cleanups.push(() => rmSync(scratch, { recursive: true, force: true }))
   return scratch
 }
@@ -125,7 +125,7 @@ function inPlaceBench() {
 test('task run prints where the Bench is, that claude started, and that GitHub could not be reached', async () => {
   const { connect, checkout } = inPlaceBench()
 
-  const result = await tania(['task', 'run', 'acme/app#12', '--in-place'], connect)
+  const result = await monica(['task', 'run', 'acme/app#12', '--in-place'], connect)
 
   expect(result).toEqual({
     code: 0,
@@ -152,8 +152,8 @@ test('task run exits 1 naming the open Blockers, and --force starts claude past 
     .get()
   db.insert(issueBlocker).values({ issueId, blockerId: upstream.id }).run()
 
-  const blocked = await tania(['task', 'run', 'acme/app#12', '--in-place'], connect)
-  const forced = await tania(['task', 'run', 'acme/app#12', '--in-place', '--force'], connect)
+  const blocked = await monica(['task', 'run', 'acme/app#12', '--in-place'], connect)
+  const forced = await monica(['task', 'run', 'acme/app#12', '--in-place', '--force'], connect)
 
   expect(blocked).toEqual({
     code: 1,
@@ -168,7 +168,7 @@ test('task run exits 1 with the reason and the log path when the Bench cannot be
   const home = inScratch()
   const { connect } = backendWithBench({ home })
 
-  const result = await tania(['task', 'run', 'acme/app#12'], connect)
+  const result = await monica(['task', 'run', 'acme/app#12'], connect)
 
   expect(result).toEqual({
     code: 1,
@@ -182,7 +182,7 @@ test('task run exits 1 with the reason and the log path when the Bench cannot be
 test("task run --in-place exits 1 when it cannot find the Repo's checkout", async () => {
   const { connect } = backendWithBench()
 
-  const result = await tania(['task', 'run', 'acme/app#12', '--in-place'], connect)
+  const result = await monica(['task', 'run', 'acme/app#12', '--in-place'], connect)
 
   expect(result).toEqual({
     code: 1,
@@ -192,7 +192,7 @@ test("task run --in-place exits 1 when it cannot find the Repo's checkout", asyn
   })
 })
 
-test('task current names the Task of the Bench the Tab is in, given by TANIA_TERMINAL_SESSION_ID', async () => {
+test('task current names the Task of the Bench the Tab is in, given by MONICA_TERMINAL_SESSION_ID', async () => {
   const { db, issueId, context, connect } = backendWithBench()
   const runspaceId = db.transaction((tx) => {
     const id = context.workbenchLedger.createRunspace(tx, { cwd: '/work' })
@@ -214,7 +214,7 @@ test('task current names the Task of the Bench the Tab is in, given by TANIA_TER
     cols: 80,
   })
 
-  const result = await tania(['task', 'current'], connect, { terminalSessionId })
+  const result = await monica(['task', 'current'], connect, { terminalSessionId })
 
   expect(result).toEqual({
     code: 0,
@@ -223,11 +223,11 @@ test('task current names the Task of the Bench the Tab is in, given by TANIA_TER
   })
 })
 
-test('task attach moves the Tab given by TANIA_TERMINAL_SESSION_ID into the Bench, opening it in place', async () => {
+test('task attach moves the Tab given by MONICA_TERMINAL_SESSION_ID into the Bench, opening it in place', async () => {
   const { connect } = inPlaceBench()
   const terminalSessionId = await openTabOutsideBench(connect())
 
-  const result = await tania(['task', 'attach', 'acme/app#12'], connect, { terminalSessionId })
+  const result = await monica(['task', 'attach', 'acme/app#12'], connect, { terminalSessionId })
 
   expect(result).toEqual({
     code: 0,
@@ -260,8 +260,8 @@ test('task close exits 1 with each reason on its own line after the code, and --
   const backend = backendWithBench()
   await withLiveRun(backend)
 
-  const refused = await tania(['task', 'close', 'acme/app#12'], backend.connect)
-  const forced = await tania(['task', 'close', 'acme/app#12', '--force'], backend.connect)
+  const refused = await monica(['task', 'close', 'acme/app#12'], backend.connect)
+  const forced = await monica(['task', 'close', 'acme/app#12', '--force'], backend.connect)
 
   expect(refused).toEqual({
     code: 1,
@@ -284,10 +284,10 @@ test('task close in the Tab of a live Run is not stopped by that Run, and task r
   const backend = backendWithBench()
   const terminalSessionId = await withLiveRun(backend)
 
-  const closed = await tania(['task', 'close', 'acme/app#12'], backend.connect, {
+  const closed = await monica(['task', 'close', 'acme/app#12'], backend.connect, {
     terminalSessionId,
   })
-  const reopened = await tania(['task', 'reopen', 'acme/app#12'], backend.connect)
+  const reopened = await monica(['task', 'reopen', 'acme/app#12'], backend.connect)
 
   expect(closed.code).toBe(0)
   expect(reopened.code).toBe(0)
@@ -297,8 +297,8 @@ test('task close in the Tab of a live Run is not stopped by that Run, and task r
 test('task current exits 1 outside a Tab, and takes no flag for the Terminal Session', async () => {
   const { connect } = backendWithBench()
 
-  const outside = await tania(['task', 'current'], connect)
-  const flagged = await tania(['task', 'current', '--terminal-session-id', 'ts-a'], connect)
+  const outside = await monica(['task', 'current'], connect)
+  const flagged = await monica(['task', 'current', '--terminal-session-id', 'ts-a'], connect)
 
   expect(outside.code).toBe(1)
   expect(outside.stderr).toStartWith('BAD_REQUEST: not in a Tab of the Workbench')

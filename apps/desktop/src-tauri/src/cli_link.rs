@@ -5,10 +5,10 @@ use crate::locations;
 
 pub fn link(home: &Path) {
     let Some(cli) = locations::cli() else {
-        eprintln!("[shell] TANIA_BIN is not set; leaving $TANIA_HOME/bin/tania as it is");
+        eprintln!("[shell] MONICA_BIN is not set; leaving $MONICA_HOME/bin/monica as it is");
         return;
     };
-    place(&home.join("bin/tania"), &cli);
+    place(&home.join("bin/monica"), &cli);
     if let Some(link) = locations::user_cli_link() {
         place(&link, &cli);
     }

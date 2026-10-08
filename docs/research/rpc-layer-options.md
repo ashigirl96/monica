@@ -42,7 +42,7 @@
 
 ### 自前 CLI adapter の見積（撤退条件が発動した場合）
 
-trpc-cli 0.17.1 の src は `index.ts` 890 行、`parse-procedure.ts` 551 行、`json-schema.ts` 408 行、`parse-router.ts` 313 行（他に completions / prompts / logging）。tania が ADR-0003 で trpc-cli に求めている最小機能（object input → `--flag`、nested command、`--format json`、exit code、`description` の help）だけなら、oRPC 2.0 の `walkProcedureContractsSync` + Standard JSON Schema（zod 4 の `z.toJSONSchema`）+ commander で **200〜300 行**と見積もる。positional、union、completion、prompt は捨てる前提。この見積は未検証。trpc-cli 側を直すなら `parse-router.ts` の `traverseContractProcedures` 呼び出しを `walkProcedureContractsSync(router, (contract, path) => ...)` に置き換える 10 行程度だが、upstream に issue / PR は無い。
+trpc-cli 0.17.1 の src は `index.ts` 890 行、`parse-procedure.ts` 551 行、`json-schema.ts` 408 行、`parse-router.ts` 313 行（他に completions / prompts / logging）。monica が ADR-0003 で trpc-cli に求めている最小機能（object input → `--flag`、nested command、`--format json`、exit code、`description` の help）だけなら、oRPC 2.0 の `walkProcedureContractsSync` + Standard JSON Schema（zod 4 の `z.toJSONSchema`）+ commander で **200〜300 行**と見積もる。positional、union、completion、prompt は捨てる前提。この見積は未検証。trpc-cli 側を直すなら `parse-router.ts` の `traverseContractProcedures` 呼び出しを `walkProcedureContractsSync(router, (contract, path) => ...)` に置き換える 10 行程度だが、upstream に issue / PR は無い。
 
 ## 推奨と ADR-0003 への反映案
 
@@ -157,7 +157,7 @@ scratchpad `rpc-options/` に候補ごとの bun プロジェクトを作り、b
 - tRPC で #8 の構成を再現する場合、契約は「resolver 無しの builder の木」という非公式の構造で、(a) builder が query / mutation を知らないので CLI に対応表が要る、(b) 契約側の `initTRPC` に server の context 型が要る、(c) `_def` は "unstable-core-do-not-import" 配下で semver の保証が無い。tRPC の client は observer なので CLI の `--follow` は `subscribe` を自前で async iterable に包み、Bun では `EventSource` ponyfill を入れる。
 - Hono RPC で CLI を作るなら OpenAPI 文書（`@hono/zod-openapi` か `hono-openapi`）を中間表現にして別の生成系へ渡す迂回しか無く、契約が TypeScript の型と OpenAPI の 2 系統になる。
 - oRPC v2 では `.meta()` の引数が plugin になるので、#8 の「`.meta({description})` を trpc-cli が読む」convention はそのままでは壊れる。`defineMeta("description")` の helper を契約側に 1 つ置けば形は保てる（上記検証）。trpc-cli が v2 で動かない以上、v2 でこれを読むのは自前 adapter か追従後の trpc-cli。
-- oRPC v2 は wire format が v1 と非互換なので、server / webview / CLI を別々に上げられない。tania は 1 repo なので同時更新は可能だが、desktop の sidecar と CLI の配布単位が違う場合は version 不一致を検出する手当てが要る。
+- oRPC v2 は wire format が v1 と非互換なので、server / webview / CLI を別々に上げられない。monica は 1 repo なので同時更新は可能だが、desktop の sidecar と CLI の配布単位が違う場合は version 不一致を検出する手当てが要る。
 - oRPC の bus factor は 1。trpc-cli も 1。この 2 つが同時に止まると「契約の走査 → CLI」の経路は自前になるが、`walkProcedureContractsSync` と `~orpc` の形が残る限り 200〜300 行の見積で書き直せる（未検証の見積）。
 - GitHub の blob URL は本調査中に curl で 503 を返したが、内容は API 経由で読んだ。リンク先は存在する。
 

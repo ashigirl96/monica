@@ -41,7 +41,7 @@ function setup({
   // system の Job は log を書かないので、home は作らない。
   const jobLedger = createJobLedger({
     db,
-    home: join(tmpdir(), 'tania-job-unused'),
+    home: join(tmpdir(), 'monica-job-unused'),
     systemJobs: jobs,
     now: () => new Date(clock.at),
   })

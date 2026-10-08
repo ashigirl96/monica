@@ -10,7 +10,7 @@
 
 - **Skill 名は `<plugin-name>:<skill-name>` に自動プリフィックス付け**され、現在の symlink 方式と共存可能。衝突しない。
 
-- **Plugin 内に hooks, commands, agents, MCP servers を同梱可能**。将来 `tania hook claude` を配布する場合も plugin フォーマット内に収納できる。
+- **Plugin 内に hooks, commands, agents, MCP servers を同梱可能**。将来 `monica hook claude` を配布する場合も plugin フォーマット内に収納できる。
 
 - **Plugin 更新は manifest の `version` フィールドでピンニング。Marketplace でこのプラグインの auto-update を制御する仕組みあり**。再インストール不要。
 
@@ -26,7 +26,7 @@ https://code.claude.com/docs/en/plugins/manifest-reference.md — Field Table
 
 ```json
 {
-  "name": "tania-skills",
+  "name": "monica-skills",
   "skills": [
     "./packages/orchestration/skills",
     "./packages/data/skills",
@@ -55,13 +55,13 @@ Marketplace.json そのものは不要。プラグイン source として plugin
 
 ```json
 {
-  "name": "tania-marketplace",
+  "name": "monica-marketplace",
   "owner": { "name": "ashigirl96" },
   "plugins": [
     {
-      "name": "tania-skills",
+      "name": "monica-skills",
       "source": "github",
-      "repo": "ashigirl96/tania",
+      "repo": "ashigirl96/monica",
       "ref": "main"
     }
   ]
@@ -76,8 +76,8 @@ https://code.claude.com/docs/en/plugins/manifest-reference.md#name — "Every co
 
 Plugin は `"name"` によって namespace。skill `review` は `/deploy-tools:review` で実行される。衝突回避機構は：
 
-- Plugin 内で skill directory 名で自動 namespace。`./packages/domain1/skills/review/SKILL.md` は `/tania:review` にはならず、domain パスは ignored。Directory 名 `review` のみが使われる。
-- 衝突は **plugin 名の prefix で回避** → `tania-orchestration:deploy`, `tania-data:migrate` 等のように plugin 分割時は明確に分岐。
+- Plugin 内で skill directory 名で自動 namespace。`./packages/domain1/skills/review/SKILL.md` は `/monica:review` にはならず、domain パスは ignored。Directory 名 `review` のみが使われる。
+- 衝突は **plugin 名の prefix で回避** → `monica-orchestration:deploy`, `monica-data:migrate` 等のように plugin 分割時は明確に分岐。
 
 現在の symlink (attach-task, track-issue) と共存：symlink は skills-dir source ロード、plugin は plugin source ロード。両者は独立した loading 機構。
 
@@ -96,11 +96,11 @@ Plugin は以下をすべて同梱可能：
 - **Commands**: `commands/` directory
 - **Output styles, themes, monitors** etc.
 
-将来 `tania hook claude` feature が必要なら：
+将来 `monica hook claude` feature が必要なら：
 
 ```json
 {
-  "name": "tania-skills",
+  "name": "monica-skills",
   "hooks": {
     "PostToolUse": [
       {
@@ -136,10 +136,10 @@ Update: manifest の `version` を上げると、user の次回 session で fetc
 現状 ~/.claude/skills：
 
 ```
-attach-task -> /Users/1e0nhard96/.ghq/src/github.com/ashigirl96/monica/.claude/skills/attach-task
-track-issue -> /Users/1e0nhard96/.ghq/src/github.com/ashigirl96/monica/.claude/skills/track-issue
-epic-worker -> /Users/1e0nhard96/.ghq/src/github.com/ashigirl96/monica/.claude/skills/epic-worker
-create-pr -> /Users/1e0nhard96/.ghq/src/github.com/ashigirl96/monica/.claude/skills/create-pr
+attach-task -> <ashigirl96/monica-v1>/.claude/skills/attach-task
+track-issue -> <ashigirl96/monica-v1>/.claude/skills/track-issue
+epic-worker -> <ashigirl96/monica-v1>/.claude/skills/epic-worker
+create-pr -> <ashigirl96/monica-v1>/.claude/skills/create-pr
 ```
 
 **Symlink 方式の課題**：
@@ -160,23 +160,23 @@ create-pr -> /Users/1e0nhard96/.ghq/src/github.com/ashigirl96/monica/.claude/ski
 以下の 3 つの broken symlink と実ディレクトリ混在：
 
 ```
-lrwxr-xr-x  attach-task -> /Users/1e0nhard96/.ghq/src/github.com/ashigirl96/monica/.claude/skills/attach-task
-lrwxr-xr-x  track-issue -> /Users/1e0nhard96/.ghq/src/github.com/ashigirl96/monica/.claude/skills/track-issue
-lrwxr-xr-x  epic-worker -> /Users/1e0nhard96/.ghq/src/github.com/ashigirl96/monica/.claude/skills/epic-worker
+lrwxr-xr-x  attach-task -> <ashigirl96/monica-v1>/.claude/skills/attach-task
+lrwxr-xr-x  track-issue -> <ashigirl96/monica-v1>/.claude/skills/track-issue
+lrwxr-xr-x  epic-worker -> <ashigirl96/monica-v1>/.claude/skills/epic-worker
 drwxr-xr-x  cc-wiki （実ディレクトリ）
 drwxr-xr-x  explain-diff-html （実ディレクトリ）
 drwxr-xr-x  test-audit （実ディレクトリ）
 drwxr-xr-x  synced （実ディレクトリ）
 ```
 
-Broken links：`.claude/skills/attach-task`, track-issue, epic-worker は全て monica repository の symlink。
+Broken links：`.claude/skills/attach-task`, track-issue, epic-worker は全て旧 Monica repository の symlink。
 
 ## 推奨する構成
 
 ### Monorepo Layout
 
 ```
-tania/
+monica/
 ├── .claude/
 │   ├── settings.json
 │   └── skills/
@@ -205,14 +205,14 @@ tania/
 
 ```json
 {
-  "name": "tania-skills",
+  "name": "monica-skills",
   "version": "0.1.0",
-  "description": "tania domain skills: orchestration, data, platform",
+  "description": "monica domain skills: orchestration, data, platform",
   "author": {
     "name": "ashigirl96"
   },
-  "homepage": "https://github.com/ashigirl96/tania",
-  "repository": "https://github.com/ashigirl96/tania",
+  "homepage": "https://github.com/ashigirl96/monica",
+  "repository": "https://github.com/ashigirl96/monica",
   "skills": [
     "./packages/orchestration/skills",
     "./packages/data/skills",
@@ -226,8 +226,8 @@ tania/
 他 repo で使用：
 
 ```bash
-/plugin marketplace add ashigirl96/tania
-/plugin install tania-skills@ashigirl96/tania
+/plugin marketplace add ashigirl96/monica
+/plugin install monica-skills@ashigirl96/monica
 ```
 
 または settings.json に記述：
@@ -235,14 +235,14 @@ tania/
 ```json
 {
   "extraKnownMarketplaces": {
-    "tania": {
+    "monica": {
       "source": {
         "source": "github",
-        "repo": "ashigirl96/tania"
+        "repo": "ashigirl96/monica"
       }
     }
   },
-  "enabledPlugins": ["tania-skills@tania"]
+  "enabledPlugins": ["monica-skills@monica"]
 }
 ```
 
@@ -254,9 +254,9 @@ tania/
 
 3. **Skill co-location constraints**：`<name>/SKILL.md` 内で `${CLAUDE_PLUGIN_ROOT}` を参照可能（supporting files へのパス）。Monorepo 内他 package への参照は不可（plugin scope 外）。必要なら shared library の symlink を `.claude-plugin/` peer で manage するか、MCP server として extract。
 
-4. **Version pinning**：manifest `version` に lock されるため、skill 変更時は tania repo の version bump が必須。過度な granular versioning を避けるため、skill release cycle を domain 単位で aggregate 推奨。
+4. **Version pinning**：manifest `version` に lock されるため、skill 変更時は monica repo の version bump が必須。過度な granular versioning を避けるため、skill release cycle を domain 単位で aggregate 推奨。
 
-5. **Other repo への distribute：**tania plugin を GitHub から install するため、tania repo が public or accessible require。Private repo の場合は SSH credentials setup or `--config` で token pass 要（https://code.claude.com/docs/en/plugins/install.md）。
+5. **Other repo への distribute：**monica plugin を GitHub から install するため、monica repo が public or accessible require。Private repo の場合は SSH credentials setup or `--config` で token pass 要（https://code.claude.com/docs/en/plugins/install.md）。
 
 ## 未確認
 

@@ -2123,6 +2123,82 @@ dependencies = [
 ]
 
 [[package]]
+name = "monica-desktop"
+version = "0.0.0"
+dependencies = [
+ "anyhow",
+ "block2 0.6.2",
+ "libc",
+ "monica-terminal-client",
+ "monica-terminal-protocol",
+ "objc2 0.6.4",
+ "objc2-app-kit 0.3.2",
+ "objc2-foundation 0.3.2",
+ "objc2-user-notifications 0.3.2",
+ "serde",
+ "serde_json",
+ "shared_child",
+ "tauri",
+ "tauri-build",
+ "tauri-plugin-mcp-bridge",
+ "tauri-plugin-notification",
+ "tauri-plugin-opener",
+ "tauri-plugin-single-instance",
+]
+
+[[package]]
+name = "monica-logfile"
+version = "0.0.0"
+dependencies = [
+ "anyhow",
+ "chrono",
+]
+
+[[package]]
+name = "monica-ptyd"
+version = "0.0.0"
+dependencies = [
+ "anyhow",
+ "base64 0.23.1",
+ "libc",
+ "log",
+ "monica-logfile",
+ "monica-terminal-client",
+ "monica-terminal-daemon",
+ "monica-terminal-protocol",
+]
+
+[[package]]
+name = "monica-terminal-client"
+version = "0.0.0"
+dependencies = [
+ "anyhow",
+ "log",
+ "monica-terminal-protocol",
+]
+
+[[package]]
+name = "monica-terminal-daemon"
+version = "0.0.0"
+dependencies = [
+ "anyhow",
+ "base64 0.23.1",
+ "log",
+ "monica-terminal-protocol",
+ "portable-pty",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
+name = "monica-terminal-protocol"
+version = "0.0.0"
+dependencies = [
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "moxcms"
 version = "0.8.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3770,82 +3846,6 @@ dependencies = [
  "pkg-config",
  "toml 0.8.2",
  "version-compare",
-]
-
-[[package]]
-name = "tania-desktop"
-version = "0.0.0"
-dependencies = [
- "anyhow",
- "block2 0.6.2",
- "libc",
- "objc2 0.6.4",
- "objc2-app-kit 0.3.2",
- "objc2-foundation 0.3.2",
- "objc2-user-notifications 0.3.2",
- "serde",
- "serde_json",
- "shared_child",
- "tania-terminal-client",
- "tania-terminal-protocol",
- "tauri",
- "tauri-build",
- "tauri-plugin-mcp-bridge",
- "tauri-plugin-notification",
- "tauri-plugin-opener",
- "tauri-plugin-single-instance",
-]
-
-[[package]]
-name = "tania-logfile"
-version = "0.0.0"
-dependencies = [
- "anyhow",
- "chrono",
-]
-
-[[package]]
-name = "tania-ptyd"
-version = "0.0.0"
-dependencies = [
- "anyhow",
- "base64 0.23.1",
- "libc",
- "log",
- "tania-logfile",
- "tania-terminal-client",
- "tania-terminal-daemon",
- "tania-terminal-protocol",
-]
-
-[[package]]
-name = "tania-terminal-client"
-version = "0.0.0"
-dependencies = [
- "anyhow",
- "log",
- "tania-terminal-protocol",
-]
-
-[[package]]
-name = "tania-terminal-daemon"
-version = "0.0.0"
-dependencies = [
- "anyhow",
- "base64 0.23.1",
- "log",
- "portable-pty",
- "serde",
- "serde_json",
- "tania-terminal-protocol",
-]
-
-[[package]]
-name = "tania-terminal-protocol"
-version = "0.0.0"
-dependencies = [
- "serde",
- "serde_json",
 ]
 
 [[package]]

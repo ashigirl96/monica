@@ -1,0 +1,6 @@
+#!/bin/sh
+# $MONICA_HOME/bin/monica は symlink でここを指すので、repo の位置は実体から求める。
+repo="$(cd "$(dirname "$(realpath "$0")")/.." && pwd)"
+: "${MONICA_HOME:=$HOME/.monica-dev}"
+export MONICA_HOME
+exec bun "$repo/apps/cli/src/main.ts" "$@"

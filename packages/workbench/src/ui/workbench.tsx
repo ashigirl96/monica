@@ -1,4 +1,4 @@
-import { cn, PromptIcon, TRAFFIC_LIGHT_ZONE_HEIGHT, TRAFFIC_LIGHT_ZONE_WIDTH } from '@tania/ui'
+import { cn, PromptIcon, TRAFFIC_LIGHT_ZONE_HEIGHT, TRAFFIC_LIGHT_ZONE_WIDTH } from '@monica/ui'
 import { useAtomValue, useSetAtom, useStore } from 'jotai'
 import { lazy, Suspense, useEffect } from 'react'
 

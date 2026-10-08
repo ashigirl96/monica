@@ -25,18 +25,18 @@ const migrations = [
 const assets = [...migrations, 'apps/web/dist']
 
 mkdirSync(binaries, { recursive: true })
-await $`cargo build --release -p tania-ptyd`.cwd(repo)
-copyFileSync(join(repo, 'target/release/tania-ptyd'), binary('tania-ptyd'))
+await $`cargo build --release -p monica-ptyd`.cwd(repo)
+copyFileSync(join(repo, 'target/release/monica-ptyd'), binary('monica-ptyd'))
 await $`bun run --cwd apps/web build`.cwd(repo)
-await $`bun build ${compile} ${assets.flatMap((dir) => ['--asset', dir])} apps/backend/src/main.ts --outfile ${binary('tania-backend')}`.cwd(
+await $`bun build ${compile} ${assets.flatMap((dir) => ['--asset', dir])} apps/backend/src/main.ts --outfile ${binary('monica-backend')}`.cwd(
   repo,
 )
-await $`bun build ${compile} apps/cli/src/main.ts --outfile ${binary('tania')}`.cwd(repo)
+await $`bun build ${compile} apps/cli/src/main.ts --outfile ${binary('monica')}`.cwd(repo)
 
 // externalBin は release の build にだけ渡す。base の config に書くと、tauri-build が dev と clippy でも
-// binaries/ の存在を求め、build のたびに target/debug/tania-ptyd をそこからのコピーで上書きする。
+// binaries/ の存在を求め、build のたびに target/debug/monica-ptyd をそこからのコピーで上書きする。
 const release = {
-  bundle: { externalBin: ['binaries/tania-ptyd', 'binaries/tania-backend', 'binaries/tania'] },
+  bundle: { externalBin: ['binaries/monica-ptyd', 'binaries/monica-backend', 'binaries/monica'] },
 }
 await $`bun run tauri build --bundles app --config ${JSON.stringify(release)}`.cwd(
   join(repo, 'apps/desktop'),

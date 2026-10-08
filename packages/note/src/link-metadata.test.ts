@@ -164,13 +164,13 @@ test('a page with no charset, one TextDecoder does not know, or charset= only in
   }
 })
 
-test('the page is asked for with tania as the User-Agent', async () => {
+test('the page is asked for with monica as the User-Agent', async () => {
   const { client, site } = setup()
   site.page('/page', { body: '<title>Page</title>' })
 
   await client.linkMetadata({ url: site.url('/page') })
 
-  expect(site.requests).toEqual([{ path: '/page', userAgent: 'tania' }])
+  expect(site.requests).toEqual([{ path: '/page', userAgent: 'monica' }])
 })
 
 test('a page answered with a status other than 2xx fails, even with a title in it', async () => {
@@ -285,7 +285,7 @@ test('a URL that is not http or https is refused', async () => {
 
 test('a page that redirects to a local file fails without reading it', async () => {
   const { client, site } = setup()
-  const file = join(await mkdtemp(join(tmpdir(), 'tania-ogp-')), 'secret.html')
+  const file = join(await mkdtemp(join(tmpdir(), 'monica-ogp-')), 'secret.html')
   await writeFile(file, '<title>Secret</title>')
   site.page('/to-file', { status: 302, headers: { location: `file://${file}` } })
 

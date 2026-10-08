@@ -16,7 +16,7 @@ import {
   setUiZoomAtom,
   sidebarOpenAtom,
   toggleTabPinAtom,
-} from '@tania/workbench/ui'
+} from '@monica/workbench/ui'
 import { useAtomValue, useSetAtom } from 'jotai'
 import { useEffect } from 'react'
 

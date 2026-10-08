@@ -1,4 +1,4 @@
-import { PopoverMenu, PopoverMenuItem } from '@tania/ui'
+import { PopoverMenu, PopoverMenuItem } from '@monica/ui'
 import { useAtomValue, useSetAtom } from 'jotai'
 import type { ReactNode } from 'react'
 

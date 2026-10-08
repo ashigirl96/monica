@@ -1,4 +1,4 @@
-import { cn } from '@tania/ui'
+import { cn } from '@monica/ui'
 
 export function JumpHint({
   hint,

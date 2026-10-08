@@ -23,7 +23,7 @@ export type UiState = {
   collapsedSections: string[]
 }
 
-const UI_STATE_KEY = 'tania.workbench.ui-state'
+const UI_STATE_KEY = 'monica.workbench.ui-state'
 
 const DEFAULT_UI_STATE: UiState = {
   activeRunspaceId: null,

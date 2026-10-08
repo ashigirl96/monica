@@ -327,7 +327,7 @@ test('the Note Mention candidates are the Notes whose title, name, preview or Re
     content: doc('Met the plumber'),
     expectedUpdatedAt: daily.updatedAt,
   })
-  const repoNote = await client.repoNote.create({ repo: 'ashigirl96/tania' })
+  const repoNote = await client.repoNote.create({ repo: 'ashigirl96/monica' })
   const scratch = await client.scratch.open({ repo: 'owner/Monica' })
   const untitled = await client.essay.create()
 
@@ -338,8 +338,8 @@ test('the Note Mention candidates are the Notes whose title, name, preview or Re
   ])
   expect(await ids('2026-10-01')).toEqual([daily.id])
   expect(await ids('PLUMBER')).toEqual([daily.id])
-  expect(await ids('tania')).toEqual([repoNote.id])
-  expect(await ids('monica')).toEqual([scratch.id])
+  expect(await ids('ashigirl96')).toEqual([repoNote.id])
+  expect(await ids('owner/monica')).toEqual([scratch.id])
   expect(await ids('untitled')).toEqual([untitled.id, repoNote.id])
   expect(await ids('2026-10-06')).toEqual([])
 })

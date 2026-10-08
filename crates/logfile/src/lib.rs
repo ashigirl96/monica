@@ -1,8 +1,9 @@
 //! Daily-rotated append-only debug logs: `<dir>/<stem>_<YYYY-MM-DD>.log`, keyed on the local date.
 //!
-//! Retention is by age, not by disk size: a size cap loses history in bursts (the tauri-plugin-log
-//! `monica.log` target burned all 5 of its generations in a single day), and these logs are read
-//! days after the failure they recorded. A total-size cap survives only as a safety valve.
+//! Retention is by age, not by disk size: a size cap loses history in bursts (old Monica's
+//! tauri-plugin-log `monica.log` target burned all 5 of its generations in a single day), and
+//! these logs are read days after the failure they recorded. A total-size cap survives only as a
+//! safety valve.
 
 use std::fs::{File, OpenOptions};
 use std::io::Write;
@@ -264,7 +265,7 @@ mod tests {
 
     fn temp_dir(name: &str) -> PathBuf {
         let dir = std::env::temp_dir().join(format!(
-            "tania-logfile-{name}-{}-{:?}",
+            "monica-logfile-{name}-{}-{:?}",
             std::process::id(),
             std::thread::current().id()
         ));

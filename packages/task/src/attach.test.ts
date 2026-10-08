@@ -2,7 +2,7 @@ import { afterEach, expect, mock, spyOn, test } from 'bun:test'
 import { existsSync, mkdirSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 
-import { tab } from '@tania/workbench/schema'
+import { tab } from '@monica/workbench/schema'
 import { eq } from 'drizzle-orm'
 
 import { bench, issue, run, task } from './schema.ts'
@@ -175,7 +175,7 @@ test('attach brings back a Tab whose claude is already a Run of the Task without
 test("attach opens the Bench of a Task that has none in place on the Repo's checkout, ready and without a setup or a clone", async () => {
   const fixture = await trackedWithoutBench()
   fixture.ghq.clone('acme/app')
-  const setupScript = join(fixture.ghq.checkout('acme/app'), '.tania/setup.sh')
+  const setupScript = join(fixture.ghq.checkout('acme/app'), '.monica/setup.sh')
   mkdirSync(join(setupScript, '..'))
   writeFileSync(setupScript, '#!/bin/sh\ntouch .setup-ran\n', { mode: 0o755 })
   const outside = await fixture.openTabOutsideBench()

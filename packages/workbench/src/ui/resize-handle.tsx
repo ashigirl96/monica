@@ -1,4 +1,4 @@
-import { cn } from '@tania/ui'
+import { cn } from '@monica/ui'
 import { useSetAtom } from 'jotai'
 import { useCallback, useEffect, useRef } from 'react'
 

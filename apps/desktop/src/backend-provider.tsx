@@ -1,4 +1,4 @@
-import { TRAFFIC_LIGHT_ZONE_WIDTH } from '@tania/ui'
+import { TRAFFIC_LIGHT_ZONE_WIDTH } from '@monica/ui'
 import { createContext, type ReactNode, useContext, useEffect, useMemo, useState } from 'react'
 
 import {

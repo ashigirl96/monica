@@ -1,4 +1,4 @@
-import { PopoverMenu, PopoverMenuItem, PopoverMenuSeparator } from '@tania/ui'
+import { PopoverMenu, PopoverMenuItem, PopoverMenuSeparator } from '@monica/ui'
 import { type MouseEvent as ReactMouseEvent, useCallback, useEffect, useState } from 'react'
 
 import { displayName, type EssaySummary } from '../../../contract.ts'

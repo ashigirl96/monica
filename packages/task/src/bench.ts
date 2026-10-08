@@ -1,8 +1,8 @@
 import { appendFileSync, mkdirSync, writeFileSync } from 'node:fs'
 import { dirname } from 'node:path'
 
+import type { Db, Tx, WorkbenchLedger } from '@monica/workbench/server'
 import { ORPCError } from '@orpc/server'
-import type { Db, Tx, WorkbenchLedger } from '@tania/workbench/server'
 import type { Subprocess } from 'bun'
 import { asc, eq } from 'drizzle-orm'
 
@@ -181,7 +181,7 @@ async function prepareAndRecord(deps: BenchDeps, row: Bench, forIssue: Issue): P
   } catch (error) {
     prepared = { error: messageOf(error) }
     try {
-      appendFileSync(log, `tania: ${prepared.error}\n`)
+      appendFileSync(log, `monica: ${prepared.error}\n`)
     } catch {
       // log が書けなくても、理由は setup_error に残る。
     }

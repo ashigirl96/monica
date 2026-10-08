@@ -10,7 +10,7 @@ import { buildSyncedContainer, openPasteMenu } from './paste-menu.ts'
 import { isEmptyParagraphContainer, nodes, reissueIds, schema } from './schema.ts'
 import { blockSelectionKey } from './selection-state.ts'
 
-export const BLOCKS_MIME = 'application/x-tania-blocks+json'
+export const BLOCKS_MIME = 'application/x-monica-blocks+json'
 
 type BlocksPayload = {
   schemaVersion: 1
@@ -31,7 +31,7 @@ export function serializeBlocksPayload(
   return JSON.stringify(payload)
 }
 
-// `@tania/note/body` の toMarkdown と同じ GFM 形にする。この plain text は renderMarkdown を
+// `@monica/note/body` の toMarkdown と同じ GFM 形にする。この plain text は renderMarkdown を
 // 渡さないときの代わりで、ここだけ表の形が違うと外部へ出したあと貼り戻したときに表に戻らない。
 function tableToGfm(table: PMNode): string {
   const lines: string[] = []

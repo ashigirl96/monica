@@ -87,7 +87,7 @@ mod tests {
     use std::thread;
 
     fn home(name: &str) -> PathBuf {
-        let dir = std::env::temp_dir().join(format!("tania-orphan-{}-{name}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("monica-orphan-{}-{name}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         dir
     }
@@ -112,7 +112,7 @@ mod tests {
                 request.extend_from_slice(&chunk[..n]);
             }
             let body = format!(
-                r#"{{"name":"tania-backend","pid":{pid},"startedAt":"2026-10-03T00:00:00.000Z"}}"#
+                r#"{{"name":"monica-backend","pid":{pid},"startedAt":"2026-10-03T00:00:00.000Z"}}"#
             );
             let _ = write!(
                 stream,

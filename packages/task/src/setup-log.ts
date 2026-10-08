@@ -1,7 +1,7 @@
 import { type Dirent, existsSync, readdirSync, rmdirSync, statSync, unlinkSync } from 'node:fs'
 import { join } from 'node:path'
 
-import type { Db } from '@tania/workbench/server'
+import type { Db } from '@monica/workbench/server'
 import { eq } from 'drizzle-orm'
 
 import { messageOf, setupLogOf } from './prepare.ts'

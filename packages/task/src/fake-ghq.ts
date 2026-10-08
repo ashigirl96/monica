@@ -23,9 +23,9 @@ export function commit(repo: string, files: Files, message: string) {
   git(
     repo,
     '-c',
-    'user.name=tania',
+    'user.name=monica',
     '-c',
-    'user.email=tania@example.com',
+    'user.email=monica@example.com',
     'commit',
     '--allow-empty',
     '-m',

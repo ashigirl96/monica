@@ -110,7 +110,7 @@ test('show says so when the Job has no Job Executions yet', () => {
   )
 })
 
-const log = (time: string) => `/Users/me/.tania/logs/jobs/dreaming/2026-10-06T${time}.000.log`
+const log = (time: string) => `/Users/me/.monica/logs/jobs/dreaming/2026-10-06T${time}.000.log`
 
 test('show prints the timeout, cwd and command of a user Job, and the exit code and log of each Job Execution', () => {
   const text = formatters.show({
@@ -147,7 +147,7 @@ test('show prints the timeout, cwd and command of a user Job, and the exit code 
       'NAME      SCHEDULE   STATE   NEXT                 TIMEOUT  CWD        COMMAND',
       'dreaming  0 3 * * *  active  2026-10-07 03:00:00  90m      /Users/me  ~/bin/dreaming.sh "$(cat ~/prompts/dreaming.md)"',
       '',
-      'STARTED              DURATION  RESULT     EXIT  LOG                                                            ERROR',
+      'STARTED              DURATION  RESULT     EXIT  LOG                                                             ERROR',
       `2026-10-06 03:00:20  11m45s    failed     1     ${log('030020')}  exit 1: permission denied: Edit`,
       `2026-10-06 02:00:00  1h30m     timed_out  -     ${log('020000')}  timed out after 5400s`,
     ].join('\n'),

@@ -1,5 +1,5 @@
 {
-  "name": "tania",
+  "name": "monica",
   "private": true,
   "workspaces": {
     "packages": [
@@ -51,7 +51,7 @@
   },
   "type": "module",
   "scripts": {
-    "tania": "scripts/tania-dev",
+    "monica": "scripts/monica-dev",
     "desktop": "bun scripts/desktop.ts",
     "web": "bun run --cwd apps/web dev",
     "dev:list": "bun scripts/dev.ts list",

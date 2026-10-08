@@ -1,6 +1,6 @@
 # パッケージ構成と dev loop
 
-tania の repo の形、package の entry、domain 間の呼び出し、CLI の組み立て、dev と release の手順を決める。骨格を実装するときに最初に読む文書で、実装が進んだらここを今の形に合わせて直す。決定の理由は `docs/adr/` にある（とくに ADR-0002 / 0003 / 0006 / 0009 / 0010 / 0011）。出発点は branch `prototype/stack`・`prototype/workbench`・`prototype/terminal-session` で、骨格の実装 issue は #25 の sub-issue。
+monica の repo の形、package の entry、domain 間の呼び出し、CLI の組み立て、dev と release の手順を決める。骨格を実装するときに最初に読む文書で、実装が進んだらここを今の形に合わせて直す。決定の理由は `docs/adr/` にある（とくに ADR-0002 / 0003 / 0006 / 0009 / 0010 / 0011）。出発点は branch `prototype/stack`・`prototype/workbench`・`prototype/terminal-session` で、骨格の実装 issue は #25 の sub-issue。
 
 ## 索引
 
@@ -13,7 +13,7 @@ tania の repo の形、package の entry、domain 間の呼び出し、CLI の�
 - `docs/packages/task-ledger.md`: Task Ledger。task の contract と、Run・Attach・Bench・Run の起動・close と reopen・sync の規則。task の procedure に触るとき。
 - `docs/packages/job-ledger.md`: Job Ledger。job の contract と、Job Execution の記録・tick・飛ばす回・中断・保持の規則。job の procedure か、裏で定期的に走る処理に触るとき。
 - `docs/packages/note-ledger.md`: Note Ledger。note の contract と、種類ごとの不変条件・保存の楽観ロック・削除と取り消し・OGP・`body` entry の規則。note の procedure か本文の扱いに触るとき。
-- `docs/packages/note-ui.md`: note の ui。monica のコードを移すときの規則と、エディタの置き場所、依存、node 型を減らせない理由、直書きの文字列の置き場所、見た目の設定と localStorage の key。`packages/note/src/ui` に触るとき、monica のコードを移すとき。
+- `docs/packages/note-ui.md`: note の ui。旧 Monica のコードを移すときの規則と、エディタの置き場所、依存、node 型を減らせない理由、直書きの文字列の置き場所、見た目の設定と localStorage の key。`packages/note/src/ui` に触るとき、旧 Monica のコードを移すとき。
 - `docs/packages/cli.md`: CLI（apps/cli）。argv の振り分け、Backend の探索、転送 router、`--format`、エラーと exit code、SKILL.md の検査。`cli: true` の procedure か SKILL.md を足すとき、apps/cli に触るとき。
 - `docs/packages/desktop.md`: desktop（apps/desktop）。webview の枠、キーの扱い、Backend の endpoint、Task の slot、Shell の責務と command、窓。apps/desktop と domain の ui の載せ方に触るとき。
 - `docs/packages/dev-loop.md`: dev loop、release、検査、版。dev の起動、scripts、release の build、CI、依存と tsconfig に触るとき、テストが誤りを捕まえるかを変異で確かめるとき。
@@ -21,23 +21,23 @@ tania の repo の形、package の entry、domain 間の呼び出し、CLI の�
 ## 配置
 
 ```
-tania/
+monica/
 ├── package.json        workspaces・catalog・packageManager・scripts
 ├── tsconfig.json       1 つだけ
 ├── Cargo.toml          Rust の workspace（crates/* と apps/desktop/src-tauri）
 ├── .claude-plugin/     plugin.json・marketplace.json（ADR-0006）
-├── scripts/            desktop.ts・dev-instance.ts・dev.ts・build.ts・install-app.ts・tania-dev
+├── scripts/            desktop.ts・dev-instance.ts・dev.ts・build.ts・install-app.ts・monica-dev
 ├── apps/
-│   ├── backend/        @tania/backend   Backend の組み立て
-│   ├── cli/            @tania/cli       bin は tania
-│   ├── desktop/        @tania/desktop   src/ が webview、src-tauri/ が Shell
-│   └── web/            @tania/web       ブラウザに配る notes の画面の組み立て
+│   ├── backend/        @monica/backend   Backend の組み立て
+│   ├── cli/            @monica/cli       bin は monica
+│   ├── desktop/        @monica/desktop   src/ が webview、src-tauri/ が Shell
+│   └── web/            @monica/web       ブラウザに配る notes の画面の組み立て
 ├── packages/
-│   ├── workbench/      @tania/workbench
-│   ├── task/           @tania/task
-│   ├── job/            @tania/job
-│   ├── note/           @tania/note
-│   └── ui/             @tania/ui        domain を持たない UI 部品
+│   ├── workbench/      @monica/workbench
+│   ├── task/           @monica/task
+│   ├── job/            @monica/job
+│   ├── note/           @monica/note
+│   └── ui/             @monica/ui        domain を持たない UI 部品
 └── crates/
     ├── terminal-protocol/
     ├── terminal-daemon/
@@ -47,8 +47,8 @@ tania/
 ```
 
 - apps は packages を組み立てるだけでロジックを持たない（ADR-0002）。apps どうしは互いを import しない。
-- Rust の `target/` と `Cargo.lock` は root に 1 つ。crate 名は `tania-<dir>`（`tania-ptyd` など）。terminal 5 crate は monica から rename だけで持ち込む（#11）。
-- `packages/ui` は popover・icon・toast・fuzzy picker・drag reorder のような、domain の語を持たない部品を置く。CLI の整形関数が使う表（`@tania/ui/table`）もここに置く。cli entry は apps/cli だけが import するので、domain の cli entry どうしでは共有できないため。domain の UI は各 domain package の `ui` entry に置く。
+- Rust の `target/` と `Cargo.lock` は root に 1 つ。crate 名は `monica-<dir>`（`monica-ptyd` など）。terminal 5 crate は旧 Monica から rename だけで持ち込む（#11）。
+- `packages/ui` は popover・icon・toast・fuzzy picker・drag reorder のような、domain の語を持たない部品を置く。CLI の整形関数が使う表（`@monica/ui/table`）もここに置く。cli entry は apps/cli だけが import するので、domain の cli entry どうしでは共有できないため。domain の UI は各 domain package の `ui` entry に置く。
 
 ### ドメイン package の中
 
@@ -76,15 +76,15 @@ entry は層ではなく、import してよい実行環境で切る（ADR-0009�
 
 | entry | 中身 | 実行環境 | import する側 |
 |---|---|---|---|
-| `@tania/<d>/schema` | drizzle の table。`drizzle-orm/sqlite-core` と `drizzle-orm` 本体（部分 index の条件を書く `sql`）だけを import する | どこでも | 自分の contract と server、他 package の schema（FK）と server（SELECT） |
-| `@tania/<d>/contract` | oRPC の contract、zod schema、型 | どこでも | apps/desktop と apps/web（型だけ）、apps/cli、apps/backend、自分と他 package の server と ui と cli |
-| `@tania/<d>/server` | router、`create<D>()`、migrations の re-export | Bun | apps/backend、他 package の server、テスト |
-| `@tania/<d>/ui` | React の component と atom。画面を持たない job には無い | browser | apps/desktop、apps/web（note）、他 package の ui |
-| `@tania/<d>/cli` | 出力の整形関数、補完の候補を返す関数、手で書く command | Bun | apps/cli |
-| `@tania/<d>/body` | Note の本文の JSON を読む関数と、本文と markdown の変換（`docs/packages/note-ledger.md`）。今は note だけが持つ | どこでも | 自分の contract と server と ui |
-| `@tania/<d>/testing` | 他の package のテストに出す fake。今は workbench だけが持ち、`src/fake-ptyd.ts` の fake の ptyd（`startFakePtyd`）、短い home を作る `tempHome`、Terminal Session が starting を抜けるのを待つ `untilSettled` を出す | Bun | 他 package のテストと `testing.ts` |
+| `@monica/<d>/schema` | drizzle の table。`drizzle-orm/sqlite-core` と `drizzle-orm` 本体（部分 index の条件を書く `sql`）だけを import する | どこでも | 自分の contract と server、他 package の schema（FK）と server（SELECT） |
+| `@monica/<d>/contract` | oRPC の contract、zod schema、型 | どこでも | apps/desktop と apps/web（型だけ）、apps/cli、apps/backend、自分と他 package の server と ui と cli |
+| `@monica/<d>/server` | router、`create<D>()`、migrations の re-export | Bun | apps/backend、他 package の server、テスト |
+| `@monica/<d>/ui` | React の component と atom。画面を持たない job には無い | browser | apps/desktop、apps/web（note）、他 package の ui |
+| `@monica/<d>/cli` | 出力の整形関数、補完の候補を返す関数、手で書く command | Bun | apps/cli |
+| `@monica/<d>/body` | Note の本文の JSON を読む関数と、本文と markdown の変換（`docs/packages/note-ledger.md`）。今は note だけが持つ | どこでも | 自分の contract と server と ui |
+| `@monica/<d>/testing` | 他の package のテストに出す fake。今は workbench だけが持ち、`src/fake-ptyd.ts` の fake の ptyd（`startFakePtyd`）、短い home を作る `tempHome`、Terminal Session が starting を抜けるのを待つ `untilSettled` を出す | Bun | 他 package のテストと `testing.ts` |
 
-- 依存の向きは task → workbench だけ。workbench は task を import しない（ADR-0005）。job は task も workbench も import しない（ADR-0016）。note は他の domain を import せず、他の domain からも import されない。bun の isolated linker では package.json に書いていない依存を解決できないので、向きは package.json が守る。package の中の entry の境界（schema が import してよいもの、ui が server の entry と `bun:sqlite` を import しないこと、body が `bun:sqlite`・`drizzle-orm`・schema と server の entry を import しないこと、cli entry を import するのが apps/cli だけであること）と apps どうしの向きは、`.oxlintrc.json` の overrides が lint で守る。testing entry を import するのがテストと `testing.ts` だけであることは、lint の `tania/testing-entry` が守る。no-restricted-imports の設定は override をまたいで重ならないので、file の集合ごとの制限とは別の rule にしている。CLI と webview とブラウザで動くコード（apps/cli、apps/desktop、apps/web、各 package の cli entry と ui entry）が DB に触るもの（`bun:sqlite`、`drizzle-orm`、schema entry と server entry の値）を import しないことも同じく守る（ADR-0003）。cli entry で見るのは `cli.ts` の import だけで、`cli.ts` が import する内側のファイルは見ない。apps/cli のテストと `testing.ts` は in-memory の Backend を組むので、この制限から外す。body の entry から辿れる module が DB に触るものを読まないことは、contract のような内側の module を経た import も含めて `packages/note/src/body/entry.test.ts` が確かめる。lint は直接の import しか見ないため。package を足して entry の override を書き忘れると、`scripts/oxlint/entry-boundaries.test.ts` が落ちる。このテストは、各 package の `exports` にある cli・ui・body・schema の entry と同じ path に禁じた import を並べた file を一時 directory に置き、oxlint を当てて全部が止まるかを見る。
+- 依存の向きは task → workbench だけ。workbench は task を import しない（ADR-0005）。job は task も workbench も import しない（ADR-0016）。note は他の domain を import せず、他の domain からも import されない。bun の isolated linker では package.json に書いていない依存を解決できないので、向きは package.json が守る。package の中の entry の境界（schema が import してよいもの、ui が server の entry と `bun:sqlite` を import しないこと、body が `bun:sqlite`・`drizzle-orm`・schema と server の entry を import しないこと、cli entry を import するのが apps/cli だけであること）と apps どうしの向きは、`.oxlintrc.json` の overrides が lint で守る。testing entry を import するのがテストと `testing.ts` だけであることは、lint の `monica/testing-entry` が守る。no-restricted-imports の設定は override をまたいで重ならないので、file の集合ごとの制限とは別の rule にしている。CLI と webview とブラウザで動くコード（apps/cli、apps/desktop、apps/web、各 package の cli entry と ui entry）が DB に触るもの（`bun:sqlite`、`drizzle-orm`、schema entry と server entry の値）を import しないことも同じく守る（ADR-0003）。cli entry で見るのは `cli.ts` の import だけで、`cli.ts` が import する内側のファイルは見ない。apps/cli のテストと `testing.ts` は in-memory の Backend を組むので、この制限から外す。body の entry から辿れる module が DB に触るものを読まないことは、contract のような内側の module を経た import も含めて `packages/note/src/body/entry.test.ts` が確かめる。lint は直接の import しか見ないため。package を足して entry の override を書き忘れると、`scripts/oxlint/entry-boundaries.test.ts` が落ちる。このテストは、各 package の `exports` にある cli・ui・body・schema の entry と同じ path に禁じた import を並べた file を一時 directory に置き、oxlint を当てて全部が止まるかを見る。
 - task の schema は workbench の table を FK のために import するが、re-export しない（ADR-0010）。
 - webview の bundle に `bun:sqlite` や `@orpc/server` が混ざっていないかは `vite build` で確かめる。混ざれば解決に失敗して落ちる。型だけの import は消えるので対象外。
 
@@ -93,7 +93,7 @@ entry は層ではなく、import してよい実行環境で切る（ADR-0009�
 ### server entry の形
 
 ```ts
-// @tania/workbench/server
+// @monica/workbench/server
 export { migrations } from "../migrations";
 export const router = os.router({ ... });          // context は { db, workbenchLedger }
 export function createWorkbenchLedger(deps: {
@@ -105,7 +105,7 @@ export function createWorkbenchLedger(deps: {
   badge: (count: number) => void;
 }): WorkbenchLedger;
 
-// @tania/task/server
+// @monica/task/server
 export { migrations } from "../migrations";
 export const router = os.router({ ... });          // context は { db, taskLedger }
 export function createTaskLedger(deps: {
@@ -120,7 +120,7 @@ export function systemJobs(
   taskLedger: TaskLedger,
 ): { name: string; every: number; run: () => Promise<void> }[];
 
-// @tania/job/server
+// @monica/job/server
 export { migrations } from "../migrations";
 export const router = os.router({ ... });          // context は { db, jobLedger }
 export function createJobLedger(deps: {
@@ -130,7 +130,7 @@ export function createJobLedger(deps: {
   now?: () => Date;
 }): JobLedger;
 
-// @tania/note/server
+// @monica/note/server
 export { migrations } from "../migrations";
 export const router = os.router({ ... });          // context は { db, noteLedger }
 export function createNoteLedger(deps: {
@@ -147,18 +147,18 @@ export function systemJobs(
 
 job の `home` はユーザーの Job の log を置く場所。`systemJobs` は system の Job の並びで、名前は `<domain>.<name>`、`run` は失敗なら reject する。`now` はテストが時計を進めるための口（`docs/packages/job-ledger.md`）。
 
-note の `home` は画像を `$TANIA_HOME/note-images/` に置くのに使う（`docs/packages/note-ledger.md` の「画像」）。`ghq` は `list(signal)` で、省けば `ghq list` の command を呼ぶ。Repo の候補（`docs/packages/note-ledger.md`）に使い、テストは偽の ghq を渡す。task の `Ghq` とは別の型で、note は task を import しない。
+note の `home` は画像を `$MONICA_HOME/note-images/` に置くのに使う（`docs/packages/note-ledger.md` の「画像」）。`ghq` は `list(signal)` で、省けば `ghq list` の command を呼ぶ。Repo の候補（`docs/packages/note-ledger.md`）に使い、テストは偽の ghq を渡す。task の `Ghq` とは別の型で、note は task を import しない。
 
 `WorkbenchLedger` と `TaskLedger` と `JobLedger` と `NoteLedger` は、Backend が 1 つずつ作り、`GLOSSARY.md` の Workbench Ledger と Task Ledger と Job Ledger と Note Ledger を扱う部品で、どれも `start()` / `stop()` を持つ。`WorkbenchLedger` と `TaskLedger` は `events` も持つ。
 
 - `events`: その domain の変更を知らせる in-process の publisher。job と note は change stream を持たないので無い（ADR-0016・0018）。
 - `start()` / `stop()`: 起動時と終了時の処理。`WorkbenchLedger` は ptyd への接続（無ければ spawn、版違いは入れ替え）と reconcile（ADR-0011）、`TaskLedger` は起動時に preparing のまま残った Bench を失敗にすることと、終了時に走っている setup の process group を kill すること、`JobLedger` は起動時に途中で止まった Job Execution を中断にして system の Job を 1 回走らせ、tick の timer を張ることと、終了時にそれを止めること。`NoteLedger` は起動時に何もせず、終了時に走っている画像の取り込みと OGP の fetch を打ち切る。
 
-`NoteLedger` はほかに、system の Job が呼ぶ `cleanImages()` と、notes の口が画像の GET に載せる `serveImage(name)` を持つ。note の system の Job も task と同じく `@tania/note/server` の `systemJobs(noteLedger)` で出し、名前は `note.image-cleanup`、24 時間おきに `cleanImages()` を呼ぶ。
+`NoteLedger` はほかに、system の Job が呼ぶ `cleanImages()` と、notes の口が画像の GET に載せる `serveImage(name)` を持つ。note の system の Job も task と同じく `@monica/note/server` の `systemJobs(noteLedger)` で出し、名前は `note.image-cleanup`、24 時間おきに `cleanImages()` を呼ぶ。
 
 `NoteLedger` はほかに `repoCandidates()` だけを持ち、note の router の `repo.candidates` が呼ぶ。router の context に渡るのは `db` と Ledger だけなので、ghq は Ledger が持つ。
 
-`TaskLedger` はほかに `syncInBackground()` と `cleanSetupLogs()` だけを持ち、どちらも task の system の Job が呼ぶ。task は timer を持たず、system の Job の並び（名前・間隔・`run`）を `@tania/task/server` の `systemJobs(taskLedger)` で出し、Backend の組み立てがそれを `createJobLedger` に渡す。task は job を import しないので、戻り値は `createJobLedger` の `systemJobs` と同じ構造の素のオブジェクトにし、job の型を注記しない（#18、ADR-0016）。
+`TaskLedger` はほかに `syncInBackground()` と `cleanSetupLogs()` だけを持ち、どちらも task の system の Job が呼ぶ。task は timer を持たず、system の Job の並び（名前・間隔・`run`）を `@monica/task/server` の `systemJobs(taskLedger)` で出し、Backend の組み立てがそれを `createJobLedger` に渡す。task は job を import しないので、戻り値は `createJobLedger` の `systemJobs` と同じ構造の素のオブジェクトにし、job の型を注記しない（#18、ADR-0016）。
 
 - `syncInBackground()`: open な Task すべての Sync で、失敗した repo があるか throw したら reject する。`systemJobs()` が `task.sync` の `run` にし、5 分おきに走る。
 - `cleanSetupLogs()`: setup の log を消し（`docs/packages/task-ledger.md` の「Bench」）、消せなかった log か directory があれば残りを消してから reject する。`systemJobs()` が `task.setup-log-cleanup` の `run` にし、24 時間おきに走る。
@@ -171,23 +171,23 @@ note の `home` は画像を `$TANIA_HOME/note-images/` に置くのに使う（
 
 ### domain をまたぐ規則
 
-- **書き込み**は相手の domain の method を通す。相手の table に直接 INSERT / UPDATE / DELETE しない。lint の `tania/cross-domain-write` が、`@tania/<d>/schema` から import した table を `insert` / `update` / `delete` に渡す形を止める。package のテストと `testing.ts` も対象にする。apps/cli のテストは自分の domain を持たず、task の table に fixture を書くので外す。
-- **読み出し**は相手の table を `@tania/<d>/schema` で直接 SELECT してよい。表示状態（#17）や ActiveRun guard のように Agent Session と Run を join する読み出しを procedure 経由にすると N+1 になるため。
+- **書き込み**は相手の domain の method を通す。相手の table に直接 INSERT / UPDATE / DELETE しない。lint の `monica/cross-domain-write` が、`@monica/<d>/schema` から import した table を `insert` / `update` / `delete` に渡す形を止める。package のテストと `testing.ts` も対象にする。apps/cli のテストは自分の domain を持たず、task の table に fixture を書くので外す。
+- **読み出し**は相手の table を `@monica/<d>/schema` で直接 SELECT してよい。表示状態（#17）や ActiveRun guard のように Agent Session と Run を join する読み出しを procedure 経由にすると N+1 になるため。
 - **event は「変わった」の合図**で、購読側は payload を信じず DB を読み直す。bun:sqlite の transaction は同期なので、tx の中で publish しても購読側が動くのは commit 後の microtask になる。rollback されても読み直すだけで害が無いので、commit 後に publish する仕組みは作らない。
 - workbench の router を in-process client（`createRouterClient`）で呼ぶ形は採らない。oRPC の呼び出しは async で、drizzle の bun:sqlite の transaction に async 関数を渡すと throw しても rollback されないため（ADR-0009）。
-- transaction に async 関数を渡さない。lint の `tania/sync-transaction` が、関数式と、同じ file で定義した async 関数を名前で渡す形を止める。
+- transaction に async 関数を渡さない。lint の `monica/sync-transaction` が、関数式と、同じ file で定義した async 関数を名前で渡す形を止める。
 
 ### Backend の組み立て（`apps/backend/src/main.ts`）
 
 最初に login shell から PATH を 1 回取り（`$SHELL -ilc` で区切り文字に挟んだ `$PATH` を出させる。cwd は `$HOME`、`DISABLE_AUTO_UPDATE=true`）、`process.env.PATH` に入れる。`.app` から起動した Backend は launchd の最小の PATH しか持たず、`gh`・`git`・`ghq`・setup script の中の bun や mise が見つからないため。失敗したら元の PATH のまま stderr に 1 行出す。login shell は stdin を渡さずに起こし（Backend の stdin は Shell の死を知らせる pipe）、5 秒で打ち切る。
 
-Bun.spawn は `env` を渡さないと、子に起動時の environ を渡し、実行ファイルも起動時の PATH で探す。そのため Backend で動くコードの spawn は `env: process.env` を渡す（絶対 path の実行ファイルは除く）。lint の `tania/spawn-env`（`scripts/oxlint/tania.js`）がこれを守る。ptyd は `process.env` から組んだ env を渡すので、Tab にも届く。
+Bun.spawn は `env` を渡さないと、子に起動時の environ を渡し、実行ファイルも起動時の PATH で探す。そのため Backend で動くコードの spawn は `env: process.env` を渡す（絶対 path の実行ファイルは除く）。lint の `monica/spawn-env`（`scripts/oxlint/monica.js`）がこれを守る。ptyd は `process.env` から組んだ env を渡すので、Tab にも届く。
 
-1. `$TANIA_HOME/tania.db` を開き、`locking_mode=EXCLUSIVE` → `journal_mode=WAL` → `foreign_keys=ON` の順に設定する（ADR-0007）。
+1. `$MONICA_HOME/monica.db` を開き、`locking_mode=EXCLUSIVE` → `journal_mode=WAL` → `foreign_keys=ON` の順に設定する（ADR-0007）。
 2. `migrate()` を workbench → task → job → note の順に呼ぶ。`migrationsTable` は各 package の `migrations.table` を渡す。
-3. `createWorkbenchLedger` → `createTaskLedger` → `createNoteLedger` → `createJobLedger` の順に作る。`createWorkbenchLedger` には、env の `TANIA_PTYD_PATH`（`ptydPath`）、stdout に通知の行を書く `notify`、`@tania/task/server` の `nameAgentSession`、stdout に未読の数の行を書く `badge` を渡す。`createTaskLedger` と `createNoteLedger` と `createJobLedger` には同じ `home` を渡す。`createJobLedger` の `systemJobs` には、`@tania/task/server` の `systemJobs(taskLedger)` と `@tania/note/server` の `systemJobs(noteLedger)` の戻り値をこの順につないで渡す。Job Ledger が両方の Ledger を呼ぶので、Note Ledger を先に作る。`TANIA_PTYD_PATH` が無ければ stderr に 1 行出して exit 1 する。
+3. `createWorkbenchLedger` → `createTaskLedger` → `createNoteLedger` → `createJobLedger` の順に作る。`createWorkbenchLedger` には、env の `MONICA_PTYD_PATH`（`ptydPath`）、stdout に通知の行を書く `notify`、`@monica/task/server` の `nameAgentSession`、stdout に未読の数の行を書く `badge` を渡す。`createTaskLedger` と `createNoteLedger` と `createJobLedger` には同じ `home` を渡す。`createJobLedger` の `systemJobs` には、`@monica/task/server` の `systemJobs(taskLedger)` と `@monica/note/server` の `systemJobs(noteLedger)` の戻り値をこの順につないで渡す。Job Ledger が両方の Ledger を呼ぶので、Note Ledger を先に作る。`MONICA_PTYD_PATH` が無ければ stderr に 1 行出して exit 1 する。
 4. router を `{ workbench: workbenchRouter, task: taskRouter, job: jobRouter }` で mount し、context は `{ db, workbenchLedger, taskLedger, jobLedger }`。note の router はこの口に載せず、notes の口だけに載せる（下の「notes の口」）。
-5. hono に CORS（`tauri://localhost`・`http://tauri.localhost`。env の `TANIA_DEV_URL` があればその origin も。`docs/packages/dev-loop.md` の「dev loop」）、`/health`（token 無し）、`/rpc/*` の bearer を載せ、`Bun.serve({ hostname: "127.0.0.1", port: 0, idleTimeout: 0 })` で立てる。
+5. hono に CORS（`tauri://localhost`・`http://tauri.localhost`。env の `MONICA_DEV_URL` があればその origin も。`docs/packages/dev-loop.md` の「dev loop」）、`/health`（token 無し）、`/rpc/*` の bearer を載せ、`Bun.serve({ hostname: "127.0.0.1", port: 0, idleTimeout: 0 })` で立てる。
 6. `start()` を Workbench Ledger → Task Ledger → Job Ledger → Note Ledger の順に呼び、notes の口を立てる。Workbench Ledger の `start()`（ptyd への接続と reconcile）を最大 3 秒待ってから、`backend.json` と stdout の endpoint 行を書く（ADR-0007 / 0011）。
 7. 終了時は notes の口を止め、`stop()` を逆順に呼んでから ADR-0007 の手順で抜ける。
 
@@ -197,13 +197,13 @@ domain は 4 つしかないので、汎用の「domain の登録」機構は作
 
 ブラウザに notes を配る、固定 port の 2 つ目の口（ADR-0017）。組み立ては `apps/backend/src/notes-listener.ts` の `listenNotes`。
 
-- port は Shell が env `TANIA_NOTES_PORT` で渡す（`docs/packages/desktop.md`）。env が無ければ口を立てない。headless で起こした dev の Backend が release の 19380 を取らないようにするため。
-- `127.0.0.1` と `::1` の両方で bind する。Chromium と macOS は `tania.localhost` を `::1` から先に引くので、他の process が `::1` 側だけを握っていても EADDRINUSE で見つける。どちらかで失敗したら、立てた方も止め、stderr に 1 行出して口なしで起動を続ける。
-- Host は `tania.localhost:<port>`・`localhost:<port>`・`127.0.0.1:<port>`（host 名は `@tania/note/contract` の `NOTES_HOSTNAMES`）の完全一致だけを通し、ほかは 403 で断る（DNS rebinding）。
+- port は Shell が env `MONICA_NOTES_PORT` で渡す（`docs/packages/desktop.md`）。env が無ければ口を立てない。headless で起こした dev の Backend が release の 19380 を取らないようにするため。
+- `127.0.0.1` と `::1` の両方で bind する。Chromium と macOS は `monica.localhost` を `::1` から先に引くので、他の process が `::1` 側だけを握っていても EADDRINUSE で見つける。どちらかで失敗したら、立てた方も止め、stderr に 1 行出して口なしで起動を続ける。
+- Host は `monica.localhost:<port>`・`localhost:<port>`・`127.0.0.1:<port>`（host 名は `@monica/note/contract` の `NOTES_HOSTNAMES`）の完全一致だけを通し、ほかは 403 で断る（DNS rebinding）。
 - GET 以外の request は `Sec-Fetch-Site: same-origin` を求め、ほかは 403 で断る（CSRF）。`same-site` は site が port を見ないので、`localhost` の別の port の app からの request も含む。
 - 載せるもの:
   - `/rpc` の `{ note }` の router。context は `{ db, noteLedger }`。workbench・task・job は載せない。`openTab` の `input` は shell に打鍵されるので、token の無い口では任意のコマンドになる。
-  - 画像の素の GET（`/api/assets/<file>`、`@tania/note/contract` の `IMAGE_URL_PREFIX`）。prefix の後ろを Note Ledger の `serveImage` に渡し、応答をそのまま返す。oRPC の RPCHandler は File を必ず multipart に包むので、`<img src>` が読む生のバイト列は procedure では返せない（ADR-0019）。
+  - 画像の素の GET（`/api/assets/<file>`、`@monica/note/contract` の `IMAGE_URL_PREFIX`）。prefix の後ろを Note Ledger の `serveImage` に渡し、応答をそのまま返す。oRPC の RPCHandler は File を必ず multipart に包むので、`<img src>` が読む生のバイト列は procedure では返せない（ADR-0019）。
   - SPA の静的ファイル。`/rpc` と画像以外の GET は、build の出力に在る file ならそれを、無ければ `index.html` を返す。path は file system の path として解かず、起動時に集めた file の一覧から引く。`assets/` の下（Vite が hash を付けた file）は `public, max-age=31536000, immutable`、ほかは `no-cache`。
 - SPA は compiled binary に `--asset` で同梱した `apps/web/dist` を、entry の隣（`/$bunfs/root/dist`）から読む（`docs/packages/dev-loop.md` の「release build と install」）。`bun run` の Backend には無いので、dev の Backend は SPA の GET に 404 を返し、画面は `apps/web` の Vite が配る。
 
@@ -211,7 +211,7 @@ domain は 4 つしかないので、汎用の「domain の登録」機構は作
 
 package ごとに in-memory の SQLite に自分の migration を当てる（task は workbench → task の順）。外から見える振る舞いは `createRouterClient(router, { context })` を通して確かめ、他の domain から呼ばれる method と module 内の関数（`openTab` など）はそのまま呼ぶ。DB を fake に差し替えない（ADR-0002）。`bun test` を root で打つと全 package のテストが走る。
 
-- workbench の ptyd は `packages/workbench/src/fake-ptyd.ts` に差し替える。fake は `$home/ptyd.sock` で NDJSON を話し、List の中身を台本にし、Exit を押し込み、届いた Reap と Terminate を記録する。本物の ptyd は CI の ts job に無く、Exit と Created の競合も決まった順で起こせないため。home は `mkdtemp(tmpdir())` で短くする（socket の path の上限は 104 byte）。fake と home の helper は `@tania/workbench/testing` から他の package にも出す。
+- workbench の ptyd は `packages/workbench/src/fake-ptyd.ts` に差し替える。fake は `$home/ptyd.sock` で NDJSON を話し、List の中身を台本にし、Exit を押し込み、届いた Reap と Terminate を記録する。本物の ptyd は CI の ts job に無く、Exit と Created の競合も決まった順で起こせないため。home は `mkdtemp(tmpdir())` で短くする（socket の path の上限は 104 byte）。fake と home の helper は `@monica/workbench/testing` から他の package にも出す。
   - op が届かないことを `receivedAll(…)` が空で確かめるときは、後から送る別の op（Tab を開いた Create など）が届くのを待ってから読む。ptyd は 1 本の接続で順に受けるので、後の op が届けば先に送られた op も届いている。すぐに読むと、transaction の後に送る op が届く前の空を見て、送ってしまう変異も通す。
 - task の GitHub は `packages/task/src/fake-github.ts` に差し替える。fake は GraphQL の `repository { issue(number:) }` と `pullRequests(headRefName:)` の alias だけを話し、届いた request を記録し、repo ごとの失敗、branch ごとの null の応答、未認証、応答の保留を起こせる。CLI のテストの Task Ledger は `gh auth token` が失敗する GitHub を持ち、本物の GitHub に届かない。
 - task と CLI のテストの Workbench Ledger も、fake の ptyd の home で `createWorkbenchLedger` を組む（`ptydPath` は存在しない path）。Workbench Ledger の method は差し替えず、transaction で `openTab` → commit の後に workbench が送る Create と Write を、本物の protocol で通す。procedure と Workbench Ledger の method は ptyd を待たずに返るので、ptyd に届いた Create・Write・Terminate は fake の `received` か `receivedAtLeast` で待ってから確かめ、Terminal Session が starting を抜けるのは `untilSettled` で待つ。Tab と Runspace は Workbench Ledger の method か workbench の router で開き、Agent Session は hook で作る。workbench の table に直に書かない。
@@ -220,14 +220,14 @@ package ごとに in-memory の SQLite に自分の migration を当てる（tas
 - await の間の競合は、await の途中で止めて決まった順で起こす。sync の途中は fake GitHub の `hold()`、git の ref の更新（`branch -D` など）の途中は checkout の `.git/hooks/reference-transaction` が file を待つ script、ptyd の応答の途中は fake の ptyd の `holdNext(op)` で止める（`close.test.ts`）。
 - system の Job を足すときは、並びを出す domain のテストに、`systemJobs(<d>Ledger)` から名前で取り出した `run` を最小の場面で呼ぶテストを 1 本足し、Ledger の method に届くことを見る（`note.image-cleanup`、`task.setup-log-cleanup`）。method の規則のテストは method を直に呼ぶ。`run` が別の method を呼んでも、型も Job Ledger のテストも捕まえないため。
 - 一定の間隔で走る処理は、`setInterval` を `spyOn` で捕まえ、間隔を確かめてから callback を手で呼ぶ。Bun の `jest.useFakeTimers()` は `Bun.sleep` と `setTimeout` も止め、一部の timer だけを偽にできないので、HTTP の応答を待つテストが進まなくなる。
-- 終わった行のように procedure に出ない行は、`@tania/workbench/schema` の table を SELECT して確かめてよい。他の domain が読むのと同じ面だから。
+- 終わった行のように procedure に出ない行は、`@monica/workbench/schema` の table を SELECT して確かめてよい。他の domain が読むのと同じ面だから。
 - CLI は remote client を `createRouterClient` に差し替えて回す（ADR-0003。fixture は `apps/cli/src/testing.ts`）。Backend 側のエラーの形と接続拒否の retry だけは、router を `Bun.serve` に載せて確かめる。in-process の client は handler の生の Error を投げ、HTTP のように `ORPCError`（`INTERNAL_SERVER_ERROR`）に包まないため。
 - Backend の組み立て（`apps/backend/src/main.ts`）は、Shell と同じく process として起こし、fake の ptyd の home を渡して確かめる。token の口と notes の口に同じ path を投げ、口ごとに載る procedure を見る。notes の口の照合と SPA と画像の GET は `listenNotes` を直に呼んで確かめる。
-- hook の CLI（`tania workbench hook claude`）は例外で、`apps/cli/src/main.ts` を subprocess で起こし、router を `Bun.serve` に載せて確かめる。claude から見た約束（stdin の payload、stdout の allow、exit code）と 2 秒の打ち切り、trpc-cli より前の振り分けは、process の外からしか見えないため。
+- hook の CLI（`monica workbench hook claude`）は例外で、`apps/cli/src/main.ts` を subprocess で起こし、router を `Bun.serve` に載せて確かめる。claude から見た約束（stdin の payload、stdout の allow、exit code）と 2 秒の打ち切り、trpc-cli より前の振り分けは、process の外からしか見えないため。
 
 ## contract の規約
 
-1. 合成した contract の root は package 名で mount する（`{ workbench, task, job }`、notes の口では `{ note }`）。path の先頭が package 名になり、CLI もそれに従う（`tania task track`、`tania workbench hook claude`）。
+1. 合成した contract の root は package 名で mount する（`{ workbench, task, job }`、notes の口では `{ note }`）。path の先頭が package 名になり、CLI もそれに従う（`monica task track`、`monica workbench hook claude`）。
 2. 全 procedure に `.meta({ description })` と `.output()` を付ける。description は CLI の help の正本、output は `--format json` の形の正本になる（#17 の JSON の形もここに書く）。
 3. CLI に出すのは `.meta({ cli: true })` を付けた procedure だけ（ADR-0003）。event iterator の procedure は付けても出ない。
 4. 呼び手が分岐する domain エラー（close の guard のように `data` に理由の一覧を持つもの）だけを `.errors()` で宣言する。それ以外は oRPC の標準 code（`NOT_FOUND`、`BAD_REQUEST`）を投げる。
@@ -263,5 +263,5 @@ contract を走査するテストを 1 本置き、description と output が全
 
 ## ここで決めていないこと
 
-- 設定、`$TANIA_HOME` のレイアウト、ログ（map の fog）。
+- 設定、`$MONICA_HOME` のレイアウト、ログ（map の fog）。
 - 署名と notarization（map の fog）。

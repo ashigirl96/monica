@@ -1,7 +1,7 @@
 export type ThemePref = 'system' | 'light' | 'dark'
 
 // apps/web の index.html の描画前の script も同じ key と規則でテーマを当てる。
-const STORAGE_KEY = 'tania-theme'
+const STORAGE_KEY = 'monica-theme'
 
 const darkSchemeQuery = () => matchMedia('(prefers-color-scheme: dark)')
 

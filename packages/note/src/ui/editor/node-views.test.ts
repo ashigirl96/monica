@@ -2,7 +2,7 @@ import { expect, test } from 'bun:test'
 
 import { isOpenableHref } from './node-views.ts'
 
-const BASE = 'http://tania.localhost:19380/daily/2026-10-06'
+const BASE = 'http://monica.localhost:19380/daily/2026-10-06'
 
 test.each([
   'https://example.com/a',

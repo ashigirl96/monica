@@ -4,7 +4,7 @@ use std::sync::Arc;
 
 use anyhow::Result;
 
-use tania_terminal_protocol::{
+use monica_terminal_protocol::{
     read_frames, write_line, Request, RequestOp, ResponseBody, ServerMessage, PROTOCOL_VERSION,
 };
 

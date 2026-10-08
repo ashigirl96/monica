@@ -1,6 +1,6 @@
 # ブラウザから loopback の Backend を使う
 
-wayfinder の map「monica の notes を tania に移す」のチケット「ブラウザに notes を配る形」で調べた事実。決定は ADR-0017 にある。
+wayfinder の map「旧 Monica の notes を monica に移す」のチケット「ブラウザに notes を配る形」で調べた事実。決定は ADR-0017 にある。
 
 確かめた環境: macOS 26.6.2、Bun 1.4.2、Brave 1.96.61（Chromium 154。agent-browser の headless で新規 profile）、oRPC 1.15.4、hono 4.13.12。【実機】と書いたものは、この環境で scratchpad の server を立てて確かめた。
 
@@ -23,18 +23,18 @@ wayfinder の map「monica の notes を tania に移す」のチケット「ブ
 - Chromium の `IsLocalHostname` は `localhost` と `*.localhost` を真にし、`ResolveLocalHostname` は DNS を使わずに `[::1, 127.0.0.1]` をこの順で返す。https://chromium.googlesource.com/chromium/src/+/main/net/base/url_util.cc ／ https://chromium.googlesource.com/chromium/src/+/main/net/dns/host_resolver_manager.cc
 - W3C Secure Contexts は、`.localhost` で終わる host を potentially trustworthy とする（「Is origin potentially trustworthy?」の step 5）。https://w3c.github.io/webappsec-secure-contexts/#is-origin-trustworthy
 - Safari は名前解決を OS に任せている。macOS 15.7 では解決できず、macOS 26 で直った（WebKit bug 160504 は RESOLVED MOVED。2025-09-19 のコメント）。https://bugs.webkit.org/show_bug.cgi?id=160504 。Safari の画面での動作は確かめていない。
-- 【実機】macOS 26.6.2 の `dscacheutil`・`dns-sd -G`・`getaddrinfo('tania.localhost')` は、どれも `::1` を先に、`127.0.0.1` を後に返した。
+- 【実機】macOS 26.6.2 の `dscacheutil`・`dns-sd -G`・`getaddrinfo('monica.localhost')` は、どれも `::1` を先に、`127.0.0.1` を後に返した。
 - curl は 7.85.0 から OS に頼らず `*.localhost` を loopback に解決する。https://curl.se/ch/7.85.0.html
 
 ## cookie と localStorage
 
 - RFC 6265 §8.5「Cookies do not provide isolation by port.」。Domain 属性が無ければ host-only になる。https://www.rfc-editor.org/rfc/rfc6265#section-8.5
 - localStorage は storage key（origin）ごとに分かれ、origin には port が入る。https://storage.spec.whatwg.org/#storage-keys
-- 【実機 Brave】`tania.localhost:47821` で書いた値を別の URL から読んだ結果。
+- 【実機 Brave】`monica.localhost:47821` で書いた値を別の URL から読んだ結果。
 
   | 読んだ側 | cookie | localStorage |
   | --- | --- | --- |
-  | `tania.localhost:47822`（port だけ違う） | 見える | 見えない |
+  | `monica.localhost:47822`（port だけ違う） | 見える | 見えない |
   | `localhost:47821` | 見えない | 見えない |
   | `127.0.0.1:47821` | 見えない | 見えない |
   | `other.localhost:47821` | 見えない | 見えない |
@@ -64,9 +64,9 @@ wayfinder の map「monica の notes を tania に移す」のチケット「ブ
   | --- | --- | --- | --- |
   | 同じ origin で POST（json） | `http://127.0.0.1:47811` | same-origin | cors |
   | 同じ origin で POST（no-cors、text/plain） | `http://127.0.0.1:47811` | same-origin | no-cors |
-  | `http://tania.localhost:47812` から no-cors POST | `http://tania.localhost:47812` | cross-site | no-cors |
-  | 同上から cors の json（preflight の OPTIONS が届いた） | `http://tania.localhost:47812` | cross-site | cors |
-  | 同上から top-level の form POST | `http://tania.localhost:47812` | cross-site | navigate |
+  | `http://monica.localhost:47812` から no-cors POST | `http://monica.localhost:47812` | cross-site | no-cors |
+  | 同上から cors の json（preflight の OPTIONS が届いた） | `http://monica.localhost:47812` | cross-site | cors |
+  | 同上から top-level の form POST | `http://monica.localhost:47812` | cross-site | navigate |
 
 ## oRPC 1.15.4
 
@@ -100,4 +100,4 @@ wayfinder の map「monica の notes を tania に移す」のチケット「ブ
 
 - `bundle.resources` は macOS の `.app` の `Contents/Resources` に、externalBin は `Contents/MacOS` に置かれる。https://v2.tauri.app/develop/resources/
 - `resource_dir()` は macOS で `${exe_dir}/../Resources`。dev では `target/<profile>` を返し、tauri-build が resources をそこへコピーする。https://docs.rs/tauri/latest/tauri/path/struct.PathResolver.html
-- tania の Shell は今 resources を使っていない。
+- monica の Shell は今 resources を使っていない。

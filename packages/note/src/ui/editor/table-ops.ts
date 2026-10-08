@@ -8,7 +8,7 @@ import type { TableCellContext } from './table.ts'
 
 // 表の構造編集（行・列の挿入 / 削除）。normalizer は表を見ないので、行幅の矩形性は
 // ここで自分で保つ。header はセル単位の attr だが、markdown 側（tableToGfm /
-// @tania/note/body の toMarkdown）は「header セルは row 0 にだけ居る」前提で delimiter を出すため、
+// @monica/note/body の toMarkdown）は「header セルは row 0 にだけ居る」前提で delimiter を出すため、
 // 行・列を足すときはその不変条件を崩さないよう header を写す / 移す。
 
 /** row の before position。rowIndex === childCount なら表の末尾（tableNextCell と同じ位置） */
