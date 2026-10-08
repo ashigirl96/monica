@@ -1,0 +1,11 @@
+{
+  "manifest_version": 3,
+  "name": "monica loopback probe",
+  "version": "0.0.1",
+  "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAsm8s+nUXTZJwstFrvi2xoRwuiabySqDeZEyfumVsErIY4Tpvv0xYqZJ/rZYtv98XL3xZXnkiNnDA1fMIprjNgskAU5ivTllG0Cs7pfrwg6nnXGnvpS0nH1rmoCn+rSB1wC7h8ZS7f3tjd1aROJzmFfPecodrns6ozp9IveejtJlbH+nKTCjCMwxfsiYh2pjtt+pOC5wyXuH0xhJy2zLTAdhStQK5WJw3t7kEUCuWHenU/M3HLnsJXsfmV8K+ooyS7CJg+dHpixHs5ORA8B8h+A15yMN9dSjJoW8k50zVBHxPtUvRC4LFyFsssWkdtvepHwNPEhjeJsqIM1LR55P9owIDAQAB",
+  "permissions": ["sidePanel", "storage", "nativeMessaging"],
+  "host_permissions": ["http://127.0.0.1/*", "http://monica.localhost/*"],
+  "side_panel": { "default_path": "panel.html" },
+  "background": { "service_worker": "sw.js", "type": "module" },
+  "action": {}
+}
