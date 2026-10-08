@@ -18,7 +18,7 @@ status: accepted
 
 ## Consequences
 
-- 照合で通す `Sec-Fetch-Site` の値は `same-origin` だけにする。`same-site` も通すと、`localhost:3000` で動く別の app からの request も通ってしまう（site は port を見ないため）。oRPC の event iterator も POST なので、同じ照合に乗る。
+- 照合で通す `Sec-Fetch-Site` の値は `same-origin` だけにする（ブラウザ拡張の `none` は ADR-0028 で足した）。`same-site` も通すと、`localhost:3000` で動く別の app からの request も通ってしまう（site は port を見ないため）。oRPC の event iterator も POST なので、同じ照合に乗る。
 - Host の照合では `monica.localhost:<port>`・`localhost:<port>`・`127.0.0.1:<port>` を通す。保存された本文とブックマークに残る正の URL は `monica.localhost`。
 - bind 先は `127.0.0.1` と `::1` の両方。Chromium と macOS は `monica.localhost` を `::1` から先に引くので、他の process が `::1` 側を握っているとブラウザはそちらに繋がる。両方で bind すれば、この衝突を EADDRINUSE で検出できる。
 - 口の port は Shell が env で Backend に渡す。release は 19380、dev は `scripts/dev-instance.ts` が home から決める（既定の home は 19381、ほかは hash で散らす）。env が無ければ Backend は口を立てない。こうすれば、headless で起こした dev の Backend が release の port を取ることはない。
