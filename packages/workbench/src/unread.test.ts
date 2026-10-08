@@ -76,8 +76,8 @@ test('a change that leaves the count as it was badges nothing', async () => {
   expect(badged).toEqual([1])
 })
 
-test('an unread Agent Session stays in the count after its Tab is closed and it is detached', async () => {
-  const { badged, workbenchLedger, client, settled } = setupBadged()
+test('closing the Tab of an unread Agent Session takes it out of the count once its shell exits', async () => {
+  const { badged, ptyd, workbenchLedger, client, settled } = setupBadged()
   const { runspaceId, tab } = await client.runspace.create(size)
   await client.tab.open({ runspaceId, ...size })
   await settled(tab.terminalSessionId)
@@ -85,8 +85,11 @@ test('an unread Agent Session stays in the count after its Tab is closed and it 
   await workbenchLedger.start()
 
   await client.tab.close({ id: tab.id })
+  await ptyd.received((op) => op.op === 'terminate' && op.session_id === tab.terminalSessionId)
+  ptyd.exit(tab.terminalSessionId, null)
+  await ptyd.received((op) => op.op === 'reap' && op.session_id === tab.terminalSessionId)
 
-  expect(badged).toEqual([1])
+  expect(badged).toEqual([1, 0])
 })
 
 test('a transaction that signals a change and then rolls back badges nothing', async () => {

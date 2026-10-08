@@ -8,7 +8,6 @@ import { JumpHint } from './jump-hint.tsx'
 import { jumpHintTargetsAtom } from './jump-hints.ts'
 import { metaHeldAtom } from './meta-hold.ts'
 import {
-  type DetachedRow,
   type ListedIn,
   repoName,
   type RowMeta,
@@ -24,10 +23,8 @@ import {
   draggedTabIdAtom,
   moveTabToRunspaceAtom,
   pickTileAtom,
-  reattachTerminalSessionAtom,
   reorderRunspacesAtom,
   sidebarAtom,
-  terminateTerminalSessionAtom,
   toggleSectionAtom,
 } from './store.ts'
 
@@ -36,7 +33,6 @@ const OUTSIDE_LABEL = 'その他'
 const SECTION_LABELS: Record<SidebarSection['kind'], string> = {
   bench: 'Bench',
   runspaces: 'Runspaces',
-  detached: 'Detached',
 }
 
 // Tile の色は dot の緑・琥珀・赤・灰と紛れない色から、repo ごとに決まった 1 つを選ぶ。
@@ -282,50 +278,6 @@ function RunspaceItem({
   )
 }
 
-function DetachedItem({ row }: { row: DetachedRow }) {
-  const reattach = useSetAtom(reattachTerminalSessionAtom)
-  const terminate = useSetAtom(terminateTerminalSessionAtom)
-  const unread = row.unreadCount > 0
-  // sidebar は狭いので、hover で出す button は path の幅を取らないよう行の上に重ねる。
-  return (
-    <div className="group relative w-full rounded-lg px-2 py-[7px] text-muted-foreground">
-      <div className="flex items-start gap-2">
-        <span
-          className={cn(
-            'min-w-0 flex-1 font-mono text-[11px] leading-[17px] wrap-anywhere',
-            unread && UNREAD_LABEL_STYLE,
-          )}
-        >
-          {row.path}
-        </span>
-        <UnreadCount count={row.unreadCount} className="mt-px" />
-      </div>
-      <span className="flex min-w-0 items-center gap-1.5">
-        <AgentDotMark dot={row.agentDot} />
-        <span className="min-w-0 truncate font-mono text-[10px] text-muted-foreground/60">
-          {row.id}
-        </span>
-      </span>
-      <div className="absolute inset-y-0 right-1 flex items-center gap-0.5 opacity-0 transition-opacity group-focus-within:opacity-100 group-hover:opacity-100">
-        <button
-          type="button"
-          onClick={() => void reattach(row.id)}
-          className="rounded bg-zinc-800 px-1.5 py-0.5 text-[10px] hover:bg-zinc-700 hover:text-foreground"
-        >
-          Reattach
-        </button>
-        <button
-          type="button"
-          onClick={() => void terminate(row.id)}
-          className="rounded bg-zinc-800 px-1.5 py-0.5 text-[10px] text-destructive hover:bg-destructive/25"
-        >
-          Kill
-        </button>
-      </div>
-    </div>
-  )
-}
-
 function SectionHeader({ tileKey, section }: { tileKey: string; section: SidebarSection }) {
   const toggle = useSetAtom(toggleSectionAtom)
   const label = SECTION_LABELS[section.kind]
@@ -422,13 +374,7 @@ export function WorkbenchSidebar() {
         {selected.sections.map((section) => (
           <div key={section.kind} className="mt-2 flex flex-col gap-0.5">
             {section.headed && <SectionHeader tileKey={selected.key} section={section} />}
-            {section.rows.map((row) =>
-              row.type === 'detached' ? (
-                <DetachedItem key={row.id} row={row} />
-              ) : (
-                renderRunspace(row, listedIn)
-              ),
-            )}
+            {section.rows.map((row) => renderRunspace(row, listedIn))}
           </div>
         ))}
       </nav>

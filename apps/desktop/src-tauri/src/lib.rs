@@ -61,7 +61,6 @@ pub fn run() {
             clipboard::clipboard_write_image,
             notification::take_notification_click,
             terminal::terminal_attach,
-            terminal::terminal_detach,
             terminal::terminal_write,
             terminal::terminal_resize,
         ])

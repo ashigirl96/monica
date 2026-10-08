@@ -70,16 +70,13 @@ test('pinning another Tab of a pinned Runspace moves the pin there without split
   ])
 })
 
-test('a pinned Tab cannot be closed, have its Terminal Session terminated, or go with its Runspace', async () => {
+test('a pinned Tab cannot be closed or go with its Runspace, and its Terminal Session keeps running', async () => {
   const { ptyd, client } = setup()
   const { runspaceId, tab } = await client.runspace.create(size)
   await client.tab.pin({ id: tab.id })
   const before = await client.layout.get()
 
   await expect(client.tab.close({ id: tab.id })).rejects.toMatchObject({ code: 'CONFLICT' })
-  await expect(
-    client.terminalSession.terminate({ id: tab.terminalSessionId }),
-  ).rejects.toMatchObject({ code: 'CONFLICT' })
   await expect(client.runspace.remove({ id: runspaceId })).rejects.toMatchObject({
     code: 'CONFLICT',
   })

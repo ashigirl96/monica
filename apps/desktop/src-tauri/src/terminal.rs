@@ -51,16 +51,6 @@ pub async fn terminal_attach(
 }
 
 #[tauri::command]
-pub async fn terminal_detach(app: AppHandle, session_id: String) -> CmdResult<()> {
-    off_main(move || {
-        let client = app.state::<PtydHandle>().ensure_connected(&app)?;
-        client.request(RequestOp::Detach { session_id })?;
-        Ok(())
-    })
-    .await
-}
-
-#[tauri::command]
 pub async fn terminal_write(app: AppHandle, session_id: String, data: String) -> CmdResult<()> {
     off_main(move || {
         let client = app.state::<PtydHandle>().ensure_connected(&app)?;

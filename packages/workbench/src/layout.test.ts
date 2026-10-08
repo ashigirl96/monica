@@ -93,8 +93,8 @@ test("tab.open appends without an index, inserts at the index given, and opens i
   ).toMatchObject({ cwd: '/elsewhere' })
 })
 
-test('tab.close leaves the Terminal Session running and detached, and tab.open reattaches it', async () => {
-  const { client, settled } = setup()
+test("tab.close terminates the Tab's Terminal Session, which leaves the list once ptyd reports the exit", async () => {
+  const { ptyd, client, settled } = setup()
   const { runspaceId, tab: kept } = await client.runspace.create(size)
   const closed = await client.tab.open({ runspaceId, ...size })
   await settled(closed.terminalSessionId)
@@ -102,40 +102,10 @@ test('tab.close leaves the Terminal Session running and detached, and tab.open r
   await client.tab.close({ id: closed.id })
 
   expect(await checkedOrder(client)).toEqual([{ id: runspaceId, tabs: [kept.id] }])
-  expect(await client.terminalSession.list()).toContainEqual(
-    expect.objectContaining({ id: closed.terminalSessionId, status: 'running', tabId: null }),
-  )
-
-  const reopened = await client.tab.open({
-    runspaceId,
-    index: 0,
-    terminalSessionId: closed.terminalSessionId,
-    ...size,
-  })
-
-  expect(reopened.terminalSessionId).toBe(closed.terminalSessionId)
-  expect(await checkedOrder(client)).toEqual([{ id: runspaceId, tabs: [reopened.id, kept.id] }])
-  expect(await client.terminalSession.list()).toContainEqual(
-    expect.objectContaining({ id: closed.terminalSessionId, tabId: reopened.id }),
-  )
-})
-
-test('tab.open reattaches only a detached Terminal Session', async () => {
-  const { ptyd, client, settled } = setup()
-  const { runspaceId, tab: shown } = await client.runspace.create(size)
-  const ended = await client.tab.open({ runspaceId, ...size })
-  await settled(ended.terminalSessionId)
-  await client.tab.close({ id: ended.id })
-  ptyd.exit(ended.terminalSessionId, 0)
-  await ptyd.received((op) => op.op === 'reap' && op.session_id === ended.terminalSessionId)
-
-  const reattach = (terminalSessionId: string) =>
-    client.tab.open({ runspaceId, terminalSessionId, ...size })
-
-  await expect(reattach(shown.terminalSessionId)).rejects.toMatchObject({ code: 'CONFLICT' })
-  await expect(reattach(ended.terminalSessionId)).rejects.toMatchObject({ code: 'CONFLICT' })
-  await expect(reattach('ts-nope')).rejects.toMatchObject({ code: 'NOT_FOUND' })
-  expect(await checkedOrder(client)).toEqual([{ id: runspaceId, tabs: [shown.id] }])
+  await ptyd.received((op) => op.op === 'terminate' && op.session_id === closed.terminalSessionId)
+  ptyd.exit(closed.terminalSessionId, null)
+  await ptyd.received((op) => op.op === 'reap' && op.session_id === closed.terminalSessionId)
+  expect((await client.terminalSession.list()).map((s) => s.id)).toEqual([kept.terminalSessionId])
 })
 
 test('closing the last Tab removes its Runspace and renumbers the rest', async () => {
@@ -269,25 +239,6 @@ test('tab.setCwd records a cwd under ~ as an absolute path', async () => {
   expect(await cwdAfter('/work/~x')).toBe('/work/~x')
 })
 
-test('a shell left detached by closing its Tab keeps the cwd the Tab last reported, and brings it back on reattach', async () => {
-  const { client } = setup()
-  const { runspaceId, tab } = await client.runspace.create({ cwd: '/work', ...size })
-  await client.tab.open({ runspaceId, ...size })
-  await client.tab.setCwd({ id: tab.id, cwd: '/work/sub' })
-
-  await client.tab.close({ id: tab.id })
-
-  expect(await client.terminalSession.list()).toContainEqual(
-    expect.objectContaining({ id: tab.terminalSessionId, cwd: '/work/sub', tabId: null }),
-  )
-  const reattached = await client.tab.open({
-    runspaceId,
-    terminalSessionId: tab.terminalSessionId,
-    ...size,
-  })
-  expect(reattached.cwd).toBe('/work/sub')
-})
-
 test('tab.respawn refuses a Tab whose Terminal Session is still live', async () => {
   const { client } = setup()
   const { tab } = await client.runspace.create(size)
@@ -319,14 +270,12 @@ test('every write to the layout streams a layout signal on changes', async () =>
   const { runspaceId, tab } = await write('runspace.create', () => client.runspace.create(size))
   const other = await write('tab.open', () => client.tab.open({ runspaceId, ...size }))
   await write('tab.close', () => client.tab.close({ id: other.id }))
-  const reopened = await write('tab.open with a terminalSessionId', () =>
-    client.tab.open({ runspaceId, terminalSessionId: other.terminalSessionId, ...size }),
-  )
-  await write('tab.move', () => client.tab.move({ id: reopened.id, runspaceId, index: 0 }))
-  await write('tab.setCwd', () => client.tab.setCwd({ id: reopened.id, cwd: '/elsewhere' }))
+  const moved = await client.tab.open({ runspaceId, ...size })
+  await write('tab.move', () => client.tab.move({ id: moved.id, runspaceId, index: 0 }))
+  await write('tab.setCwd', () => client.tab.setCwd({ id: moved.id, cwd: '/elsewhere' }))
   await write('runspace.move', () => client.runspace.move({ id: runspaceId, index: 0 }))
-  await write('tab.pin', () => client.tab.pin({ id: reopened.id }))
-  await write('tab.unpin', () => client.tab.unpin({ id: reopened.id }))
+  await write('tab.pin', () => client.tab.pin({ id: moved.id }))
+  await write('tab.unpin', () => client.tab.unpin({ id: moved.id }))
   ptyd.exit(tab.terminalSessionId, 0)
   await ptyd.received((op) => op.op === 'reap' && op.session_id === tab.terminalSessionId)
   await write('tab.respawn', () => client.tab.respawn({ id: tab.id, ...size }))

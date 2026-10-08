@@ -3,12 +3,13 @@ import { afterEach, beforeEach, expect, test } from 'bun:test'
 import { createStore, type Store } from 'jotai'
 
 import { cleanUp, ghqCheckout, setup, until } from '../testing.ts'
-import { OUTSIDE } from './sidebar-model.ts'
+import { type BenchLabel, OUTSIDE } from './sidebar-model.ts'
 import {
   activateRunspaceAtom,
   activateTerminalTabAtom,
   activeRunspaceAtom,
   activeTerminalTabAtom,
+  benchLabelOfAtom,
   pickTileByNumberAtom,
   reloadAtom,
   sidebarAtom,
@@ -128,27 +129,28 @@ test('a number brings back the Runspace that was active at a restart, even after
 })
 
 test('the selected Tile and the collapsed sections come back after a restart', async () => {
-  const { client } = setup()
+  const { db, workbenchLedger, client } = setup()
   const app = ghqCheckout('acme/app')
-  const { runspaceId } = await client.runspace.create({ cwd: app.checkout, ...size })
-  const closed = await client.tab.open({ runspaceId, cwd: app.checkout, ...size })
-  await client.tab.close({ id: closed.id })
+  await client.runspace.create({ cwd: app.checkout, ...size })
+  const shipIt = db.transaction((tx) => workbenchLedger.createRunspace(tx, { cwd: app.worktree }))
+  const label: BenchLabel = { repo: 'acme/app', number: 1, title: 'Ship it', setup: null }
 
   await saveFrom(client, (store) => {
-    store.set(toggleSectionAtom, 'acme/app:detached')
+    store.set(toggleSectionAtom, 'acme/app:bench')
     store.set(tileChoiceAtom, OUTSIDE)
   })
 
   const store = workbenchStore(client)
+  store.set(benchLabelOfAtom, () => (runspaceId: string) => (runspaceId === shipIt ? label : null))
   await store.set(reloadAtom)
-  // Repo は Backend への問い合わせを待って決まるので、Tile が出るまで待つ。
+  // Repo は Backend への問い合わせを待って決まるので、Tile に両方のセクションが出るまで待つ。
   const sidebar = await until(store, sidebarAtom, (s) =>
-    s.tiles.some((tile) => tile.key === 'acme/app'),
+    s.tiles.some((tile) => tile.key === 'acme/app' && tile.sections.length === 2),
   )
   expect(sidebar.selected.key).toBe(OUTSIDE)
   expect(sidebar.tiles[0]?.sections).toMatchObject([
+    { kind: 'bench', collapsed: true },
     { kind: 'runspaces', collapsed: false },
-    { kind: 'detached', collapsed: true },
   ])
 })
 

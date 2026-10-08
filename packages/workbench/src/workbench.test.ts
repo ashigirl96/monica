@@ -5,7 +5,7 @@ import { eq } from 'drizzle-orm'
 import type { WorkbenchChange } from './contract.ts'
 import { startFakePtyd } from './fake-ptyd.ts'
 import type { SessionInfo } from './ptyd.ts'
-import { terminalSession } from './schema.ts'
+import { runspace, tab as tabTable, terminalSession } from './schema.ts'
 import type { Db, WorkbenchLedger } from './server.ts'
 import { cleanUp, onCleanup, setup } from './testing.ts'
 
@@ -44,6 +44,22 @@ function seedRow(db: Db, id: string, status: Status) {
     .run()
 }
 
+// reconcile は Tab の無い live な行を終わらせるので、残す行は Tab に表示させておく。
+function seedRowInTab(db: Db, id: string) {
+  seedRow(db, id, 'running')
+  const runspaceId = `rs-${id}`
+  db.insert(runspace).values({ id: runspaceId, cwd: '/tmp/somewhere', sortOrder: 0 }).run()
+  db.insert(tabTable)
+    .values({
+      id: `tab-${id}`,
+      runspaceId,
+      cwd: '/tmp/somewhere',
+      sortOrder: 0,
+      terminalSessionId: id,
+    })
+    .run()
+}
+
 test('a live row ptyd no longer holds turns lost', async () => {
   const { db, workbenchLedger, client } = setup()
   seedRow(db, 'ts-gone', 'running')
@@ -66,16 +82,23 @@ test('a live row whose shell died meanwhile turns exited with the code, then its
   await ptyd.received((op) => op.op === 'reap' && op.session_id === 'ts-died')
 })
 
-test("a live row ptyd still runs stays listed with ptyd's pid", async () => {
-  const { ptyd, db, workbenchLedger, client } = setup()
-  seedRow(db, 'ts-alive', 'running')
-  ptyd.sessions.push(heldByPtyd('ts-alive', { pid: 999 }))
+test("a live row a Tab shows keeps running with ptyd's pid, while one no Tab shows is terminated, as when the Backend stopped before sending the Terminate of a closed Tab", async () => {
+  const { ptyd, db, workbenchLedger, client, settled } = setup()
+  seedRowInTab(db, 'ts-shown')
+  seedRow(db, 'ts-tabless', 'running')
+  ptyd.sessions.push(heldByPtyd('ts-shown', { pid: 999 }), heldByPtyd('ts-tabless'))
 
   await workbenchLedger.start()
+  // ptyd は 1 本の接続で順に受けるので、後から開いた Tab の Create が届けば、reconcile の Terminate も届いている。
+  const { tab } = await client.runspace.create({ cwd: '/work', rows: 24, cols: 80 })
+  await settled(tab.terminalSessionId)
 
-  expect(await client.terminalSession.list()).toEqual([
-    expect.objectContaining({ id: 'ts-alive', status: 'running', pid: 999 }),
+  expect(ptyd.receivedAll((op) => op.op === 'terminate').map((op) => op.session_id)).toEqual([
+    'ts-tabless',
   ])
+  expect(await client.terminalSession.list()).toContainEqual(
+    expect.objectContaining({ id: 'ts-shown', status: 'running', pid: 999 }),
+  )
 })
 
 test("an ended row stays ended; ptyd's session under its id is terminated or reaped", async () => {
@@ -107,7 +130,8 @@ test('a tombstone only ptyd knows is reaped without a row', async () => {
 })
 
 test('an Exit from ptyd turns the row exited with the code and reaps the tombstone', async () => {
-  const { ptyd, db, workbenchLedger, client } = setup()
+  const { ptyd, db, workbenchLedger } = setup()
+  seedRowInTab(db, 'ts-a')
   ptyd.sessions.push(heldByPtyd('ts-a'))
   await workbenchLedger.start()
 
@@ -115,7 +139,6 @@ test('an Exit from ptyd turns the row exited with the code and reaps the tombsto
   await ptyd.received((op) => op.op === 'reap' && op.session_id === 'ts-a')
 
   expect(rowOf(db, 'ts-a')).toMatchObject({ status: 'exited', exitCode: 130 })
-  expect(await client.terminalSession.list()).toEqual([])
 })
 
 test('a new Terminal Session runs in ptyd under a ts-<uuidv7> id with the shell fixed at startup', async () => {
@@ -166,7 +189,8 @@ function nextChange(
 }
 
 test('while ptyd is gone the Backend keeps retrying, then reconciles against the new ptyd', async () => {
-  const { home, ptyd, db, workbenchLedger, client } = setup()
+  const { home, ptyd, db, workbenchLedger } = setup()
+  seedRowInTab(db, 'ts-a')
   ptyd.sessions.push(heldByPtyd('ts-a'))
   await workbenchLedger.start()
 
@@ -178,34 +202,11 @@ test('while ptyd is gone the Backend keeps retrying, then reconciles against the
   await reconciled
 
   expect(rowOf(db, 'ts-a')?.status).toBe('lost')
-  expect(await client.terminalSession.list()).toEqual([])
-})
-
-test("terminate asks ptyd to kill the session, and the row turns exited on ptyd's Exit", async () => {
-  const { ptyd, db, workbenchLedger, client } = setup()
-  ptyd.sessions.push(heldByPtyd('ts-a'))
-  await workbenchLedger.start()
-
-  await client.terminalSession.terminate({ id: 'ts-a' })
-  await ptyd.received((op) => op.op === 'terminate' && op.session_id === 'ts-a')
-  expect(rowOf(db, 'ts-a')?.status).toBe('running')
-
-  ptyd.exit('ts-a', null)
-  await ptyd.received((op) => op.op === 'reap' && op.session_id === 'ts-a')
-  expect(rowOf(db, 'ts-a')?.status).toBe('exited')
-})
-
-test('terminate refuses an id the Workbench Ledger does not know', async () => {
-  const { workbenchLedger, client } = setup()
-  await workbenchLedger.start()
-
-  await expect(client.terminalSession.terminate({ id: 'ts-nope' })).rejects.toMatchObject({
-    code: 'NOT_FOUND',
-  })
 })
 
 test('changes streams a signal naming the Terminal Session that changed', async () => {
-  const { ptyd, workbenchLedger, client } = setup()
+  const { ptyd, db, workbenchLedger, client } = setup()
+  seedRowInTab(db, 'ts-a')
   ptyd.sessions.push(heldByPtyd('ts-a'))
   await workbenchLedger.start()
 
@@ -217,16 +218,16 @@ test('changes streams a signal naming the Terminal Session that changed', async 
   await changes.return?.()
 })
 
-test('an Exit that arrives while the reconcile waits for List still ends the adopted row', async () => {
-  const { ptyd, db, workbenchLedger, client } = setup()
-  ptyd.sessions.push(heldByPtyd('ts-orphan'))
-  ptyd.beforeList = () => [{ type: 'exit', session_id: 'ts-orphan', exit_code: 0 }]
+test('an Exit that arrives while the reconcile waits for List still ends the row', async () => {
+  const { ptyd, db, workbenchLedger } = setup()
+  seedRowInTab(db, 'ts-a')
+  ptyd.sessions.push(heldByPtyd('ts-a'))
+  ptyd.beforeList = () => [{ type: 'exit', session_id: 'ts-a', exit_code: 0 }]
 
   await workbenchLedger.start()
-  await ptyd.received((op) => op.op === 'reap' && op.session_id === 'ts-orphan')
+  await ptyd.received((op) => op.op === 'reap' && op.session_id === 'ts-a')
 
-  expect(rowOf(db, 'ts-orphan')).toMatchObject({ status: 'exited', exitCode: 0 })
-  expect(await client.terminalSession.list()).toEqual([])
+  expect(rowOf(db, 'ts-a')).toMatchObject({ status: 'exited', exitCode: 0 })
 })
 
 test('a ptyd that drops the connection mid-handshake leaves a single connection after the retry', async () => {
@@ -239,31 +240,15 @@ test('a ptyd that drops the connection mid-handshake leaves a single connection 
   expect(ptyd.connections).toBe(1)
 })
 
-test('a cwd whose multibyte character straddles two socket chunks is read intact', async () => {
-  const { ptyd, db, workbenchLedger } = setup()
-  ptyd.sessions.push(heldByPtyd('ts-a', { cwd: '/work/日本語' }))
-  ptyd.splitListMidCharacter = true
+test('a live session only ptyd knows is terminated without a row', async () => {
+  const { ptyd, db, workbenchLedger, client } = setup()
+  ptyd.sessions.push(heldByPtyd('ts-orphan'))
 
   await workbenchLedger.start()
 
-  expect(rowOf(db, 'ts-a')?.cwd).toBe('/work/日本語')
-})
-
-test('a live session only ptyd knows is adopted without a shell and listed', async () => {
-  const { ptyd, workbenchLedger, client } = setup()
-  ptyd.sessions.push(heldByPtyd('ts-orphan', { pid: 777, cwd: '/work/repo' }))
-
-  await workbenchLedger.start()
-
-  expect(await client.terminalSession.list()).toEqual([
-    expect.objectContaining({
-      id: 'ts-orphan',
-      cwd: '/work/repo',
-      shell: '',
-      status: 'running',
-      pid: 777,
-    }),
-  ])
+  await ptyd.received((op) => op.op === 'terminate' && op.session_id === 'ts-orphan')
+  expect(rowOf(db, 'ts-orphan')).toBeUndefined()
+  expect(await client.terminalSession.list()).toEqual([])
 })
 
 test('the WorkbenchLedger exposes events, start, stop and only the methods other domains call', () => {
