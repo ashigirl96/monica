@@ -129,6 +129,8 @@ ADR-0008 の「Backend 起動時」と ADR-0011 の reconcile の規則のうち
 - Agent Session の居場所（`terminal_session_id`）は、受け付けた hook の Terminal Session に合わせる。resume の SessionStart を取りこぼした agent が前の Tab に結ばれたままだと、前の Tab が閉じたときに生きている agent を終了にしてしまうため。1 つの Terminal Session に live な Agent Session が 1 つであることは、`agent_session` の部分 unique index（`state <> 'ended'`）が守る。cwd も受け付けた hook の値に合わせる。
 - Terminal Session の行が終わるとき（ptyd の Exit、reconcile の lost / exited）、同じ transaction で、その Terminal Session の終了でない Agent Session を終了（terminal_exited）にする。
 - 生きている Terminal Session の動作中の Agent Session を未観測にするのは、Backend の起動直後の reconcile だけ。ptyd に繋ぎ直したときの reconcile では動作中のままにする。その間も Backend は居て hook を受けていたため。
+- Agent Session の行を書く処理（hook の適用、`markSeen`、Terminal Session の終わりでの終了、reconcile）は `packages/workbench/src/agent-session.ts` の `createAgentSessions` に集め、書いた行ごとに自分で `{ type: "agentSession", sessionId }` を publish する。router の handler、Exit の記録、ptyd に繋いだ後の処理は出さない。書き込みが id を返して呼び手が commit の後に出す形だと、呼び手を 1 つ忘れるだけで task の Run の誕生と Dock の数が黙って壊れるため。
+- 呼び手の transaction を受ける処理（Terminal Session の終わりでの終了と reconcile）は、その transaction の中で publish する。hook の適用は自分で開く transaction の中で、`markSeen` は UPDATE の直後に出す。購読側は microtask か DB の読み直しで動くので、commit の後の行を読む（`docs/packages.md` の「domain をまたぐ規則」）。
 - reconcile が終了や未観測にした Agent Session も、`reconciled` の前に 1 つずつ `{ type: "agentSession", sessionId }` で知らせる。`agentSession` の合図だけを読む購読側（task の Run）にも、ptyd に繋ぎ直したときの終了が届くようにするため。
 
 ## 未読

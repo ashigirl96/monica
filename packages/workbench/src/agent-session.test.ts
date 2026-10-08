@@ -4,6 +4,7 @@ import { join } from 'node:path'
 
 import { eq } from 'drizzle-orm'
 
+import type { WorkbenchChange } from './contract.ts'
 import { startFakePtyd } from './fake-ptyd.ts'
 import { agentSession, terminalSession } from './schema.ts'
 import type { Db } from './server.ts'
@@ -564,6 +565,25 @@ test('an Exit from ptyd ends the Agent Session in that Terminal Session', async 
 
   expect(await client.agentSession.list()).toEqual([])
   expect(rowOf(db, 's-1')).toMatchObject({ state: 'ended', endReason: 'terminal_exited' })
+})
+
+test('an Exit from ptyd signals the Agent Session it ends', async () => {
+  const { ptyd, workbenchLedger, client, settled } = setup()
+  const { tab } = await client.runspace.create(size)
+  await settled(tab.terminalSessionId)
+  await client.agentSession.recordHook({
+    terminalSessionId: tab.terminalSessionId,
+    payload: payload('s-1', 'UserPromptSubmit', { prompt: 'hi' }),
+  })
+  const signals: WorkbenchChange[] = []
+  onCleanup(workbenchLedger.events.subscribe('change', (change) => signals.push(change)))
+
+  ptyd.exit(tab.terminalSessionId, 0)
+  await ptyd.received((op) => op.op === 'reap' && op.session_id === tab.terminalSessionId)
+
+  expect(signals.filter((change) => change.type === 'agentSession')).toEqual([
+    { type: 'agentSession', sessionId: 's-1' },
+  ])
 })
 
 test('after a Backend restart a running Agent Session is unobserved until its next hook, a waiting one stays, and one whose Terminal Session is gone has ended', async () => {

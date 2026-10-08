@@ -3,10 +3,9 @@ import { userInfo } from 'node:os'
 import { EventPublisher } from '@orpc/server'
 import type { BunSQLiteDatabase } from 'drizzle-orm/bun-sqlite'
 
-import { readAgentSessionTitle } from './agent-session-title.ts'
-import type { AgentSession, WorkbenchChange } from './contract.ts'
+import { type AgentSessions, createAgentSessions } from './agent-session.ts'
+import type { WorkbenchChange } from './contract.ts'
 import { createRunspace, moveTab, openTab, removeRunspace } from './layout.ts'
-import { shortPath } from './paths.ts'
 import { openDaemon, type PtydClient } from './ptyd.ts'
 import { writeTabFiles } from './tab-env.ts'
 import { createTerminalSessions, type Size, type TerminalSessions } from './terminal-session.ts'
@@ -39,9 +38,9 @@ export type NotificationDeps = {
 /** start() で 1 回、以降は未読の Agent Session が居る Terminal Session の集合が変わるたびに呼ぶ。 */
 export type Unread = (terminalSessionIds: string[]) => void
 
-type Internals = NotificationDeps & {
-  db: Db
+type Internals = {
   terminalSessions: TerminalSessions
+  agentSessions: AgentSessions
 }
 
 // WorkbenchLedger の型は他の domain が呼ぶものだけに保ち、ptyd の接続などの中身は WorkbenchLedger を key にここへ置く。
@@ -55,6 +54,10 @@ function internals(workbenchLedger: WorkbenchLedger): Internals {
 
 export function terminalSessionsOf(workbenchLedger: WorkbenchLedger): TerminalSessions {
   return internals(workbenchLedger).terminalSessions
+}
+
+export function agentSessionsOf(workbenchLedger: WorkbenchLedger): AgentSessions {
+  return internals(workbenchLedger).agentSessions
 }
 
 export function createWorkbenchLedger(
@@ -73,11 +76,13 @@ export function createWorkbenchLedger(
   let backendRestarted = true
   let stopping = false
 
+  const agentSessions = createAgentSessions({ db, publish, notify, nameAgentSession })
   const terminalSessions = createTerminalSessions({
     db,
     home,
     shell: process.env.SHELL || userInfo().shell || '/bin/zsh',
     publish,
+    agentSessions,
     ready,
     stopping: () => stopping,
   })
@@ -111,17 +116,14 @@ export function createWorkbenchLedger(
         opened.close()
         throw new Error('the Workbench Ledger has stopped')
       }
-      const { reaped, terminated, agentSessionIds } = terminalSessions.reconcile(
-        opened,
-        await opened.list(),
-        { backendRestarted },
-      )
+      const { reaped, terminated } = terminalSessions.reconcile(opened, await opened.list(), {
+        backendRestarted,
+      })
       backendRestarted = false
       client = opened
       const exits = exitsDuringReconcile
       exitsDuringReconcile = null
       for (const [id, exitCode] of exits) onExit(id, exitCode)
-      for (const sessionId of agentSessionIds) publish({ type: 'agentSession', sessionId })
       publish({ type: 'reconciled' })
       terminalSessions.respawnPinnedTabs()
       console.error(
@@ -188,26 +190,6 @@ export function createWorkbenchLedger(
       publish({ type: 'layout' })
     },
   }
-  internalsOf.set(workbenchLedger, { db, terminalSessions, notify, nameAgentSession })
+  internalsOf.set(workbenchLedger, { terminalSessions, agentSessions })
   return workbenchLedger
-}
-
-// 通知は commit した後の副作用なので、出せなくても hook の記録と変更の合図は止めない。
-export function notifyWaiting(
-  workbenchLedger: WorkbenchLedger,
-  agentSession: AgentSession,
-  reason: string,
-) {
-  const { db, notify, nameAgentSession } = internals(workbenchLedger)
-  try {
-    const title = nameAgentSession(db, agentSession.sessionId) ?? shortPath(agentSession.cwd)
-    const agentSessionTitle = readAgentSessionTitle(agentSession.transcriptPath)
-    notify({
-      title,
-      body: agentSessionTitle ? `${reason} · ${agentSessionTitle}` : reason,
-      terminalSessionId: agentSession.terminalSessionId,
-    })
-  } catch (error) {
-    console.error(`[workbench] could not notify for ${agentSession.sessionId}: ${error}`)
-  }
 }
