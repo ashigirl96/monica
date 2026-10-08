@@ -3,7 +3,7 @@ import { homedir } from 'node:os'
 import { implement } from '@orpc/server'
 import { eq, getTableColumns, inArray, isNotNull, or } from 'drizzle-orm'
 
-import { listAgentSessions, markSeenIfUnread, recordHook } from './agent-session.ts'
+import { listAgentSessions } from './agent-session.ts'
 import { contract } from './contract.ts'
 import { openInEditor, resolveEditorPaths } from './editor.ts'
 import {
@@ -25,7 +25,7 @@ import {
 import { repoOf } from './repo.ts'
 import { tab, terminalSession } from './schema.ts'
 import { LIVE } from './terminal-session.ts'
-import { terminalSessionsOf, type WorkbenchContext } from './workbench.ts'
+import { agentSessionsOf, terminalSessionsOf, type WorkbenchContext } from './workbench.ts'
 
 export { migrations } from '../migrations/index.ts'
 export { inheritableEnv } from './ptyd.ts'
@@ -111,20 +111,13 @@ export const router = os.router({
     }),
   },
   agentSession: {
-    recordHook: os.agentSession.recordHook.handler(({ context, input }) => {
-      for (const sessionId of recordHook(context, input)) {
-        context.workbenchLedger.events.publish('change', { type: 'agentSession', sessionId })
-      }
-    }),
+    recordHook: os.agentSession.recordHook.handler(({ context, input }) =>
+      agentSessionsOf(context.workbenchLedger).recordHook(input),
+    ),
     list: os.agentSession.list.handler(({ context }) => listAgentSessions(context.db)),
-    markSeen: os.agentSession.markSeen.handler(({ context, input }) => {
-      if (markSeenIfUnread(context.db, input)) {
-        context.workbenchLedger.events.publish('change', {
-          type: 'agentSession',
-          sessionId: input.sessionId,
-        })
-      }
-    }),
+    markSeen: os.agentSession.markSeen.handler(({ context, input }) =>
+      agentSessionsOf(context.workbenchLedger).markSeen(input),
+    ),
   },
   repo: {
     of: os.repo.of.handler(({ input }) => repoOf(input.cwd)),

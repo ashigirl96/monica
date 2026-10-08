@@ -1,6 +1,6 @@
 import { and, eq, inArray } from 'drizzle-orm'
 
-import { endAgentSessionsIn, reconcileAgentSessions } from './agent-session.ts'
+import type { AgentSessions } from './agent-session.ts'
 import type { TerminalSession, WorkbenchChange } from './contract.ts'
 import { shouldRespawn } from './pin.ts'
 import type { PtydClient, SessionInfo } from './ptyd.ts'
@@ -37,10 +37,11 @@ export function createTerminalSessions(deps: {
   home: string
   shell: string
   publish: (change: WorkbenchChange) => void
+  agentSessions: AgentSessions
   ready: () => Promise<PtydClient>
   stopping: () => boolean
 }) {
-  const { db, home, shell, publish, ready } = deps
+  const { db, home, shell, publish, agentSessions, ready } = deps
   // ここにある Terminal Session は ptyd がまだ知らないので、reconcile で lost にしない。
   const createNotSent = new Set<string>()
 
@@ -160,15 +161,14 @@ export function createTerminalSessions(deps: {
   // Reap は commit の後にする。間で Backend が死んでも tombstone が残り、次の reconcile が拾う。
   function recordExit(ptyd: PtydClient | null, id: string, exitCode: number | null) {
     const endedAt = new Date()
-    const agentSessionIds = db.transaction((tx) => {
+    db.transaction((tx) => {
       tx.update(terminalSession)
         .set({ status: 'exited', exitCode, endedAt })
         .where(and(eq(terminalSession.id, id), inArray(terminalSession.status, LIVE)))
         .run()
-      return endAgentSessionsIn(tx, id, endedAt)
+      agentSessions.endIn(tx, id, endedAt)
     })
     publish({ type: 'terminalSession', id })
-    for (const sessionId of agentSessionIds) publish({ type: 'agentSession', sessionId })
     ptyd?.reap(id)
     respawnPinnedTabs([id])
   }
@@ -202,7 +202,7 @@ export function createTerminalSessions(deps: {
     const unmatched = new Map(ptydSessions.map((s) => [s.session_id, s]))
     const toReap: string[] = []
     const toTerminate: string[] = []
-    const agentSessionIds = db.transaction((tx) => {
+    db.transaction((tx) => {
       const rows = tx
         .select({ row: terminalSession, tabId: tab.id })
         .from(terminalSession)
@@ -245,11 +245,11 @@ export function createTerminalSessions(deps: {
         if (held.running) toTerminate.push(held.session_id)
         else toReap.push(held.session_id)
       }
-      return reconcileAgentSessions(tx, { backendRestarted })
+      agentSessions.reconcile(tx, { backendRestarted })
     })
     for (const id of toReap) ptyd.reap(id)
     terminate(toTerminate)
-    return { reaped: toReap.length, terminated: toTerminate.length, agentSessionIds }
+    return { reaped: toReap.length, terminated: toTerminate.length }
   }
 
   return {
