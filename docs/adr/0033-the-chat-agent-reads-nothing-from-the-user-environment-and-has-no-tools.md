@@ -11,7 +11,7 @@ status: accepted
 - 他の session の message: `settings` に `{ crossSessionInbound: "refuse" }` を渡し、env に `CLAUDE_CODE_RESTRICTED=1` を足す。
 - system prompt: 文字列で渡し、Claude Code の preset を置き換える。
 - cwd: 空の `$MONICA_HOME/chat`。
-- env: Backend の env を継がない。Backend の env からは `USER` と `HOME` だけを写し、上の 3 つと `DISABLE_AUTOUPDATER=1` を足す。SDK の `env` は `process.env` に重ならず、丸ごと置き換わる。
+- env: Backend の env を継がない。Backend の env からは `USER` と `HOME` だけを写し、上の 3 つと `DISABLE_AUTOUPDATER=1`・`CLAUDE_CODE_MAX_RETRIES=4` を足す。SDK の `env` は `process.env` に重ならず、丸ごと置き換わる。
 
 ## Consequences
 
@@ -23,5 +23,6 @@ status: accepted
 - 認証と接続先を替える env（`ANTHROPIC_API_KEY`・`ANTHROPIC_AUTH_TOKEN`・`CLAUDE_CODE_OAUTH_TOKEN`・`ANTHROPIC_BASE_URL`・`CLAUDE_CODE_USE_BEDROCK` など）も届かない。Monica を起こした shell の env しだいで、plan の login から別の課金に黙って替わることはない。
 - claude は keychain の account 名を `USER` から決めるので、`USER` が無いと login を読めない。`HOME` と `PATH` は無くても答える。`HOME` を写すのは、テストで home を分けられるようにするため。proxy と CA の env は通さないので、proxy の内側で使うようになったら足す。
 - `DISABLE_AUTOUPDATER=1` は、同梱した claude が自分を更新しないようにするため。SDK から起こした claude が更新を走らせるかは確かめていないが、走れば ADR-0032 の「claude と SDK の版を lockfile で揃える」が崩れる。
+- `CLAUDE_CODE_MAX_RETRIES=4` は、API の一時的な失敗（529・500・network に届かない）で答えを待たせる時間を約 8 秒にするため。既定の 10 回では、CLI が `api_retry` だけを流しながら約 3 分再試行する。plan の上限の 429 は回数によらず再試行しない（#269）。この env は CLI のコードで読んだだけなので、効くかは実装で確かめる。
 - 他の session の message を断るのは、ADR-0028 が守らないとした同じ Mac の process から守るためではない。普通の送り手は user 自身の Claude Code の session で、送られると答えが壊れるため。SDK から起こした claude は inbox の socket を開き、user の他の session の `ListAgents` に普通の session と見分けのつかない行で出る。そこへ `SendMessage` が届くと、spare は `query()` を呼ばれる前にその場で turn を起こし、SDK はその turn の result を質問の答えより先に流す。次の質問も、その turn を履歴に持ったまま答える。docs の「非対話の session は保留して 5 分で捨てる」は、送り手が bypass のときにしか当たらない（#271）。
 - refuse と restricted を重ねるのは、片方では足りないため。`crossSessionInbound` は docs が約束する口で、`settingSources: []` でも flag の settings として読まれるが、socket は開いたままで `ListAgents` に出続ける。restricted は socket を開かないので一覧から消えるが、この効果は docs に無く、claude の実装で確かめただけ。版が上がって restricted が socket を開くようになっても、message は refuse で断られ、一覧に出るだけになる。restricted のほかの効果（command やコードを走らせる tool と WebFetch を外す、managed と `--settings` のほかの settings を読まない）は、上の options と重なるだけでぶつからない。bare mode（`CLAUDE_CODE_SIMPLE=1`）も socket を開かないが、keychain の login も読まなくなるので使わない。
