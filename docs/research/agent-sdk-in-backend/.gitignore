@@ -1,0 +1,8 @@
+node_modules/
+bun.lock
+bin/
+cwd-empty/
+parking/
+login-path.txt
+logs-*.jsonl
+marker-start
