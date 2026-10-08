@@ -1,23 +1,17 @@
 import type { Layout, RepoPlace, Tab } from '../contract.ts'
 import { shortPath } from '../paths.ts'
 import { type AgentDot, type AgentTally, tallyAgentDots } from './agent-dot.ts'
+import {
+  type AssignedTile,
+  type BenchLabel,
+  type BenchSetup,
+  isCollapsed,
+  OUTSIDE,
+  type SectionKind,
+  type TileAssignment,
+} from './tile-assignment.ts'
 
 type Runspace = Layout['runspaces'][number]
-
-// Repo の Tile の key は owner/repo で必ず `/` を含むので、`/` の無い語は Repo と重ならない。
-export const OUTSIDE = 'outside'
-
-export type BenchSetup = { text: string; error: boolean }
-
-// workbench は Task を知らないので、Bench の Task の Repo と Issue は task の ui から slot で受ける（ADR-0005）。
-export type BenchLabel = {
-  repo: string
-  number: number
-  title: string
-  setup: BenchSetup | null
-}
-
-export type BenchLabelOf = (runspaceId: string) => BenchLabel | null
 
 // 普通の Runspace は Tab の dot を色ごとに数えた agentTallies を、Bench は代表の Tab の agentDot を持つ。
 export type RunspaceRow = {
@@ -34,8 +28,6 @@ export type RunspaceRow = {
   path: string
   branch: string | null
 }
-
-export type SectionKind = 'bench' | 'runspaces'
 
 // 畳んだセクションは rows を空にし、見出しに出す行の数と未読の Tab の数だけを持つ。
 export type SidebarSection = {
@@ -54,35 +46,27 @@ export type Tile = {
   sections: SidebarSection[]
 }
 
-// tileKeys は Pinned でない Runspace ごとの Tile の key で、畳んだセクションの行も含む。
-// cwdTileKeys はそのうち、Task が持たず、一番左の Tab の cwd の Repo が引けた Runspace の Tile の key。
 export type Sidebar = {
   pinned: RunspaceRow[]
   tiles: Tile[]
   selected: Tile
-  tileKeys: Record<string, string>
-  cwdTileKeys: Record<string, string>
 }
 
 export type SidebarInput = {
   runspaces: Runspace[]
+  assignment: TileAssignment
+  selectedTile: string
   activeRunspaceId: string | null
   activeTabOf: (runspace: Runspace) => Tab | null
   titles: Record<string, string>
   places: Record<string, RepoPlace | undefined>
   unreadOf: (terminalSessionId: string) => boolean
   agentDotOf: (terminalSessionId: string) => AgentDot | null
-  benchLabelOf: BenchLabelOf
-  tileChoice: string | null
   collapsed: ReadonlySet<string>
 }
 
 export function isPathTitle(title: string): boolean {
   return title === '~' || title.startsWith('~/') || title.startsWith('/')
-}
-
-export function sectionKey(tileKey: string, kind: SectionKind): string {
-  return `${tileKey}:${kind}`
 }
 
 export function repoName(repo: string): string {
@@ -92,15 +76,6 @@ export function repoName(repo: string): string {
 // Repo は Backend への問い合わせを待って決まるので、引けるまでは cwd の末尾で出す。
 function pathOf(cwd: string, place: RepoPlace | undefined): string {
   return place?.path ?? shortPath(cwd)
-}
-
-function holdsPin(runspace: Runspace): boolean {
-  return runspace.tabs.some((t) => t.pinned)
-}
-
-// 一番左の Tab で決めるので、Tab を切り替えても行は別の Tile へ移らない。
-function leftmostCwd(runspace: Runspace): string {
-  return runspace.tabs[0]?.cwd ?? runspace.cwd
 }
 
 // 動いている claude を手空きで隠さないよう、Task の表示状態の集約（手空き > 未観測 > 動作中）とは違う順で選ぶ。
@@ -129,8 +104,8 @@ function representativeOf(
 }
 
 function runspaceRow(input: SidebarInput, runspace: Runspace): RunspaceRow {
-  const bench = runspace.owned ? input.benchLabelOf(runspace.id) : null
-  const leftmost = leftmostCwd(runspace)
+  const assigned = input.assignment.runspaces[runspace.id]
+  const bench = assigned?.bench ?? null
   const tab = input.activeTabOf(runspace)
   const representative = bench ? representativeOf(input, runspace) : null
   const titleTab = representative?.tab ?? tab
@@ -147,7 +122,7 @@ function runspaceRow(input: SidebarInput, runspace: Runspace): RunspaceRow {
       ? []
       : tallyAgentDots(runspace.tabs.map((t) => input.agentDotOf(t.terminalSessionId))),
     agentDot: representative?.dot ?? null,
-    repo: bench?.repo ?? input.places[leftmost]?.repo ?? null,
+    repo: assigned?.repo ?? null,
     bench,
     title: bench?.title || terminalTitle || path,
     titleIsPath: !bench && !terminalTitle,
@@ -161,78 +136,37 @@ function sum(items: { unreadCount: number }[]): number {
   return items.reduce((total, item) => total + item.unreadCount, 0)
 }
 
-function tileOf(input: SidebarInput, key: string, rows: RunspaceRow[]): Tile {
-  const parts = [
-    { kind: 'bench' as const, rows: rows.filter((r) => r.bench !== null) },
-    { kind: 'runspaces' as const, rows: rows.filter((r) => r.bench === null) },
-  ].filter((part) => part.rows.length > 0)
-  // セクションが 1 つなら見出しを出さないので、畳んだままでも行を隠さない。
-  const headed = parts.length > 1
-  const sections = parts.map((part): SidebarSection => {
-    const collapsed = headed && input.collapsed.has(sectionKey(key, part.kind))
+function tileOf(
+  input: SidebarInput,
+  tile: AssignedTile,
+  rowsOf: (ids: string[]) => RunspaceRow[],
+): Tile {
+  const sections = tile.sections.map((section): SidebarSection => {
+    const rows = rowsOf(section.runspaceIds)
+    const collapsed = isCollapsed(tile, section.kind, input.collapsed)
     return {
-      kind: part.kind,
-      headed,
+      kind: section.kind,
+      headed: tile.sections.length > 1,
       collapsed,
-      rowCount: part.rows.length,
-      unreadCount: sum(part.rows),
-      rows: collapsed ? [] : part.rows,
+      rowCount: rows.length,
+      unreadCount: sum(rows),
+      rows: collapsed ? [] : rows,
     }
   })
-  const repo = key === OUTSIDE ? null : (rows[0]?.repo ?? key)
-  return { key, repo, unreadCount: sum(sections), sections }
+  return { key: tile.key, repo: tile.repo, unreadCount: sum(sections), sections }
 }
+
+const EMPTY_OUTSIDE_TILE: Tile = { key: OUTSIDE, repo: null, unreadCount: 0, sections: [] }
 
 export function buildSidebar(input: SidebarInput): Sidebar {
-  const runspaces = input.runspaces.map((runspace) => ({
-    row: runspaceRow(input, runspace),
-    pinned: holdsPin(runspace),
-  }))
-  const listed = runspaces.filter((r) => !r.pinned).map((r) => r.row)
-  // GitHub の Repo 名は大小文字を区別しないので、Task の nameWithOwner と checkout の path が違っても同じ Tile にする。
-  const tileKey = (row: RunspaceRow) => row.repo?.toLowerCase() ?? OUTSIDE
-  const keys = new Set(listed.map(tileKey))
-  keys.delete(OUTSIDE)
-  const tiles = [...keys, OUTSIDE].map((key) =>
-    tileOf(
-      input,
-      key,
-      listed.filter((r) => tileKey(r) === key),
-    ),
-  )
-  const tileKeys = Object.fromEntries(listed.map((r) => [r.id, tileKey(r)]))
-  const cwdTileKeys = Object.fromEntries(
-    input.runspaces
-      .filter((r) => r.id in tileKeys && !r.owned && input.places[leftmostCwd(r)])
-      .map((r) => [r.id, tileKeys[r.id]!]),
-  )
-  const active = input.activeRunspaceId && tileKeys[input.activeRunspaceId]
-  const selected =
-    tiles.find((tile) => tile.key === input.tileChoice) ??
-    tiles.find((tile) => tile.key === active) ??
-    tiles[0]!
+  const rows = new Map(input.runspaces.map((r) => [r.id, runspaceRow(input, r)]))
+  const rowsOf = (ids: string[]) => ids.flatMap((id) => rows.get(id) ?? [])
+  const tiles = input.assignment.tiles.map((tile) => tileOf(input, tile, rowsOf))
   return {
-    pinned: runspaces.filter((r) => r.pinned).map((r) => r.row),
+    pinned: rowsOf(input.assignment.pinned),
     tiles,
-    selected,
-    tileKeys,
-    cwdTileKeys,
+    selected: tiles.find((tile) => tile.key === input.selectedTile) ?? EMPTY_OUTSIDE_TILE,
   }
-}
-
-// Repo の外の Tile は常に最後にある。
-export function tileNumberOf(sidebar: Sidebar, key: string): number | null {
-  if (key === OUTSIDE) return 0
-  const n = sidebar.tiles.findIndex((tile) => tile.key === key) + 1
-  return n >= 1 && n <= 9 ? n : null
-}
-
-export function tileAt(sidebar: Sidebar, n: number): Tile | undefined {
-  return sidebar.tiles.find((tile) => tileNumberOf(sidebar, tile.key) === n)
-}
-
-export function shownRunspaceIds(sidebar: Sidebar): string[] {
-  return [...sidebar.pinned, ...sidebar.selected.sections.flatMap((s) => s.rows)].map((r) => r.id)
 }
 
 // Workbench Ledger の並びは 1 本なので、並べ替えは同じセクションの中に限る。

@@ -4,8 +4,8 @@ import type { Terminal } from '@xterm/xterm'
 import { getDefaultStore } from 'jotai'
 import { useEffect } from 'react'
 
+import { activeTerminalTabAtom } from './navigation.ts'
 import { shell } from './shell.ts'
-import { activeTerminalTabAtom } from './store.ts'
 import { getTabTerminal } from './terminal-connections.ts'
 
 const IMAGE_EXTENSIONS = ['.png', '.jpg', '.jpeg', '.gif', '.webp', '.heic', '.tiff', '.bmp']

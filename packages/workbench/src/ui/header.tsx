@@ -5,20 +5,17 @@ import { useEffect, useRef } from 'react'
 import { baseName } from '../paths.ts'
 import { AgentDotMark } from './agent-dot-mark.tsx'
 import { UNREAD_LABEL_STYLE } from './agent-dot.ts'
+import { agentDotOfTerminalSessionAtom, unreadOfTerminalSessionAtom } from './backend-copy.ts'
 import { JumpHint } from './jump-hint.tsx'
 import { jumpHintTargetsAtom, pendingCloseTabIdAtom } from './jump-hints.ts'
+import { activateTerminalTabAtom, activeRunspaceAtom, activeTerminalTabAtom } from './navigation.ts'
 import {
-  activateTerminalTabAtom,
-  activeRunspaceAtom,
-  activeTerminalTabAtom,
-  agentDotOfTerminalSessionAtom,
   createTerminalTabAtom,
   deadTabsAtom,
   draggedTabIdAtom,
   reorderTabsAtom,
   tabMenuAtom,
   tabTitlesAtom,
-  unreadOfTerminalSessionAtom,
 } from './store.ts'
 
 const TERMINAL_SESSION_STATUS_DOT: Record<string, string> = {

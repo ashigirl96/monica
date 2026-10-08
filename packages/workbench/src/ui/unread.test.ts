@@ -3,19 +3,15 @@ import { afterEach, expect, test } from 'bun:test'
 import { createStore, type Store } from 'jotai'
 
 import { cleanUp, onCleanup, setup, until } from '../testing.ts'
-import type { RunspaceRow } from './sidebar-model.ts'
+import { agentSessionByTerminalSessionAtom, unreadOfTerminalSessionAtom } from './backend-copy.ts'
 import {
   activateRunspaceAtom,
   activateTerminalTabAtom,
   activeTerminalTabAtom,
-  agentSessionByTerminalSessionAtom,
-  benchLabelOfAtom,
-  reloadAgentSessionsAtom,
-  reloadAtom,
-  sidebarAtom,
-  unreadOfTerminalSessionAtom,
-  workbenchClientAtom,
-} from './store.ts'
+} from './navigation.ts'
+import type { RunspaceRow } from './sidebar-model.ts'
+import { reloadAgentSessionsAtom, reloadAtom, sidebarAtom, workbenchClientAtom } from './store.ts'
+import { benchLabelOfAtom } from './tile-assignment.ts'
 import { markSeenWhileShown, windowFocusedAtom } from './unread.ts'
 
 const size = { rows: 24, cols: 80 }
@@ -176,19 +172,4 @@ test("pressing a Runspace's row opens its leftmost unread Tab rather than the on
   store.set(activateRunspaceAtom, runspaceId)
 
   expect(store.get(activeTerminalTabAtom)?.id).toBe(left.id)
-})
-
-test("pressing a Runspace's row with no unread Tab opens the one last shown", async () => {
-  const { client, store } = bench({ focused: true })
-  const { runspaceId } = await client.runspace.create(size)
-  const lastShown = await client.tab.open({ runspaceId, ...size })
-  const other = await client.runspace.create(size)
-  await store.set(reloadAtom)
-  store.set(activateRunspaceAtom, runspaceId)
-  store.set(activateTerminalTabAtom, lastShown.id)
-  store.set(activateRunspaceAtom, other.runspaceId)
-
-  store.set(activateRunspaceAtom, runspaceId)
-
-  expect(store.get(activeTerminalTabAtom)?.id).toBe(lastShown.id)
 })

@@ -1,12 +1,9 @@
 import { getCurrentWindow } from '@tauri-apps/api/window'
 import { atom, type Store } from 'jotai'
 
-import {
-  activeTerminalTabAtom,
-  agentSessionByTerminalSessionAtom,
-  warnFailed,
-  workbenchClientAtom,
-} from './store.ts'
+import { agentSessionByTerminalSessionAtom } from './backend-copy.ts'
+import { activeTerminalTabAtom } from './navigation.ts'
+import { warnFailed, workbenchClientAtom } from './store.ts'
 
 export const windowFocusedAtom = atom(false)
 
