@@ -44,7 +44,6 @@ function useWorkbenchChanges(client: WorkbenchClient | null) {
         const changes = await client.changes(undefined, { signal: controller.signal })
         void reloadLogged()
         void reloadAgentSessionsLogged()
-        // reconcile は Agent Session の合図を出さずに未観測や終了にするので、どの合図でも読み直す。
         for await (const change of changes) {
           if (change.type !== 'agentSession') void reloadLogged()
           void reloadAgentSessionsLogged()

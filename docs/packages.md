@@ -114,7 +114,7 @@ export function create<D>Ledger(deps: { db: Db; home: string; ... }): <D>Ledger;
 - Ledger の型には、他の domain と Backend が呼ぶ method だけを出す。procedure の handler が使う中身（ghq や GitHub への口、Bench の準備の状態など）は、Ledger を key にした WeakMap に置き、`internals(<d>Ledger)` で引く。router の context に渡るのは `db` と Ledger だけなので、外の口も Ledger が持つ。
 - system の Job を持つ domain（task と note）は、`@monica/<d>/server` の `systemJobs(<d>Ledger)` で `{ name, every, run }[]` を出し、Backend の組み立てがそれを `createJobLedger` に渡す。名前は `<domain>.<name>`、`run` は失敗なら reject する。domain は timer を持たない。job を import しないので、戻り値は素のオブジェクトにし、job の型を注記しない（#18、ADR-0016）。
 - 他の domain から呼ばれる書き込みは、第 1 引数に transaction（`db` でもよい）を取る**同期**の method にする。呼び手は `db.transaction((tx) => { workbenchLedger.moveTab(tx, …); insertRun(tx, …) })` のように、両 domain の書き込みを 1 つの transaction にまとめる。fs への副作用は transaction に入らないので別の async method にし、呼び手が commit の後に呼ぶ。ptyd への副作用は workbench が transaction の後に自分で送る（ADR-0015）。今これを持つのは `WorkbenchLedger` だけで、method は `docs/packages/workbench-ledger.md` の「他の domain が呼ぶ書き込み」にある。
-- 他の domain が呼ばない書き込みは、同じ形（第 1 引数が tx）の module 内の関数として procedure の handler から呼び、Ledger には出さない。他の domain から呼ばれない処理は router の handler の中に書いてよい。
+- 他の domain が呼ばない書き込みは、同じ形（第 1 引数が tx）の module 内の関数として procedure の handler から呼び、Ledger には出さない。合図や通知の口のような Ledger の deps を使う書き込みは、`internals` に置いた module の method にしてよい。そのうち呼び手と transaction を束ねないもの（workbench の hook の適用と `markSeen`）は tx を取らない。他の domain から呼ばれない処理は router の handler の中に書いてよい。
 
 ### domain をまたぐ規則
 
