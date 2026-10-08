@@ -3,7 +3,7 @@
   "configVersion": 1,
   "workspaces": {
     "": {
-      "name": "tania",
+      "name": "monica",
       "devDependencies": {
         "@types/bun": "^1.4.2",
         "oxfmt": "^0.71.0",
@@ -13,13 +13,13 @@
       },
     },
     "apps/backend": {
-      "name": "@tania/backend",
+      "name": "@monica/backend",
       "dependencies": {
         "@orpc/server": "catalog:",
-        "@tania/job": "workspace:*",
-        "@tania/note": "workspace:*",
-        "@tania/task": "workspace:*",
-        "@tania/workbench": "workspace:*",
+        "@monica/job": "workspace:*",
+        "@monica/note": "workspace:*",
+        "@monica/task": "workspace:*",
+        "@monica/workbench": "workspace:*",
         "drizzle-orm": "catalog:",
         "hono": "catalog:",
       },
@@ -29,35 +29,35 @@
       },
     },
     "apps/cli": {
-      "name": "@tania/cli",
+      "name": "@monica/cli",
       "bin": {
-        "tania": "./src/main.ts",
+        "monica": "./src/main.ts",
       },
       "dependencies": {
         "@orpc/client": "catalog:",
         "@orpc/contract": "catalog:",
         "@orpc/server": "catalog:",
-        "@tania/job": "workspace:*",
-        "@tania/task": "workspace:*",
-        "@tania/workbench": "workspace:*",
+        "@monica/job": "workspace:*",
+        "@monica/task": "workspace:*",
+        "@monica/workbench": "workspace:*",
         "commander": "catalog:",
         "trpc-cli": "catalog:",
         "zod": "catalog:",
       },
       "devDependencies": {
-        "@tania/note": "workspace:*",
+        "@monica/note": "workspace:*",
         "drizzle-orm": "catalog:",
       },
     },
     "apps/desktop": {
-      "name": "@tania/desktop",
+      "name": "@monica/desktop",
       "dependencies": {
         "@fontsource-variable/jetbrains-mono": "catalog:",
         "@orpc/client": "catalog:",
         "@orpc/contract": "catalog:",
-        "@tania/task": "workspace:*",
-        "@tania/ui": "workspace:*",
-        "@tania/workbench": "workspace:*",
+        "@monica/task": "workspace:*",
+        "@monica/ui": "workspace:*",
+        "@monica/workbench": "workspace:*",
         "@tauri-apps/api": "catalog:",
         "jotai": "catalog:",
         "react": "catalog:",
@@ -75,11 +75,11 @@
       },
     },
     "apps/web": {
-      "name": "@tania/web",
+      "name": "@monica/web",
       "dependencies": {
         "@orpc/client": "catalog:",
         "@orpc/contract": "catalog:",
-        "@tania/note": "workspace:*",
+        "@monica/note": "workspace:*",
         "react": "catalog:",
         "react-dom": "catalog:",
       },
@@ -94,11 +94,11 @@
       },
     },
     "packages/job": {
-      "name": "@tania/job",
+      "name": "@monica/job",
       "dependencies": {
         "@orpc/contract": "catalog:",
         "@orpc/server": "catalog:",
-        "@tania/ui": "workspace:*",
+        "@monica/ui": "workspace:*",
         "croner": "catalog:",
         "drizzle-orm": "catalog:",
         "drizzle-zod": "catalog:",
@@ -109,12 +109,12 @@
       },
     },
     "packages/note": {
-      "name": "@tania/note",
+      "name": "@monica/note",
       "dependencies": {
         "@orpc/client": "catalog:",
         "@orpc/contract": "catalog:",
         "@orpc/server": "catalog:",
-        "@tania/ui": "workspace:*",
+        "@monica/ui": "workspace:*",
         "@tanstack/react-query": "catalog:",
         "drizzle-orm": "catalog:",
         "drizzle-zod": "catalog:",
@@ -135,12 +135,12 @@
       },
     },
     "packages/task": {
-      "name": "@tania/task",
+      "name": "@monica/task",
       "dependencies": {
         "@orpc/contract": "catalog:",
         "@orpc/server": "catalog:",
-        "@tania/ui": "workspace:*",
-        "@tania/workbench": "workspace:*",
+        "@monica/ui": "workspace:*",
+        "@monica/workbench": "workspace:*",
         "drizzle-orm": "catalog:",
         "drizzle-zod": "catalog:",
         "react": "catalog:",
@@ -152,7 +152,7 @@
       },
     },
     "packages/ui": {
-      "name": "@tania/ui",
+      "name": "@monica/ui",
       "dependencies": {
         "clsx": "catalog:",
         "jotai": "catalog:",
@@ -166,11 +166,11 @@
       },
     },
     "packages/workbench": {
-      "name": "@tania/workbench",
+      "name": "@monica/workbench",
       "dependencies": {
         "@orpc/contract": "catalog:",
         "@orpc/server": "catalog:",
-        "@tania/ui": "workspace:*",
+        "@monica/ui": "workspace:*",
         "@tauri-apps/api": "catalog:",
         "@tauri-apps/plugin-opener": "catalog:",
         "@xterm/addon-fit": "catalog:",
@@ -478,23 +478,23 @@
 
     "@tailwindcss/vite": ["@tailwindcss/vite@4.3.3", "", { "dependencies": { "@tailwindcss/node": "4.3.3", "@tailwindcss/oxide": "4.3.3", "tailwindcss": "4.3.3" }, "peerDependencies": { "vite": "^5.2.0 || ^6 || ^7 || ^8" } }, "sha512-yYU8cogLeSh/ms2jh8Fj7jaba/EWa7Ja6GoUqYZaraEuCI5YS6ms6ObZgjjedm+jm6XZjdNRWBpPP6Z86oOxcw=="],
 
-    "@tania/backend": ["@tania/backend@workspace:apps/backend"],
+    "@monica/backend": ["@monica/backend@workspace:apps/backend"],
 
-    "@tania/cli": ["@tania/cli@workspace:apps/cli"],
+    "@monica/cli": ["@monica/cli@workspace:apps/cli"],
 
-    "@tania/desktop": ["@tania/desktop@workspace:apps/desktop"],
+    "@monica/desktop": ["@monica/desktop@workspace:apps/desktop"],
 
-    "@tania/job": ["@tania/job@workspace:packages/job"],
+    "@monica/job": ["@monica/job@workspace:packages/job"],
 
-    "@tania/note": ["@tania/note@workspace:packages/note"],
+    "@monica/note": ["@monica/note@workspace:packages/note"],
 
-    "@tania/task": ["@tania/task@workspace:packages/task"],
+    "@monica/task": ["@monica/task@workspace:packages/task"],
 
-    "@tania/ui": ["@tania/ui@workspace:packages/ui"],
+    "@monica/ui": ["@monica/ui@workspace:packages/ui"],
 
-    "@tania/web": ["@tania/web@workspace:apps/web"],
+    "@monica/web": ["@monica/web@workspace:apps/web"],
 
-    "@tania/workbench": ["@tania/workbench@workspace:packages/workbench"],
+    "@monica/workbench": ["@monica/workbench@workspace:packages/workbench"],
 
     "@tanstack/query-core": ["@tanstack/query-core@5.104.1", "", {}, "sha512-TiRghcrGkUTE+M4JBxvpPSpBhxvIzQairw+cksrHYGr+2uwC77yW1SY9nYxnYRYOppvucf8rEg6b5byoz4rTpw=="],
 

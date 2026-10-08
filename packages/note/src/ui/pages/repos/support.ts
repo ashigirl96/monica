@@ -1,6 +1,6 @@
 import { RepoSchema } from '../../../contract.ts'
 
-const LAST_REPO_KEY = 'tania-repos-last'
+const LAST_REPO_KEY = 'monica-repos-last'
 
 /** 前回開いた Repo（`owner/repo`）。notes の画面には server に置く ui の状態が無いので、
  * サイドバーの幅と同じく localStorage に置く。 */

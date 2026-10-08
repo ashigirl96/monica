@@ -36,9 +36,9 @@ test.each<[ThemePref, ThemePref, boolean, string]>([
   },
 )
 
-test('選んだテーマは localStorage の tania-theme に残る', () => {
+test('選んだテーマは localStorage の monica-theme に残る', () => {
   const storage = new FakeStorage()
   openPage(storage)
   setThemePref('light')
-  expect([...storage.items]).toEqual([['tania-theme', 'light']])
+  expect([...storage.items]).toEqual([['monica-theme', 'light']])
 })

@@ -14,7 +14,7 @@ afterEach(() => {
 const forIssue = { repo: 'acme/app', number: 12 }
 
 async function inspectedClean({ squashMerged = false } = {}) {
-  const scratch = mkdtempSync(join(tmpdir(), 'tania-teardown-'))
+  const scratch = mkdtempSync(join(tmpdir(), 'monica-teardown-'))
   cleanups.push(() => rmSync(scratch, { recursive: true, force: true }))
   const ghq = fakeGhq(scratch)
   ghq.origin('acme/app')

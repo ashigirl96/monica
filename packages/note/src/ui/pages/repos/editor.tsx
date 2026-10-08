@@ -1,5 +1,5 @@
+import { FuzzyPickerModal } from '@monica/ui'
 import { ORPCError } from '@orpc/client'
-import { FuzzyPickerModal } from '@tania/ui'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 
 import { displayName, type Note, sameRepo } from '../../../contract.ts'

@@ -2,7 +2,7 @@ import { afterEach, expect, mock, spyOn, test } from 'bun:test'
 import { chmodSync, existsSync, mkdirSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 
-import { runspace, tab } from '@tania/workbench/schema'
+import { runspace, tab } from '@monica/workbench/schema'
 import { eq } from 'drizzle-orm'
 
 import { insertBench } from './bench.ts'
@@ -419,7 +419,7 @@ test('close refuses a Task that is already closed or not tracked', async () => {
 
 test('close refuses a Bench that is still being prepared, even with --force', async () => {
   const fixture = await tracked({
-    '.tania/setup.sh': {
+    '.monica/setup.sh': {
       content: '#!/bin/sh\ntouch .started\nwhile [ ! -e .release ]; do sleep 0.02; done\n',
       mode: 0o755,
     },

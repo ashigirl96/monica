@@ -24,9 +24,9 @@ Agent Session がユーザー待ちに入ったときに macOS の通知を出�
 
 ## title と body
 
-- title は呼び名。`nameAgentSession(db, agentSessionId)` が文字列を返せばそれを使う。null なら Agent Session の cwd の末尾 2 つ（monica の `shortPath`）を使う。長さは切らない（macOS が切る）。
+- title は呼び名。`nameAgentSession(db, agentSessionId)` が文字列を返せばそれを使う。null なら Agent Session の cwd の末尾 2 つ（旧 Monica の `shortPath`）を使う。長さは切らない（macOS が切る）。
 - `nameAgentSession` は table を読むだけの関数。その Agent Session の Run の Task を引き、無ければ Tab → Runspace → Bench の Task を引いて（CLI の `current` と同じ順）、Bench のラベルと同じ `<repo>#<n> <title>` を返す。後ろの経路は、通知の判定（`recordHook` の commit 直後）が task の購読より先に走り、Bench の Tab で始まったばかりの Agent Session にまだ Run が無い場合のためにある。
-- body は `<理由> · <Agent Session の title>`（`手空き · Tania通知の問題`）。理由は `手空き`、`質問`、`許可: <tool>`、`エラー: <error_type>`（error_type が無ければ `エラー`）。Agent Session の title が読めなければ理由だけにし、通知は止めない。title は Task か cwd でしか呼ばないので、同じ repo で claude の Tab を複数開くと、名前が無ければどの Tab の待ちか分からないため。名前を title でなく body に足すのは、sidebar で Runspace → Tab の順に探す並びに合わせるため。名前は切らない（macOS が切る）。
+- body は `<理由> · <Agent Session の title>`（`手空き · Monica通知の問題`）。理由は `手空き`、`質問`、`許可: <tool>`、`エラー: <error_type>`（error_type が無ければ `エラー`）。Agent Session の title が読めなければ理由だけにし、通知は止めない。title は Task か cwd でしか呼ばないので、同じ repo で claude の Tab を複数開くと、名前が無ければどの Tab の待ちか分からないため。名前を title でなく body に足すのは、sidebar で Runspace → Tab の順に探す並びに合わせるため。名前は切らない（macOS が切る）。
 - Agent Session の title は、`transcript_path` が指す Agent Session Transcript の末尾 64 KiB を読み、その中で最後の `{"type":"ai-title","aiTitle":…}` の行の `aiTitle` を使う。Claude Code が Tab の title（OSC 0/2）に出す会話の名前と同じもので、Tab の title は Workbench Ledger に持たない（`docs/packages/workbench-ledger.md`）ので Agent Session Transcript から読む。ptyd に最後の OSC の title を覚えさせる案は、ptyd の protocol と Rust 側の変更が要るので採らない。手元の Agent Session Transcript 87 件では、最後の `ai-title` は末尾から 33 KiB 以内にあった。
 - `ai-title` は Claude Code の文書化されていない形式で、短い会話には付かない。Agent Session Transcript が無い、`ai-title` の行が無い、最後の `ai-title` の行が JSON として読めないか `aiTitle` が空でない文字列でないときは、読めないとする。最後の行が読めなくても前の `ai-title` には戻らない。形が変わった後で古い title を出さないため。`ai-title` の行は `"type":"ai-title"` を含む行として探す。Claude Code は詰めた JSON を書くので、会話の本文に出た同じ文字列は escape されて当たらない。
 - 音は鳴らさない。
@@ -43,18 +43,18 @@ Agent Session がユーザー待ちに入ったときに macOS の通知を出�
 - Shell は main bundle の path が `.app` で終わるか（release）で経路を分ける。.app の外の process で `UNUserNotificationCenter.currentNotificationCenter` を呼ぶと、catch できない例外で abort するため（`docs/research/macos-notifications.md`）。
 - release は objc2-user-notifications で UNUserNotificationCenter に出す。title と body に加え、`userInfo` の `terminalSessionId` に notify の行の値を載せる。request identifier は通知ごとの UUID で、取り下げと置き換えはしない。音は鳴らさない。投稿の失敗は completion handler で受け、stderr に 1 行出す。
 - release の Shell は `setup` で center の delegate を置き、許可（alert だけ）を求める。`setup` は `applicationDidFinishLaunching:` の中で走るので、通知で起こされたときのクリックにも delegate が間に合う。center は delegate を weak で持つので、Shell は process が終わるまで static に持つ。許可が無ければ通知は出ず、stderr に 1 行出す。
-- delegate の `willPresent` は list だけを返す。tania が前面の間はバナーを出さず、通知センターにだけ入れる。
+- delegate の `willPresent` は list だけを返す。monica が前面の間はバナーを出さず、通知センターにだけ入れる。
 - dev（.app の外）は今までどおり tauri-plugin-notification で出す。plugin は Terminal.app の名義で出す（`tauri::is_dev()` で切り替わる）ので、Terminal.app に通知の許可が要り、押しても Tab へは移らない。見た目とクリックは `bun run install-app` で入れた release で確かめる。
 
 ### クリック
 
 - delegate の `didReceive` は、`userInfo` の `terminalSessionId` を Shell に 1 つ持ち（新しいクリックで上書き）、webview に `notification-clicked` を emit し、main の窓を unminimize・show・focus する。
 - webview は `take_notification_click` command で持っている Terminal Session を取り出し、その Tab を選ぶ（`docs/packages/workbench-ui-state.md` の「通知のクリック」）。取り出すと Shell から消える。
-- 通知で起こした tania では、webview が listen を張る前にクリックが届く。ptyd は tania より長生きする（ADR-0011）ので、その Terminal Session がまだ Tab にあれば選べる。
+- 通知で起こした monica では、webview が listen を張る前にクリックが届く。ptyd は monica より長生きする（ADR-0011）ので、その Terminal Session がまだ Tab にあれば選べる。
 
 ## Dock の数
 
-Dock の tania の icon に未読の数を出し、0 なら何も出さない（未読は `docs/packages/workbench-ledger.md` の「未読」）。通知のバナーは数秒で消え、窓が隠れている間は webview の JS が止まる（ADR-0013）ので、通知と同じく Backend が数えて Shell が出す。
+Dock の monica の icon に未読の数を出し、0 なら何も出さない（未読は `docs/packages/workbench-ledger.md` の「未読」）。通知のバナーは数秒で消え、窓が隠れている間は webview の JS が止まる（ADR-0013）ので、通知と同じく Backend が数えて Shell が出す。
 
 - 数えるのは未読の Agent Session で、Pinned の Tab にあるものも数える。終了でない Agent Session は生きている Terminal Session に 1 つずつしか居ず、生きている Terminal Session は、閉じた Tab の shell が終わるまでの間を除けばどれかの Tab が表示しているので、Dock の数は sidebar の行の数の合計と同じになる。Tab を閉じるとその Terminal Session が終わり、Agent Session も終了になるので、その未読は Exit の記録で数から外れる（ADR-0023）。
 - Workbench Ledger は `start()` で、ptyd への接続を待たずに今の数を `badge(count)` に渡す。ptyd が起きない起動でも数を出すため。以降は自分の `changes` を購読して数え直し、前に渡した数と違うときだけ渡す。合図は procedure の output が変わる経路すべてで出る（`docs/packages.md` の contract の規約 5）ので、hook、`markSeen`、shell の終了、reconcile のどれで数が変わっても拾う。`stop()` で購読をやめる。

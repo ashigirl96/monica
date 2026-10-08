@@ -1,4 +1,4 @@
-import { cn, PinIcon, PlusIcon, useDragReorder } from '@tania/ui'
+import { cn, PinIcon, PlusIcon, useDragReorder } from '@monica/ui'
 import { useAtomValue, useSetAtom } from 'jotai'
 import { useEffect, useRef } from 'react'
 

@@ -1,5 +1,5 @@
 {
-  "name": "@tania/note",
+  "name": "@monica/note",
   "private": true,
   "type": "module",
   "exports": {
@@ -13,10 +13,10 @@
     "generate": "drizzle-kit generate"
   },
   "dependencies": {
+    "@monica/ui": "workspace:*",
     "@orpc/client": "catalog:",
     "@orpc/contract": "catalog:",
     "@orpc/server": "catalog:",
-    "@tania/ui": "workspace:*",
     "@tanstack/react-query": "catalog:",
     "drizzle-orm": "catalog:",
     "drizzle-zod": "catalog:",

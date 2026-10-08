@@ -1,8 +1,8 @@
+import type { contract as taskContract } from '@monica/task/contract'
+import type { contract as workbenchContract } from '@monica/workbench/contract'
 import { createORPCClient } from '@orpc/client'
 import { RPCLink } from '@orpc/client/fetch'
 import type { ContractRouterClient } from '@orpc/contract'
-import type { contract as taskContract } from '@tania/task/contract'
-import type { contract as workbenchContract } from '@tania/workbench/contract'
 import { invoke } from '@tauri-apps/api/core'
 import { listen } from '@tauri-apps/api/event'
 

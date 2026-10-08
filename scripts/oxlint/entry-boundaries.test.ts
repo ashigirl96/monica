@@ -15,8 +15,8 @@ const repo = join(import.meta.dir, '../..')
 
 // cli・ui・body は Backend の外でも動くので DB に触れず、schema はどこでも import されるので決まったものしか import しない。
 function forbiddenImports(domain: string): Record<string, string[]> {
-  const db = ['bun:sqlite', 'drizzle-orm', `@tania/${domain}/schema`, `@tania/${domain}/server`]
-  return { cli: db, ui: db, body: db, schema: ['bun:sqlite', 'zod', `@tania/${domain}/server`] }
+  const db = ['bun:sqlite', 'drizzle-orm', `@monica/${domain}/schema`, `@monica/${domain}/server`]
+  return { cli: db, ui: db, body: db, schema: ['bun:sqlite', 'zod', `@monica/${domain}/server`] }
 }
 
 type Probe = { path: string; specifiers: string[] }
@@ -44,7 +44,7 @@ function probes(): Probe[] {
 
 // 設定を読まずに oxlint を当てるので、override の書き方を変えてもこのテストは直さずに済む。
 async function refusedImports(probed: Probe[]): Promise<Map<string, Set<string>>> {
-  const dir = mkdtempSync(join(tmpdir(), 'tania-entry-boundaries-'))
+  const dir = mkdtempSync(join(tmpdir(), 'monica-entry-boundaries-'))
   try {
     copyFileSync(join(repo, '.oxlintrc.json'), join(dir, '.oxlintrc.json'))
     symlinkSync(join(repo, 'scripts'), join(dir, 'scripts'))

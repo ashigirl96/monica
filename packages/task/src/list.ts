@@ -1,4 +1,4 @@
-import type { Db } from '@tania/workbench/server'
+import type { Db } from '@monica/workbench/server'
 import { asc, eq, isNotNull, isNull } from 'drizzle-orm'
 
 import type { ListItem } from './contract.ts'

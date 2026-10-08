@@ -13,11 +13,11 @@ import {
 
 export default defineConfig(({ command }) => {
   if (command === 'build') return { plugins: [react(), tailwindcss()] }
-  const home = resolve(process.env.TANIA_HOME || DEFAULT_HOME)
-  // release の Tab は TANIA_HOME=~/.tania を継ぐので、そこで起こすと dev の画面から release の note に書きかねない。
+  const home = resolve(process.env.MONICA_HOME || DEFAULT_HOME)
+  // release の Tab は MONICA_HOME=~/.monica を継ぐので、そこで起こすと dev の画面から release の note に書きかねない。
   if (isReleaseHome(home)) {
     throw new Error(
-      `TANIA_HOME が release の home（${RELEASE_HOME}）です。dev の home を渡してください`,
+      `MONICA_HOME が release の home（${RELEASE_HOME}）です。dev の home を渡してください`,
     )
   }
   const { notesPort, webPort } = devInstance(home)

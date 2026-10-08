@@ -1,5 +1,5 @@
+import type { BenchLabelOf } from '@monica/workbench/ui'
 import type { ContractRouterClient } from '@orpc/contract'
-import type { BenchLabelOf } from '@tania/workbench/ui'
 import { useCallback, useEffect, useState } from 'react'
 
 import type { BenchItem, contract } from '../contract.ts'

@@ -159,7 +159,7 @@ test('consecutive references into one Note become one Synced Block', () => {
   ])
 })
 
-test('an image is made only from an image of tania or an http(s) URL', () => {
+test('an image is made only from an image of monica or an http(s) URL', () => {
   const markdown =
     '![](/api/assets/a.png)\n\n![](https://example.com/b.png)\n\n![](data:image/png;base64,AAA)'
 

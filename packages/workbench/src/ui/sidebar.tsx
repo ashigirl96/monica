@@ -1,4 +1,4 @@
-import { ChevronRightIcon, cn, FolderIcon, PinIcon, useDragReorder } from '@tania/ui'
+import { ChevronRightIcon, cn, FolderIcon, PinIcon, useDragReorder } from '@monica/ui'
 import { useAtomValue, useSetAtom } from 'jotai'
 import { type MouseEvent, type RefObject, useLayoutEffect, useRef, useState } from 'react'
 

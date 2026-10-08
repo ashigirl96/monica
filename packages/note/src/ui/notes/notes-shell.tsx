@@ -6,13 +6,13 @@ import './notes.css'
 
 type NoteDensity = 'relaxed' | 'compact'
 
-const DENSITY_KEY = 'tania-notes-density'
+const DENSITY_KEY = 'monica-notes-density'
 
 function readDensity(): NoteDensity {
   return localStorage.getItem(DENSITY_KEY) === 'compact' ? 'compact' : 'relaxed'
 }
 
-const SIDEBAR_KEY = 'tania-notes-sidebar-w'
+const SIDEBAR_KEY = 'monica-notes-sidebar-w'
 const SIDEBAR_DEFAULT = 400
 const SIDEBAR_MIN = 260
 const SIDEBAR_MAX = 720

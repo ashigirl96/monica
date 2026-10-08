@@ -1,3 +1,3 @@
 fn main() {
-    tania_desktop_lib::run()
+    monica_desktop_lib::run()
 }

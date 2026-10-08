@@ -1,6 +1,6 @@
-# monica の notes
+# 旧 Monica の notes
 
-wayfinder の map「monica の notes を tania に移す」の charting で調べた事実。monica は `/Users/1e0nhard96/.ghq/src/github.com/ashigirl96/monica`（以下のパスはここからの相対）、実データは 2026-10-05 19:29 UTC にコピーした `~/monica/db/monica.db` と `~/monica/assets` と `~/monica/settings.json` を読んだ。notes 以外の機能（Task・terminal・agent・translate・explanations）は読んでいない。
+wayfinder の map「旧 Monica の notes を monica に移す」の charting で調べた事実。旧 Monica は `ashigirl96/monica-v1` の repo（以下のパスはここからの相対）、実データは 2026-10-05 19:29 UTC にコピーした `~/monica/db/monica.db` と `~/monica/assets` と `~/monica/settings.json` を読んだ。notes 以外の機能（Task・terminal・agent・translate・explanations）は読んでいない。
 
 ## 要点
 
@@ -12,8 +12,8 @@ wayfinder の map「monica の notes を tania に移す」の charting で調�
 | project との紐づけ | `kind=project` の note だけが `project_id`（`owner/repo`）を持つ。daily と essay は全件 NULL。project ごとに primary note が 1 つ |
 | 画像 | `~/monica/assets/<uuid>.png` が 15 枚（10.6MB）。本文の image node の `src: /api/assets/<uuid>.png` と 1 対 1 で、欠けも余りも無い |
 | note 間の参照 | noteMention 12、syncedBlock 1、`http://monica.localhost:19280/...` への link mark 9、相対の `/notes/note-3` 1 |
-| エディタ | `shared/block-editor` は ProseMirror 上の自作（`@milkdown/kit/prose/*` を re-export として使うだけ）。monica の API は props で注入する |
-| ブラウザへの配り方 | monica desktop の process の中の thread が `127.0.0.1:19280` 固定で配る。token は無く、Host ヘッダの照合で DNS rebinding を防ぐ。Tailscale の IP にも追加で bind する |
+| エディタ | `shared/block-editor` は ProseMirror 上の自作（`@milkdown/kit/prose/*` を re-export として使うだけ）。旧 Monica の API は props で注入する |
+| ブラウザへの配り方 | 旧 Monica desktop の process の中の thread が `127.0.0.1:19280` 固定で配る。token は無く、Host ヘッダの照合で DNS rebinding を防ぐ。Tailscale の IP にも追加で bind する |
 | 設定 | `settings.json` の notes 節は `day_boundary_hour: 5` だけ |
 
 ## データ
@@ -57,11 +57,11 @@ projects 表は `id, name, provider, repo, path, default_branch, worktree_root, 
 
 | project（`owner/repo`） | 総数 | 生存 | primary note |
 |---|---|---|---|
-| ashigirl96/monica | 18 | 10 | note-25 |
+| ashigirl96/monica-v1 | 18 | 10 | note-25 |
 | work-org-2/repo-a | 18 | 16 | note-46 |
 | work-org/repo-b | 16 | 13 | note-52 |
 | ashigirl96/me | 6 | 6 | note-27 |
-| ashigirl96/tania | 3 | 3 | note-153 |
+| ashigirl96/monica | 3 | 3 | note-153 |
 | ashigirl96/kamishibai、work-org/repo-c、work-org/repo-d | 0 | 0 | なし |
 
 primary note はすべて、その project に属する生きた project note を指す。存在しない project を指す note は無い。
@@ -133,7 +133,7 @@ node の type の出現回数（括弧は含む note 数）: paragraph 1512 (135
 - ブロック: paragraph、heading（1〜3、collapsed）、todo、bullet、numbered（decimal / lower-alpha / lower-roman）、toggle、quote、callout（note / tips / danger / question / example）、codeBlock（language、wrap）、table、divider、bookmark、syncedBlock、image。inline: text、linkMention、noteMention、hardBreak。mark: bold、italic、underline、strike、code、link。
 - NodeView は React ではなく `document.createElement` で組む。
 - import しているのは web だけ（desktop の journal space は削除済み）。外への import は `react` と `@milkdown/kit/prose/*` だけ。
-- monica 固有の口は props で注入する: `fetchLinkMetadata`、`searchNoteMentions`、`resolveNoteMention`、`onNoteMentionClick`、`resolveBlock`、`onOpenBlock`、`uploadImage`、`importExternalImage`、`renderMarkdown`、`parseMarkdown`。渡さなければその機能が無効になる。
+- 旧 Monica 固有の口は props で注入する: `fetchLinkMetadata`、`searchNoteMentions`、`resolveNoteMention`、`onNoteMentionClick`、`resolveBlock`、`onOpenBlock`、`uploadImage`、`importExternalImage`、`renderMarkdown`、`parseMarkdown`。渡さなければその機能が無効になる。
 - 直書きされているもの: `noteHref = /notes/${id}`（`schema.ts:9-11`）と、`window.location.origin` で自分の note の URL かを見る `internalNoteId`（`note-mention-menu.ts:47-62, 94, 218, 287`）、`ASSET_URL_PREFIX = "/api/assets/"`（`schema.ts:21`、Rust 側と文字列を合わせている）、clipboard の MIME `application/x-monica-blocks+json`（`clipboard.ts:18`）、dev でだけ IME の debug plugin を入れる `import.meta.env.DEV`（`create-editor.ts:123`）、ホストの CSS 変数と Tailwind の `relative`。
 - CSS は `shared/block-editor/block-editor.css`（1241 行、`.jb-*`）と `web/src/notes/notes.css`（122 行、`--ink`・`--paper`・`--desk`）。block-editor.css がホストから読むのは `--foreground`・`--background`・`--popover`・`--popover-foreground`（後ろ 2 つは fallback 付き）で、祖先の `[data-density="compact"]` で詰める。menu は `relative` を付けた host（`view.dom.parentElement`）に append するので、`relative` は機能に要る。
 - 操作: `/` か Cmd-J のスラッシュメニュー（callout 5 種と Table）、ほかは markdown 風の input rule。`[[` で note のリンク、URL の貼り付けで「Paste as」（URL / Mention / Bookmark、OGP は `GET /api/ogp`）、ブロックの貼り付けで「Paste / Paste and sync」。copy は選択範囲を `POST /api/notes/markdown` で markdown にし、text/plain だけの paste は `POST /api/notes/from-markdown` で doc にする。ブロック選択（Esc / Cmd-A）と移動・複製・削除。
@@ -224,11 +224,11 @@ node の type の出現回数（括弧は含む note 数）: paragraph 1512 (135
 
 ## ブラウザへの配り方
 
-- monica desktop が起動時に thread で `monica_web::serve` を立てる（`crates/monica-desktop/src/lib.rs:170-202`）。release は `127.0.0.1:19280` 固定、dev は 19281〜19299 を順に試し、埋まっていれば port 0 にする（`crates/monica-web/src/lib.rs:18-20, 782-793`）。desktop が閉じている間は notes を開けない。
+- 旧 Monica desktop が起動時に thread で `monica_web::serve` を立てる（`crates/monica-desktop/src/lib.rs:170-202`）。release は `127.0.0.1:19280` 固定、dev は 19281〜19299 を順に試し、埋まっていれば port 0 にする（`crates/monica-web/src/lib.rs:18-20, 782-793`）。desktop が閉じている間は notes を開けない。
 - bind に失敗すると error の log を出し、web server 無しで desktop を動かし続ける。retry も画面への通知も無い（`crates/monica-desktop/src/lib.rs:181-199`）。
 - 認証は無い。`Host` が `127.0.0.1:<port>`・`localhost:<port>`・`monica.localhost:<port>`（と Tailscale の IP）のどれかと完全一致しなければ、本文無しの 403 にする。静的ファイルを含む全 route に掛かる。コメントは「認証ではなく DNS rebinding 対策で、到達の制御は bind する interface で行う」（`crates/monica-web/src/lib.rs:82-120, 778`）。
 - Origin・`Sec-Fetch-Site`・CSRF token の照合も、CORS の層も無い。content-type を見ない状態変更の route がある（`POST /api/notes/essays`、`POST /api/notes/{id}/restore`、`PUT /api/notes/daily/{date}`、`DELETE /api/notes/{id}`、`POST /api/assets` など）。
-- Tailscale の IP が取れればそこにも bind して、tailnet のスマホから開けるようにしている（同 823-845）。tania には持ち込まない（map の決定）。
+- Tailscale の IP が取れればそこにも bind して、tailnet のスマホから開けるようにしている（同 823-845）。monica には持ち込まない（map の決定）。
 - SPA は rust-embed で binary に埋め込み、`$MONICA_HOME/web-dist` が directory として在れば request ごとにそちらを優先する（`crates/monica-web/src/lib.rs:28-30, 214-242`）。SPA の route は列挙で、未知の path は 404 になる。`/settings/` は client だけが受け付ける（同 759-775、`web/src/app.tsx:63`）。`index.html` と `/assets/*` に cache の header は無い。
 - dev の Vite（5174）は `/api` を backend に proxy する。backend の port は `target/monica-web-port` から読み、dev の backend が居なければ release の `http://monica.localhost:19280` に倒す。そのため Vite だけを動かすと release のデータに読み書きする（`web/vite.config.ts:7, 14-74`）。
 - 画面に notes の URL を開く menu や shortcut は無い。Tab の env に `MONICA_WEB_URL` を入れるだけ（`crates/monica-desktop/src/commands/terminal.rs:51-55`）。
@@ -237,7 +237,7 @@ node の type の出現回数（括弧は含む note 数）: paragraph 1512 (135
 
 HTTP（`crates/monica-web/src/lib.rs:732-758`）: `GET /api/notes/by-project`、`GET /api/notes/daily-counts`、`PUT /api/notes/daily/{date}`、`GET|POST /api/notes/essays`、`POST /api/notes/project`、`PUT /api/notes/project/primary`、`POST /api/notes/from-markdown`、`POST /api/notes/markdown`、`GET /api/notes/mentions`、`GET /api/notes/mentions/{id}`、`GET /api/notes/today`、`GET|PUT|DELETE /api/notes/{id}`、`PUT /api/notes/{id}/status`、`POST /api/notes/{id}/restore`、`GET /api/notes/{id}/blocks/{block_id}`、`GET /api/ogp`、`GET|PUT /api/settings/notes`、assets の 3 本。
 
-CLI（`crates/monica-cli/src/note.rs`）: `monica note show <id> [--format md|json] [--expand]` と `monica note search <query>`。tania では最初は持ち込まない（map の決定）。CLI は HTTP を経由せず facade を直に呼ぶ。
+CLI（`crates/monica-cli/src/note.rs`）: 旧 Monica の `monica note show <id> [--format md|json] [--expand]` と `monica note search <query>`。monica では最初は持ち込まない（map の決定）。CLI は HTTP を経由せず facade を直に呼ぶ。
 
 contract の正は Rust の DTO（`crates/monica-api/src/note.rs`）で、`web/src/types.gen.ts` は specta で生成している。エラーの body は `{code, message}` で、NotFound と Validation（不正な id を含む）が 404、Conflict が 409。web の `ApiError` は status しか見ない。
 
@@ -277,7 +277,7 @@ contract の正は Rust の DTO（`crates/monica-api/src/note.rs`）で、`web/s
 | note-81（daily） | `http://monica.localhost:19280/essays/note-82` | note-82（essay） |
 | note-98（project） | `http://monica.localhost:19280/projects/work-org/repo-b/notes/note-97` | note-97（project） |
 | note-98（project） | `http://monica.localhost:19280/projects/work-org/repo-b/notes/note-96` | note-96（project） |
-| note-75（project） | `http://monica.localhost:19280/explanations/expl-35` | monica の explanations |
+| note-75（project） | `http://monica.localhost:19280/explanations/expl-35` | 旧 Monica の explanations |
 | note-79（daily） | `http://monica.localhost:19280/explanations/expl-37` | 同上 |
 | note-80（project） | `http://monica.localhost:19280/explanations/expl-38` | 同上 |
 | note-116（daily） | `http://monica.localhost:19280/explanations/expl-48` | 同上 |

@@ -1,7 +1,7 @@
 [package]
-name = "tania-ptyd"
+name = "monica-ptyd"
 version.workspace = true
-description = "tania PTY daemon: owns terminal sessions independently of the app lifecycle"
+description = "monica PTY daemon: owns terminal sessions independently of the app lifecycle"
 edition.workspace = true
 rust-version.workspace = true
 
@@ -9,13 +9,13 @@ rust-version.workspace = true
 anyhow.workspace = true
 libc.workspace = true
 log = { workspace = true, features = ["std"] }
-tania-logfile.workspace = true
-tania-terminal-daemon.workspace = true
+monica-logfile.workspace = true
+monica-terminal-daemon.workspace = true
 
 [dev-dependencies]
 base64.workspace = true
-tania-terminal-client.workspace = true
-tania-terminal-protocol.workspace = true
+monica-terminal-client.workspace = true
+monica-terminal-protocol.workspace = true
 
 [lints]
 workspace = true

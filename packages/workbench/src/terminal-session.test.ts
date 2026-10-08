@@ -124,7 +124,7 @@ test('while ptyd cannot be reached, opening a Tab returns and leaves it starting
   const { home, ptyd, db, workbenchLedger, client, owned, settled } = setupWithOwned()
   const failedToConnect = Promise.withResolvers<void>()
   const stderr = spyOn(console, 'error').mockImplementation((line: unknown) => {
-    if (String(line).includes('tania-ptyd connection failed')) failedToConnect.resolve()
+    if (String(line).includes('monica-ptyd connection failed')) failedToConnect.resolve()
   })
   onCleanup(() => stderr.mockRestore())
   ptyd.stop()

@@ -109,18 +109,18 @@ function lookupByCommandName(root: unknown, names: string[]): unknown {
 }
 
 // fpath から autoload されたときは関数の本体として走り、eval や source されたときは compdef で登録する。
-export const zshScript = `#compdef tania
+export const zshScript = `#compdef monica
 
-_tania() {
+_monica() {
   local -a candidates
   candidates=(\${(f)"$("\${words[1]}" __complete -- "\${(@)words[2,CURRENT]}" 2>/dev/null)"})
-  _describe -V tania candidates
+  _describe -V monica candidates
 }
 
-if [[ "\${funcstack[1]}" == _tania ]]; then
-  _tania "$@"
+if [[ "\${funcstack[1]}" == _monica ]]; then
+  _monica "$@"
 else
-  compdef _tania tania
+  compdef _monica monica
 fi
 `
 

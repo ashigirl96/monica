@@ -13,7 +13,7 @@ afterEach(() => {
 
 function fakeShell(script: string) {
   // pwd は symlink を解いた path を出す（macOS の tmpdir は /var → /private/var）。
-  const dir = realpathSync(mkdtempSync(join(tmpdir(), 'tania-shell-')))
+  const dir = realpathSync(mkdtempSync(join(tmpdir(), 'monica-shell-')))
   dirs.push(dir)
   const shell = join(dir, 'zsh')
   writeFileSync(shell, `#!/bin/sh\n${script}\n`)

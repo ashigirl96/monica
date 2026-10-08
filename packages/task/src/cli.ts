@@ -1,5 +1,5 @@
+import { table } from '@monica/ui/table'
 import type { ContractRouterClient } from '@orpc/contract'
-import { table } from '@tania/ui/table'
 
 import type {
   AttachOutput,
@@ -38,7 +38,7 @@ export const completers = {
 export const formatters = {
   track({ ref, title, alreadyTracked, closed }: TrackOutput): string {
     if (!alreadyTracked) return `tracked ${ref} ${title}`
-    if (closed) return `already tracked ${ref}; it is closed, so run \`tania task reopen ${ref}\``
+    if (closed) return `already tracked ${ref}; it is closed, so run \`monica task reopen ${ref}\``
     return `already tracked ${ref}`
   },
   sync({ synced, missing }: SyncOutput): string {

@@ -1,2 +1,3 @@
 #!/bin/sh
-exec ./.tania/setup.sh
+set -eu
+bun install

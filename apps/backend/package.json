@@ -1,13 +1,13 @@
 {
-  "name": "@tania/backend",
+  "name": "@monica/backend",
   "private": true,
   "type": "module",
   "dependencies": {
+    "@monica/job": "workspace:*",
+    "@monica/note": "workspace:*",
+    "@monica/task": "workspace:*",
+    "@monica/workbench": "workspace:*",
     "@orpc/server": "catalog:",
-    "@tania/job": "workspace:*",
-    "@tania/note": "workspace:*",
-    "@tania/task": "workspace:*",
-    "@tania/workbench": "workspace:*",
     "drizzle-orm": "catalog:",
     "hono": "catalog:"
   },

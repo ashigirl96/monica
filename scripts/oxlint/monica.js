@@ -61,11 +61,11 @@ function calls(node, name) {
   )
 }
 
-const SCHEMA_ENTRY = /^@tania\/([^/]+)\/schema$/
-const TESTING_ENTRY = /^@tania\/[^/]+\/testing$/
+const SCHEMA_ENTRY = /^@monica\/([^/]+)\/schema$/
+const TESTING_ENTRY = /^@monica\/[^/]+\/testing$/
 
 export default {
-  meta: { name: 'tania' },
+  meta: { name: 'monica' },
   rules: {
     // Bun.spawn は env を渡さないと起動時の environ で子を起こし、実行ファイルも起動時の PATH で探す。
     // Backend が login shell から取った PATH は process.env にしか無いので、渡し忘れは .app でだけ表に出る。

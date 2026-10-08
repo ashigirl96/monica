@@ -47,7 +47,7 @@ impl PtyManager {
             .unwrap_or_else(|| "/bin/zsh".to_string());
         let mut cmd = CommandBuilder::new(&shell);
         // Drop direnv state inherited from the shell that launched the app. With a stale
-        // DIRENV_DIFF, direnv in the new tab "reverts" vars recorded there (e.g. TANIA_HOME
+        // DIRENV_DIFF, direnv in the new tab "reverts" vars recorded there (e.g. MONICA_HOME
         // exported by a repo .envrc) and silently strips them from the session env.
         for key in ["DIRENV_DIFF", "DIRENV_DIR", "DIRENV_FILE", "DIRENV_WATCHES"] {
             cmd.env_remove(key);

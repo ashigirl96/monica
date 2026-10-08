@@ -1,4 +1,4 @@
-//! NDJSON wire protocol between the Tauri app and `tania-ptyd`: one JSON object per line
+//! NDJSON wire protocol between the Tauri app and `monica-ptyd`: one JSON object per line
 //! over a Unix domain socket. Binary payloads (PTY input/output, replay) are base64.
 //!
 //! Delivery rules the daemon must uphold:

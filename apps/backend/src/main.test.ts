@@ -1,7 +1,7 @@
 import { afterEach, expect, test } from 'bun:test'
 import { join } from 'node:path'
 
-import { startFakePtyd, tempHome } from '@tania/workbench/testing'
+import { startFakePtyd, tempHome } from '@monica/workbench/testing'
 
 import { freePort } from './testing.ts'
 
@@ -39,13 +39,13 @@ async function startBackend(notesPort: number) {
   const home = tempHome((cleanup) => cleanups.push(cleanup))
   const ptyd = startFakePtyd(home)
   cleanups.push(() => ptyd.stop())
-  const { TANIA_NOTES_PORT: _, ...env } = process.env
+  const { MONICA_NOTES_PORT: _, ...env } = process.env
   const backend = Bun.spawn([process.execPath, join(import.meta.dir, 'main.ts')], {
     env: {
       ...env,
-      TANIA_HOME: home,
-      TANIA_PTYD_PATH: join(home, 'no-ptyd'),
-      TANIA_NOTES_PORT: String(notesPort),
+      MONICA_HOME: home,
+      MONICA_PTYD_PATH: join(home, 'no-ptyd'),
+      MONICA_NOTES_PORT: String(notesPort),
       // login shell の rc を読む時間を短くする。
       SHELL: '/bin/sh',
     },
@@ -84,7 +84,7 @@ test('the token listener carries workbench, task and job but not note, and the n
     fetch(`http://127.0.0.1:${notesPort}/rpc/${path}`, {
       method: 'POST',
       headers: {
-        host: `tania.localhost:${notesPort}`,
+        host: `monica.localhost:${notesPort}`,
         'sec-fetch-site': 'same-origin',
         'content-type': 'application/json',
       },

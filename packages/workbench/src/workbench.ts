@@ -96,7 +96,7 @@ export function createWorkbenchLedger(
     const wasConnected = client !== null
     client = null
     if (stopping || !wasConnected) return
-    console.error('[workbench] lost tania-ptyd; reconnecting')
+    console.error('[workbench] lost monica-ptyd; reconnecting')
     connection = reconnect()
     // 待つ呼び手が居ないまま stop() で reject しても unhandled にしない。
     connection.catch(() => {})
@@ -125,7 +125,7 @@ export function createWorkbenchLedger(
       publish({ type: 'reconciled' })
       terminalSessions.respawnPinnedTabs()
       console.error(
-        `[workbench] connected to tania-ptyd; reaped ${reaped}, terminated ${terminated}`,
+        `[workbench] connected to monica-ptyd; reaped ${reaped}, terminated ${terminated}`,
       )
       return opened
     } finally {
@@ -139,7 +139,7 @@ export function createWorkbenchLedger(
         return await connect()
       } catch (error) {
         if (stopping) throw error
-        console.error(`[workbench] tania-ptyd connection failed: ${error}`)
+        console.error(`[workbench] monica-ptyd connection failed: ${error}`)
         await Bun.sleep(Math.min(5000, 200 * 2 ** attempt))
       }
     }

@@ -6,7 +6,7 @@ repo の形と規則は `docs/packages.md` から読む。全文を読み、冒�
 
 ### Issue tracker
 
-issue は GitHub Issues（`ashigirl96/tania`）で管理し、`gh` CLI で操作する。詳細は `docs/agents/issue-tracker.md`。
+issue は GitHub Issues（`ashigirl96/monica`）で管理し、`gh` CLI で操作する。詳細は `docs/agents/issue-tracker.md`。
 
 ### Triage labels
 

@@ -1,6 +1,6 @@
 import { homedir, userInfo } from 'node:os'
 
-const DELIMITER = '_TANIA_PATH_DELIMITER_'
+const DELIMITER = '_MONICA_PATH_DELIMITER_'
 const TIMEOUT_MS = 5000
 
 // .app から起動した Backend は launchd の最小の PATH しか持たず、gh・git・ghq・setup script の中の bun や mise が見つからない。

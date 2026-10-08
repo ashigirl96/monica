@@ -17,7 +17,7 @@ import { cleanUp, onCleanup, setup } from './testing.ts'
 afterEach(cleanUp)
 
 function scratchDir(): string {
-  const dir = mkdtempSync(join(tmpdir(), 'tania-user-'))
+  const dir = mkdtempSync(join(tmpdir(), 'monica-user-'))
   onCleanup(() => rmSync(dir, { recursive: true, force: true }))
   return dir
 }
@@ -63,9 +63,9 @@ test.skipIf(!Bun.which('zsh'))(
       ['zsh', '--login', '-i', '-c', 'print -r -- "$PATH"; print -r -- "${ZDOTDIR-unset}"'],
       {
         HOME: user,
-        TANIA_HOME: home,
+        MONICA_HOME: home,
         ZDOTDIR: join(home, 'shell/zdotdir'),
-        TANIA_USER_ZDOTDIR: '',
+        MONICA_USER_ZDOTDIR: '',
         PATH: `${join(home, 'bin')}:/usr/bin:/bin`,
       },
     )
@@ -91,9 +91,9 @@ test.skipIf(!Bun.which('zsh'))(
 
     const result = await run(['zsh', '--login', '-i', '-c', 'printenv ZDOTDIR'], {
       HOME: user,
-      TANIA_HOME: home,
+      MONICA_HOME: home,
       ZDOTDIR: join(home, 'shell/zdotdir'),
-      TANIA_USER_ZDOTDIR: join(user, 'dots'),
+      MONICA_USER_ZDOTDIR: join(user, 'dots'),
       PATH: `${join(home, 'bin')}:/usr/bin:/bin`,
     })
 
@@ -119,7 +119,7 @@ function realClaude(): string {
   return dir
 }
 
-const inTab = { TANIA_TERMINAL_SESSION_ID: 'ts-a' }
+const inTab = { MONICA_TERMINAL_SESSION_ID: 'ts-a' }
 
 test.each([
   ["a Tab's claude gets the hook settings", inTab, ['--print', 'hi'], true],
@@ -171,7 +171,7 @@ test('the claude wrapper reaches the real claude past another wrapper that hands
   const result = await claudeThroughWrapper(
     home,
     `${join(home, 'bin')}:${other}:${real}:/usr/bin:/bin`,
-    { TANIA_TERMINAL_SESSION_ID: 'ts-a' },
+    { MONICA_TERMINAL_SESSION_ID: 'ts-a' },
   )
 
   expect(result.code).toBe(0)
@@ -220,10 +220,10 @@ test("a new Terminal Session is created with the Tab's env", async () => {
   const created = await ptyd.received((op) => op.op === 'create')
   expect(created).toMatchObject({
     env: expect.arrayContaining([
-      ['TANIA_HOME', home],
-      ['TANIA_TERMINAL_SESSION_ID', tab.terminalSessionId],
+      ['MONICA_HOME', home],
+      ['MONICA_TERMINAL_SESSION_ID', tab.terminalSessionId],
       ['ZDOTDIR', join(home, 'shell/zdotdir')],
-      ['TANIA_USER_ZDOTDIR', '/users/own/zdotdir'],
+      ['MONICA_USER_ZDOTDIR', '/users/own/zdotdir'],
       ['PATH', `${join(home, 'bin')}:${process.env.PATH}`],
     ]),
   })

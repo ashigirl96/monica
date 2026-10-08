@@ -1,10 +1,10 @@
 import { existsSync } from 'node:fs'
 import { join } from 'node:path'
 
+import { IMAGE_URL_PREFIX, NOTES_HOSTNAMES } from '@monica/note/contract'
+import { router as noteRouter } from '@monica/note/server'
 import { type InferRouterInitialContext, os } from '@orpc/server'
 import { RPCHandler } from '@orpc/server/fetch'
-import { IMAGE_URL_PREFIX, NOTES_HOSTNAMES } from '@tania/note/contract'
-import { router as noteRouter } from '@tania/note/server'
 import { type Context, Hono } from 'hono'
 
 const IMMUTABLE = 'public, max-age=31536000, immutable'

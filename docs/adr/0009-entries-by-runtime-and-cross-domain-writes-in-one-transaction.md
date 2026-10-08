@@ -4,7 +4,7 @@ status: accepted
 
 # ドメイン package は実行環境ごとの entry を持ち、domain をまたぐ書き込みは同期関数で 1 つの transaction にする
 
-ADR-0002 で `packages/<domain>` が schema・router・CLI・skill・UI を縦に持つと決めた。しかし 1 つの entry からすべてを export すると、webview の bundle に router 経由で `bun:sqlite` と `@orpc/server` が入る（stack prototype で起きた）。そこで entry を層ではなく、import してよい実行環境で切る。`schema`（どこでも）、`contract`（どこでも）、`server`（Bun）、`ui`（browser）、`cli`（Bun）の 5 つで、root の `"."` は置かない。domain をまたぐ書き込み（task が Bench を開く、Attach、close）は、workbench の router を in-process client で呼ぶのではなく、`@tania/workbench/server` の `Workbench` が持つ同期の method で行う。method は第 1 引数に transaction を取る。drizzle の bun:sqlite の transaction は同期関数しか包めず、async 関数を渡すと throw しても rollback されない（await より前の書き込みも残る。実測）。oRPC の呼び出しは必ず async なので、procedure をつなぐ形では 2 つの domain にまたがる書き込みを原子的にできない。
+ADR-0002 で `packages/<domain>` が schema・router・CLI・skill・UI を縦に持つと決めた。しかし 1 つの entry からすべてを export すると、webview の bundle に router 経由で `bun:sqlite` と `@orpc/server` が入る（stack prototype で起きた）。そこで entry を層ではなく、import してよい実行環境で切る。`schema`（どこでも）、`contract`（どこでも）、`server`（Bun）、`ui`（browser）、`cli`（Bun）の 5 つで、root の `"."` は置かない。domain をまたぐ書き込み（task が Bench を開く、Attach、close）は、workbench の router を in-process client で呼ぶのではなく、`@monica/workbench/server` の `Workbench` が持つ同期の method で行う。method は第 1 引数に transaction を取る。drizzle の bun:sqlite の transaction は同期関数しか包めず、async 関数を渡すと throw しても rollback されない（await より前の書き込みも残る。実測）。oRPC の呼び出しは必ず async なので、procedure をつなぐ形では 2 つの domain にまたがる書き込みを原子的にできない。
 
 ## Considered Options
 

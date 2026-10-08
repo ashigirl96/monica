@@ -1,6 +1,6 @@
-# tania
+# monica
 
-私と AI エージェントが一緒に仕事を進めるための個人用 Agentic Workspace。monica の後継で、端末（Workbench・Terminal Session・ptyd）と Note を引き継ぎ、Task を作り直す。
+私と AI エージェントが一緒に仕事を進めるための個人用 Agentic Workspace。旧 Monica の後継で、端末（Workbench・Terminal Session・ptyd）と Note を引き継ぎ、Task を作り直す。
 
 ## Language
 
@@ -90,7 +90,7 @@ agent が Agent Session の会話に付ける短い名前。claude は Tab の t
 _Avoid_: Tab の title（shell や claude 以外の program も出す、Tab の帯の表示）, session 名
 
 **Agent Session Transcript**:
-agent が Agent Session の会話を書き残したもの。agent が書き、tania は読むだけ。claude は hook の payload の `transcript_path` でその file の path を渡す。Agent Session の title はここから読む。
+agent が Agent Session の会話を書き残したもの。agent が書き、monica は読むだけ。claude は hook の payload の `transcript_path` でその file の path を渡す。Agent Session の title はここから読む。
 _Avoid_: Transcript（単独で使わない）, 会話ログ
 
 **通知**:
@@ -104,7 +104,7 @@ _Avoid_: 未観測（Backend の不在の語）, unseen, 未確認
 ### Job
 
 **Job**:
-予定で繰り返し走る処理。tania が持つ system の Job（Sync など）と、ユーザーが登録して shell command を走らせる Job がある。Backend が動いている間だけ走り、予定の時刻に Backend が居なければその回は飛ばす。一度きりの裏の処理（Bench の準備など）は Job ではない。
+予定で繰り返し走る処理。monica が持つ system の Job（Sync など）と、ユーザーが登録して shell command を走らせる Job がある。Backend が動いている間だけ走り、予定の時刻に Backend が居なければその回は飛ばす。一度きりの裏の処理（Bench の準備など）は Job ではない。
 _Avoid_: cron（claude の session cron と紛れる）, routine, schedule
 
 **Job Execution**:
@@ -156,7 +156,7 @@ _Avoid_: Rust 側, Tauri 側
 
 **Backend**:
 Shell が起動し、desktop と同寿命の process。Task Ledger と Workbench Ledger と Job Ledger と Note Ledger と DB を唯一所有し、webview と CLI とブラウザは HTTP で呼ぶ。desktop が閉じている間は存在しない。
-_Avoid_: server, sidecar, tania-backend
+_Avoid_: server, sidecar, monica-backend
 
 **Task Ledger**:
 Backend に 1 つだけある、Task・Issue・Pull Request・Run・Bench の記録の全体。1 件の Task ではない。
@@ -180,5 +180,5 @@ Terminal Session を管理する常駐 daemon。Backend が起動し、desktop �
 ### Skill
 
 **Skill**:
-agent に渡す手順書。`tania` の command を呼ぶことでだけ tania に触り、どの repo で動く agent にも配る。tania repo 自身を開発するための手順書は Skill に含めない。
+agent に渡す手順書。`monica` の command を呼ぶことでだけ monica に触り、どの repo で動く agent にも配る。monica repo 自身を開発するための手順書は Skill に含めない。
 _Avoid_: 製品 skill、plugin skill

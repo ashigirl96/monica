@@ -93,9 +93,9 @@ function initRepo(root: string, dir: string) {
   git(
     dir,
     '-c',
-    'user.name=tania',
+    'user.name=monica',
     '-c',
-    'user.email=tania@example.com',
+    'user.email=monica@example.com',
     'commit',
     '--allow-empty',
     '-m',
@@ -105,7 +105,7 @@ function initRepo(root: string, dir: string) {
 
 // worktree は Bench と同じく ghq の外に置く。
 export function ghqCheckout(repo: string) {
-  const root = mkdtempSync(join(tmpdir(), 'tania-git-'))
+  const root = mkdtempSync(join(tmpdir(), 'monica-git-'))
   onCleanup(() => rmSync(root, { recursive: true, force: true }))
   const checkout = join(root, 'ghq', 'github.com', repo)
   const worktree = join(root, 'worktrees', repo, 'issue-1')

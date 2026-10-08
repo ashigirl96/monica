@@ -1,4 +1,4 @@
-import type { Db, Tx } from '@tania/workbench/server'
+import type { Db, Tx } from '@monica/workbench/server'
 import { and, asc, eq, inArray, ne, or, sql } from 'drizzle-orm'
 import { alias, type SQLiteColumn } from 'drizzle-orm/sqlite-core'
 

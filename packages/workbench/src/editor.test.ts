@@ -8,7 +8,7 @@ import { cleanUp, onCleanup, setup } from './testing.ts'
 afterEach(cleanUp)
 
 function project() {
-  const cwd = mkdtempSync(join(tmpdir(), 'tania-editor-'))
+  const cwd = mkdtempSync(join(tmpdir(), 'monica-editor-'))
   onCleanup(() => rmSync(cwd, { recursive: true, force: true }))
   mkdirSync(join(cwd, 'src'))
   const file = join(cwd, 'src', 'main.ts')

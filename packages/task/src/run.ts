@@ -1,5 +1,5 @@
-import { agentSession, tab } from '@tania/workbench/schema'
-import type { Db, Tx } from '@tania/workbench/server'
+import { agentSession, tab } from '@monica/workbench/schema'
+import type { Db, Tx } from '@monica/workbench/server'
 import { and, eq, inArray, isNull, ne } from 'drizzle-orm'
 
 import type { RunAgentSession } from './display-state.ts'

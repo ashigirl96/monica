@@ -1,4 +1,4 @@
-import type { agentSession } from '@tania/workbench/schema'
+import type { agentSession } from '@monica/workbench/schema'
 
 import type { DisplayState, LiveRun } from './contract.ts'
 import type { bench as benchTable, issue, task } from './schema.ts'

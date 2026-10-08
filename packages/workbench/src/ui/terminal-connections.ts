@@ -34,7 +34,7 @@ const tabTerminals = new Map<string, Terminal>()
 
 // WebGL で描いた Tab の文字は DOM に無いので、tauri-mcp で画面を確かめる dev のときだけ晒す。
 if (import.meta.env.DEV) {
-  ;(globalThis as { __taniaTerminals?: Map<string, Terminal> }).__taniaTerminals = tabTerminals
+  ;(globalThis as { __monicaTerminals?: Map<string, Terminal> }).__monicaTerminals = tabTerminals
 }
 
 export function setTabTerminal(tabId: string, term: Terminal) {

@@ -3,10 +3,10 @@ import { realpathSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { basename, join, resolve } from 'node:path'
 
-export const DEFAULT_HOME = join(homedir(), '.tania-dev')
-export const RELEASE_HOME = join(homedir(), '.tania')
+export const DEFAULT_HOME = join(homedir(), '.monica-dev')
+export const RELEASE_HOME = join(homedir(), '.monica')
 
-const IDENTIFIER = 'com.ashigirl96.tania.dev'
+const IDENTIFIER = 'com.ashigirl96.monica.dev'
 const DEFAULT_PORT = 1420
 // release の notes の口は 19380（ADR-0017）。
 const DEFAULT_NOTES_PORT = 19381

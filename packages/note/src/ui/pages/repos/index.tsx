@@ -1,4 +1,4 @@
-import { FuzzyPickerModal } from '@tania/ui'
+import { FuzzyPickerModal } from '@monica/ui'
 import { useEffect, useState } from 'react'
 
 import { useDocumentTitle } from '../../document-title.ts'

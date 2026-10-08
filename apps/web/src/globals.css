@@ -6,7 +6,7 @@
 
 @custom-variant dark (&:where([data-theme="dark"], [data-theme="dark"] *));
 
-/* 名前は @tania/ui の部品が読む desktop の token に揃え、値は monica の notes のものを使う。 */
+/* 名前は @monica/ui の部品が読む desktop の token に揃え、値は旧 Monica の notes のものを使う。 */
 :root {
   color-scheme: light;
   --background: oklch(1 0 0);

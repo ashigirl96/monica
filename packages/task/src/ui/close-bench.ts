@@ -1,4 +1,4 @@
-import { pushErrorToast, pushInfoToast } from '@tania/ui'
+import { pushErrorToast, pushInfoToast } from '@monica/ui'
 import { useCallback } from 'react'
 
 import { closeErrors } from '../contract.ts'

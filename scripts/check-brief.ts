@@ -3,7 +3,7 @@ import { join } from 'node:path'
 
 // 検査の出力はテストの Ledger が stderr に書く行で長くなる。パイプで絞ると終了コードがパイプの末尾のものになるので、絞るのはここで行い、検査の終了コードで抜ける。
 const script = process.argv[2] ?? 'check'
-const log = join(tmpdir(), `tania-${script.replace(':', '-')}-${process.pid}.log`)
+const log = join(tmpdir(), `monica-${script.replace(':', '-')}-${process.pid}.log`)
 const run = Bun.spawn(['sh', '-c', 'exec bun run "$0" > "$1" 2>&1', script, log], {
   env: process.env,
   stdout: 'inherit',

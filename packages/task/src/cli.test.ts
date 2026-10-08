@@ -19,7 +19,7 @@ test('track says which Issue it tracked, or that it was already tracked', () => 
   expect(formatters.track(output)).toBe('tracked acme/app#12 Ship it')
   expect(formatters.track({ ...output, alreadyTracked: true })).toBe('already tracked acme/app#12')
   expect(formatters.track({ ...output, alreadyTracked: true, closed: true })).toBe(
-    'already tracked acme/app#12; it is closed, so run `tania task reopen acme/app#12`',
+    'already tracked acme/app#12; it is closed, so run `monica task reopen acme/app#12`',
   )
 })
 

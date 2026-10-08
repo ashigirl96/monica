@@ -1,5 +1,5 @@
 {
-  "name": "@tania/desktop",
+  "name": "@monica/desktop",
   "private": true,
   "type": "module",
   "scripts": {
@@ -9,11 +9,11 @@
   },
   "dependencies": {
     "@fontsource-variable/jetbrains-mono": "catalog:",
+    "@monica/task": "workspace:*",
+    "@monica/ui": "workspace:*",
+    "@monica/workbench": "workspace:*",
     "@orpc/client": "catalog:",
     "@orpc/contract": "catalog:",
-    "@tania/task": "workspace:*",
-    "@tania/ui": "workspace:*",
-    "@tania/workbench": "workspace:*",
     "@tauri-apps/api": "catalog:",
     "jotai": "catalog:",
     "react": "catalog:",

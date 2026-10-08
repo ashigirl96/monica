@@ -1,4 +1,4 @@
-import { agentSession, runspace } from '@tania/workbench/schema'
+import { agentSession, runspace } from '@monica/workbench/schema'
 import {
   type AnySQLiteColumn,
   index,

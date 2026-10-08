@@ -32,7 +32,7 @@ afterEach(() => {
 })
 
 function setup() {
-  const home = mkdtempSync(join(tmpdir(), 'tania-note-'))
+  const home = mkdtempSync(join(tmpdir(), 'monica-note-'))
   cleanups.push(() => rmSync(home, { recursive: true, force: true }))
   const db = drizzle(new Database(':memory:'))
   migrate(db, { migrationsFolder: migrations.folder, migrationsTable: migrations.table })
@@ -298,7 +298,7 @@ test('cleaning removes the images no body refers to once they are older than 48 
     id: daily.id,
     content: bodyWith(
       image(`/api/assets/${inDaily}`),
-      image(`http://tania.localhost:19380/api/assets/${byAbsoluteUrl}`),
+      image(`http://monica.localhost:19380/api/assets/${byAbsoluteUrl}`),
       {
         type: 'paragraph',
         content: [

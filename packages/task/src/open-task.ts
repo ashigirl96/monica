@@ -1,5 +1,5 @@
+import type { Db } from '@monica/workbench/server'
 import { ORPCError } from '@orpc/server'
-import type { Db } from '@tania/workbench/server'
 import { eq, type SQL } from 'drizzle-orm'
 
 import { formatRef } from './ref.ts'
@@ -22,7 +22,7 @@ export function findOpenTask(db: Pick<Db, 'select'>, where: SQL | undefined, ask
   const ref = formatRef(found.issue)
   if (found.task.closedAt) {
     throw new ORPCError('BAD_REQUEST', {
-      message: `${ref} is closed, so run \`tania task reopen ${ref}\``,
+      message: `${ref} is closed, so run \`monica task reopen ${ref}\``,
     })
   }
   return found

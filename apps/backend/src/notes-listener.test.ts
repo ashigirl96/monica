@@ -4,11 +4,11 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 
+import type { contract } from '@monica/note/contract'
+import { createNoteLedger, migrations } from '@monica/note/server'
 import { createORPCClient } from '@orpc/client'
 import { RPCLink } from '@orpc/client/fetch'
 import type { ContractRouterClient } from '@orpc/contract'
-import type { contract } from '@tania/note/contract'
-import { createNoteLedger, migrations } from '@tania/note/server'
 import { drizzle } from 'drizzle-orm/bun-sqlite'
 import { migrate } from 'drizzle-orm/bun-sqlite/migrator'
 
@@ -21,7 +21,7 @@ afterEach(() => {
 })
 
 function webDist(files: Record<string, string>): string {
-  const dir = mkdtempSync(join(tmpdir(), 'tania-web-dist-'))
+  const dir = mkdtempSync(join(tmpdir(), 'monica-web-dist-'))
   cleanups.push(() => rmSync(dir, { recursive: true, force: true }))
   for (const [path, content] of Object.entries(files)) {
     mkdirSync(dirname(join(dir, path)), { recursive: true })
@@ -31,7 +31,7 @@ function webDist(files: Record<string, string>): string {
 }
 
 function listen(port: number | undefined, dist = webDist({ 'index.html': '<p>notes</p>' })) {
-  const home = mkdtempSync(join(tmpdir(), 'tania-home-'))
+  const home = mkdtempSync(join(tmpdir(), 'monica-home-'))
   cleanups.push(() => rmSync(home, { recursive: true, force: true }))
   const db = drizzle(new Database(':memory:'))
   migrate(db, { migrationsFolder: migrations.folder, migrationsTable: migrations.table })
@@ -49,11 +49,11 @@ test('the notes listener answers on both loopbacks to the three names of its por
     (await fetch(`http://${address}:${port}/`, { headers: { host } })).status
 
   for (const address of ['127.0.0.1', '[::1]']) {
-    expect(await status(address, `tania.localhost:${port}`)).toBe(200)
+    expect(await status(address, `monica.localhost:${port}`)).toBe(200)
     expect(await status(address, `localhost:${port}`)).toBe(200)
     expect(await status(address, `127.0.0.1:${port}`)).toBe(200)
     expect(await status(address, `evil.example:${port}`)).toBe(403)
-    expect(await status(address, `tania.localhost:${port + 1}`)).toBe(403)
+    expect(await status(address, `monica.localhost:${port + 1}`)).toBe(403)
   }
 })
 
@@ -66,7 +66,7 @@ test('a request other than GET runs a note procedure only when Sec-Fetch-Site is
     fetch(`http://127.0.0.1:${port}/rpc/note/daily/open`, {
       method: 'POST',
       headers: {
-        host: `tania.localhost:${port}`,
+        host: `monica.localhost:${port}`,
         'content-type': 'application/json',
         ...(secFetchSite && { 'sec-fetch-site': secFetchSite }),
       },
@@ -91,7 +91,7 @@ test('a GET for a path of the SPA gets index.html uncached, and a hashed asset i
   listen(port, dist)
 
   const get = (path: string) =>
-    fetch(`http://127.0.0.1:${port}${path}`, { headers: { host: `tania.localhost:${port}` } })
+    fetch(`http://127.0.0.1:${port}${path}`, { headers: { host: `monica.localhost:${port}` } })
 
   for (const path of ['/', '/essays/note-1', '/index.html']) {
     const page = await get(path)
@@ -147,7 +147,7 @@ test('a GET for an image whose name is not one the Note Ledger makes is not foun
   for (const name of [`${uuid.toUpperCase()}.png`, `${uuid}.svg`, `${uuid}.png.txt`, 'notes.txt']) {
     writeFileSync(join(home, 'note-images', name), PNG)
   }
-  writeFileSync(join(home, 'tania.db'), 'the DB')
+  writeFileSync(join(home, 'monica.db'), 'the DB')
 
   for (const path of [
     `${crypto.randomUUID()}.png`,
@@ -155,7 +155,7 @@ test('a GET for an image whose name is not one the Note Ledger makes is not foun
     `${uuid}.svg`,
     `${uuid}.png.txt`,
     'notes.txt',
-    '..%2Ftania.db',
+    '..%2Fmonica.db',
     `x/${uuid}.png`,
     '',
   ]) {
@@ -170,7 +170,7 @@ test('without a port there is no notes listener', () => {
   expect(listen(undefined).listener).toBeNull()
 })
 
-// Chromium と macOS は tania.localhost を ::1 から先に引くので、::1 だけを他の process が握っていてもブラウザはそちらに繋がる。
+// Chromium と macOS は monica.localhost を ::1 から先に引くので、::1 だけを他の process が握っていてもブラウザはそちらに繋がる。
 test.each(['::1', '127.0.0.1'])(
   'a port taken on %s leaves notes unserved with one line on stderr and the other loopback free',
   (taken) => {

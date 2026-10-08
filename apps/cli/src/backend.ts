@@ -14,7 +14,7 @@ type Endpoint = { port: number; token: string; pid: number }
 
 export class BackendNotRunning extends Error {
   constructor() {
-    super('BACKEND_NOT_RUNNING: start the tania desktop app')
+    super('BACKEND_NOT_RUNNING: start the monica desktop app')
   }
 }
 

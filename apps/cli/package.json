@@ -1,23 +1,23 @@
 {
-  "name": "@tania/cli",
+  "name": "@monica/cli",
   "private": true,
   "bin": {
-    "tania": "./src/main.ts"
+    "monica": "./src/main.ts"
   },
   "type": "module",
   "dependencies": {
+    "@monica/job": "workspace:*",
+    "@monica/task": "workspace:*",
+    "@monica/workbench": "workspace:*",
     "@orpc/client": "catalog:",
     "@orpc/contract": "catalog:",
     "@orpc/server": "catalog:",
-    "@tania/job": "workspace:*",
-    "@tania/task": "workspace:*",
-    "@tania/workbench": "workspace:*",
     "commander": "catalog:",
     "trpc-cli": "catalog:",
     "zod": "catalog:"
   },
   "devDependencies": {
-    "@tania/note": "workspace:*",
+    "@monica/note": "workspace:*",
     "drizzle-orm": "catalog:"
   }
 }

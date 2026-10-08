@@ -11,11 +11,11 @@ import { closePage, FakeStorage, openPage } from './fake-browser.ts'
 
 afterEach(closePage)
 
-test('選んだ ambient は localStorage の tania-ambient に残り、次に開いたときに読まれる', () => {
+test('選んだ ambient は localStorage の monica-ambient に残り、次に開いたときに読まれる', () => {
   const storage = new FakeStorage()
   openPage(storage)
   setAmbientPref('sakura')
-  expect([...storage.items]).toEqual([['tania-ambient', 'sakura']])
+  expect([...storage.items]).toEqual([['monica-ambient', 'sakura']])
 
   openPage(storage)
   expect(ambientPref()).toBe('sakura')
@@ -31,7 +31,7 @@ test.each<[string | null, AmbientName]>([
   ['__proto__', 'universe'],
   ['toString', 'universe'],
 ])('保存した値が %p なら %s を開く', (saved, expected) => {
-  openPage(new FakeStorage(saved === null ? {} : { 'tania-ambient': saved }))
+  openPage(new FakeStorage(saved === null ? {} : { 'monica-ambient': saved }))
   expect(ambientPref()).toBe(expected)
 })
 

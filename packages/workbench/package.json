@@ -1,5 +1,5 @@
 {
-  "name": "@tania/workbench",
+  "name": "@monica/workbench",
   "private": true,
   "type": "module",
   "exports": {
@@ -14,9 +14,9 @@
     "generate": "drizzle-kit generate"
   },
   "dependencies": {
+    "@monica/ui": "workspace:*",
     "@orpc/contract": "catalog:",
     "@orpc/server": "catalog:",
-    "@tania/ui": "workspace:*",
     "@tauri-apps/api": "catalog:",
     "@tauri-apps/plugin-opener": "catalog:",
     "@xterm/addon-fit": "catalog:",

@@ -1,5 +1,5 @@
 {
-  "name": "@tania/web",
+  "name": "@monica/web",
   "private": true,
   "type": "module",
   "scripts": {
@@ -7,9 +7,9 @@
     "build": "vite build"
   },
   "dependencies": {
+    "@monica/note": "workspace:*",
     "@orpc/client": "catalog:",
     "@orpc/contract": "catalog:",
-    "@tania/note": "workspace:*",
     "react": "catalog:",
     "react-dom": "catalog:"
   },

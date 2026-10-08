@@ -119,7 +119,7 @@ export async function queryIssues(
     headers: {
       authorization: `bearer ${token}`,
       'content-type': 'application/json',
-      'user-agent': 'tania',
+      'user-agent': 'monica',
     },
     body: JSON.stringify({ query: issuesQuery(asked), variables: { owner, name } }),
     signal,
@@ -198,7 +198,7 @@ function issuesQuery(asked: AskedIssue[]): string {
           `    pr${n}: pullRequests(headRefName: ${JSON.stringify(benchBranch)}, states: [OPEN, CLOSED, MERGED], first: 10) { nodes { ...CopiedPullRequest } }`,
         ]),
   ])
-  return `query TaniaIssues($owner: String!, $name: String!) {
+  return `query MonicaIssues($owner: String!, $name: String!) {
   repository(owner: $owner, name: $name) {
     nameWithOwner
 ${aliases.join('\n')}

@@ -1,4 +1,4 @@
-import { pushErrorToast } from '@tania/ui'
+import { pushErrorToast } from '@monica/ui'
 import { getCurrentWebview } from '@tauri-apps/api/webview'
 import type { Terminal } from '@xterm/xterm'
 import { getDefaultStore } from 'jotai'

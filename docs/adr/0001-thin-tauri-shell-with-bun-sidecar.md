@@ -4,7 +4,7 @@ status: accepted
 
 # Tauri は domain を知らない配管だけに絞り、backend は Bun の sidecar で動かす
 
-monica では Task・DB・CLI まで Rust で書いた結果、人間が読めない領域が大半を占めた。tania では Rust に残すのを Tauri の shell 本体と、ptyd（PTY daemon）・terminal protocol・その client と daemon・log を担う terminal の 5 crate だけにし、いずれも Task を知らない固定の配管とする。Task を含むすべての業務ロジックと DB は TypeScript の backend が持ち、desktop はそれを Bun でコンパイルした sidecar として起動して HTTP/oRPC で呼ぶ。
+旧 Monica では Task・DB・CLI まで Rust で書いた結果、人間が読めない領域が大半を占めた。monica では Rust に残すのを Tauri の shell 本体と、ptyd（PTY daemon）・terminal protocol・その client と daemon・log を担う terminal の 5 crate だけにし、いずれも Task を知らない固定の配管とする。Task を含むすべての業務ロジックと DB は TypeScript の backend が持ち、desktop はそれを Bun でコンパイルした sidecar として起動して HTTP/oRPC で呼ぶ。
 
 ## Considered Options
 
@@ -16,4 +16,4 @@ monica では Task・DB・CLI まで Rust で書いた結果、人間が読め�
 - 言語は 2 つ残るが、Rust 側は読む必要のない配管に限る。Rust にドメインロジックや DB を置かない。
 - Shell に置くのは、Tauri プロセスにしか無いもの（窓と webview の event、app の名義、AppKit）に触る処理と、Backend の再起動で途切れてはいけない端末の byte だけ。通知（ADR-0013）と画像のクリップボードはこれに当たり、worktree の判定やエディタを開く処理のように fs と process の spawn で済むものは Backend に置く（#39）。
 - sidecar の起動・終了・port の受け渡しは Tauri が担う。
-- ランタイムは Bun に統一し、DB は `bun:sqlite` で開く。monica のバイナリ最小化方針は Tauri shell にだけ適用し、sidecar には適用しない。
+- ランタイムは Bun に統一し、DB は `bun:sqlite` で開く。旧 Monica のバイナリ最小化方針は Tauri shell にだけ適用し、sidecar には適用しない。
