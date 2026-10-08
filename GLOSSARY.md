@@ -180,5 +180,21 @@ Terminal Session を管理する常駐 daemon。Backend が起動し、desktop �
 ### Skill
 
 **Skill**:
-agent に渡す手順書。`monica` の command を呼ぶことでだけ monica に触り、どの repo で動く agent にも配る。monica repo 自身を開発するための手順書は Skill に含めない。
+agent に渡す手順書。どの repo で動く agent にも配る。monica に触るときは `monica` の command を通す。Upstream から写したものと、この repo で書いたものがある。monica repo 自身を開発するための手順書は Skill に含めない。
 _Avoid_: 製品 skill、plugin skill
+
+**Upstream**:
+Skill の写し元にする、他人が書いた skill の repo（mattpocock/skills など）。
+_Avoid_: 本家、元 repo
+
+**Upstream Update**:
+Upstream の新しい版を、Upstream から写した Skill に反映すること。Skill Patch は残す。
+_Avoid_: Sync（GitHub の写しを引き直すこと）、取り込み
+
+**Skill Patch**:
+Upstream から写した Skill に、この repo でだけ加えた変更。Upstream Update の後も残る。
+_Avoid_: 改変、override、customization
+
+**Skill Patch Note**:
+Skill Patch ごとに、何をなぜ変えたかを書いたもの。Upstream Update で Upstream の変更と Skill Patch がぶつかったとき、どちらを残すかを決める拠り所になる。
+_Avoid_: 改変記録、changelog
