@@ -1,6 +1,6 @@
 import { Database } from 'bun:sqlite'
 import { afterEach, expect, mock, spyOn, test } from 'bun:test'
-import { mkdtemp, writeFile } from 'node:fs/promises'
+import { mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
@@ -12,10 +12,12 @@ import { type FakeSite, startFakeSite } from './fake-site.ts'
 import { createNoteLedger, migrations, router } from './server.ts'
 
 const sites: FakeSite[] = []
+const dirs: string[] = []
 
-afterEach(() => {
+afterEach(async () => {
   mock.restore()
   for (const site of sites.splice(0)) void site.stop()
+  await Promise.all(dirs.splice(0).map((dir) => rm(dir, { recursive: true, force: true })))
 })
 
 async function failure(promise: Promise<unknown>) {
@@ -285,7 +287,9 @@ test('a URL that is not http or https is refused', async () => {
 
 test('a page that redirects to a local file fails without reading it', async () => {
   const { client, site } = setup()
-  const file = join(await mkdtemp(join(tmpdir(), 'monica-ogp-')), 'secret.html')
+  const dir = await mkdtemp(join(tmpdir(), 'monica-ogp-'))
+  dirs.push(dir)
+  const file = join(dir, 'secret.html')
   await writeFile(file, '<title>Secret</title>')
   site.page('/to-file', { status: 302, headers: { location: `file://${file}` } })
 
