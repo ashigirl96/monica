@@ -75,7 +75,7 @@ ptyd が Terminal Session の出力をそのまま書き残したもの。直近
 _Avoid_: Transcript（単独で使わない）, log（ptyd の診断の log と紛れる）, scrollback（xterm の語）
 
 **Agent Session**:
-Tab の中で動く agent が自分で名乗るセッション。同一性は agent の session_id で、resume と compact は同じ Agent Session の再開、fork は別の Agent Session。Terminal Session とは別物で、同じ Tab に両方が存在する。agent の状態の唯一の正本で、Task に紐づかない Tab でも観測する。状態は次の 4 つ。動作中とユーザー待ちには agent 自身の報告でだけ入る。終了には Terminal Session の終わりでも入り、未観測には Backend の不在でだけ入る。
+Tab の中で動く agent が自分で名乗るセッション。同一性は agent の session_id で、resume と compact は同じ Agent Session の再開、fork は別の Agent Session。Terminal Session とは別物で、同じ Tab に両方が存在する。Tab の中の agent の状態の唯一の正本で、Task に紐づかない Tab でも観測する。状態は次の 4 つ。動作中とユーザー待ちには agent 自身の報告でだけ入る。終了には Terminal Session の終わりでも入り、未観測には Backend の不在でだけ入る。
 
 - **動作中**: agent が turn を進めているか、自分で起こした background の agent の仕事が終わるのを待っている（終われば agent が自分で次の turn を始める）。
 - **ユーザー待ち**: agent がユーザーの行動を待っている。理由は 4 つ。**手空き**（次の指示を待っている。起動直後と、turn が終わって background の agent の仕事も残っていない時）、**質問**（agent が訊いている）、**許可**（tool の実行許可を求めている。subagent の分とプラン承認も含む）、**エラー**（API エラーで turn が終わった）。
@@ -148,6 +148,20 @@ _Avoid_: Mention（単独で使わない）, wiki link, Note Link, backlink
 ある Note の block の並びを、別の場所に読み取り専用で映す block。映した側は元の今の中身を表示し、編集は元の Note でだけ行う。同じ Note の block も映せる。元の block が消えると、消えたと出る。
 _Avoid_: transclusion, mirror, embed
 
+### Browser
+
+**Browser Tab**:
+ブラウザの 1 枚のタブ。Workbench の Tab とは別物。
+_Avoid_: タブ（単独で使うと Tab と紛れる）
+
+**Current Page**:
+ある window で、active な Browser Tab に開いているページ。
+_Avoid_: 今のページ, 開いているページ（どの Browser Tab のことか曖昧）
+
+**Chat**:
+Chrome Extension の side panel で agent と交わす一続きの問答。side panel を開いた window ごとに 1 つだけあり、質問はそれぞれ、質問した時の Current Page について訊く。新しい Chat を始めるか、side panel を閉じるか、Backend が居なくなると終わり、どこにも残らない。Tab の外で動くので Agent Session ではない。
+_Avoid_: 会話（単独では Agent Session の会話と紛れる）, session, conversation, thread
+
 ### Process
 
 **Shell**:
@@ -155,8 +169,12 @@ Tauri の殻。窓、端末の中継、Backend の起動・監督と、OS への
 _Avoid_: Rust 側, Tauri 側
 
 **Backend**:
-Shell が起動し、desktop と同寿命の process。Task Ledger と Workbench Ledger と Job Ledger と Note Ledger と DB を唯一所有し、webview と CLI とブラウザは HTTP で呼ぶ。desktop が閉じている間は存在しない。
+Shell が起動し、desktop と同寿命の process。Task Ledger と Workbench Ledger と Job Ledger と Note Ledger と DB を唯一所有し、webview と CLI と notes の画面と Chrome Extension は HTTP で呼ぶ。desktop が閉じている間は存在しない。
 _Avoid_: server, sidecar, monica-backend
+
+**Chrome Extension**:
+Brave に読み込む monica のブラウザ拡張。side panel を持ち、Backend を HTTP で呼ぶ。
+_Avoid_: 拡張（単独で使わない）, plugin（Skill を配る Claude Code の plugin と紛れる）, アドオン
 
 **Task Ledger**:
 Backend に 1 つだけある、Task・Issue・Pull Request・Run・Bench の記録の全体。1 件の Task ではない。
