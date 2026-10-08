@@ -22,6 +22,7 @@
   "include": [
     "apps/*/src",
     "apps/desktop/vite.config.ts",
+    "apps/extension/vite.config.ts",
     "apps/web/vite.config.ts",
     "packages/*/src",
     "packages/*/migrations",
