@@ -20,5 +20,5 @@ status: accepted
 - release の拡張は 19380 を呼ぶ。dev の拡張は、apps/web の Vite と同じく `devInstance(MONICA_HOME || ~/.monica-dev)` の port を build 時に焼き、release の 19380 には倒さない。
 - 回答は oRPC の event iterator で流す。1 回の質問への応答の stream で、回答が終われば閉じ、client は payload の文字をそのまま描く。contract の規約 5 の change stream（「変わった」の合図を流し、購読側が読み直す）とは別の種類になる。
 - RPC は side panel の page から呼び、service worker を経由しない。service worker は stream を受けていても、最後の拡張の event から 30 秒で止まる（#259）。
-- side panel を閉じると、約 0.4 秒で handler の `signal` が abort する（#259）。そのとき agent の turn を止めるかは、agent の動かし方で決める。
+- side panel を閉じると、約 0.4 秒で handler の `signal` が abort する（#259）。そのとき agent の turn を止めるかは、agent の動かし方で決める（止める。ADR-0031）。
 - side panel ごとに張り続ける購読は持たず、stream は回答の間だけ開く。窓ごとの side panel が張り続けると、ADR-0017 の 6 本の上限で詰まるため。
