@@ -14,7 +14,7 @@ monica の repo の形、package の entry、domain 間の呼び出し、テス�
 - `docs/packages/job-ledger.md`: job の contract と Job Ledger。job の procedure、system の Job を足すとき、裏で定期的に走る処理に触るとき。
 - `docs/packages/note-ledger.md`: note の contract と Note Ledger と body。note の procedure、画像、OGP、本文の JSON と markdown の変換に触るとき。
 - `docs/packages/note-ui.md`: note の ui。`packages/note/src/ui` か `apps/web` に触るとき、旧 Monica のコードを移すとき。
-- `docs/packages/backend.md`: Backend の組み立て（apps/backend）。起動と終了の順序、PATH、Ledger の配線、notes の口に触るとき。
+- `docs/packages/backend.md`: Backend の組み立て（apps/backend）。起動と終了の順序、PATH、Ledger の配線、ブラウザの口に触るとき。
 - `docs/packages/cli.md`: CLI（apps/cli）。`cli: true` の procedure か SKILL.md を足すとき、argv の振り分け・出力・エラー・補完・CLI のテストに触るとき。
 - `docs/packages/desktop.md`: desktop（apps/desktop）。webview の枠、キーの扱い、domain の ui の載せ方と Task の slot、Shell（`src-tauri`）に触るとき。
 - `docs/packages/migration.md`: migration。table を足すか変えるとき、domain の package を足すとき。
@@ -139,7 +139,7 @@ package ごとに in-memory の SQLite に自分の migration を当てる（tas
 
 ## contract の規約
 
-1. 合成した contract の root は package 名で mount する（`{ workbench, task, job }`、notes の口では `{ note }`）。path の先頭が package 名になり、CLI もそれに従う（`monica task track`、`monica workbench hook claude`）。
+1. 合成した contract の root は package 名で mount する（`{ workbench, task, job }`、ブラウザの口では `{ note }`）。path の先頭が package 名になり、CLI もそれに従う（`monica task track`、`monica workbench hook claude`）。
 2. 全 procedure に `.meta({ description })` と `.output()` を付ける。description は CLI の help の正本、output は `--format json` の形の正本になる（#17 の JSON の形もここに書く）。
 3. CLI に出すのは `.meta({ cli: true })` を付けた procedure だけ（ADR-0003）。event iterator の procedure は付けても出ない。
 4. 呼び手が分岐する domain エラー（close の guard のように `data` に理由の一覧を持つもの）だけを `.errors()` で宣言する。それ以外は oRPC の標準 code（`NOT_FOUND`、`BAD_REQUEST`）を投げる。

@@ -39,7 +39,7 @@ pub fn ptyd() -> PathBuf {
 }
 
 /// dev の port は `scripts/desktop.ts` が env に入れ、Backend は Shell の env からそのまま継ぐ。
-pub fn notes_port() -> Option<&'static str> {
+pub fn browser_port() -> Option<&'static str> {
     (!cfg!(debug_assertions)).then_some("19380")
 }
 

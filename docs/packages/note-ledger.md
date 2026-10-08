@@ -33,7 +33,7 @@ linkMetadata         { url } → { title, description, image, favicon, siteName 
 - `date` は Logical Date の `YYYY-MM-DD`。Daily はその Daily の日付、ほかは作った時点の Logical Date で、後から変えない。
 - `repo` は `owner/repo` の形だけを確かめ、ghq も GitHub も引かない。書いた時点の綴りで持ち、比べるときは大文字と小文字を区別しない（task の `copy.ts` と同じ）。
 - 時刻は他の domain と同じく `z.date()` で出す。
-- router は CLI に出さない。meta の型が `cli` を持たないので、`cli: true` を付けると型で落ちる。router は notes の口（ADR-0017）にだけ載せる。
+- router は CLI に出さない。meta の型が `cli` を持たないので、`cli: true` を付けると型で落ちる。router はブラウザの口（ADR-0017）にだけ載せる。
 - change stream は持たない。notes の画面は focus のたびに取り直す（ADR-0018）。タブごとに stream を張ると、Chromium の host ごとの接続数の上限（6 本）に当たる。
 - `.errors()` で宣言するのは、画面が分岐する保存の `CONFLICT` だけ。ほかは `NOT_FOUND`（無い id と削除した Note）と `BAD_REQUEST`（形の違う入力と、種類に合わない操作）。画像は oRPC の標準の code を使う（「画像」の節）。エディタは失敗の理由で分岐しない。
 
@@ -42,7 +42,7 @@ contract に置く純関数と定数。server と ui が同じものを読む。
 - `logicalDate(at)`: Logical Date。local time の 5 時より前は前の日に数える。server は作るときの `date` に、ui は `/daily` の今日に使う。`today` の procedure は作らない。
 - `displayName(note)`: Daily は ISO の日付、Essay と Repo Note は title（空なら `Untitled`）、Scratch は `owner/repo`。
 - `IMAGE_URL_PREFIX`: 本文の画像の URL の prefix の `/api/assets/`（ADR-0019）。body の画像の参照の列挙と markdown の取り込みも読むので、定義は body に置いて contract が re-export する。body が contract を import すると、contract の先の schema と drizzle-orm まで読むため。
-- `NOTES_HOSTNAMES`: notes の口が答える host 名（`monica.localhost`・`localhost`・`127.0.0.1`）。notes の口の Host の照合と、エディタの内部リンクの判定が読む。Host の照合は DNS rebinding を防ぐ許可の一覧なので、名前を足すとその口に届く経路も増える。
+- `NOTES_HOSTNAMES`: ブラウザの口が答える host 名（`monica.localhost`・`localhost`・`127.0.0.1`）。ブラウザの口の Host の照合と、エディタの内部リンクの判定が読む。Host の照合は DNS rebinding を防ぐ許可の一覧なので、名前を足すとその口に届く経路も増える。
 
 ## 種類ごとの不変条件
 
@@ -111,7 +111,7 @@ Note Mention と Synced Block が引く procedure。画面での扱いは `docs/
 ### upload と取り込み
 
 - `image.upload` は `z.file()` を受ける。RPCLink は File を含む input を multipart で送る。
-- `image.import` は外部の URL を受け、Backend が fetch して upload と同じく置く。http と https だけを受け（ほかは input の検証で `BAD_REQUEST`）、行き先の host は制限しない。外の site からの呼び出しは notes の口の same-origin の照合で止まる。
+- `image.import` は外部の URL を受け、Backend が fetch して upload と同じく置く。http と https だけを受け（ほかは input の検証で `BAD_REQUEST`）、行き先の host は制限しない。外の site からの呼び出しはブラウザの口の照合（ADR-0017・0028）で止まる。
 - どちらも置いた画像の URL を返す。
 - 上限は 20MB。超えれば `PAYLOAD_TOO_LARGE`。upload は File の中身を写す前に大きさを見る。取り込みは Content-Length を信じず、読みながら数えて、超えた所で読むのをやめて接続を切る。
 - 形式は先頭のバイト列（magic bytes）だけで決め、Content-Type と file 名は見ない。png・jpg・gif・webp 以外は `UNSUPPORTED_MEDIA_TYPE`。SVG は本文の中で script を動かせるので断る。
@@ -121,7 +121,7 @@ Note Mention と Synced Block が引く procedure。画面での扱いは `docs/
 
 ### 配信
 
-- `NoteLedger.serveImage(name)` が `/api/assets/<name>` の GET への応答を返す。apps/backend が notes の口の素の GET の route に載せる（`docs/packages/backend.md` の「notes の口」）。
+- `NoteLedger.serveImage(name)` が `/api/assets/<name>` の GET への応答を返す。apps/backend がブラウザの口の素の GET の route に載せる（`docs/packages/backend.md` の「ブラウザの口」）。
 - `name` は置くときの名前の形（小文字の UUID と 4 つの拡張子）で厳密に照合してから path にする。合わなければ、file が無いときと同じ 404。`..` や `/` を含む名前も、大文字の UUID も、置き場所に別の名前で在る file も配らない。
 - `cache-control: public, max-age=31536000, immutable`。同じ名前の画像は中身が変わらない。content-type は拡張子から Bun が付ける。
 
@@ -143,7 +143,7 @@ Note Mention と Synced Block が引く procedure。画面での扱いは `docs/
 - HTML は 1MB まで読み、そこで読みやめて残りの転送を止め、読んだ分を解析する。OGP は head にあるので、読みやめても取りこぼさない。
 - 2xx 以外の応答と、届かなかった request は `BAD_GATEWAY` で失敗する。redirect は fetch の既定のまま追う。
 - `Content-Type` が無いか、大文字小文字を区別せずに `html` を含むときだけ body を読む。ほかは body を読まず、項目はどれも無いものとして favicon だけを `/favicon.ico` にする。
-- 行き先の host は制限しない。localhost の URL を貼るのは正当な使い方で、外の site からの呼び出しは notes の口の same-origin の照合で止まるため。
+- 行き先の host は制限しない。localhost の URL を貼るのは正当な使い方で、外の site からの呼び出しはブラウザの口の照合（ADR-0017・0028）で止まるため。
 - cache は持たない。取った値は、貼った時点で本文の attrs に入る。
 - 画面は失敗の種類で分岐しないので、`.errors()` で宣言しない。
 
@@ -218,7 +218,7 @@ note は他の domain を import せず、他の domain からも import され�
 - escape は、行頭と inline の構文を素の文字として持たせた doc を、block の種類ごとに `toMarkdown` → `fromMarkdown` に通し、元の doc に戻るかで確かめる。記号の組み合わせは固定のテストでは数え尽くせないので、`src/body/markdown-roundtrip.test.ts` が、記号の多い文字・mark・hardBreak・Note Mention・入れ子の list・表を固定の seed で乱択に組んだ doc も往復させる。乱択から外す組み合わせは、escape を入れる前のコードでも同じく往復しなかったものに限り、外す理由をそこに書く。
 - GFM に合わせた読み（表のセルの区切りや escape）は、同じ入力を GitHub の markdown API（`gh api markdown -f mode=gfm -f text='…'`）に通し、cmark-gfm の描画と比べて確かめる。cmark-gfm の文法（`ext_scanners.re`）を読むだけだと、re2c の最長一致を見落として読み違える。`table_cell = (escaped_char|[^|\r\n])+` を `\` の偶奇で区切ると読むと誤りで、描画では `a \\| b` を区切らない。
 - 画像は `image.test.ts` が、一時 directory の home で確かめる。取り込みの相手は Bun.serve の fake で、終わらない body、始まらない応答、途中で止まる body を作る。10 秒の打ち切りは、task の sync と同じく `importImage` に短い timeout を渡して確かめる。GC の 48 時間は時計を止めず、画像の mtime を `utimesSync` で過去と未来に置く。
-- 画像の GET と multipart の輸送は、apps/backend の `notes-listener.test.ts` が RPCLink で upload してから GET して確かめる。
+- 画像の GET と multipart の輸送は、apps/backend の `browser-listener.test.ts` が RPCLink で upload してから GET して確かめる。
 - OGP の行き先は `src/fake-site.ts` の fake の site に差し替える。fake は Bun.serve で path ごとに status・header・body を返し、届いた request の path と User-Agent を記録し、header の保留（`hold()`）、body の後に送り続けるか止まったままでいること、client が body を読みやめたこと（`cancelled`）を記録する。task の `fake-github.ts` と同じ形。
 - 10 秒の打ち切りは、`AbortSignal.timeout` を `spyOn` で差し替え、渡された ms を確かめてから手で abort する。header を待つ間と body の途中で止まった間の両方で確かめる。`stop()` も同じ 2 つで確かめる。
 - 1MB で転送を止めたことは、fake に cancel が 200ms 以内に届くことで見る。読みやめたまま捨てた body も GC が 1 秒ほどで cancel するので、待つ時間を長くすると cancel を呼ばなくても通る。

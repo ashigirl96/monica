@@ -12,7 +12,7 @@ import type { ContractRouterClient } from '@orpc/contract'
 import { drizzle } from 'drizzle-orm/bun-sqlite'
 import { migrate } from 'drizzle-orm/bun-sqlite/migrator'
 
-import { listenNotes } from './notes-listener.ts'
+import { listenBrowser } from './browser-listener.ts'
 import { freePort } from './testing.ts'
 
 const cleanups: (() => void)[] = []
@@ -36,12 +36,12 @@ function listen(port: number | undefined, dist = webDist({ 'index.html': '<p>not
   const db = drizzle(new Database(':memory:'))
   migrate(db, { migrationsFolder: migrations.folder, migrationsTable: migrations.table })
   const noteLedger = createNoteLedger({ db, home })
-  const listener = listenNotes(port?.toString(), { context: { db, noteLedger }, webDist: dist })
+  const listener = listenBrowser(port?.toString(), { context: { db, noteLedger }, webDist: dist })
   if (listener) cleanups.push(() => listener.stop())
   return { listener, home }
 }
 
-test('the notes listener answers on both loopbacks to the three names of its port and refuses any other Host', async () => {
+test('the browser listener answers on both loopbacks to the three names of its port and refuses any other Host', async () => {
   const port = freePort()
   listen(port)
 
@@ -57,28 +57,37 @@ test('the notes listener answers on both loopbacks to the three names of its por
   }
 })
 
-// 外の site からの top-level の form POST は loopback まで届く（docs/research/browser-loopback.md）。
-test('a request other than GET runs a note procedure only when Sec-Fetch-Site is same-origin', async () => {
+// 外の site からの top-level の form POST は loopback まで届き、user が起こす navigation には none が付く（docs/research/browser-loopback.md、ADR-0028）。
+test('a request other than GET runs a note procedure only from the same origin or from a Chrome Extension', async () => {
   const port = freePort()
   listen(port)
 
-  const openDaily = (secFetchSite?: string) =>
+  const openDaily = (site?: string, mode?: string) =>
     fetch(`http://127.0.0.1:${port}/rpc/note/daily/open`, {
       method: 'POST',
       headers: {
         host: `monica.localhost:${port}`,
         'content-type': 'application/json',
-        ...(secFetchSite && { 'sec-fetch-site': secFetchSite }),
+        ...(site && { 'sec-fetch-site': site }),
+        ...(mode && { 'sec-fetch-mode': mode }),
       },
       body: JSON.stringify({ json: { date: '2026-10-06' } }),
     })
 
-  expect((await openDaily()).status).toBe(403)
-  expect((await openDaily('same-site')).status).toBe(403)
-  expect((await openDaily('cross-site')).status).toBe(403)
-  const sameOrigin = await openDaily('same-origin')
-  expect(sameOrigin.status).toBe(200)
-  expect(await sameOrigin.json()).toMatchObject({ json: { kind: 'daily', date: '2026-10-06' } })
+  const cases: [site: string | undefined, mode: string | undefined, status: number][] = [
+    ['same-origin', undefined, 200],
+    ['same-origin', 'cors', 200],
+    ['none', 'cors', 200],
+    ['none', undefined, 403],
+    ['none', 'navigate', 403],
+    ['none', 'no-cors', 403],
+    ['same-site', 'cors', 403],
+    ['cross-site', 'cors', 403],
+    [undefined, undefined, 403],
+  ]
+  for (const [site, mode, status] of cases) {
+    expect([site, mode, (await openDaily(site, mode)).status]).toEqual([site, mode, status])
+  }
 })
 
 test('a GET for a path of the SPA gets index.html uncached, and a hashed asset is cached for good', async () => {
@@ -120,7 +129,7 @@ test('a GET for a path of the SPA gets index.html uncached, and a hashed asset i
 
 const PNG = Uint8Array.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 0x0d])
 
-test('an image uploaded through the notes listener is served back byte for byte and cached for good', async () => {
+test('an image uploaded through the browser listener is served back byte for byte and cached for good', async () => {
   const port = freePort()
   listen(port)
   const client: ContractRouterClient<{ note: typeof contract }> = createORPCClient(
@@ -166,13 +175,13 @@ test('a GET for an image whose name is not one the Note Ledger makes is not foun
 })
 
 // headless で起こした dev の Backend が release の 19380 を取らないよう、env が無ければ既定の port にも倒さない。
-test('without a port there is no notes listener', () => {
+test('without a port there is no browser listener', () => {
   expect(listen(undefined).listener).toBeNull()
 })
 
 // Chromium と macOS は monica.localhost を ::1 から先に引くので、::1 だけを他の process が握っていてもブラウザはそちらに繋がる。
 test.each(['::1', '127.0.0.1'])(
-  'a port taken on %s leaves notes unserved with one line on stderr and the other loopback free',
+  'a port taken on %s leaves no browser listener with one line on stderr and the other loopback free',
   (taken) => {
     const port = freePort()
     const holder = Bun.serve({ hostname: taken, port, fetch: () => new Response('someone else') })

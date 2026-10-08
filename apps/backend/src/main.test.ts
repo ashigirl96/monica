@@ -35,17 +35,17 @@ function announcements(stdout: ReadableStream<Uint8Array>) {
 }
 
 // main.ts は Backend の組み立てそのものなので、Shell と同じく process として起こす。
-async function startBackend(notesPort: number) {
+async function startBackend(browserPort: number) {
   const home = tempHome((cleanup) => cleanups.push(cleanup))
   const ptyd = startFakePtyd(home)
   cleanups.push(() => ptyd.stop())
-  const { MONICA_NOTES_PORT: _, ...env } = process.env
+  const { MONICA_BROWSER_PORT: _, ...env } = process.env
   const backend = Bun.spawn([process.execPath, join(import.meta.dir, 'main.ts')], {
     env: {
       ...env,
       MONICA_HOME: home,
       MONICA_PTYD_PATH: join(home, 'no-ptyd'),
-      MONICA_NOTES_PORT: String(notesPort),
+      MONICA_BROWSER_PORT: String(browserPort),
       // login shell の rc を読む時間を短くする。
       SHELL: '/bin/sh',
     },
@@ -80,15 +80,15 @@ function viaToken(
   })
 }
 
-test('the token listener carries workbench, task and job but not note, and the notes listener only note', async () => {
-  const notesPort = freePort()
-  const backend = await startBackend(notesPort)
+test('the token listener carries workbench, task and job but not note, and the browser listener only note', async () => {
+  const browserPort = freePort()
+  const backend = await startBackend(browserPort)
 
-  const viaNotes = (path: string) =>
-    fetch(`http://127.0.0.1:${notesPort}/rpc/${path}`, {
+  const viaBrowser = (path: string) =>
+    fetch(`http://127.0.0.1:${browserPort}/rpc/${path}`, {
       method: 'POST',
       headers: {
-        host: `monica.localhost:${notesPort}`,
+        host: `monica.localhost:${browserPort}`,
         'sec-fetch-site': 'same-origin',
         'content-type': 'application/json',
       },
@@ -97,9 +97,9 @@ test('the token listener carries workbench, task and job but not note, and the n
 
   for (const path of ['workbench/layout/get', 'task/list', 'job/list']) {
     expect([path, (await viaToken(backend, path)).status]).toEqual([path, 200])
-    expect([path, (await viaNotes(path)).status]).toEqual([path, 404])
+    expect([path, (await viaBrowser(path)).status]).toEqual([path, 404])
   }
-  expect((await viaNotes('note/essay/create')).status).toBe(200)
+  expect((await viaBrowser('note/essay/create')).status).toBe(200)
   expect((await viaToken(backend, 'note/essay/create')).status).toBe(404)
 }, 20_000)
 

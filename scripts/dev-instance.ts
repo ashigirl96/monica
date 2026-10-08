@@ -8,9 +8,9 @@ export const RELEASE_HOME = join(homedir(), '.monica')
 
 const IDENTIFIER = 'com.ashigirl96.monica.dev'
 const DEFAULT_PORT = 1420
-// release の notes の口は 19380（ADR-0017）。
-const DEFAULT_NOTES_PORT = 19381
-// notes の口を散らす範囲（19382〜19481）の外に置く。
+// release のブラウザの口は 19380（ADR-0017）。
+const DEFAULT_BROWSER_PORT = 19381
+// ブラウザの口を散らす範囲（19382〜19481）の外に置く。
 const DEFAULT_WEB_PORT = 19581
 const PORT_SPREAD = 100
 
@@ -30,7 +30,7 @@ export function isReleaseHome(home: string): boolean {
 type DevInstance = {
   identifier: string
   preferredPort: number
-  notesPort: number
+  browserPort: number
   webPort: number
 }
 
@@ -41,7 +41,7 @@ export function devInstance(home: string): DevInstance {
     return {
       identifier: IDENTIFIER,
       preferredPort: DEFAULT_PORT,
-      notesPort: DEFAULT_NOTES_PORT,
+      browserPort: DEFAULT_BROWSER_PORT,
       webPort: DEFAULT_WEB_PORT,
     }
   }
@@ -53,7 +53,7 @@ export function devInstance(home: string): DevInstance {
   return {
     identifier: `${IDENTIFIER}.${slug}-${hash.toString('hex').slice(0, 6)}`,
     preferredPort: DEFAULT_PORT + offset,
-    notesPort: DEFAULT_NOTES_PORT + offset,
+    browserPort: DEFAULT_BROWSER_PORT + offset,
     webPort: DEFAULT_WEB_PORT + offset,
   }
 }
