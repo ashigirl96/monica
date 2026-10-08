@@ -117,19 +117,19 @@ Backend を本物の ptyd に繋いで起こす。Shell の役（親として生
 
 ## notes の画面をブラウザで確かめる
 
-画面は `apps/web` の Vite が配り、`/rpc` と `/api/assets` を同じ home の Backend の notes の口へ proxy する。`bun run` の Backend の notes の口は SPA を配らないので、開くのは Vite の URL。
+画面は `apps/web` の Vite が配り、`/rpc` と `/api/assets` を同じ home の Backend のブラウザの口へ proxy する。`bun run` の Backend のブラウザの口は SPA を配らないので、開くのは Vite の URL。
 
-1. home を作ってから、notes の口と Vite の port を引く。`devInstance` は home の realpath から port を決めるので、home が無いうちに引くと `$TMPDIR` の `/var` と `/private/var` の違いで Vite と別の port になる。
+1. home を作ってから、ブラウザの口と Vite の port を引く。`devInstance` は home の realpath から port を決めるので、home が無いうちに引くと `$TMPDIR` の `/var` と `/private/var` の違いで Vite と別の port になる。
 
    ```bash
    mkdir -p ${TMPDIR%/}/monica-s2
    MONICA_HOME=${TMPDIR%/}/monica-s2 bun -e '
    const { devInstance } = await import(`${process.cwd()}/scripts/dev-instance.ts`);
-   const { notesPort, webPort } = devInstance(process.env.MONICA_HOME);
-   console.log(notesPort, webPort);'
+   const { browserPort, webPort } = devInstance(process.env.MONICA_HOME);
+   console.log(browserPort, webPort);'
    ```
 
-2. 「起こす」の 3 の command に `MONICA_NOTES_PORT=<notes の port>` を足して Backend を起こす。port が埋まっていると、`err.log` に `[backend] not serving notes on port …` が出て、口なしで起きる。
+2. 「起こす」の 3 の command に `MONICA_BROWSER_PORT=<ブラウザの口の port>` を足して Backend を起こす。port が埋まっていると、`err.log` に `[backend] no browser listener on port …` が出て、口なしで起きる。
 3. Bash の `run_in_background` で Vite を起こす。`web.log` に `Local:   http://localhost:<Vite の port>/` が出たら開ける。
 
    ```bash
@@ -147,11 +147,11 @@ Backend を本物の ptyd に繋いで起こす。Shell の役（親として生
 
    Backend に届かないときは、Vite が proxy の接続を応答なしで切り（release の口と同じく、画面には network error に見える）、`web.log` に `http proxy error` が出る。
 
-5. 確かめる Note は、notes の口に RPCLink を向けた script で入れる。router は `{ note }` の下にあり、GET 以外の request には `Sec-Fetch-Site: same-origin` が要る。script を `packages/note/` の下に置くと `@orpc/*` と `./src/contract.ts` を解決できるので、終わったら消す。
+5. 確かめる Note は、ブラウザの口に RPCLink を向けた script で入れる。router は `{ note }` の下にあり、GET 以外の request には `Sec-Fetch-Site: same-origin` か、`Sec-Fetch-Site: none` と `Sec-Fetch-Mode: cors` の組（Chrome Extension の fetch が付けるもの）が要る。script を `packages/note/` の下に置くと `@orpc/*` と `./src/contract.ts` を解決できるので、終わったら消す。
 
    ```ts
    const root: ContractRouterClient<{ note: typeof contract }> = createORPCClient(
-     new RPCLink({ url: `http://localhost:${notesPort}/rpc`, headers: { 'sec-fetch-site': 'same-origin' } }),
+     new RPCLink({ url: `http://localhost:${browserPort}/rpc`, headers: { 'sec-fetch-site': 'same-origin' } }),
    )
    const daily = await root.note.daily.open({ date: '2026-10-06' })
    ```

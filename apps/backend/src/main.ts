@@ -33,8 +33,8 @@ import { Hono } from 'hono'
 import { bearerAuth } from 'hono/bearer-auth'
 import { cors } from 'hono/cors'
 
+import { listenBrowser } from './browser-listener.ts'
 import { loginShellPath } from './login-shell-path.ts'
-import { listenNotes } from './notes-listener.ts'
 
 // stdout は Shell 宛ての JSON 行だけを書く channel なので、log は stderr に出す。
 const announce = (line: object) => console.log(JSON.stringify(line))
@@ -112,7 +112,7 @@ taskLedger.start()
 jobLedger.start()
 noteLedger.start()
 // compiled binary の --asset は entry の隣に置かれ、bun run の Backend には無い。
-const notesListener = listenNotes(process.env.MONICA_NOTES_PORT, {
+const browserListener = listenBrowser(process.env.MONICA_BROWSER_PORT, {
   context: { db, noteLedger },
   webDist: join(import.meta.dir, 'dist'),
 })
@@ -135,7 +135,7 @@ let exiting = false
 function exit() {
   if (exiting) return
   exiting = true
-  notesListener?.stop()
+  browserListener?.stop()
   noteLedger.stop()
   jobLedger.stop()
   taskLedger.stop()

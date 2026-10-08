@@ -20,9 +20,9 @@ if (isReleaseHome(process.env.MONICA_HOME)) {
 }
 process.env.MONICA_BIN = join(repo, 'scripts/monica-dev')
 mkdirSync(process.env.MONICA_HOME, { recursive: true, mode: 0o700 })
-const { identifier, preferredPort, notesPort } = devInstance(process.env.MONICA_HOME)
+const { identifier, preferredPort, browserPort } = devInstance(process.env.MONICA_HOME)
 // apps/web の Vite も同じ home から port を引いて proxy するので、空きを探して動かさない。
-process.env.MONICA_NOTES_PORT = String(notesPort)
+process.env.MONICA_BROWSER_PORT = String(browserPort)
 
 function bindable(port: number, host: string): Promise<boolean> {
   return new Promise((settle) => {
