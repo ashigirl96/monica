@@ -1,0 +1,7 @@
+node_modules/
+bun.lock
+build/
+*.app/
+home-*/
+results.jsonl
+shell.jsonl

@@ -1,0 +1,8 @@
+{
+  "name": "r268-bundled-claude-probe",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "@anthropic-ai/claude-agent-sdk": "0.3.293"
+  }
+}
