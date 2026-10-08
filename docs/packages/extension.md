@@ -8,7 +8,16 @@
 - `name` と `key` は `env.mode` で選ぶ。`production` は `Monica` と release の key、それ以外は `Monica (dev)` と dev の key。普段の Brave に dev を並べて読み込んでも、`brave://extensions` で見分けられる。key を出力の dir と同じ mode で選ぶので、dev の出力に release の key は入らない。
 - `version` は `0.1.0` に固定する。unpacked でしか配らず、版を上げる運用を持たない。
 - side panel は global にする。manifest の `side_panel.default_path` に `src/sidepanel/index.html` を書き、service worker（`src/background.ts`）が `chrome.sidePanel.setPanelBehavior({ openPanelOnActionClick: true })` を呼ぶ。toolbar の action を押すと、その window の side panel が開閉する。
-- permission は `sidePanel` だけ。build の manifest は `web_accessible_resources` を持たない（CRXJS は dev の出力にだけ足す）。
+- permission は `sidePanel` だけ。`tabs` と `webNavigation` は足さない。build の manifest は `web_accessible_resources` を持たない（CRXJS は dev の出力にだけ足す）。
+- `host_permissions` は `["<all_urls>"]`。side panel が Current Page の url と title を読み（`docs/packages/chat.md` の「Current Page の追い方」）、ブラウザの口（loopback）を呼ぶ（ADR-0028）。
+- `content_security_policy.extension_pages` は `"script-src 'self'; object-src 'self'; img-src 'self' data:"`。答えに埋めた画像を読み込ませないため、`img-src` で外の画像を止める。CRXJS の dev は manifest の CSP を変えないので、dev も同じ CSP で動く。
+
+## side panel
+
+- `src/sidepanel/main.tsx` は globals.css を import してから、ブラウザの口への RPCLink を作って `client.chat` を `@monica/chat/ui` の `ChatApp` に渡すだけにする。画面と Current Page の追跡（`chrome.tabs`）は chat の ui が持つ（`docs/packages/chat.md` の「ui」）。RPC は side panel の page から呼び、service worker を経由しない（ADR-0028）。
+- globals.css は fluid の token と Tailwind の theme を持ち、`@source` で `packages/chat/src/ui` を走査する。chat の ui の CSS より先に読ませ、Tailwind の layer の順を先に決める。
+- side panel は `http://127.0.0.1:<port>/rpc` を token 無しで呼ぶ。port は `vite.config.ts` の `define` で `__MONICA_BROWSER_PORT__` に焼き込み、型は `src/sidepanel/browser-port.d.ts` が宣言する。`vite build` は release の 19380（`scripts/dev-instance.ts` の `RELEASE_BROWSER_PORT`）、`vite`（dev）は `devInstance(MONICA_HOME || ~/.monica-dev)` の `browserPort` を焼く。dev は release の口に倒さない。Vite の dev は `define` を `/@vite/env` で global に置くので、dev で焼いた値は `curl http://localhost:<Chrome Extension の port>/@vite/env` で見られる。
+- `@fontsource-variable/inter` は globals.css が import するので apps/extension の依存にする。bun の isolated linker では、import する側の package.json に書く必要がある。
 
 ## ID と鍵
 

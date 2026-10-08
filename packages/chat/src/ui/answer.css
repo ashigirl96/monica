@@ -1,0 +1,13 @@
+/* ChatMessage の吹き出しは中身の min-content で広がるので、表とコードを幅の計算から外し、長い URL も途中で折れるようにする。 */
+.typeset :is(pre, .typeset-scroll) {
+  contain: inline-size;
+}
+
+.typeset {
+  overflow-wrap: anywhere;
+}
+
+/* typeset は太さを font-variation-settings だけで付けるので、可変軸の無い日本語のフォントでは太字と見出しが太くならない。 */
+.typeset :is(strong, b, h1, h2, h3, h4, h5, h6, th) {
+  font-weight: 600;
+}

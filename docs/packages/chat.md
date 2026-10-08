@@ -1,6 +1,6 @@
-# Chat の agent
+# Chat の agent と画面
 
-`packages/chat` の contract と `ChatAgent`。Chrome Extension の Chat の質問に、Backend が起こす claude が答える。決定の理由は ADR-0028・0031・0032・0033 にある。
+`packages/chat` の contract と `ChatAgent` と ui。Chrome Extension の side panel の Chat の質問に、Backend が起こす claude が答える。決定の理由は ADR-0028・0029・0030・0031・0032・0033 にある。画面は末尾の「ui」にある。
 
 ## contract（root は `chat`）
 
@@ -124,3 +124,76 @@ SDK 0.3.293 と同梱の claude 2.1.293 で、dev の Backend を `env -i`（`HO
 - `~/.claude/projects` に `<MONICA_HOME>/chat` の path から作った directory ができず、`~/.claude.json` の `projects` に `<MONICA_HOME>` の path が入らない。
 - spare を起こした Backend に SIGTERM を送ると、spare が居なくなる。
 - SIGKILL した claude は `~/.claude/sessions/<pid>.json` を残し、次に claude が起きたときに消える。
+
+## ui
+
+`packages/chat/src/ui` は Chrome Extension の side panel の Chat の画面。`@monica/chat/ui` から出すのは root の `ChatApp` だけで、apps/extension の side panel の main.tsx がブラウザの口への RPCLink を作って `client.chat` を渡す（`docs/packages/extension.md`）。ui は `@monica/ui` に依存しない。
+
+### fluid-functionalism の写し
+
+部品は fluid-functionalism（MIT、`fluid/LICENSE`）の commit `bf9ece4` の registry から、`packages/chat/src/ui/fluid/` に写した。upstream を追う仕組みは持たない。
+
+- 写したのは 14 ファイル: `chat-message.tsx`、`input-message.tsx`、`thinking-indicator.tsx`、`button.tsx`（Base UI 版）、`hooks/use-touch-primary.tsx`、`lib/` の `utils.ts`・`springs.ts`・`font-weight.ts`・`shape-context.tsx`・`size-context.tsx`・`type-scale.ts`・`icon-context.tsx`・`surface-classes.ts`・`surface-context.tsx`。CSS は `fluid/typeset.css`（`.typeset`）と `fluid/shimmer.css`（`.shimmer-text` と keyframes）を、本家の `app/globals.css` から写した。
+- 写さないもの: Tooltip、use-fluid-hover、fluid-hover-highlight、popup、file-thumbnail。Button の loading の spinner の keyframes も、使わないので写さない。
+- 写すときの直し:
+  - `"use client"` を消し、import を拡張子付きの相対 path にし、oxfmt を当てた。
+  - InputMessage は history を残し、添付・queue・suggestions・placeholder の suggestion を消した。`leftSlot` と `rightSlot` は ReactNode だけを受ける。`onStop` と止めるボタンは写したまま残し、今は渡さない。
+  - history の添字の 2 か所は、範囲外を分岐で扱う。新しい Chat で history が縮んでも、古い添字で `undefined` を入れない。
+  - ChatMessage から、file-thumbnail を使う添付の表示を消した。
+  - ThinkingIndicator はその場で日本語にした（「考えています」「ページを読んでいます」「まとめています」）。英語版は残さない。
+  - 画面に出る英語の文言は日本語にした（送るボタンの「送る」、止めるボタンの「止める」、textarea の aria-label の「質問」）。
+  - Button の asChild の `cloneElement` に ref を渡す所は、oxlint の `react/refs` を理由付きで止めた。
+- 写した元と比べるときは、import の書き換えと oxfmt だけを当てた控えを repo の外に作り、`git diff --no-index` で比べる（`docs/packages/note-ui.md` の「旧 Monica のコードを移すとき」と同じ）。
+
+### 字と色と CSS
+
+- 字と色は fluid の token と、同梱の Inter Variable（`@fontsource-variable/inter/opsz.css`）。dark は OS に従い、切り替えの UI は持たない。
+- apps/extension の globals.css が、`@import "tailwindcss"`、Inter、`packages/chat/src/ui` を指す `@source`、fluid の token・`@theme inline`・type scale・base・focus・scrollbar を持つ。dark は `light-dark()` と `color-scheme: light dark` と `prefers-color-scheme` の media query で切り替え、fluid の `.light`・`.dark` の class と `@custom-variant dark` は持ち込まない。
+- `packages/chat/src/ui` の CSS は Tailwind の指示を含まず、token を定義せずに読むだけにする。使う component が import する（`answer.tsx` が `fluid/typeset.css` と `answer.css`、`thinking-indicator.tsx` が `fluid/shimmer.css`）。`.typeset` は `@layer components` に入るので、side panel の main.tsx は globals.css を `ChatApp` より先に import し、Tailwind の layer の順を先に決める。
+- `answer.css` の直し: `.typeset :is(pre, .typeset-scroll)` に `contain: inline-size`、`.typeset` に `overflow-wrap: anywhere` を当て、表・コードブロック・長い URL が吹き出しを広げないようにする。`.typeset :is(strong, b, h1〜h6, th)` に `font-weight: 600` を当てる。typeset は太さを `font-variation-settings` だけで付けるので、可変軸の無い日本語のフォントでは見出しが太くならないため。
+
+### 画面の組み立て
+
+- 並べ方は prototype の B。質問は ChatMessage の右の吹き出し、答えは ChatMessage に `w-full max-w-full items-stretch` で幅いっぱいに入れる。`max-w-full` だけでは、表とコードブロックだけの答えで吹き出しが潰れた（`contain: inline-size` で両方を幅の計算から外しているため）。質問の吹き出しに、その質問の Current Page は出さない。
+- 上端の見出し（`page-header.tsx`）は Current Page の title と host を出し、右端に「新しい Chat」を置く。host の行の `title` 属性に URL を持つ。host の無い URL（`file:` など）は URL をそのまま出し、URL も title も見えない Browser Tab は「読めないページ」と出す。favicon は出さない。外の画像は CSP の `img-src` で止まり、`_favicon` には `favicon` の権限が要るため。
+- 答えは use-stick-to-bottom（`chat-scroll.tsx`）で下端に張り付き、上へスクロールすると外れて「↓ 最新へ」を出す。
+- 最初の `text` が届くまで ThinkingIndicator を出す。答えている間は送らないが、入力欄には打てる。
+- 失敗は種類を分けず、答えの場所に「答えを受け取れませんでした」と出し、その問答を履歴に入れない。
+
+### Chat の状態（`chat-store.ts`）
+
+React に依らない `createChatStore(client)` が Chat を持ち、`ChatApp` は `useSyncExternalStore` で描くだけにする。DOM の無い bun test で送受信を確かめるため。
+
+- Chat は side panel の document の memory にだけあり、window ごとに 1 つ。「新しい Chat」を押すか side panel を閉じると終わり、どこにも残さない。Backend が居なくなっても終わらない（ADR-0030・0031）。
+- `open(readPage)` は side panel を開いた時に `ChatApp` の effect が 1 回呼び、`chat.prepare` を呼んで spare を起こさせる。失敗は無視する。Backend の不在を知らせる帯はまだ無い。dev の StrictMode で 2 回呼ばれても、Backend が spare を 1 つに保つので害は無い。
+- `ask` は、送る時に `readPage` で Current Page を読み直して `page` に入れ、答え終えた問答を古い順に `history` に入れて `chat.ask` を呼ぶ。答えている間は送らずに false を返す。答えの途中で Current Page が替わっても、delta はその質問の答えに足す。
+- `startNewChat` は流れている stream を `signal` で abort し、問答と履歴を空にする。abort の後に届いた delta は描かない。Backend は abort でその claude を止める。
+- client の型 `ChatClient` は、side panel が呼ぶ `prepare` と `ask` だけの形。ブラウザの口への oRPC の client の `chat` がそのまま入り、テストは偽の client を渡す。
+
+### Current Page の追い方（`current-page.ts`）
+
+- `watchCurrentPage(onChange)` は、最初の `tabs.query({ active: true, currentWindow: true })` で side panel を載せた window の id と Browser Tab を取る。side panel の page からは、別の window に focus があってもこの window が返る。
+- `tabs.onActivated` はその window の event だけを見る。`tabs.onUpdated` は Current Page の Browser Tab の event だけを見て、tab の url と title が前に出したものと違えば出し直す。pushState と hash の変更も url の変化として届く。chrome:// へ移ったときは url も title も無い event だけが届くので、変化の中身ではなく tab の値で比べる。
+- 権限は `tabs` も `webNavigation` も足さない。`<all_urls>` の host permission で http・https・file のページの url と title が見える。
+- `read()` は送る時に `tabs.query({ active: true, windowId })` で取り直す。見出しの追跡が event を取りこぼしても、送るページを違えない。
+- 止めると listener を外し、読み途中の結果も捨てる。
+
+### markdown
+
+- 答えは react-markdown と remark-gfm で描き、`.typeset` をかぶせる。表は `.typeset-scroll` で包む。コードブロックに色は付けない。
+- 画像は読み込まず、`[画像: alt] URL` を文字で出す。URL に Chat の中身を載せた画像を読み込ませないため。manifest の CSP の `img-src 'self' data:` も外の画像を止める。
+- リンクにするのは `http:` と `https:` の URL だけで、`<a target="_blank" rel="noreferrer">` で新しい Browser Tab に開き、文字の後ろに `new URL(href).host` を淡く出す。target の無い `<a>` は side panel から開かない。ほかの scheme（`javascript:`、`mailto:`、相対 URL など）は文字で出す。
+
+### テスト
+
+- DOM の環境は入れない（`docs/packages/note-ui.md` の「テスト」と同じ）。
+- `current-page.test.ts` は `fake-chrome.ts` の偽の `chrome.tabs` で確かめる。偽物は `globalThis.chrome` に置いてテストの後に外し、`query` の `active`・`windowId`・`currentWindow` を本物と同じく絞る。chrome:// へ移ったときの url も title も無い `onUpdated` も出せる。
+- `chat-store.test.ts` は偽の client で確かめる。偽の答えの stream は `signal` に応えず、test が流した delta をそのまま渡すので、abort の後に届いた delta を描かないことを確かめられる。
+- `answer.test.tsx` は `react-dom/server` の `renderToStaticMarkup` で markdown の描画を確かめる。react-dom は devDependency。
+
+### 実機で確かめたこと
+
+Brave 1.97 で確かめた。
+
+- 新しい profile の headed の Brave で action から side panel を開くと、side panel は窓の右に出て、Brave の sidebar（icon の列）は一緒に出なかった。
+- dev の side panel で `current-page.ts` を編集すると HMR で届くが、開いている side panel の listener は前の module のままだった。Current Page の追い方を確かめ直すときは、side panel を閉じて開き直す。

@@ -6,9 +6,11 @@ import { basename, join, resolve } from 'node:path'
 export const DEFAULT_HOME = join(homedir(), '.monica-dev')
 export const RELEASE_HOME = join(homedir(), '.monica')
 
+// release の Shell が Backend に渡す apps/desktop/src-tauri/src/locations.rs の値と揃える（ADR-0017）。
+export const RELEASE_BROWSER_PORT = 19380
+
 const IDENTIFIER = 'com.ashigirl96.monica.dev'
 const DEFAULT_PORT = 1420
-// release のブラウザの口は 19380（ADR-0017）。
 const DEFAULT_BROWSER_PORT = 19381
 // ブラウザの口を散らす範囲（19382〜19481）の外に置く。
 const DEFAULT_WEB_PORT = 19581

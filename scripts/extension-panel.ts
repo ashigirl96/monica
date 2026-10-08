@@ -80,7 +80,57 @@ async function openedSidePanel(cdp: Cdp, id: string): Promise<string> {
   return attach(cdp, panel)
 }
 
-const usage = `使い方: MONICA_HOME=<home> bun scripts/extension-panel.ts open | eval '<js>' | screenshot <path>`
+// open と同じく最初の Browser Tab で action を押すので、window が 1 つの Brave で使う。
+async function closeSidePanel(cdp: Cdp, id: string): Promise<void> {
+  const panel = await sidePanel(cdp, id)
+  if (!panel) throw new Error('side panel が開いていません')
+  const [tab] = await targets(cdp, 'tab')
+  if (!tab) throw new Error('action を押す Browser Tab がありません')
+  await cdp.send('Extensions.triggerAction', { id, targetId: tab.targetId })
+  for (let i = 0; i < 100; i++) {
+    const { targetInfos } = await cdp.send<{ targetInfos: TargetInfo[] }>('Target.getTargets')
+    if (!targetInfos.some(({ targetId }) => targetId === panel)) return
+    await Bun.sleep(50)
+  }
+  throw new Error('action を押しても side panel が閉じなかった')
+}
+
+// side panel が閉じるか、SIGINT・SIGTERM を受けるまで、URL に path を含む request の body を 1 行ずつ出す。
+async function printRequests(cdp: Cdp, id: string, path: string): Promise<void> {
+  const sessionId = await openedSidePanel(cdp, id)
+  const { promise: ended, resolve: end } = Promise.withResolvers<void>()
+  process.on('SIGINT', end)
+  process.on('SIGTERM', end)
+  cdp.on('Target.detachedFromTarget', (params) => {
+    if ((params as { sessionId: string }).sessionId === sessionId) end()
+  })
+  cdp.on('Network.requestWillBeSent', (params, from) => {
+    const { requestId, request } = params as {
+      requestId: string
+      request: { url: string; method: string; postData?: string; hasPostData?: boolean }
+    }
+    if (from !== sessionId || !request.url.includes(path)) return
+    void (async () => {
+      const body =
+        request.postData ??
+        (request.hasPostData
+          ? (
+              await cdp.send<{ postData: string }>(
+                'Network.getRequestPostData',
+                { requestId },
+                sessionId,
+              )
+            ).postData
+          : undefined)
+      console.log(JSON.stringify({ url: request.url, method: request.method, body }))
+    })()
+  })
+  await cdp.send('Network.enable', {}, sessionId)
+  console.error(`[extension-panel] ${path} への request を待っています`)
+  await ended
+}
+
+const usage = `使い方: MONICA_HOME=<home> bun scripts/extension-panel.ts open | close | eval '<js>' | screenshot <path> | requests <path>`
 const [command, arg] = process.argv.slice(2)
 const home = resolve(process.env.MONICA_HOME || DEFAULT_HOME)
 const endpoint = browserEndpoint(braveProfile(home))
@@ -95,6 +145,10 @@ try {
   const id = await devExtensionId(cdp, extensionDevOutput(home))
   if (command === 'open') {
     console.log(await openSidePanel(cdp, id))
+  } else if (command === 'close') {
+    await closeSidePanel(cdp, id)
+  } else if (command === 'requests' && arg) {
+    await printRequests(cdp, id, arg)
   } else if (command === 'eval' && arg) {
     const sessionId = await openedSidePanel(cdp, id)
     console.log(JSON.stringify(await evaluate(cdp, sessionId, arg, { userGesture: true })))
