@@ -49,6 +49,7 @@
 - externalBin を base の `tauri.conf.json` に書かないのは、tauri-build が cargo の build のたびに `binaries/` の存在を求め、`binaries/monica-ptyd-<triple>` で `target/<profile>/monica-ptyd` を上書きするため。base に書くと dev と CI の clippy にも `binaries/` が要り、空の placeholder は cargo が作った ptyd を潰す。
 - `--minify` は使わない。trpc-cli が class 名で instanceof を判定しており、名前が潰れると起動しない。`--bytecode` は top-level await があるので `--format=esm` が要る。
 - compiled binary は 1 つ約 70MB（Bun の runtime だけで約 60MB）あり、Backend と CLI で約 140MB になる。
+  - Chat の本文への変換（linkedom と defuddle。`docs/packages/chat.md` の「Page Snapshot」）で、Backend は 74,924,658 byte から 80,604,786 byte に 5,680,128 byte（約 5.7MB）増えた。compile した Backend でも変換は動き、`snapshot` の本文は `bun run` の Backend と同じになった。
 - `bun run install-app`（`scripts/install-app.ts`）は、build した `.app` を一時の場所に `cp -R` し、Chat の claude と Chrome Extension を写して、codesign と quarantine の解除を済ませる。そのあと起きている Monica を終了させ、`/Applications` の `.app` を入れ替える。起動はしない。
   - 署名する前の `.app` を開かせないよう、一時の場所で署名してから置く。
   - claude は `scripts/bundled-claude.ts` の `bundledClaude()` が解く。`packages/chat` から SDK を解き、その場所から platform package（`@anthropic-ai/claude-agent-sdk-<platform>-<arch>`）の `claude` を解く。bun の isolated linker では root から SDK を解けず、`packages/chat` から platform package も直には解けないため。SDK も自分の場所から同じ名前を解くので、dev の Backend が使う claude と同じ file になる。PATH の `~/.local/bin/claude` は使わない（ADR-0032）。これを `cp` で `Contents/MacOS/claude` に写す。`.app` は約 236MB 増える。

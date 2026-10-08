@@ -15,11 +15,19 @@ function event<F>(listeners: Listeners<F>) {
   }
 }
 
-/** bun test に無い chrome.tabs を、side panel が触る分だけ globals に置く。side panel は windowId の window に載る。 */
+/** Browser Tab で executeScript を呼んだ時に起きること。hang は返らない（view-source: など）。 */
+type Reading = { html: string; selection: string } | { error: string } | 'hang'
+
+/**
+ * bun test に無い chrome.tabs と chrome.scripting を、side panel が触る分だけ globals に置く。side panel は windowId の window に載る。
+ * executeScript は注入された関数を走らせず、readings に置いた結果を返す。
+ */
 export class FakeChrome {
   readonly tabs: FakeTab[] = []
   readonly activated: Listeners<ActivatedListener> = new Set()
   readonly updated: Listeners<UpdatedListener> = new Set()
+  readonly readings = new Map<number, Reading>()
+  readonly injections: unknown[] = []
   readonly windowId: number
 
   constructor(windowId: number, tabs: Omit<FakeTab, 'active'>[]) {
@@ -38,9 +46,18 @@ export class FakeChrome {
         .filter((tab) => !filter.currentWindow || tab.windowId === this.windowId)
         .map((tab) => this.#asTab(tab))
     const get = async (tabId: number) => this.#asTab(this.#tab(tabId))
+    const executeScript = async (injection: { target: { tabId: number } }) => {
+      this.injections.push(injection)
+      const reading = this.readings.get(injection.target.tabId)
+      if (reading === undefined) throw new Error(`no reading for tab ${injection.target.tabId}`)
+      if (reading === 'hang') return new Promise<never>(() => {})
+      if ('error' in reading) throw new Error(reading.error)
+      return [{ frameId: 0, documentId: 'document-0', result: reading }]
+    }
     Object.assign(globalThis, {
       chrome: {
         tabs: { query, get, onActivated: event(this.activated), onUpdated: event(this.updated) },
+        scripting: { executeScript },
       },
     })
   }

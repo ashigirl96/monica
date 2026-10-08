@@ -1,20 +1,21 @@
-import type { Page } from '../contract.ts'
+/** 見出しに出す Current Page。chrome:// などの Browser Tab では url も title も無い。 */
+export type CurrentPage = { url?: string; title?: string }
 
 export type CurrentPageWatch = {
-  /** side panel の window の Current Page を、event を待たずに取り直す。 */
-  read: () => Promise<Page>
+  /** side panel の window の Current Page の Browser Tab を、event を待たずに取り直す。 */
+  read: () => Promise<chrome.tabs.Tab | undefined>
   stop: () => void
 }
 
-function pageOf({ url, title }: chrome.tabs.Tab): Page {
+function pageOf({ url, title }: chrome.tabs.Tab): CurrentPage {
   return { ...(url !== undefined && { url }), ...(title !== undefined && { title }) }
 }
 
 /** side panel を載せた window の Current Page を追い、変わるたびに onChange を呼ぶ。 */
-export function watchCurrentPage(onChange: (page: Page) => void): CurrentPageWatch {
+export function watchCurrentPage(onChange: (page: CurrentPage) => void): CurrentPageWatch {
   let windowId: number | undefined
   let tabId: number | undefined
-  let shown: Page | undefined
+  let shown: CurrentPage | undefined
   let stopped = false
 
   const show = (tab: chrome.tabs.Tab) => {
@@ -50,7 +51,7 @@ export function watchCurrentPage(onChange: (page: Page) => void): CurrentPageWat
       const [tab] = await chrome.tabs.query(
         windowId === undefined ? { active: true, currentWindow: true } : { active: true, windowId },
       )
-      return tab ? pageOf(tab) : {}
+      return tab
     },
     stop() {
       stopped = true

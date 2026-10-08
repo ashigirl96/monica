@@ -32,7 +32,8 @@ const manifest = defineManifest(({ mode }) => ({
   action: {},
   background: { service_worker: 'src/background.ts', type: 'module' },
   side_panel: { default_path: 'src/sidepanel/index.html' },
-  permissions: ['sidePanel'],
+  // scripting は、質問を送った時に Current Page の HTML と選択範囲を読む。
+  permissions: ['sidePanel', 'scripting'],
   // Current Page の url と title を読み、ブラウザの口（loopback）を呼ぶ（ADR-0028）。
   host_permissions: ['<all_urls>'],
   // 答えに埋めた画像を読み込ませない。URL に載せた Chat の中身が外へ出るため。

@@ -1,4 +1,12 @@
-import type { AskInput, ChatEvent, Page, Turn } from '../contract.ts'
+import {
+  type AskInput,
+  type ChatEvent,
+  MAX_ASK_BODY_BYTES,
+  type Page,
+  type PageSnapshot,
+  type Turn,
+} from '../contract.ts'
+import { noticeOf } from './notice.ts'
 
 /** side panel が呼ぶ分の chat の client。ブラウザの口への oRPC の client の chat がそのまま入る。 */
 export type ChatClient = {
@@ -11,6 +19,25 @@ export type ChatEntry = {
   question: string
   answer: string
   status: 'waiting' | 'answering' | 'answered' | 'failed'
+  /** 読めなかった・切り詰めた・渡していないことを、質問の吹き出しの下に出す 1 行。 */
+  notice?: string
+}
+
+// oRPC が input を包む分の余白。
+const BODY_MARGIN_BYTES = 1024 * 1024
+
+/** body の上限を超える input は、今のページの HTML と選択範囲を外し、大きすぎて読めなかったことにする。履歴は削らない。 */
+function withinBodyLimit(input: AskInput): AskInput {
+  const bytes = new TextEncoder().encode(JSON.stringify(input)).byteLength
+  if (bytes + BODY_MARGIN_BYTES <= MAX_ASK_BODY_BYTES) return input
+  return {
+    ...input,
+    page: { ...addressOf(input.page), content: { kind: 'unreadable', reason: 'too-large' } },
+  }
+}
+
+function addressOf({ url, title }: Pick<PageSnapshot, 'url' | 'title'>) {
+  return { ...(url !== undefined && { url }), ...(title !== undefined && { title }) }
 }
 
 export type ChatSnapshot = { entries: readonly ChatEntry[]; answering: boolean }
@@ -55,18 +82,25 @@ export function createChatStore(client: ChatClient): ChatStore {
     try {
       const page = await read()
       if (!live()) return
-      const events = await client.ask(
-        { question, page, history: [...history] },
-        { signal: controller.signal },
-      )
+      const events = await client.ask(withinBodyLimit({ question, page, history: [...history] }), {
+        signal: controller.signal,
+      })
       let text = ''
+      // Backend は Chat を持たないので、本文にした Page Snapshot を返してもらい、次の質問から送り直す（ADR-0031）。
+      let turnPage: PageSnapshot = addressOf(page)
       for await (const event of events) {
         if (!live()) return
+        if (event.type === 'snapshot') {
+          turnPage = event.page
+          const notice = noticeOf(event)
+          if (notice) patch(id, { notice })
+          continue
+        }
         text += event.text
         patch(id, { answer: text, status: 'answering' })
       }
       if (!live()) return
-      history = [...history, { question, page, answer: text }]
+      history = [...history, { question, page: turnPage, answer: text }]
       answering = undefined
       patch(id, { status: 'answered' })
     } catch {

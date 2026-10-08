@@ -11,7 +11,9 @@ import {
 } from '@anthropic-ai/claude-agent-sdk'
 
 import { type Claude, claudeOptions } from './claude.ts'
-import type { AskInput, ChatEvent } from './contract.ts'
+import type { AskInput, ChatEvent, SnapshotEvent } from './contract.ts'
+import { askContent } from './page/prompt.ts'
+import { snapshotOf } from './page/snapshot.ts'
 import { singleTurn, userMessage } from './prompt.ts'
 
 // 1 つ 270〜290MB の claude を token の無い口から起こせるので、spare も含めてこの数で止める（ADR-0031）。
@@ -113,6 +115,7 @@ export function createChatAgent(deps: { home: string; claudePath?: string }): Ch
     { started: q, claude }: Started<Query>,
     end: () => void,
     signal: AbortSignal | undefined,
+    snapshot: SnapshotEvent,
   ): AsyncGenerator<ChatEvent> {
     // generator の finally は走っている await が終わるまで走らないので、abort ではすぐに送る。
     const kill = () => claude?.kill('SIGKILL')
@@ -120,6 +123,7 @@ export function createChatAgent(deps: { home: string; claudePath?: string }): Ch
     if (signal?.aborted) kill()
     let answered = false
     try {
+      yield snapshot
       // for await を抜けると SDK は claude の終了を最大 2 秒待つので、result を受けたら iterator を閉じずに返す。
       const messages = q[Symbol.asyncIterator]()
       for (;;) {
@@ -137,6 +141,11 @@ export function createChatAgent(deps: { home: string; claudePath?: string }): Ch
         ) {
           yield { type: 'text', text: message.event.delta.text }
         } else if (message.type === 'result') {
+          // Backend の stdout は Shell 宛ての JSON 行だけなので、prompt cache の観察に使う usage は stderr に出す。
+          const { usage } = message
+          console.error(
+            `[chat] claude ${claude?.pid}: usage input ${usage.input_tokens}, cache creation ${usage.cache_creation_input_tokens ?? 0}, cache read ${usage.cache_read_input_tokens ?? 0}, output ${usage.output_tokens}`,
+          )
           answered = true
           return
         }
@@ -163,19 +172,24 @@ export function createChatAgent(deps: { home: string; claudePath?: string }): Ch
   }
   internalsOf.set(chatAgent, {
     prepare,
-    async ask(input, signal) {
-      const { prompt, end } = singleTurn(userMessage(input))
+    async ask({ question, page, history }, signal) {
+      // 本文への変換は数百 ms で、spare から答えれば claude を並べて起こす得は小さいので、変換を先に済ませる。
+      const snapshot = await snapshotOf(page, history)
+      const { content, omitted } = askContent(question, snapshot, history)
+      const event: SnapshotEvent = { type: 'snapshot', page: snapshot, omitted }
+      const { prompt, end } = singleTurn(userMessage(content))
       const claimed = spare
       if (claimed) {
         spare = undefined
         clearTimeout(claimed.timer)
-        return answer(await fromSpare(claimed, prompt), end, signal)
+        return answer(await fromSpare(claimed, prompt), end, signal, event)
       }
       if (claudes.size >= MAX_CLAUDES) return undefined
       return answer(
         spawnWith((options) => query({ prompt, options })),
         end,
         signal,
+        event,
       )
     },
   })

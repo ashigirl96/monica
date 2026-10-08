@@ -1,4 +1,4 @@
-import type { Page } from '../contract.ts'
+import type { CurrentPage } from './current-page.ts'
 import { Button } from './fluid/button.tsx'
 import { useIcons } from './fluid/lib/icon-context.tsx'
 
@@ -11,7 +11,7 @@ function hostOf(url: string): string {
   }
 }
 
-function PageLines({ page: { url, title } }: { page: Page }) {
+function PageLines({ page: { url, title } }: { page: CurrentPage }) {
   if (url === undefined && title === undefined) {
     return (
       <div className="truncate text-[13px] leading-5 text-muted-foreground">読めないページ</div>
@@ -30,7 +30,13 @@ function PageLines({ page: { url, title } }: { page: Page }) {
 }
 
 /** 上端に Current Page の title と host を出し、右端に「新しい Chat」を置く。 */
-export function PageHeader({ page, onNewChat }: { page: Page | undefined; onNewChat: () => void }) {
+export function PageHeader({
+  page,
+  onNewChat,
+}: {
+  page: CurrentPage | undefined
+  onNewChat: () => void
+}) {
   const icons = useIcons()
   return (
     <header className="flex min-h-[52px] items-center gap-2 border-b border-border px-3 py-2">
