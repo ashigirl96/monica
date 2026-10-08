@@ -289,6 +289,34 @@ test('an escaped pipe stays inside its cell', () => {
   expect(cell?.content).toEqual([{ type: 'text', text: 'a | b' }])
 })
 
+// GFM の spec の例 200。
+test('an escaped pipe in a cell reads as a pipe inside code and emphasis too', () => {
+  const rows = blockAt('| f\\|oo  |\n| ------ |\n| b `\\|` az |\n| b **\\|** im |', 0)?.content
+
+  expect(rows?.map((row) => row.content?.[0]?.content)).toEqual([
+    [{ type: 'text', text: 'f|oo' }],
+    [
+      { type: 'text', text: 'b ' },
+      { type: 'text', text: '|', marks: [{ type: 'code' }] },
+      { type: 'text', text: ' az' },
+    ],
+    [
+      { type: 'text', text: 'b ' },
+      { type: 'text', text: '|', marks: [{ type: 'bold' }] },
+      { type: 'text', text: ' im' },
+    ],
+  ])
+})
+
+test('an escaped pipe at the end of a row stays in the last cell', () => {
+  const cells = blockAt('| a | b \\|\n| c | d |', 0)?.content?.[0]?.content
+
+  expect(cells?.map((cell) => cell.content)).toEqual([
+    [{ type: 'text', text: 'a' }],
+    [{ type: 'text', text: 'b |' }],
+  ])
+})
+
 test('a cell ending in a backslash before an escaped pipe reads back the same', () => {
   const markdown = '| a \\\\\\| b | c |\n| --- | --- |\n| d | e |'
   const header = blockAt(markdown, 0)?.content?.[0]?.content

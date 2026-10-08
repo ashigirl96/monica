@@ -19,7 +19,6 @@ const EMPHASIS = new Set(['bold', 'italic', 'strike'])
 
 const LIST = new Set(['bullet', 'numbered', 'todo'])
 
-// 表示名を渡すのは note-1 だけにし、表のセルには note-2 だけを置く。
 const noteName = (noteId: string) => (noteId === 'note-1' ? 'n[a]me|*x*\\' : null)
 
 function mulberry32(seed: number): () => number {
@@ -96,18 +95,14 @@ class Generator {
     return { type: 'table', content: rows }
   }
 
-  // セルは hardBreak を空白にして 1 行に書き、両端の空白を外して読む。表示名つきの Note Mention と、
-  // `|` を含む code の mark は、セルの `|` の escape と重なって往復しない（escape の前から）。
+  // セルは hardBreak を空白にして 1 行に書き、両端の空白を外して読む。
   private inlines(lineCount: number, cell: boolean): Node[] {
     const out: Node[] = []
     for (let line = 0; line < lineCount; line++) {
       if (line > 0) out.push({ type: 'hardBreak' })
       this.times(1, 3, (segment) => {
         if (this.next() < 0.1) {
-          out.push({
-            type: 'noteMention',
-            attrs: { noteId: cell ? 'note-2' : this.pick(['note-1', 'note-2']) },
-          })
+          out.push({ type: 'noteMention', attrs: { noteId: this.pick(['note-1', 'note-2']) } })
           return
         }
         let text = this.word()
@@ -115,7 +110,6 @@ class Generator {
         if (segment === 0) text = text.replace(/^ +/, 'a')
         if (cell) text = text.trim() || 'a'
         const marks = this.marks(text)
-        if (cell && marks?.some((mark) => mark.type === 'code')) text = text.replaceAll('|', 'a')
         const last = out.at(-1)
         if (last?.type === 'text' && JSON.stringify(last.marks) === JSON.stringify(marks)) {
           last.text += text
@@ -136,7 +130,7 @@ class Generator {
     const marks = ['bold', 'italic', 'underline', 'strike', 'code', 'link']
       .filter((type) => types.has(type) && (edgesOk || !EMPHASIS.has(type)))
       .map((type) =>
-        type === 'link' ? { type, attrs: { href: 'https://example.com/*a_b' } } : { type },
+        type === 'link' ? { type, attrs: { href: 'https://example.com/*a_b|c\\|d' } } : { type },
       )
     return marks.length > 0 ? marks : undefined
   }
