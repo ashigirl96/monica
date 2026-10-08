@@ -94,11 +94,11 @@ agent が Agent Session の会話を書き残したもの。agent が書き、mo
 _Avoid_: Transcript（単独で使わない）, 会話ログ
 
 **通知**:
-Agent Session がユーザー待ちに入ったことを知らせる macOS の通知。質問とエラーはその理由の待ちに入るたびに出し、許可は許可を求められるたびに出し（許可待ちの間に次の許可を求められても出す）、手空きは turn が終わった時だけ出す。claude の起動や resume の直後の手空きでは出さない。Task に属する Agent Session は Task の Issue の参照と title で、それ以外は agent の cwd で呼ぶ。本文は待ちの理由に Agent Session の title を添え、title が無ければ理由だけにする。desktop が動いている間だけ出し、待ちが解けても取り下げない。クリックすると、出した時に Agent Session が居た Terminal Session を表示している Tab を選ぶ。その Tab が無ければ desktop を前面に出すだけになる。
+Agent Session がユーザー待ちに入ったことを知らせる macOS の通知。質問とエラーはその理由の待ちに入るたびに出し、許可は許可を求められるたびに出し（許可待ちの間に次の許可を求められても出す）、手空きは turn が終わった時だけ出す。claude の起動や resume の直後の手空きでは出さない。Task に属する Agent Session は Task の Issue の参照と title で、それ以外は agent の cwd で呼ぶ。本文は待ちの理由に Agent Session の title を添え、title が無ければ理由だけにする。desktop が動いている間だけ出す。同じ Terminal Session の通知は新しい通知で置き換え、その Agent Session が未読でなくなると取り下げる。クリックすると、出した時に Agent Session が居た Terminal Session を表示している Tab を選ぶ。その Tab が無ければ desktop を前面に出すだけになる。
 _Avoid_: 待ち通知, alert
 
 **未読**:
-通知を出した Agent Session の待ちを、私がまだ見ていないこと。見たとは、desktop の窓が前面にあり、Workbench がその Agent Session の Tab を表示したこと。見るか、待ちが解ける（動作中か終了になる）と未読でなくなる。同じ待ちの間に通知が何度出ても、1 つの Agent Session の未読は 1 つと数える。
+通知を出した Agent Session の待ちを、私がまだ見ていないこと。見たとは、desktop の窓が前面にあり、Workbench がその Agent Session の Tab を表示したこと。通知センターで通知を消しても、見たことにはならない。見るか、待ちが解ける（動作中か終了になる）と未読でなくなる。同じ待ちの間に通知が何度出ても、1 つの Agent Session の未読は 1 つと数える。
 _Avoid_: 未観測（Backend の不在の語）, unseen, 未確認
 
 ### Job
@@ -151,7 +151,7 @@ _Avoid_: transclusion, mirror, embed
 ### Process
 
 **Shell**:
-Tauri の殻。窓、端末の中継、Backend の起動・監督と、OS への窓口（通知を出し、押された通知を Workbench に渡す、Dock に未読の数を出す、画像をクリップボードに置く、クリップボードからファイルの path を読む、URL を開く）だけを持ち、Task も Backend の中身も知らない。
+Tauri の殻。窓、端末の中継、Backend の起動・監督と、OS への窓口（通知を出して取り下げ、押された通知を Workbench に渡す、Dock に未読の数を出す、画像をクリップボードに置く、クリップボードからファイルの path を読む、URL を開く）だけを持ち、Task も Backend の中身も知らない。
 _Avoid_: Rust 側, Tauri 側
 
 **Backend**:
