@@ -162,6 +162,10 @@ _Avoid_: 今のページ, 開いているページ（どの Browser Tab のこ�
 Chrome Extension の side panel で agent と交わす一続きの問答。side panel を開いた window ごとに 1 つだけあり、質問はそれぞれ、質問した時の Current Page について訊く。新しい Chat を始めるか side panel を閉じると終わり、どこにも残らない。Backend が居ない間は答えが返らないが、Chat は終わらない。Tab の外で動くので Agent Session ではない。
 _Avoid_: 会話（単独では Agent Session の会話と紛れる）, session, conversation, thread
 
+**Page Snapshot**:
+質問を送った時に Current Page から読み取った、そのページの URL・title・本文・選択範囲と、添えたならスクリーンショット。質問 1 つに 1 つある。読めなかったときは、読めなかったことと、その理由を持つ。
+_Avoid_: ページの情報, page context, capture（スクリーンショットの撮影と紛れる）
+
 ### Process
 
 **Shell**:
