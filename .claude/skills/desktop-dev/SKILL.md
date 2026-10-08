@@ -47,6 +47,8 @@ dev の desktop は `MONICA_HOME` ごとに identifier と vite の port が分�
   ```js
   (() => { const b = window.__monicaTerminals.get(tabId).buffer.active; const end = b.baseY + b.cursorY; return Array.from({ length: 10 }, (_, i) => b.getLine(end - 9 + i)?.translateToString(true)); })()
   ```
+
+- **Tab の env**は、上の「書き込み」で `env > $MONICA_HOME/tab-env.txt` を Tab に送り、その file を読む。macOS の `ps eww` は Tab の shell の env を出さない。
 - **Tab の切り替え**は、`[data-tab-id]` の button に `pointerdown` と `pointerup` を `dispatchEvent` する。Tab は pointerdown で切り替わるが、tauri-mcp の click は pointerdown を出さない。
 - **窓の前面と背面**（未読のように窓の focus で変わる振る舞い）は、`osascript -e 'tell application "Finder" to activate'` で別の app を前に出して背面にし、tauri-mcp の `manage_window` の `focus` で前面に戻す。最小化（`manage_window` の `minimize`）では webview の JS が止まりうるので、focus の event が届いて背面と扱えたのかを見分けられない。
   - 最小化した窓は `focus` だけでは戻らず、`document.visibilityState` が `hidden` のまま残る。`osascript -e 'tell application "System Events" to set frontmost of (first process whose unix id is <DESKTOP の pid>) to true'` で前に出してから `focus` する。前面に来たかは webview の `document.hasFocus()` で確かめる。
