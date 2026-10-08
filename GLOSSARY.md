@@ -188,13 +188,13 @@ Skill の写し元にする、他人が書いた skill の repo（mattpocock/ski
 _Avoid_: 本家、元 repo
 
 **Upstream Update**:
-Upstream の新しい版を、Upstream から写した Skill に反映すること。Skill Patch は残す。
+Upstream の新しい版を、Upstream から写した Skill に反映すること。Upstream が意図を満たした Skill Patch は外してその Skill Patch Note も消し、ほかの Skill Patch は残す。
 _Avoid_: Sync（GitHub の写しを引き直すこと）、取り込み
 
 **Skill Patch**:
-Upstream から写した Skill に、この repo でだけ加えた変更。Upstream Update の後も残る。
+Upstream から写した Skill に、この repo でだけ加えた変更。1 つの Skill の中で、1 つの理由のために変えた箇所の束を 1 つと数え、同じ理由で複数の Skill を変えたら Skill ごとに別の Skill Patch になる。Upstream が同じ意図を満たすまで、Upstream Update の後も残る。
 _Avoid_: 改変、override、customization
 
 **Skill Patch Note**:
-Skill Patch ごとに、何をなぜ変えたかを書いたもの。Upstream Update で Upstream の変更と Skill Patch がぶつかったとき、どちらを残すかを決める拠り所になる。
+Skill Patch ごとに、何をなぜ変えたかを書いたもの。Upstream Update でその Skill Patch を当て直すか外すかを決める拠り所になる。
 _Avoid_: 改変記録、changelog
