@@ -10,6 +10,7 @@
 - side panel は global にする。manifest の `side_panel.default_path` に `src/sidepanel/index.html` を書き、service worker（`src/background.ts`）が `chrome.sidePanel.setPanelBehavior({ openPanelOnActionClick: true })` を呼ぶ。toolbar の action を押すと、その window の side panel が開閉する。
 - permission は `sidePanel` と `scripting`。`scripting` は、質問を送った時に Current Page の top frame で `chrome.scripting.executeScript` を走らせ、HTML と選択範囲を読む（`docs/packages/chat.md` の「Page Snapshot」）。`activeTab`・`tabs`・`webNavigation` は足さない。`<all_urls>` の host permission で、どの Browser Tab にも注入できる。build の manifest は `web_accessible_resources` を持たない（CRXJS は dev の出力にだけ足す）。
 - `host_permissions` は `["<all_urls>"]`。side panel が Current Page の url と title を読み（`docs/packages/chat.md` の「Current Page の追い方」）、ブラウザの口（loopback）を呼ぶ（ADR-0028）。
+- 質問に添えるスクリーンショットの `chrome.tabs.captureVisibleTab` のために足す権限は無い。`activeTab` が無くても、`<all_urls>` の host permission だけで side panel から呼べる（`docs/packages/chat.md` の「スクリーンショット」）。`chrome://` などの host permission の外のページでは、`The 'activeTab' permission is not in effect…` で reject する。
 - `content_security_policy.extension_pages` は `"script-src 'self'; object-src 'self'; img-src 'self' data:"`。答えに埋めた画像を読み込ませないため、`img-src` で外の画像を止める。CRXJS の dev は manifest の CSP を変えないので、dev も同じ CSP で動く。
 
 ## side panel

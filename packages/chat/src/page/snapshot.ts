@@ -46,7 +46,7 @@ function sameTurn(url: string | undefined, text: string, history: readonly Turn[
  * 送られた履歴に URL も本文も同じページがあれば、本文の代わりにその turn を指す。
  */
 export async function snapshotOf(page: Page, history: readonly Turn[]): Promise<PageSnapshot> {
-  const { url, title, selection, content } = page
+  const { url, title, selection, content, screenshot, screenshotFailed } = page
   const read = await contentOf(content, url)
   const turn = read.kind === 'text' ? sameTurn(url, read.text, history) : undefined
   return {
@@ -54,5 +54,7 @@ export async function snapshotOf(page: Page, history: readonly Turn[]): Promise<
     ...(title !== undefined && { title }),
     ...(selection && { selection: cut(selection, MAX_PAGE_CHARS) }),
     content: turn === undefined ? read : { kind: 'same', turn },
+    ...(screenshot !== undefined && { screenshot }),
+    ...(screenshotFailed && { screenshotFailed }),
   }
 }
