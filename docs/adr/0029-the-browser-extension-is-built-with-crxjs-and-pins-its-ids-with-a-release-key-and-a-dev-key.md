@@ -13,7 +13,7 @@ Chrome Extension（`apps/extension`、map #254）は Brave の side panel で動
 
 ## Consequences
 
-- `@types/chrome` の global の `chrome` は、tsconfig が 1 つなので apps/web と apps/desktop でも型が付く。oxlint の `no-restricted-globals` で apps/extension の外の `chrome` を止める。
+- `@types/chrome` の global の `chrome` は、tsconfig が 1 つなので apps/web と apps/desktop でも型が付く。oxlint の `no-restricted-globals` で、apps/extension と chat の ui（`packages/chat/src/ui`）の外の `chrome` を止める。chat の ui は Chrome Extension の side panel でだけ動き、Current Page を追うのとページを読むのに `chrome.*` を直に呼ぶ。workbench の ui が Shell の command を直に呼ぶのと同じ形で、apps/extension は組み立てるだけにする（ADR-0002）。
 - manifest は `defineManifest` に手で書き、permission も自分で足す。`permissions` の typo は型で止まらない（3.0.0 の d.ts が参照する型が @types/chrome 0.3.4 に無く、`skipLibCheck` の下で任意の string が通る）。
 - CRXJS は dev と build が同じ `build.outDir` に書くので、mode で dir を分ける。分けないと、`check:ts` の build が、dev で読み込んでいる Chrome Extension を production の中身に置き換える。
 - dev の出力には dev server の port が焼き込まれ、dev server が別の port で起き直すと、Chrome Extension を reload するまで繋がらない。そこで port は `devInstance` が home から決め（既定の home は 19781、ほかは 19782〜19881）、`strictPort` で起こす。空いている別の port には移らない。
