@@ -13,7 +13,7 @@ monica の repo の形、package の entry、domain 間の呼び出し、テス�
 - `docs/packages/task-ledger.md`: task の contract と Task Ledger。task の procedure、Run、Bench の準備、close、sync、task のテストの fake に触るとき。
 - `docs/packages/job-ledger.md`: job の contract と Job Ledger。job の procedure、system の Job を足すとき、裏で定期的に走る処理に触るとき。
 - `docs/packages/note-ledger.md`: note の contract と Note Ledger と body。note の procedure、画像、OGP、本文の JSON と markdown の変換に触るとき。
-- `docs/packages/chat.md`: chat の contract と `ChatAgent`。Chat の procedure、claude の options と env、spare と同時の数、claude の止め方、偽の claude に触るとき。
+- `docs/packages/chat.md`: chat の contract と `ChatAgent` と ui。Chat の procedure、claude の options と env、spare と同時の数、claude の止め方、偽の claude、side panel の Chat の画面（fluid-functionalism の写し、CSS、Current Page の追い方、markdown）に触るとき。
 - `docs/packages/note-ui.md`: note の ui。`packages/note/src/ui` か `apps/web` に触るとき、旧 Monica のコードを移すとき。
 - `docs/packages/backend.md`: Backend の組み立て（apps/backend）。起動と終了の順序、PATH、Ledger の配線、ブラウザの口に触るとき。
 - `docs/packages/cli.md`: CLI（apps/cli）。`cli: true` の procedure か SKILL.md を足すとき、argv の振り分け・出力・エラー・補完・CLI のテストに触るとき。
@@ -83,9 +83,9 @@ entry は層ではなく、import してよい実行環境で切る（ADR-0009�
 | entry | 中身 | 実行環境 | import する側 |
 |---|---|---|---|
 | `@monica/<d>/schema` | drizzle の table。table を持たない chat には無い。`drizzle-orm/sqlite-core` と `drizzle-orm` 本体（CHECK と index の条件を書く `sql`）と、FK のための他 package の schema だけを import する | どこでも | 自分の contract と server、他 package の schema（FK）と server（SELECT） |
-| `@monica/<d>/contract` | oRPC の contract、zod schema、型 | どこでも | apps/desktop と apps/web（型だけ）、apps/cli、apps/backend、自分と他 package の server と ui と cli |
+| `@monica/<d>/contract` | oRPC の contract、zod schema、型 | どこでも | apps/desktop と apps/web と apps/extension（型だけ）、apps/cli、apps/backend、自分と他 package の server と ui と cli |
 | `@monica/<d>/server` | router、`create<D>Ledger()`（chat は `createChatAgent()`）、migrations の re-export | Bun | apps/backend、他 package の server、テスト |
-| `@monica/<d>/ui` | React の component と atom。画面を持たない job と、まだ side panel を持たない chat には無い | browser | apps/desktop、apps/web（note）、他 package の ui |
+| `@monica/<d>/ui` | React の component と atom。画面を持たない job には無い | browser | apps/desktop、apps/web（note）、apps/extension（chat）、他 package の ui |
 | `@monica/<d>/cli` | 出力の整形関数、補完の候補を返す関数、手で書く command。CLI に出す procedure の無い note と chat には無い | Bun | apps/cli |
 | `@monica/<d>/body` | Note の本文の JSON を読む関数と、本文と markdown の変換（`docs/packages/note-ledger.md`）。今は note だけが持つ | どこでも | 自分の contract と server と ui |
 | `@monica/<d>/testing` | 他の package のテストに出す fake。今は workbench と chat が持つ。workbench は `src/fake-ptyd.ts` の fake の ptyd（`startFakePtyd`）、短い home を作る `tempHome`、Terminal Session が starting を抜けるのを待つ `untilSettled` を出す。chat は `src/testing.ts` の、偽の claude を起こす wrapper を書く `writeFakeClaude` を出す | Bun | 他 package のテストと `testing.ts` |

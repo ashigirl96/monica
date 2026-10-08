@@ -3,10 +3,19 @@ import { join } from 'node:path'
 
 export type Cdp = {
   send<T>(method: string, params?: object, sessionId?: string): Promise<T>
+  /** CDP の event を受ける。flatten の session の event は sessionId 付きで届く。 */
+  on(method: string, listener: (params: unknown, sessionId?: string) => void): void
   close(): void
 }
 
-type Reply = { id?: number; result?: unknown; error?: { message: string } }
+type Reply = {
+  id?: number
+  result?: unknown
+  error?: { message: string }
+  method?: string
+  params?: unknown
+  sessionId?: string
+}
 
 // Chromium は --remote-debugging-port=0 で選んだ port と browser の path を user-data-dir の DevToolsActivePort に書く。
 export function browserEndpoint(userDataDir: string): string | undefined {
@@ -24,6 +33,7 @@ export async function connectCdp(url: string): Promise<Cdp> {
     number,
     { resolve: (value: unknown) => void; reject: (error: Error) => void }
   >()
+  const listeners = new Map<string, ((params: unknown, sessionId?: string) => void)[]>()
   let lastId = 0
   await new Promise<void>((resolve, reject) => {
     socket.addEventListener('open', () => resolve())
@@ -31,6 +41,11 @@ export async function connectCdp(url: string): Promise<Cdp> {
   })
   socket.addEventListener('message', (event) => {
     const reply = JSON.parse(String(event.data)) as Reply
+    if (reply.method !== undefined) {
+      for (const listener of listeners.get(reply.method) ?? [])
+        listener(reply.params, reply.sessionId)
+      return
+    }
     const waiter = reply.id === undefined ? undefined : pending.get(reply.id)
     if (!waiter || reply.id === undefined) return
     pending.delete(reply.id)
@@ -51,6 +66,9 @@ export async function connectCdp(url: string): Promise<Cdp> {
           reject: (error) => reject(new Error(`${method}: ${error.message}`)),
         })
       })
+    },
+    on(method: string, listener: (params: unknown, sessionId?: string) => void) {
+      listeners.set(method, [...(listeners.get(method) ?? []), listener])
     },
     close: () => socket.close(),
   }

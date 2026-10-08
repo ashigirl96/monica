@@ -7,6 +7,7 @@ import { defineConfig } from 'vite'
 
 import {
   DEFAULT_HOME,
+  RELEASE_BROWSER_PORT,
   RELEASE_HOME,
   devInstance,
   extensionDevOutput,
@@ -32,11 +33,26 @@ const manifest = defineManifest(({ mode }) => ({
   background: { service_worker: 'src/background.ts', type: 'module' },
   side_panel: { default_path: 'src/sidepanel/index.html' },
   permissions: ['sidePanel'],
+  // Current Page の url と title を読み、ブラウザの口（loopback）を呼ぶ（ADR-0028）。
+  host_permissions: ['<all_urls>'],
+  // 答えに埋めた画像を読み込ませない。URL に載せた Chat の中身が外へ出るため。
+  content_security_policy: {
+    extension_pages: "script-src 'self'; object-src 'self'; img-src 'self' data:",
+  },
 }))
+
+// side panel が呼ぶブラウザの口の port を焼き込む。apps/extension/src/sidepanel/browser-port.d.ts が型を宣言する。
+const browserPort = (port: number) => ({ __MONICA_BROWSER_PORT__: JSON.stringify(port) })
 
 export default defineConfig(({ command, mode }) => {
   const plugins = [react(), tailwindcss(), crx({ manifest })]
-  if (command === 'build') return { plugins, build: { outDir: `dist/${mode}` } }
+  if (command === 'build') {
+    return {
+      plugins,
+      define: browserPort(RELEASE_BROWSER_PORT),
+      build: { outDir: `dist/${mode}` },
+    }
+  }
   const home = resolve(process.env.MONICA_HOME || DEFAULT_HOME)
   if (isReleaseHome(home)) {
     throw new Error(
@@ -44,9 +60,11 @@ export default defineConfig(({ command, mode }) => {
     )
   }
   // dev の出力に port が焼き込まれるので、空いている別の port に移らない。
-  const { extensionPort } = devInstance(home)
+  const { extensionPort, browserPort: devBrowserPort } = devInstance(home)
   return {
     plugins,
+    // 同じ home の Backend が居なくても release の口に倒さず、dev の画面から release の Backend を呼ばない。
+    define: browserPort(devBrowserPort),
     // CRXJS は dev も build.outDir に書くので、check:ts の build が dev で読み込んでいる中身を置き換えないよう分ける。
     build: { outDir: extensionDevOutput(home) },
     clearScreen: false,

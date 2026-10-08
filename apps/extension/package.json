@@ -7,6 +7,10 @@
     "build": "vite build"
   },
   "dependencies": {
+    "@fontsource-variable/inter": "catalog:",
+    "@monica/chat": "workspace:*",
+    "@orpc/client": "catalog:",
+    "@orpc/contract": "catalog:",
     "react": "catalog:",
     "react-dom": "catalog:"
   },
