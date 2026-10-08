@@ -1,6 +1,6 @@
 # Note Ledger
 
-`packages/note` の contract と、Note の種類ごとの不変条件、保存、削除と取り消し、本文の中の参照、画像、OGP の規則。決定の理由は ADR-0017・0018・0019 にある。今あるのは Note を 1 件ずつ扱う procedure、Essay の一覧、Repo の Note の一覧と Repo の候補、本文の中の参照（Note Mention の候補と解決、block の取得）、画像、OGP。
+`packages/note` の contract と、Note の種類ごとの不変条件、保存、削除と取り消し、本文の中の参照、画像、OGP、body の規則。決定の理由は ADR-0017・0018・0019 にある。
 
 ## contract（root は `note`）
 
@@ -60,7 +60,7 @@ Note は `note` table に 1 件 1 行で持つ。種類と列の対応を CHECK 
 - `daily.dates` は Daily のある Logical Date を新しい順に返す。Daily は Logical Date ごとに 1 つなので、旧 Monica の `daily-counts` の件数は持たない。Daily の画面のサイドバーとカレンダーが読む。
 - `essay.create` は title が空で `writing` の Essay を、`repoNote.create` は title が空の Repo Note を作る。どちらも呼ぶたびに新しい Note になる。
 - 作った Note の本文は、エディタの schema を満たす最小の doc（`@monica/note/body` の `EMPTY_DOC`）。
-- `essay.list` は削除していない Essay を、作った時刻の新しい順（`createdAt` の降順、同じ ms なら id の降順）に返す。旧 Monica の実際の並びで、保存しても一覧の中で動かない（旧 Monica の `api.ts` のコメントは updated_at の降順と書いていたが、実際は created_at の降順だった）。本文の代わりに preview を返し、一度も保存していない Essay と text の無い本文の preview は null。件数は区切らない。
+- `essay.list` は削除していない Essay を、作った時刻の新しい順（`createdAt` の降順、同じ ms なら id の降順）に返す。旧 Monica の実際の並びで、保存しても一覧の中で動かない。本文の代わりに preview を返し、一度も保存していない Essay と text の無い本文の preview は null。件数は区切らない。
 - `essay.setStatus` は toggle ではなく値を受ける。次に送る値は画面が導く。今と同じ値なら何も書かず、`updatedAt` も進めない。Essay 以外は `BAD_REQUEST`。
 
 ## 保存
@@ -121,7 +121,7 @@ Note Mention と Synced Block が引く procedure。画面での扱いは `docs/
 
 ### 配信
 
-- `NoteLedger.serveImage(name)` が `/api/assets/<name>` の GET への応答を返す。apps/backend が notes の口の素の GET の route に載せる（`docs/packages.md` の「notes の口」）。
+- `NoteLedger.serveImage(name)` が `/api/assets/<name>` の GET への応答を返す。apps/backend が notes の口の素の GET の route に載せる（`docs/packages/backend.md` の「notes の口」）。
 - `name` は置くときの名前の形（小文字の UUID と 4 つの拡張子）で厳密に照合してから path にする。合わなければ、file が無いときと同じ 404。`..` や `/` を含む名前も、大文字の UUID も、置き場所に別の名前で在る file も配らない。
 - `cache-control: public, max-age=31536000, immutable`。同じ名前の画像は中身が変わらない。content-type は拡張子から Bun が付ける。
 

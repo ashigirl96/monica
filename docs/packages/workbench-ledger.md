@@ -32,18 +32,44 @@ changes                    → { type: "layout" } | { type: "terminalSession", i
 - `owned` は他の domain が `createRunspace(tx, { cwd })` で作った Runspace の印（ADR-0012）。規則は「Runspace と Tab」と「pin」の節にある。
 - `terminal_session.shell` は Backend の起動時に 1 回決める。`$SHELL`、無ければ `os.userInfo().shell`、それも無ければ `/bin/zsh`。
 
+## createWorkbenchLedger
+
+```ts
+createWorkbenchLedger(deps: {
+  db: Db;
+  home: string;
+  ptydPath: string;
+  notify: (n: { title: string; body: string; terminalSessionId: string }) => void;
+  nameAgentSession: (db: Db, agentSessionId: string) => string | null;
+  unread: (terminalSessionIds: string[]) => void;
+}): WorkbenchLedger;
+```
+
+- `ptydPath` は spawn する ptyd の場所（ADR-0011）。`notify` と `nameAgentSession` は通知のための口、`unread` は未読の Agent Session が居る Terminal Session の集合を渡し、Dock の数と通知の取り下げに使わせる口（`docs/packages/notifications.md`）。
+- `start()` は Tab のファイルを書き（`docs/packages/tab-env-and-shim.md`）、未読の集合を `unread` に渡し始め（`docs/packages/notifications.md` の「未読の集合」）、ptyd に繋いで（無ければ spawn、版違いは入れ替え）reconcile する（ADR-0011）。`events` は workbench の変更の合図で、`changes` と同じ判別 union を流す。
+
+### 他の domain が呼ぶ書き込み
+
+`WorkbenchLedger` に出ている書き込みは `createRunspace` / `removeRunspace` / `moveTab` / `openTab` の 4 つで、どれも第 1 引数に transaction を取る同期の method（`docs/packages.md` の「server entry の形」）。
+
+- `createRunspace(tx, { cwd })` は Tab の無い所有された Runspace を作る。
+- `removeRunspace(tx, id, { spare? })` はそれを消し、中の Tab の Terminal Session を transaction の後に終わらせる。`spare`（Terminal Session の配列）の Tab が中にあれば、Runspace を消さずに所有を解いてそれらの Tab だけを残し（pin されていれば pin のまま）、ほかの Tab の Terminal Session を終わらせる（ADR-0012）。ptyd の Terminate は冪等で、終わった session に送っても失敗しない。
+- `openTab(tx, { runspaceId, cwd?, size?, input? }) → { tabId, terminalSessionId }` は、`starting` の Terminal Session の行と Tab を書き、shell を自分で埋め、`{ type: "layout" }` を publish する。Create は transaction の後に workbench が送り、通ったら `input` を Write する。`size` を省けば 24×80 で起こし、表示されていない Tab の shell は attach の resize で追いつく。ptyd は attach していない接続からの Write も通すので、webview が Tab を表示していなくても打てる。Create をまだ送っていない行は reconcile で lost にならないので、呼び手は reconcile を待たない（ADR-0015）。
+- `moveTab(tx, tabId, runspaceId)` は Tab を Runspace の末尾へ移し（`tab.move` と同じ規則）、`{ type: "layout" }` を publish する。
+
+Terminal Session の行の状態機械、Create をまだ送っていない集合、transaction の後の Create・Write・Terminate、張り直し（`tab.respawn` と pin）は `packages/workbench/src/terminal-session.ts` に集め、workbench の router の handler も同じ経路を通す。
+
 ## Runspace と Tab
 
 所有されていない Runspace は常に Tab を 1 つ以上持ち、Backend がそれを守る（`GLOSSARY.md` の Runspace）。所有された Runspace（Bench）は Tab が 0 でも残り、Workbench の操作では消えない。`runspace.remove` は `CONFLICT` で断り、GUI に remove は無い。消すのは作った側の `removeRunspace`（Task の close、slice 5）だけ（ADR-0012）。webview で Bench の最後の Tab を閉じたときも、workbench は消さず、slot で task に Task の close を頼むだけ（下の項目）。
 
 - `sort_order` は、Runspace と Tab を足す・移す・消すたびに、同じ transaction の中で兄弟を 0..n-1 に振り直す。`runspace.create` と `tab.open` の `index` を省けば末尾に足す。webview は active の次を渡し（旧 Monica どおり）、CLI と Task は省く。
-- Tab の title は Workbench Ledger に持たない。OSC 0/2 の title は webview の memory にだけ持ち、再 attach のときは Terminal Session Transcript の replay に含まれる OSC で戻る。表示は旧 Monica どおり title、無ければ cwd の末尾、それも無ければ `Terminal`。title はよくある zsh の theme なら command のたびに変わり、Workbench Ledger に書くとそのたびに `changes` と `layout.get` が往復するため。
+- Tab の title は Workbench Ledger に持たない。OSC 0/2 の title は webview の memory にだけ持ち、再 attach のときは Terminal Session Transcript の replay に含まれる OSC で戻る。表示は旧 Monica どおり title、無ければ cwd の末尾。title はよくある zsh の theme なら command のたびに変わり、Workbench Ledger に書くとそのたびに `changes` と `layout.get` が往復するため。
 - 再 attach の replay は Terminal Session Transcript の末尾 256 KB だけを流す。そこから落ちたモード（alt screen、マウス、bracketed paste、kitty keyboard の stack など）は、ptyd が replay の前に流し直す。追うモードと理由は `crates/terminal-daemon` の `TerminalModes` の module doc にある。webview の parser がそのモードの CSI を握りつぶすと、この流し直しも効かない。webview の xterm が CSI をどう扱うか（同じモードを送り直したときや、kitty keyboard の stack が buffer ごとにあること）は、webview が動かす版の source の `packages/workbench/node_modules/@xterm/xterm/src/common/InputHandler.ts` で確かめる。RIS と DECSTR が既定に戻す状態（kitty keyboard を含む）は、同じ directory の `services/CoreService.ts` の `reset` にある。
 - Shell が出力を読み遅れても、ptyd は接続を切らず、送り損ねた分を後から Terminal Session Transcript から送る（ADR-0020）。Shell と webview は何もせず、出力が遅れて届くだけになる。Terminal Session Transcript の保持を超えて遅れた分は届かず、ptyd は続きの先頭で xterm の buffer を合わせ、追いついて live に戻る前に今のモードをすべて言い直す。
-- `tab.respawn` は exited / lost / failed の Tab に新しい session を結び直す。overlay の「New shell in …」と「Retry」が呼ぶ（旧 Monica どおり）。
+- `tab.respawn` は exited / lost / failed の Tab に新しい session を結び直す。live な Terminal Session を表示している Tab には `CONFLICT` を返す。overlay の「New shell in …」と「Retry」が呼ぶ（旧 Monica どおり）。
 - `tab.cwd` は最後に分かった cwd。webview は OSC 7 の cwd が前の値と変わったときだけ `tab.setCwd` を呼ぶ（OSC 7 は prompt のたびに来る）。OSC 7 を出さない shell のため、OSC 0/2 の title が `/` で始まるか `~`・`~/…` なら、それも cwd の知らせとして扱う（旧 Monica どおり。`~user` や zsh の named directory は Backend が絶対 path にできないので取らない）。ただし一度でも OSC 7 を出した Tab では title を cwd に使わない（title の `~/repo` と OSC 7 の `/Users/…/repo` が交互に「変わった」ことになるため）。`tab.setCwd` は `~` を home に展開して絶対 path で持つ。Terminal Session の行の cwd は起動したときの cwd のままで、CLI の `terminal-session list` の CWD 列はそれを出す。Backend の張り直し（「pin」の節）と `tab.respawn` はこの cwd で始め、sidebar の Runspace の Repo と行（`repo.of`）も再起動の直後はこれを使う。
-
-- `runspace.create { cwd?, rows, cols } → { runspaceId, tab }` は、Runspace・Tab・`starting` の Terminal Session を 1 transaction で作り、commit 後に Create する（`tab.open` と同じ形）。cwd を省けば `$HOME`。空の Runspace を作ってから `tab.open` を呼ぶ 2 段にすると、間で webview の reload や Backend の再起動が起きたときに空の Runspace が残り、消す規則が無いため。
+- `runspace.create { cwd?, index?, rows, cols } → { runspaceId, tab }` は、Runspace・Tab・`starting` の Terminal Session を 1 transaction で作り、commit 後に Create する（`tab.open` と同じ形）。cwd を省けば `$HOME`。空の Runspace を作ってから `tab.open` を呼ぶ 2 段にすると、間で webview の reload や Backend の再起動が起きたときに空の Runspace が残り、消す規則が無いため。
 - `tab.open` の cwd を省けば、新しい Terminal Session は Runspace の cwd で始める。
 - Task の close の後に残った Runspace と Tab の cwd は、消えた worktree を指すことがある。ptyd は cwd が directory でなければ shell を `$HOME` で起こす（portable-pty の `CommandBuilder` がそうする）ので、Backend は cwd を確かめずに渡す。Tab の cwd は OSC 7 で追いつく。
 - `tab.close` と `tab.move` は、Tab が抜けて 0 になった所有されていない Runspace を同じ transaction で消す。CLI の Attach のように webview の無い経路でも、空の Runspace が残らない。所有された Runspace は 0 になっても残す。
@@ -65,7 +91,7 @@ ptyd への Create・Write・Terminate は、行を書いた transaction の後�
 - `runspace.create`・`tab.open`・`tab.respawn`、pin の張り直し、他の domain の `openTab` は、`starting` の行を commit したら返り、ptyd を待たない。shell の失敗は Tab の failed / lost で見える。
 - `runspace.remove`、`tab.close`、他の domain の `removeRunspace` も、Terminate を後ろで送って返る。Terminate は接続が切れても繋ぎ直した ptyd に送り直し、失敗は stderr に出す。
 - 終了には ptyd の Terminate（shell の pid に SIGHUP）を使い、SIGKILL は足さない。前面の claude は shell と別の process group にいても SIGHUP を受け、SessionEnd を送ってから終わる（ADR-0023）。
-- reconcile は、ptyd にだけある live な session を取り込まずに Terminate し、Tab に指されていない live な行も Terminate する（ADR-0023）。後者は、Tab を閉じた後で Terminate を送る前に Backend が止まった shell。どちらも Exit を受けて Reap し、後者の行は exited になる。Tab の無い Terminal Session を残さないため。
+- reconcile は、ptyd にだけある live な session を取り込まずに Terminate し、Tab に指されていない live な行も Terminate する（ADR-0023）。後者は、Tab を閉じた後で Terminate を送る前に Backend が止まった shell。どちらも Exit を受けて Reap し、後者の行は exited になる。Tab の無い Terminal Session を残さないため。DB では終わった行と同じ id で ptyd に残った session も、running なら Terminate し、終わっていれば Reap する。終わった行は生き返らないので、どこからも辿れないため。
 - reconcile は、Create をまだ送っていない行を、ptyd の List に無くても lost にしない（ADR-0011 の規則の例外）。Create を送った後で応答の前に接続が切れた行は、ADR-0011 どおり reconcile が決める。
 - webview は Terminal Session が `starting` の間は attach せず、`running` になった合図（`{ type: "terminalSession", id }`）で attach する。ptyd に session が無いうちに attach すると失敗し、lost と表示して繋ぎ直さないため。
 
@@ -100,7 +126,7 @@ ptyd への Create・Write・Terminate は、行を書いた transaction の後�
 
 ADR-0008 の「Backend 起動時」と ADR-0011 の reconcile の規則のうち、Agent Session の分。どちらも `transition` に Terminal Session の終了と Backend の再起動の event として渡す。
 
-- Agent Session の居場所（`terminal_session_id`）は、受け付けた hook の Terminal Session に合わせる。resume の SessionStart を取りこぼした agent が前の Tab に結ばれたままだと、前の Tab が閉じたときに生きている agent を終了にしてしまうため。 つの Terminal Session に live な Agent Session が 1 つであることは、`agent_session` の部分 unique index（`state <> 'ended'`）が守る。cwd も受け付けた hook の値に合わせる。
+- Agent Session の居場所（`terminal_session_id`）は、受け付けた hook の Terminal Session に合わせる。resume の SessionStart を取りこぼした agent が前の Tab に結ばれたままだと、前の Tab が閉じたときに生きている agent を終了にしてしまうため。1 つの Terminal Session に live な Agent Session が 1 つであることは、`agent_session` の部分 unique index（`state <> 'ended'`）が守る。cwd も受け付けた hook の値に合わせる。
 - Terminal Session の行が終わるとき（ptyd の Exit、reconcile の lost / exited）、同じ transaction で、その Terminal Session の終了でない Agent Session を終了（terminal_exited）にする。
 - 生きている Terminal Session の動作中の Agent Session を未観測にするのは、Backend の起動直後の reconcile だけ。ptyd に繋ぎ直したときの reconcile では動作中のままにする。その間も Backend は居て hook を受けていたため。
 - reconcile が終了や未観測にした Agent Session も、`reconciled` の前に 1 つずつ `{ type: "agentSession", sessionId }` で知らせる。`agentSession` の合図だけを読む購読側（task の Run）にも、ptyd に繋ぎ直したときの終了が届くようにするため。
@@ -112,7 +138,7 @@ ADR-0008 の「Backend 起動時」と ADR-0011 の reconcile の規則のうち
 - `agent_session` に、今の待ちを通知した時刻 `notified_at` と見た時刻 `seen_at` を置く。どちらも Agent Session が状態に入り直すたび（`transition` の `enter`。待ちの理由が変わるときと、許可の新しい待ちを含む）に空にする。
 - `recordHook` は、`notificationFor` が理由を返した遷移の行に、同じ transaction で `notified_at` を書く。通知はどれも状態に入り直す遷移で出るので、通知した待ちの `seen_at` は空から始まる。
 - 未読は `notified_at` があり `seen_at` が空のこと。`agentSession.list` が行ごとに `unread` として導いて渡し、webview は導かない。時刻を比べず空かどうかで決めるのは、同じ ms に見たことと次の通知が重なっても取りこぼさないため。
-- 待ちが解けると（動作中・終了・未観測）、入り直しで両方が空になるので未読でなくなる。通知を出さない待ち（起動・resume の直後の手空き）は `notified_at` が空なので未読にならない。
+- 待ちが解けると（動作中・終了）、入り直しで両方が空になるので未読でなくなる。通知を出さない待ち（起動・resume の直後の手空き）は `notified_at` が空なので未読にならない。
 - 同じ待ちの間の通知は 1 つの未読と数える。許可を 2 回求めると待ちに入り直すので、1 回目を見た後でも未読に戻る。
 - `agentSession.markSeen { sessionId, notifiedAt }` は、未読の行の `notified_at` が渡された `notifiedAt`（webview が見た通知の時刻）と同じときだけ、`seen_at` に今の時刻を書き、`{ type: "agentSession", sessionId }` を publish する。webview が見てから届くまでの間に同じ Agent Session に次の通知が出ても、まだ見ていないその通知を既読にしないため。それ以外の行には何も書かず、合図も出さない。webview が同じ未読に重ねて呼んでも、読み直しが連鎖しないようにするため。無い session は `NOT_FOUND`。
 - 未読は Backend の再起動をまたいで残る。reconcile は待ちの行を動かさない（未観測にするのは動作中の行だけ）。

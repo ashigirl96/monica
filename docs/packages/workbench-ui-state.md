@@ -1,10 +1,10 @@
 # Workbench の UI 状態と sidebar と status dot
 
-Workbench Ledger に載せない Workbench の画面の状態と、sidebar の Rail、Agent Session の状態と未読の見せ方。どれも `packages/workbench/src/ui` に置く。
+Workbench Ledger に載せない Workbench の画面の状態と、sidebar の Rail、Agent Session の状態と未読の見せ方。どれも `packages/workbench/src/ui` に置く。キーの割り当ては `apps/desktop/src/use-shortcuts.ts` と、jump モード（Ctrl+T の後）の `packages/workbench/src/ui/jump-mode.ts` にある。
 
 ## UI 状態
 
-- webview の localStorage に置く（ADR-0014）。中身は active な Runspace とその active Tab、sidebar の開閉と幅（160〜360、既定 200）、UI zoom（0.8〜1.6、既定 1）、選んだ Tile（field は `tile`。値は `owner/repo`、Repo の外は `outside`、active な Runspace の Tile に従うときは null）、畳んだセクション（`<Tile の key>:<bench|runspaces>` の一覧）。旧 Monica の `ui-state.json` から、Space、Work Board、window ごとの入れ子を除き、Tile とセクションを足した形。
+- webview の localStorage に置く（ADR-0014）。中身は active な Runspace とその active Tab、sidebar の開閉と幅（160〜360、既定 200）、UI zoom（0.8〜1.6、既定 1）、選んだ Tile（field は `tile`。値は小文字にした `owner/repo`、Repo の外は `outside`、active な Runspace の Tile に従うときは null）、畳んだセクション（`<Tile の key>:<bench|runspaces>` の一覧）。旧 Monica の `ui-state.json` から、Space、Work Board、window ごとの入れ子を除き、Tile とセクションを足した形。
 - 端末の font size と、active でない Runspace の active Tab は保存しない（旧 Monica どおり）。
 - 書き込みは 500ms の debounce。localStorage は同期で読めるので、旧 Monica の render 前の hydrate は要らない。
 - 保存した id が `layout.get` に無ければ、先頭の Runspace と、その先頭の Tab に戻す（旧 Monica の `resolveWorkbenchActive`）。読めないか壊れていれば既定値で始める。
@@ -28,7 +28,7 @@ Workbench Ledger に載せない Workbench の画面の状態と、sidebar の R
 - Tile とセクションの見出しは、押しても端末から focus を外さない（mousedown の既定の動作を止める）。見出しと、active な Runspace の Tile や Runspace の無い Tile は表示する Tab を変えないので、押した後もそのまま Tab の claude に打てるようにするため。押した後に focus を戻す形にしないのは、一度 blur すると xterm が focus を知らせる mode（DECSET 1004）を立てた app に focus out と in を送るため。別の Runspace を開く Tile と行は、その Runspace を active にして端末に focus を戻す。
 - Tile とセクションの見出しは、click ではなく mousedown で動く（行と Tab が pointerdown で動くのと同じく、押した時に動く）。WKWebView は trackpad の tap（tap-to-click）を up、down の順で届けるので、各 tap の up は 1 つ前の tap の down と組になり、click は 2 つの tap の位置の共通の祖先に飛んで、押した button には届かないため。click で動くのは、キーボード（Enter・Space）の click（`detail` が 0）だけにする。
 - key で巡る（⌥J / ⌥K）のと jump hint は、画面に見えている行（Pinned と、選んだ Tile の開いたセクション）を上から順に扱い、畳んだセクションの行は飛ばす。active な行が見えていないとき（畳んだセクションにあるときや、Runspace の無い Tile を押してほかの Tile が出ているとき）は、下へは先頭の行から、上へは末尾の行から巡る。別の Repo の Tile へは Tile を押すか ⌘ の数字で移り、巡っても Tile をまたがない（Repo の Tile が 9 を超えると、10 番目からの Repo の Tile へはキーで移れない）。
-- Runspace の並べ替え（drag と ⌃⇧↑↓）は同じセクションの中に限る。Workbench Ledger の並びは 1 本なので、セクションをまたいで動かしても見た目の位置にならないため。key で下へ動かすときは、自分を下の行の位置へ動かさず、下の行を自分の位置へ動かす。Tile の順はセクションの先頭の行の位置で決まるので、間にある別の Repo の Runspace を越えると Tile の順が入れ替わるため。
+- Runspace の並べ替え（drag と jump モードの ⇧J / ⇧K）は同じセクションの中に限る。Workbench Ledger の並びは 1 本なので、セクションをまたいで動かしても見た目の位置にならないため。key で下へ動かすときは、自分を下の行の位置へ動かさず、下の行を自分の位置へ動かす。Tile の順はセクションの先頭の行の位置で決まるので、間にある別の Repo の Runspace を越えると Tile の順が入れ替わるため。
 
 ### 行
 
@@ -63,7 +63,7 @@ Tab の dot（label の左）は、その Tab の Terminal Session の live な 
 - 手空きは灰の塗りにし、未観測の灰の輪とは塗りで分ける。琥珀の薄い版では、行の数として質問・許可の琥珀の隣に並ぶと見分けにくいため。灰は Tile の色（上の「sidebar」）にも未読の印にも使わない。
 - plan 承認の色は持たない。plan の承認は許可の一種で、ExitPlanMode は自動承認されて待ちにならない（#16）。
 - Terminal Session の dot（label の右。exited / lost / failed）は旧 Monica のまま残す。
-- sidebar の行も、2 行目に Tab の帯と同じ色と点滅の dot で Agent の状態を出す（上の「行」と「数」）。普通の Runspace の行は Tab の dot を 1 つに畳まず色ごとに数え、Bench の行は dot と端末の title を同じ代表の Tab から取る。1 つに畳むと、1 つの Runspace に Tab と claude が複数あるときに何が起きているか読めないため。
+- sidebar の行も、2 行目に Tab の帯と同じ色と点滅の dot で Agent の状態を出す（上の「行」と「数」）。
 - 状態と色の対応は Task の型を借りない。旧 Monica の `lib/status-config` は Task の `DisplayStatus` を借りていたが、workbench は task を import しない（ADR-0005）。
 
 ## 未読

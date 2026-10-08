@@ -1,6 +1,6 @@
 # 通知と Dock の数
 
-Agent Session がユーザー待ちに入ったときに macOS の通知を出し、押されたらその Tab を選ぶ（ADR-0013、ADR-0022、語は `GLOSSARY.md` の通知）。判定と本文は workbench が持ち、OS に渡すのは Shell が持つ。Task の無い Tab でも出すので、観測と同じく Workbench を持ち込む骨格の実装に含める。task が足すのは `nameAgentSession` だけ（`docs/packages/task-ledger.md` の「Run」）。未読の数を Dock の icon に出すのと、release で未読でなくなった通知を通知センターから取り下げるのも同じ経路で行う（下の「Dock の数」と「取り下げ」、ADR-0025）。
+Agent Session がユーザー待ちに入ったときに macOS の通知を出し、押されたらその Tab を選ぶ（ADR-0013、ADR-0022、語は `GLOSSARY.md` の通知）。判定と本文は workbench が持ち、OS に渡すのは Shell が持つ。Task の無い Tab でも出すので、観測と同じく workbench に置く。task が足すのは `nameAgentSession` だけ（`docs/packages/task-ledger.md` の「Run」）。未読の数を Dock の icon に出すのと、release で未読でなくなった通知を通知センターから取り下げるのも同じ経路で行う（下の「Dock の数」と「取り下げ」、ADR-0025）。
 
 ## 出す遷移
 
