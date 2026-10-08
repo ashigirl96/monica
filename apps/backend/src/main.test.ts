@@ -80,7 +80,7 @@ function viaToken(
   })
 }
 
-test('the token listener carries workbench, task and job but not note, and the browser listener only note', async () => {
+test('the token listener carries workbench, task and job but not note, and the browser listener note but none of those three', async () => {
   const browserPort = freePort()
   const backend = await startBackend(browserPort)
 
@@ -101,6 +101,26 @@ test('the token listener carries workbench, task and job but not note, and the b
   }
   expect((await viaBrowser('note/essay/create')).status).toBe(200)
   expect((await viaToken(backend, 'note/essay/create')).status).toBe(404)
+}, 20_000)
+
+// 不正な input は handler の前で断られるので、claude を起こさない。
+test('the browser listener carries chat for a Chrome Extension and the token listener does not', async () => {
+  const browserPort = freePort()
+  const backend = await startBackend(browserPort)
+
+  const fromExtension = await fetch(`http://127.0.0.1:${browserPort}/rpc/chat/ask`, {
+    method: 'POST',
+    headers: {
+      host: `127.0.0.1:${browserPort}`,
+      'sec-fetch-site': 'none',
+      'sec-fetch-mode': 'cors',
+      'content-type': 'application/json',
+    },
+    body: JSON.stringify({ json: { question: '' } }),
+  })
+
+  expect(fromExtension.status).toBe(400)
+  expect((await viaToken(backend, 'chat/ask', { question: '' })).status).toBe(404)
 }, 20_000)
 
 // 新しい Tab の claude が turn を終え、手空きの通知が出る。

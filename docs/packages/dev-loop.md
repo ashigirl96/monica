@@ -67,7 +67,7 @@
 
 - Bun は `package.json` の `packageManager` で固定し、CI も同じ版を使う。1.4 未満には `--asset` が無い。
 - Rust は `rust-toolchain.toml` で `Cargo.toml` の `rust-version` と同じ版に固定し、CI も同じ file から入れる。stable を追うと、clippy に足された lint で、crate に触れた PR が変更と関係なく落ちるため。
-- 依存の版は root の `workspaces.catalog` に集め、member は `catalog:` で参照する。`@orpc/*` は trpc-cli が対応する major に固定する（ADR-0003）。
+- 依存の版は root の `workspaces.catalog` に集め、member は `catalog:` で参照する。`@orpc/*` は trpc-cli が対応する major に固定する（ADR-0003）。`@anthropic-ai/claude-agent-sdk` は `^` を付けずに版を固定する。Chat の claude の options の効き目は、この版と同梱の claude で確かめたもので、上げるときは `docs/packages/chat.md` の「実機で確かめたこと」をやり直す（ADR-0032）。
 - tsconfig は root の 1 つで、`types: ["bun"]` と DOM の lib を同居させる。browser 側の安全性は `vite build` に任せる。`@types/chrome` は `types` に足さず、`apps/extension/src/chrome-env.d.ts` の `/// <reference types="chrome" />` で読む。`chrome` の型は program の全 file から見えるので、使ってよい場所は lint で絞る（`docs/packages/extension.md`）。
 - tsconfig に `exactOptionalPropertyTypes` と `noPropertyAccessFromIndexSignature` は入れない。前者は zod が推論する `x?: T | undefined` を domain の関数の `x?: T` に渡せず、procedure を足すたびに書き足しが要るため。後者は `env.X` を `env["X"]` と書かせるだけのため。`noUnusedLocals`・`noUnusedParameters` も入れない。oxlint の `no-unused-vars` が同じものを error にしている。
 - scripts は root の `package.json` に並べ、1 行に収まらないものは `scripts/*.ts` に書く。just は使わない。

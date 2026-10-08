@@ -13,6 +13,7 @@ monica の repo の形、package の entry、domain 間の呼び出し、テス�
 - `docs/packages/task-ledger.md`: task の contract と Task Ledger。task の procedure、Run、Bench の準備、close、sync、task のテストの fake に触るとき。
 - `docs/packages/job-ledger.md`: job の contract と Job Ledger。job の procedure、system の Job を足すとき、裏で定期的に走る処理に触るとき。
 - `docs/packages/note-ledger.md`: note の contract と Note Ledger と body。note の procedure、画像、OGP、本文の JSON と markdown の変換に触るとき。
+- `docs/packages/chat.md`: chat の contract と `ChatAgent`。Chat の procedure、claude の options と env、spare と同時の数、claude の止め方、偽の claude に触るとき。
 - `docs/packages/note-ui.md`: note の ui。`packages/note/src/ui` か `apps/web` に触るとき、旧 Monica のコードを移すとき。
 - `docs/packages/backend.md`: Backend の組み立て（apps/backend）。起動と終了の順序、PATH、Ledger の配線、ブラウザの口に触るとき。
 - `docs/packages/cli.md`: CLI（apps/cli）。`cli: true` の procedure か SKILL.md を足すとき、argv の振り分け・出力・エラー・補完・CLI のテストに触るとき。
@@ -41,6 +42,7 @@ monica/
 │   ├── task/           @monica/task
 │   ├── job/            @monica/job
 │   ├── note/           @monica/note
+│   ├── chat/           @monica/chat
 │   └── ui/             @monica/ui        domain を持たない UI 部品
 └── crates/
     ├── terminal-protocol/
@@ -80,15 +82,15 @@ entry は層ではなく、import してよい実行環境で切る（ADR-0009�
 
 | entry | 中身 | 実行環境 | import する側 |
 |---|---|---|---|
-| `@monica/<d>/schema` | drizzle の table。`drizzle-orm/sqlite-core` と `drizzle-orm` 本体（CHECK と index の条件を書く `sql`）と、FK のための他 package の schema だけを import する | どこでも | 自分の contract と server、他 package の schema（FK）と server（SELECT） |
+| `@monica/<d>/schema` | drizzle の table。table を持たない chat には無い。`drizzle-orm/sqlite-core` と `drizzle-orm` 本体（CHECK と index の条件を書く `sql`）と、FK のための他 package の schema だけを import する | どこでも | 自分の contract と server、他 package の schema（FK）と server（SELECT） |
 | `@monica/<d>/contract` | oRPC の contract、zod schema、型 | どこでも | apps/desktop と apps/web（型だけ）、apps/cli、apps/backend、自分と他 package の server と ui と cli |
-| `@monica/<d>/server` | router、`create<D>Ledger()`、migrations の re-export | Bun | apps/backend、他 package の server、テスト |
-| `@monica/<d>/ui` | React の component と atom。画面を持たない job には無い | browser | apps/desktop、apps/web（note）、他 package の ui |
-| `@monica/<d>/cli` | 出力の整形関数、補完の候補を返す関数、手で書く command。CLI に出す procedure の無い note には無い | Bun | apps/cli |
+| `@monica/<d>/server` | router、`create<D>Ledger()`（chat は `createChatAgent()`）、migrations の re-export | Bun | apps/backend、他 package の server、テスト |
+| `@monica/<d>/ui` | React の component と atom。画面を持たない job と、まだ side panel を持たない chat には無い | browser | apps/desktop、apps/web（note）、他 package の ui |
+| `@monica/<d>/cli` | 出力の整形関数、補完の候補を返す関数、手で書く command。CLI に出す procedure の無い note と chat には無い | Bun | apps/cli |
 | `@monica/<d>/body` | Note の本文の JSON を読む関数と、本文と markdown の変換（`docs/packages/note-ledger.md`）。今は note だけが持つ | どこでも | 自分の contract と server と ui |
 | `@monica/<d>/testing` | 他の package のテストに出す fake。今は workbench だけが持ち、`src/fake-ptyd.ts` の fake の ptyd（`startFakePtyd`）、短い home を作る `tempHome`、Terminal Session が starting を抜けるのを待つ `untilSettled` を出す | Bun | 他 package のテストと `testing.ts` |
 
-- 依存の向きは task → workbench だけ。workbench は task を import しない（ADR-0005）。job は task も workbench も import しない（ADR-0016）。note は他の domain を import せず、他の domain からも import されない。
+- 依存の向きは task → workbench だけ。workbench は task を import しない（ADR-0005）。job は task も workbench も import しない（ADR-0016）。note は他の domain を import せず、他の domain からも import されない。chat も同じ。
 - task の schema は workbench の table を FK のために import するが、re-export しない（ADR-0010）。
 - 境界は次のものが守る。
   - package の間の向き: package.json。bun の isolated linker では package.json に書いていない依存を解決できない。
@@ -115,6 +117,7 @@ export function create<D>Ledger(deps: { db: Db; home: string; ... }): <D>Ledger;
 - `WorkbenchLedger` と `TaskLedger` は `events` も持つ。その domain の変更を知らせる in-process の publisher で、job と note は change stream を持たないので無い（ADR-0016・0018）。
 - server entry は、ほかに他の domain と Backend が使う関数と型を出してよい（task の `nameAgentSession`、ptyd と setup が env を絞る workbench の `inheritableEnv()`）。
 - Ledger の型には、他の domain と Backend が呼ぶ method だけを出す。procedure の handler が使う中身（ghq や GitHub への口、Bench の準備の状態など）は、Ledger を key にした WeakMap に置き、`internals(<d>Ledger)` で引く。router の context に渡るのは `db` と Ledger だけなので、外の口も Ledger が持つ。
+- chat は記録を持たないので、Ledger ではなく `ChatAgent`（`createChatAgent()`）を持つ。型には Backend が呼ぶ `stop()` だけを出し、procedure の handler が使う `prepare` と `ask` は Ledger と同じく `internals(chatAgent)` で引く。router の context は `{ chatAgent }` で、`db` は渡さない。deps と method は `docs/packages/chat.md` にある。
 - system の Job を持つ domain（task と note）は、`@monica/<d>/server` の `systemJobs(<d>Ledger)` で `{ name, every, run }[]` を出し、Backend の組み立てがそれを `createJobLedger` に渡す。名前は `<domain>.<name>`、`run` は失敗なら reject する。domain は timer を持たない。job を import しないので、戻り値は素のオブジェクトにし、job の型を注記しない（#18、ADR-0016）。
 - 他の domain から呼ばれる書き込みは、第 1 引数に transaction（`db` でもよい）を取る**同期**の method にする。呼び手は `db.transaction((tx) => { workbenchLedger.moveTab(tx, …); insertRun(tx, …) })` のように、両 domain の書き込みを 1 つの transaction にまとめる。fs への副作用は transaction に入らないので別の async method にし、呼び手が commit の後に呼ぶ。ptyd への副作用は workbench が transaction の後に自分で送る（ADR-0015）。今これを持つのは `WorkbenchLedger` だけで、method は `docs/packages/workbench-ledger.md` の「他の domain が呼ぶ書き込み」にある。
 - 他の domain が呼ばない書き込みは、同じ形（第 1 引数が tx）の module 内の関数として procedure の handler から呼び、Ledger には出さない。合図や通知の口のような Ledger の deps を使う書き込みは、`internals` に置いた module の method にしてよい。そのうち呼び手と transaction を束ねないもの（workbench の hook の適用と `markSeen`）は tx を取らない。他の domain から呼ばれない処理は router の handler の中に書いてよい。
@@ -142,14 +145,15 @@ package ごとに in-memory の SQLite に自分の migration を当てる（tas
 
 ## contract の規約
 
-1. 合成した contract の root は package 名で mount する（`{ workbench, task, job }`、ブラウザの口では `{ note }`）。path の先頭が package 名になり、CLI もそれに従う（`monica task track`、`monica workbench hook claude`）。
+1. 合成した contract の root は package 名で mount する（`{ workbench, task, job }`、ブラウザの口では `{ note, chat }`）。path の先頭が package 名になり、CLI もそれに従う（`monica task track`、`monica workbench hook claude`）。
 2. 全 procedure に `.meta({ description })` と `.output()` を付ける。description は CLI の help の正本、output は `--format json` の形の正本になる（#17 の JSON の形もここに書く）。
 3. CLI に出すのは `.meta({ cli: true })` を付けた procedure だけ（ADR-0003）。event iterator の procedure は付けても出ない。
 4. 呼び手が分岐する domain エラー（close の guard のように `data` に理由の一覧を持つもの）だけを `.errors()` で宣言する。それ以外は oRPC の標準 code（`NOT_FOUND`、`BAD_REQUEST`）を投げる。
 5. 変更の stream は domain ごとに 1 本（`workbench.changes`、`task.changes`）で、判別 union の event を流す。中身は `events` と同じ合図。合図は、その domain の procedure の output が変わる経路すべてで出す。stream だけを購読して読み直す client が、古い output を持ったまま残らないようにするため。他の domain の行から導く output（task の表示状態は workbench の Agent Session から導く）は、相手の合図を受けて自分の合図を出す。購読する画面の無い job と、focus のたびに取り直す note は stream を持たない（ADR-0016・0018）。
 6. `oc.$meta(...)` と `createSchemaFactory({ coerce: { date: true } })` は各 package の `contract.ts` の中にだけ書く。oRPC 2.0 で `.meta` が plugin 制になったときに直す場所を 1 つにするため（#21）。例外は `apps/cli/src/forward.ts` で、output を持たない procedure を組み直すために contract の meta を `os.$meta` で引き継ぐ（`docs/packages/cli.md`）。
+7. 応答の stream は、1 回の呼び出しへの応答を流す event iterator（`chat.ask`）。答えが終われば閉じ、client は payload をそのまま描く。規約 5 の change stream とは別の種類で、購読し続けない（ADR-0028）。
 
-contract を走査するテストが、description と output が全 procedure にあること、`cli: true` の procedure に整形関数があることを確かめる。CLI に載る workbench・task・job は `apps/cli/src/contract.test.ts`、note は `packages/note/src/contract.test.ts` が見る。
+contract を走査するテストが、description と output が全 procedure にあること、`cli: true` の procedure に整形関数があることを確かめる。CLI に載る workbench・task・job は `apps/cli/src/contract.test.ts`、note と chat は `packages/note/src/contract.test.ts` と `packages/chat/src/contract.test.ts` が見る。
 
 ## ここで決めていないこと
 
