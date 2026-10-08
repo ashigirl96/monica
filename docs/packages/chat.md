@@ -6,13 +6,13 @@
 
 ```
 prepare   → void
-ask       { question, page: { url?, title? }, history: { question, page, answer }[] } → event iterator of ChatEvent   errors: CHAT_BUSY
+ask       { question, page: Page, history: { question, answer, page: PageSnapshot }[] } → event iterator of ChatEvent   errors: CHAT_BUSY
 ```
 
 - `prepare` は spare（下の「spare」）を起こし、その initialize を待たずに返る。spare が既にあるか、claude を 4 つ持っていれば何もしない。Chrome Extension は Backend の不在の確かめにもこれを呼ぶので、速く返す。
-- `ask` は 1 回の質問への応答の stream（`docs/packages.md` の contract の規約 7）。`ChatEvent` は `type` の判別 union で、今は `{ type: 'text', text }`（答えの文字の delta）だけ。client は届いた順に `text` をつなぐ。result を受けたら stream を閉じる。
-- `question` は 1 字以上。`page` の `url` と `title` は省略できるただの文字列で、形を検めない。`chrome://` などの Browser Tab では side panel から見えず、`file://` のページもあるため。
-- `history` は Chat の前の問答を古い順に並べたもの。turn ごとに質問した時のページを持つ。Backend は検めずに prompt の文字にする（ADR-0031）。
+- `ask` は 1 回の質問への応答の stream（`docs/packages.md` の contract の規約 7）。`ChatEvent` は `type` の判別 union で、最初に `{ type: 'snapshot', page: PageSnapshot, omitted: { pages, turns } }` を 1 つ流し、続けて `{ type: 'text', text }`（答えの文字の delta）を流す。client は届いた順に `text` をつなぐ。result を受けたら stream を閉じる。形は下の「Page Snapshot」にある。
+- `question` は 1 字以上。`page` と `PageSnapshot` の `url` と `title` は省略できるただの文字列で、形を検めない。`chrome://` などの Browser Tab では side panel から見えず、`file://` のページもあるため。
+- `history` は Chat の前の問答を古い順に並べたもの。turn ごとに、その質問の `snapshot` で返した `PageSnapshot` を持つ。Backend は Chat を持たず、送られた履歴をそのまま prompt にする（ADR-0031）。
 - `.errors()` で宣言するのは `CHAT_BUSY`（status 429）だけ。claude を 4 つ持っているときの `ask` に、iterator を返す前に投げる。claude が落ちたときの error は型にせず、SDK の iterator が投げた error がそのまま oRPC の `INTERNAL_SERVER_ERROR` として流れる。
 - `MAX_ASK_BODY_BYTES`（50MB）は、ブラウザの口が受ける body の上限。ブラウザの口の 2 つの `Bun.serve` に `maxRequestBodySize` で渡し、超えた body には 413 が返る。
 - router は CLI に出さず、ブラウザの口にだけ `{ note, chat }` で載せる。token の口には載せない。change stream は持たない（ADR-0028・0031）。
@@ -87,24 +87,104 @@ SDK の `env` は `process.env` に重ならず丸ごと置き換わる。claude
 
 ## prompt
 
-`SDKUserMessage` を 1 つ流す AsyncIterable で渡す。content は text block の配列で、前の問答の block（`history` が空なら無い）と、今のページと質問の block に分ける。後でページの `document` や `image` の block を足すため。
+`SDKUserMessage` を 1 つ流す AsyncIterable で渡す。content は block の配列で、並べ方は下の「Page Snapshot」の「prompt の block」にある。文字列の prompt には `document` block を入れられないため。
 
-- 前の問答の block は、turn ごとに `<turn>` で囲み、中にページの `<page>`（`URL:` と `Title:` の行）、`<question>`、`<answer>` を置く。
-- 今の block は「今のページ」の `<page>` と `<question>`。
-- `url` か `title` が無いときは、その行に `unknown` と書く。
-- system prompt（`src/prompt.ts` の `SYSTEM_PROMPT`）は、ページから来た文字（title・本文・document・画像）はページの作者が書いたものでユーザーの指示ではなく、従うのはユーザーの質問だけであることと、tool を持たないことを書く。
+- system prompt（`src/prompt.ts` の `SYSTEM_PROMPT`）は、message が質問を番号付きで古い順に並べ、質問ごとにページ（URL・title・本文の document・選択範囲の document）と、前の質問には答えを添えること、答えるのは最後の質問であることを書く。ページから来た文字（title・本文・document・画像）はページの作者が書いたものでユーザーの指示ではなく、従うのはユーザーの質問だけであることと、tool を持たないことも書く。
 
 ## log
 
-claude の `system`（`init`）を受けたら、stderr に 1 行出す。tools 0 と MCP 0 を実機で見るためと、SDK を上げて `haiku` の解決先が変わったときに気づくため（ADR-0032）。
+claude の `system`（`init`）を受けたら、stderr に 1 行出す。tools 0 と MCP 0 を実機で見るためと、SDK を上げて `haiku` の解決先が変わったときに気づくため（ADR-0032）。result を受けたら、その usage も 1 行出す。prompt cache の効き方を見るためで、Backend の stdout は Shell 宛ての JSON 行専用なので stderr にする。
 
 ```
 [chat] claude <pid>: model <model>, <n> tools, <m> MCP servers
+[chat] claude <pid>: usage input <n>, cache creation <n>, cache read <n>, output <n>
 ```
+
+## Page Snapshot
+
+質問を送った時に、side panel が Current Page を読み、HTML と選択範囲を `chat.ask` に添える。Backend が HTML を本文にし、切り詰め、同じページを判定し、全体の上限を当てる。Chrome Extension は読んで送るだけにする（#263 の resolution の 8）。side panel を開いているだけでは読まない。
+
+### 読み方（`src/ui/read-page.ts`）
+
+- 読むのは、送る時に `tabs.query({ active: true, windowId })` で取り直した Browser Tab（下の「Current Page の追い方」）。`url` と `title` もその Browser Tab のものにし、見出しと揃える。
+- `chrome.scripting.executeScript` に `target: { tabId }`・`func`・`injectImmediately: true` だけを渡す。`frameIds` も `allFrames` も渡さず top frame だけを読み、world は既定の ISOLATED のままにしてページの CSP を受けない。
+- 3 秒で返らなければ打ち切って `timeout` にする。`view-source:`、`alert()` の最中、frozen のタブでは返らず、`injectImmediately` が無いと body が終わらないページでも返らない。
+- 注入する関数（`readDocument`）は `{ html, selection }` を返す自己完結した関数で、module の他の関数も import も参照しない。`func` は文字列にして送られ、build の minify で名前が変わった helper も届かないため。
+  - shadow root は `document.documentElement` から要素を順に辿り、`chrome.dom.openOrClosedShadowRoot` で closed のものまで、見つけた root の中にも潜って集める。`html` は `document.documentElement.getHTML({ shadowRoots })` で、shadow root は `<template shadowrootmode>` として書き出される。
+  - 選択範囲は top frame の `getSelection().toString()`。activeElement が textarea か、`type` が `text`・`search`・`url`・`tel` の input なら、その `selectionStart`・`selectionEnd` で読む。別の場所を選んだ後も古い値が残るので、focus のある欄だけを読む。それ以外の input（`password` など）に focus があれば読まない。空なら `selection` を送らない。
+- `executeScript` が reject したら `restricted` にし、`detail` に error の message を入れる。
+- 送る前に、input を `JSON.stringify` した UTF-8 の bytes に 1MiB（oRPC の包みの分）を足して `MAX_ASK_BODY_BYTES` と比べる。超えたら今のページの `html` と `selection` を外して `too-large` にする（`chat-store.ts`）。履歴は削らない。
+- PDF の Browser Tab は分けない。viewer の DOM は空なので本文は空になる（#279 が分ける）。
+
+### 形（`src/contract.ts`）
+
+```
+Page          { url?, title?, selection?: string, content: { kind: 'html', html } | Unreadable }
+PageSnapshot  { url?, title?, selection?: { text, truncated }, content?: { kind: 'text', text, truncated } | { kind: 'same', turn } | Unreadable }
+Unreadable    { kind: 'unreadable', reason: 'restricted' | 'timeout' | 'too-large' | 'unparsable', detail? }
+snapshot      { type: 'snapshot', page: PageSnapshot, omitted: { pages, turns } }
+```
+
+- `snapshot` の `page` と `history` の各 turn の `page` は同じ型で、side panel は届いたものをそのまま履歴に入れる。`snapshot` の届かなかった答えの turn は、`content` の無い `{ url, title }` になる。
+- `same` の `turn` は、その request の `history` の添字。失敗した質問は履歴に入らず、Backend が落とす古い turn も side panel の配列は変えないので、一度返した添字は後の request でも同じ turn を指す。
+- `omitted` は、今回渡さなかった古いページと問答の数。問答ごと落とした turn のページは `turns` にだけ数える。
+
+### 本文への変換（`src/page/extract.ts`・`snapshot.ts`）
+
+- HTML を `<!doctype html><html>` と `</html>` で包んで linkedom で DOM にし、`defuddle/node` の `Defuddle` に `markdown: true`・`useAsync: false`・`removeImages: true` を渡して Markdown にする。`useAsync: false` は、本文の無いページで第三者の API を呼ばせないため。jsdom 30 と happy-dom 20 では defuddle が失敗し、失敗しても例外を投げずに body 全体を返すので使わない。`defuddle/full` は Bun で Markdown 変換が失敗するので使わない。
+- defuddle は linkedom を見込んで `<template shadowrootmode>` を展開するので、open と closed の shadow root の中の文字が本文に残る。nav と footer は本文に入らない。
+- Markdown から URL を落として文字を残す。
+  - リンク `[text](href "title")`（href の `(` `)` は `\(` `\)`、空白を含む href は `<…>`）は `text` にする。`\[` で始まる文字の `[` はリンクと読まない。
+  - 画像 `![alt](src)` は消す。`removeImages` は `img` を消すが、`picture` の `source` は turndown が Markdown の画像にする。
+  - turndown が生の HTML のまま残したもの（colspan のある表、`sup`）の中の `<a>` は tag だけを外し、`iframe`・`video`・`audio` は要素ごと消す。ほかの HTML の tag は残す。
+- 本文と選択範囲は 10 万字（`MAX_PAGE_CHARS`）で切り、先頭を残して `truncated` を立てる。字は JS の文字列の `length` で数え、surrogate pair は割らない。
+- 見えない文字は落とそうとしない。stylesheet の class で隠した文字は defuddle も残すので、`document` block と system prompt で受ける。
+- 変換は Backend の main thread で、claude を起こす前に行う。数百 ms で、spare から答えれば claude を並べて起こす得は小さいため。変換が例外を投げたら `unparsable`（`detail` に message）にして答えを続ける。
+- 本文が空なら `document` block を作らず、見出しに「本文の文字は無かった」と書く。知らせは出さない。
+
+### 同じページ
+
+- 1 回の request の中で、送られた `history` を新しい方から探し、`content` が `text` の turn のうち、URL が `#` から後ろを除いて一致し、切った後の本文が一致する最初の turn を `same` で指す。本文が一致していれば、hash だけ違う URL は同じページとみなす。
+- `same` のときも選択範囲は添える。同じページだったことは side panel に知らせない。
+
+### 全体の上限
+
+- 前の問答、前のページの本文と選択範囲、今の質問と Page Snapshot の字の和を 20 万字（`MAX_ASK_CHARS`）に収める。URL、title、Backend が足す見出しの文は数えない。
+- 超えたら、古い turn のページ（本文と選択範囲）から 1 つずつ落とす。それでも超えたら、古い turn の問答を 1 つずつ落とす。
+- 今の質問と Page Snapshot は落とさない。今のページが `same` で指す turn も、ページと問答のどちらも落とさない。今のページの本文がそこにしか無いため。今の分だけで 20 万字を超えても、そのまま送る。
+
+### prompt の block（`src/page/prompt.ts`）
+
+- turn ごとに、本文の `document`、選択範囲の `document`、見出しと質問の `text`、答えの `text` の順に並べ、古い turn から並べる。今の turn は答えの手前で終える。何も落とさなければ、n 問目の並びが n+1 問目の並びの頭とそのまま一致する。
+- 本文の `document` は `{ type: 'document', source: { type: 'text', media_type: 'text/plain', data }, title, context }`。`title` は page の title の先頭 500 字で、無ければ省く。`context` は `URL: <url>` で、切り詰めたときは「先頭の 100,000 字だけ」の行を足す。API は `title` を 1〜500 字、`context` を 1 字以上とする。
+- 選択範囲の `document` は `title` を `Selection: <page の title>`（title が無ければ `Selection`）にする。選択範囲もページの作者が書いた文字なので、質問の `text` に混ぜない。
+- 見出しには「Question n」（`history` の添字 + 1）、URL、title（無ければ `unknown`）、本文を省いたこと（同じページ・上限で落とした）・切り詰めたこと・本文が空だったこと・読めなかった理由を書く。答えは `document` に入れない。
+- 問答を落としたら、先頭に落とした数を 1 行の `text` で置く。
+
+### 知らせ（`src/ui/notice.ts`）
+
+`snapshot` から、質問の吹き出しの下に淡い 1 行を作る。読めなかった・切り詰めた・渡していない、の順に「。」でつなぐ。答えの場所に出す失敗とは分ける。
+
+| `reason` | 決める側 | 当てる場面 | 文言 |
+|---|---|---|---|
+| `restricted` | side panel | `executeScript` が reject した（`chrome://`・Web Store・ブラウザ拡張のページ・top-level の `about:blank` と `data:`・`account.brave.com`・error のページ） | ページを読めませんでした（このページは Chrome Extension から読めません） |
+| `timeout` | side panel | `executeScript` が 3 秒で返らない | ページを読めませんでした（3 秒以内に応えませんでした） |
+| `too-large` | side panel | 送る前の大きさの確かめで外した | ページを読めませんでした（大きすぎます） |
+| `unparsable` | Backend | 本文への変換が例外を投げた | ページを読めませんでした（本文を取り出せませんでした） |
+
+- 本文か選択範囲を切り詰めたら「本文を切り詰めました」「選択範囲を切り詰めました」（両方なら「本文と選択範囲を切り詰めました」）。
+- `omitted` の和が 1 以上なら「古いページや問答 n 件を渡していません」。
+
+### 確かめていないこと
+
+- context menu から選択範囲を渡す経路、iframe の中の本文と選択（`allFrames`）。
+- 本物のクリックで side panel の入力欄に focus を移した後も、ページの選択範囲が `selection` に入るか（CDP の操作でだけ確かめた）。
+- 入れ子の深い DOM での変換の時間。div を 256・512・1000 段入れ子にしたページで、defuddle は 0.33 秒・1.1 秒・4.4 秒かかった（3000 段で 79 秒）。main thread で走るので、その間 Backend は他の request に応えない。
 
 ## テスト
 
-- `src/chat.test.ts` が `createRouterClient(router, { context: { chatAgent } })` を通して確かめる。DB は使わない。
+- `src/chat.test.ts` が `createRouterClient(router, { context: { chatAgent } })` を通して確かめる。DB は使わない。本文への変換の失敗は、`defuddle/node` の `Defuddle` を `spyOn` で reject させて作る。
+- 本文への変換は `src/page/snapshot.test.ts` が `src/page/fixtures/` の HTML（`getHTML` が書き出す、document element の中身の形）で、同じページと全体の上限と block の並びは `src/page/prompt.test.ts` が `PageSnapshot` を直に組んで確かめる。どちらも claude を起こさない。
 - claude は `src/fake-claude.ts` の偽の claude に差し替える。テストは拡張子の無い `/bin/sh` の wrapper を一時 directory に書いて `claudePath` に渡す。wrapper は `@monica/chat/testing` の `writeFakeClaude(dir, recordPath)` が書き、Backend のテスト（`apps/backend/src/main.test.ts`）も `MONICA_CLAUDE_PATH` に渡して使う。wrapper は `exec "<process.execPath>" "<fake-claude.ts の path>" "<記録の file>" "$@"` の 1 行。SDK は path が `.js`・`.mjs`・`.ts`・`.tsx`・`.jsx` で終わると `bun` か `node` を名前で起こすが、claude の env には `PATH` が無い。拡張子の無い path は直に起こす。wrapper の `/bin/sh` は env に `PWD`・`SHLVL`・`_` を足す。
 - 偽の claude は次のように話す。
   - stdin の `control_request` に `control_response`（`subtype: success`、`response: {}`）を返す。
@@ -126,6 +206,8 @@ SDK 0.3.293 と同梱の claude 2.1.293 で、dev の Backend を `env -i`（`HO
 - `~/.claude/projects` に `<MONICA_HOME>/chat` の path から作った directory ができず、`~/.claude.json` の `projects` に `<MONICA_HOME>` の path が入らない。
 - spare を起こした Backend に SIGTERM を送ると、spare が居なくなる。
 - SIGKILL した claude は `~/.claude/sessions/<pid>.json` を残し、次に claude が起きたときに消える。
+- prompt cache（Page Snapshot を足した後、約 2 万字の fixture のページで 1 問目から 5 分以内に 3 問続けた）: usage は 1 問目が cache creation 5,424・cache read 0、2 問目（同じページで `same`）が 5,824・0、3 問目（`chrome://version`）が 6,204・0。質問ごとに claude を起こし直す形では、前の問答の部分は cache read にならなかった。理由は確かめていない。
+- 2 万字の HTML（本文 13,928 字）の変換から `snapshot` が届くまで、`bun run` の Backend で 48ms、compile した Backend で 36ms。
 
 ## ui
 
@@ -161,6 +243,7 @@ SDK 0.3.293 と同梱の claude 2.1.293 で、dev の Backend を `env -i`（`HO
 - 答えは use-stick-to-bottom（`chat-scroll.tsx`）で下端に張り付き、上へスクロールすると外れて「↓ 最新へ」を出す。
 - 最初の `text` が届くまで ThinkingIndicator を出す。答えている間は送らないが、入力欄には打てる。
 - 失敗は種類を分けず、答えの場所に「答えを受け取れませんでした」と出し、その問答を履歴に入れない。
+- 読めなかった・切り詰めた・渡していないことの知らせ（上の「Page Snapshot」の「知らせ」）は、質問の吹き出しの下に右寄せの淡い 1 行で出し、答えの場所の失敗とは分ける。
 
 ### Chat の状態（`chat-store.ts`）
 
@@ -168,7 +251,8 @@ React に依らない `createChatStore(client)` が Chat を持ち、`ChatApp` �
 
 - Chat は side panel の document の memory にだけあり、window ごとに 1 つ。「新しい Chat」を押すか side panel を閉じると終わり、どこにも残さない。Backend が居なくなっても終わらない（ADR-0030・0031）。
 - `open(readPage)` は side panel を開いた時に `ChatApp` の effect が 1 回呼び、`chat.prepare` を呼んで spare を起こさせる。失敗は無視する。Backend の不在を知らせる帯はまだ無い。dev の StrictMode で 2 回呼ばれても、Backend が spare を 1 つに保つので害は無い。
-- `ask` は、送る時に `readPage` で Current Page を読み直して `page` に入れ、答え終えた問答を古い順に `history` に入れて `chat.ask` を呼ぶ。答えている間は送らずに false を返す。答えの途中で Current Page が替わっても、delta はその質問の答えに足す。
+- `ask` は、送る時に `readPage` で Current Page を読み直して `page` に入れ、答え終えた問答を古い順に `history` に入れて `chat.ask` を呼ぶ。`ChatApp` が渡す `readPage` は、Browser Tab を取り直して `read-page.ts` で読む（上の「Page Snapshot」）。答えている間は送らずに false を返す。答えの途中で Current Page が替わっても、delta はその質問の答えに足す。
+- 届いた `snapshot` の `page` を、その問答の turn の `page` として履歴に入れ、`snapshot` から作った知らせを質問の entry の `notice` に入れる。
 - `startNewChat` は流れている stream を `signal` で abort し、問答と履歴を空にする。abort の後に届いた delta は描かない。Backend は abort でその claude を止める。
 - client の型 `ChatClient` は、side panel が呼ぶ `prepare` と `ask` だけの形。ブラウザの口への oRPC の client の `chat` がそのまま入り、テストは偽の client を渡す。
 
@@ -177,7 +261,7 @@ React に依らない `createChatStore(client)` が Chat を持ち、`ChatApp` �
 - `watchCurrentPage(onChange)` は、最初の `tabs.query({ active: true, currentWindow: true })` で side panel を載せた window の id と Browser Tab を取る。side panel の page からは、別の window に focus があってもこの window が返る。
 - `tabs.onActivated` はその window の event だけを見る。`tabs.onUpdated` は Current Page の Browser Tab の event だけを見て、tab の url と title が前に出したものと違えば出し直す。pushState と hash の変更も url の変化として届く。chrome:// へ移ったときは url も title も無い event だけが届くので、変化の中身ではなく tab の値で比べる。
 - 権限は `tabs` も `webNavigation` も足さない。`<all_urls>` の host permission で http・https・file のページの url と title が見える。
-- `read()` は送る時に `tabs.query({ active: true, windowId })` で取り直す。見出しの追跡が event を取りこぼしても、送るページを違えない。
+- `read()` は送る時に `tabs.query({ active: true, windowId })` で Browser Tab を取り直して返す。見出しの追跡が event を取りこぼしても、読んで送るページを違えない。
 - 止めると listener を外し、読み途中の結果も捨てる。
 
 ### markdown
@@ -190,6 +274,7 @@ React に依らない `createChatStore(client)` が Chat を持ち、`ChatApp` �
 
 - DOM の環境は入れない（`docs/packages/note-ui.md` の「テスト」と同じ）。
 - `current-page.test.ts` は `fake-chrome.ts` の偽の `chrome.tabs` で確かめる。偽物は `globalThis.chrome` に置いてテストの後に外し、`query` の `active`・`windowId`・`currentWindow` を本物と同じく絞る。chrome:// へ移ったときの url も title も無い `onUpdated` も出せる。
+- `read-page.test.ts` は同じ偽物の `chrome.scripting.executeScript` で確かめる。偽物は注入された関数を走らせず、`readings` に置いた結果を返すか、reject するか、返らない。渡された injection は `injections` に残る。注入する関数そのもの（shadow root と選択範囲）は DOM が要るので、実機で確かめる。3 秒の打ち切りは `setTimeout` を `spyOn` して callback を手で呼ぶ。
 - `chat-store.test.ts` は偽の client で確かめる。偽の答えの stream は `signal` に応えず、test が流した delta をそのまま渡すので、abort の後に届いた delta を描かないことを確かめられる。
 - `answer.test.tsx` は `react-dom/server` の `renderToStaticMarkup` で markdown の描画を確かめる。react-dom は devDependency。
 
@@ -199,3 +284,7 @@ Brave 1.97 で確かめた。
 
 - 新しい profile の headed の Brave で action から side panel を開くと、side panel は窓の右に出て、Brave の sidebar（icon の列）は一緒に出なかった。
 - dev の side panel で `current-page.ts` を編集すると HMR で届くが、開いている side panel の listener は前の module のままだった。Current Page の追い方を確かめ直すときは、side panel を閉じて開き直す。
+- Page Snapshot（headless の Brave、dev の side panel の page を Browser Tab で開き、別の agent-browser の session で読む Browser Tab を active にして送った）:
+  - script で `attachShadow({ mode: 'closed' })` した要素の中の文字は、body の `html` に `<template shadowrootmode="closed">` で入り、本文に残った。page の script で選んだ 1 文は、side panel の入力欄に打った後も `selection` に入った。
+  - `chrome://version` は `restricted`（`detail` は `Cannot access a chrome:// URL`）になり、知らせが出て答えも返った。
+  - `view-source:` は、Enter から約 3.3 秒後に `timeout` の body を送った。`view-source:` は CDP の `Page.navigate` では開けず、新しい Browser Tab としてなら開けた。

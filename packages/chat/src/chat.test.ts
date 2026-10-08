@@ -4,15 +4,25 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
 import { createRouterClient } from '@orpc/server'
+import * as defuddle from 'defuddle/node'
 
-import type { AskInput } from './contract.ts'
+import type { AskInput, ChatEvent } from './contract.ts'
 import { createChatAgent, router } from './server.ts'
 import { writeFakeClaude } from './testing.ts'
+
+type Block =
+  | { type: 'text'; text: string }
+  | {
+      type: 'document'
+      source: { type: 'text'; media_type: 'text/plain'; data: string }
+      title?: string
+      context: string
+    }
 
 type Record =
   | { pid: number; kind: 'start'; argv: string[]; env: { [key: string]: string }; cwd: string }
   | { pid: number; kind: 'initialize'; request: { [key: string]: unknown } }
-  | { pid: number; kind: 'user'; content: { type: string; text: string }[] }
+  | { pid: number; kind: 'user'; content: Block[] }
   | { pid: number; kind: 'eof' | 'sigterm' }
 
 const cleanups: (() => unknown)[] = []
@@ -66,30 +76,94 @@ function startChat() {
   return { home, chatAgent, client, records, claudes }
 }
 
+const MATH_HTML =
+  '<head><title>Math</title></head><body><nav>Home</nav><article><p>One and one make two, and two and two make four.</p></article></body>'
+
 const QUESTION: AskInput = {
   question: 'What is 1+1?',
-  page: { url: 'https://example.com/math', title: 'Math' },
+  page: {
+    url: 'https://example.com/math',
+    title: 'Math',
+    content: { kind: 'html', html: MATH_HTML },
+  },
   history: [],
 }
 
-test('ask streams the text deltas of claude in order and closes after the result, leaving out the thinking', async () => {
+test('ask sends the Page Snapshot first, then streams the text deltas of claude in order and closes after the result, leaving out the thinking', async () => {
   const { client } = startChat()
 
   const events = []
   for await (const event of await client.ask(QUESTION)) events.push(event)
 
   expect(events).toEqual([
+    {
+      type: 'snapshot',
+      page: {
+        url: 'https://example.com/math',
+        title: 'Math',
+        content: {
+          kind: 'text',
+          text: 'One and one make two, and two and two make four.',
+          truncated: false,
+        },
+      },
+      omitted: { pages: 0, turns: 0 },
+    },
     { type: 'text', text: 'Two' },
     { type: 'text', text: ' is' },
     { type: 'text', text: ' the answer.' },
   ])
 })
 
-async function answerOf(answer: AsyncIterable<{ type: 'text'; text: string }>): Promise<string> {
+async function answerOf(answer: AsyncIterable<ChatEvent>): Promise<string> {
   let text = ''
-  for await (const event of answer) text += event.text
+  for await (const event of answer) if (event.type === 'text') text += event.text
   return text
 }
+
+const userContent = (records: Record[]) =>
+  records.filter((r) => r.kind === 'user').flatMap(({ content }) => content)
+
+test('claude reads the text of the page as a document, apart from the question', async () => {
+  const { client, records } = startChat()
+
+  await answerOf(await client.ask(QUESTION))
+
+  expect(userContent(records())).toEqual([
+    {
+      type: 'document',
+      source: {
+        type: 'text',
+        media_type: 'text/plain',
+        data: 'One and one make two, and two and two make four.',
+      },
+      title: 'Math',
+      context: 'URL: https://example.com/math',
+    },
+    { type: 'text', text: expect.stringContaining('What is 1+1?') },
+  ])
+})
+
+test('a page whose HTML could not be turned into text is still answered, after a snapshot that says so', async () => {
+  const failing = spyOn(defuddle, 'Defuddle').mockRejectedValue(new Error('the parser broke'))
+  cleanups.push(() => failing.mockRestore())
+  const { client, records } = startChat()
+
+  const events = []
+  for await (const event of await client.ask(QUESTION)) events.push(event)
+
+  expect(events[0]).toEqual({
+    type: 'snapshot',
+    page: {
+      url: 'https://example.com/math',
+      title: 'Math',
+      content: { kind: 'unreadable', reason: 'unparsable', detail: 'the parser broke' },
+    },
+    omitted: { pages: 0, turns: 0 },
+  })
+  expect(events.slice(1).map((event) => event.type)).toEqual(['text', 'text', 'text'])
+  expect(userContent(records()).map(({ type }) => type)).toEqual(['text'])
+})
 
 const pairs = (argv: string[]) => argv.map((arg, i) => [arg, argv[i + 1]])
 
@@ -172,60 +246,80 @@ test('claude gets only USER and HOME from the Backend, the five added keys and t
 })
 
 const userText = (records: Record[]) =>
-  records
-    .filter((r) => r.kind === 'user')
-    .flatMap(({ content }) => content.map(({ text }) => text))
+  userContent(records)
+    .map((block) => (block.type === 'text' ? block.text : `[document] ${block.source.data}`))
     .join('\n')
 
-test('claude reads each earlier turn with its page and answer, then the current page and the question', async () => {
+test('claude reads each earlier turn with its page text and answer, then the current page and the question', async () => {
   const { client, records } = startChat()
 
   await answerOf(
     await client.ask({
-      question: 'And what does it say about subtraction?',
-      page: { url: 'https://example.com/subtraction', title: 'Subtraction' },
+      ...QUESTION,
+      question: 'And what does it say about four?',
       history: [
         {
           question: 'What is this page about?',
-          page: { url: 'https://example.com/addition', title: 'Addition' },
+          page: {
+            url: 'https://example.com/addition',
+            title: 'Addition',
+            content: {
+              kind: 'text',
+              text: 'Carrying moves a ten to the next column.',
+              truncated: false,
+            },
+          },
           answer: 'It explains carrying.',
-        },
-        {
-          question: 'Who wrote it?',
-          page: { url: 'https://example.com/about', title: 'About us' },
-          answer: 'A maths teacher.',
         },
       ],
     }),
   )
 
-  const text = userText(records())
-  for (const part of [
-    'What is this page about?',
-    'https://example.com/addition',
-    'Addition',
-    'It explains carrying.',
-    'Who wrote it?',
-    'https://example.com/about',
-    'About us',
-    'A maths teacher.',
-    'https://example.com/subtraction',
-    'Subtraction',
-    'And what does it say about subtraction?',
-  ]) {
-    expect(text).toContain(part)
-  }
+  expect(userText(records())).toMatch(
+    /\[document\] Carrying moves a ten[\s\S]*https:\/\/example\.com\/addition[\s\S]*What is this page about\?[\s\S]*It explains carrying\.[\s\S]*\[document\] One and one make two[\s\S]*https:\/\/example\.com\/math[\s\S]*And what does it say about four\?/,
+  )
 })
 
-// chrome:// の Browser Tab では side panel から URL と title が見えない。
-test('a question about a page without a URL or a title is answered too', async () => {
-  const { client } = startChat()
+test('a question on the page of an earlier turn gets a snapshot that points at that turn, and claude does not read the text twice', async () => {
+  const { client, records } = startChat()
+  const [first] = await Array.fromAsync(await client.ask(QUESTION))
+  if (first?.type !== 'snapshot') throw new Error('no snapshot')
 
-  const answer = await answerOf(
-    await client.ask({ question: 'What is 1+1?', page: {}, history: [] }),
+  const [second] = await Array.fromAsync(
+    await client.ask({
+      ...QUESTION,
+      question: 'And 2+2?',
+      history: [{ question: QUESTION.question, page: first.page, answer: 'Two is the answer.' }],
+    }),
   )
 
-  expect(answer).toBe('Two is the answer.')
+  expect(second).toMatchObject({ type: 'snapshot', page: { content: { kind: 'same', turn: 0 } } })
+  const [, secondAsk] = records().filter((r) => r.kind === 'user')
+  if (secondAsk?.kind !== 'user') throw new Error('no second question')
+  expect(secondAsk.content.filter(({ type }) => type === 'document')).toHaveLength(1)
+})
+
+// chrome:// の Browser Tab では side panel から URL と title が見えず、読めない。
+test('a question about a page that could not be read is answered too, and its snapshot keeps the reason', async () => {
+  const { client } = startChat()
+  const unreadable = {
+    kind: 'unreadable',
+    reason: 'restricted',
+    detail: 'Cannot access a chrome:// URL',
+  } as const
+
+  const events = await Array.fromAsync(
+    await client.ask({ question: 'What is 1+1?', page: { content: unreadable }, history: [] }),
+  )
+
+  expect(events[0]).toEqual({
+    type: 'snapshot',
+    page: { content: unreadable },
+    omitted: { pages: 0, turns: 0 },
+  })
+  expect(events.flatMap((event) => (event.type === 'text' ? [event.text] : [])).join('')).toBe(
+    'Two is the answer.',
+  )
 })
 
 // HOLD の偽の claude は stdin の EOF と SIGTERM では抜けないので、居なくなれば SIGKILL で終わっている。
@@ -243,7 +337,7 @@ test('aborting the call while claude answers kills that claude', async () => {
 
   const answer = await client.ask(HELD, { signal: controller.signal })
   try {
-    for await (const _event of answer) controller.abort()
+    for await (const event of answer) if (event.type === 'text') controller.abort()
   } catch {
     // 止めた答えは error で終わる。
   }
@@ -255,7 +349,7 @@ test('aborting the call while claude answers kills that claude', async () => {
 test('leaving the answer before the result kills the claude that answers', async () => {
   const { client, records } = startChat()
 
-  for await (const _event of await client.ask(HELD)) break
+  for await (const event of await client.ask(HELD)) if (event.type === 'text') break
 
   const [pid] = answeringPids(records())
   await gone(pid!)
@@ -268,8 +362,11 @@ async function holdAnswers(client: Client, records: () => Record[], n: number) {
   const before = answeringPids(records()).length
   for (let i = 0; i < n; i++) {
     const answer = await client.ask(HELD)
-    // 後片付けで SIGKILL した答えは error で終わる。
-    answer.next().catch(() => {})
+    // snapshot の後の最初の text まで読む。後片付けで SIGKILL した答えは error で終わる。
+    answer
+      .next()
+      .then(() => answer.next())
+      .catch(() => {})
   }
   return until(() => {
     const pids = answeringPids(records())
@@ -335,8 +432,8 @@ test('an aborted answer starts no spare', async () => {
   const controller = new AbortController()
 
   try {
-    for await (const _event of await client.ask(HELD, { signal: controller.signal })) {
-      controller.abort()
+    for await (const event of await client.ask(HELD, { signal: controller.signal })) {
+      if (event.type === 'text') controller.abort()
     }
   } catch {
     // 止めた答えは error で終わる。

@@ -1,7 +1,6 @@
 import { afterEach, expect, test } from 'bun:test'
 
-import type { Page } from '../contract.ts'
-import { watchCurrentPage } from './current-page.ts'
+import { type CurrentPage, watchCurrentPage } from './current-page.ts'
 import { FakeChrome } from './fake-chrome.ts'
 
 let fake: FakeChrome
@@ -11,7 +10,7 @@ afterEach(() => fake.uninstall())
 function open(...tabs: ConstructorParameters<typeof FakeChrome>[1]) {
   fake = new FakeChrome(1, tabs)
   fake.install()
-  const pages: Page[] = []
+  const pages: CurrentPage[] = []
   const watch = watchCurrentPage((page) => pages.push(page))
   return { pages, watch }
 }
@@ -121,7 +120,7 @@ test('read asks again for the active Browser Tab of the side panel window, even 
 
   fake.activate(11)
 
-  expect(await watch.read()).toEqual({ url: 'https://b.example/', title: 'B' })
+  expect(await watch.read()).toMatchObject({ id: 11, url: 'https://b.example/', title: 'B' })
 })
 
 test('activating a Browser Tab in another window leaves the page as it is', async () => {

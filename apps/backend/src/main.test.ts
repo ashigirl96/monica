@@ -147,10 +147,10 @@ test('the Backend answers chat.ask with the claude that MONICA_CLAUDE_PATH names
   let answer = ''
   for await (const event of await client.chat.ask({
     question: 'What is 1 + 1?',
-    page: {},
+    page: { content: { kind: 'unreadable', reason: 'restricted' } },
     history: [],
   }))
-    answer += event.text
+    if (event.type === 'text') answer += event.text
 
   expect(answer).toBe('Two is the answer.')
 }, 20_000)
