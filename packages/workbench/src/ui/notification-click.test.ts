@@ -24,7 +24,8 @@ await mock.module('@tauri-apps/api/event', () => ({
 
 const { createStore } = await import('jotai')
 const { cleanUp, onCleanup, setup, until } = await import('../testing.ts')
-const { activeTerminalTabAtom, reloadAtom, workbenchClientAtom } = await import('./store.ts')
+const { activeTerminalTabAtom } = await import('./navigation.ts')
+const { reloadAtom, workbenchClientAtom } = await import('./store.ts')
 const { followNotificationClicks } = await import('./notification-click.ts')
 
 const size = { rows: 24, cols: 80 }

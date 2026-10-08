@@ -7,26 +7,24 @@ import { AGENT_DOT_STYLE, agentTallyLabel, UNREAD_LABEL_STYLE } from './agent-do
 import { JumpHint } from './jump-hint.tsx'
 import { jumpHintTargetsAtom } from './jump-hints.ts'
 import { metaHeldAtom } from './meta-hold.ts'
+import { activateRunspaceAtom, pickTileAtom } from './navigation.ts'
 import {
   type ListedIn,
   repoName,
   type RowMeta,
   rowMetaOf,
   type RunspaceRow,
-  sectionKey,
   type SidebarSection,
   type Tile,
-  tileNumberOf,
 } from './sidebar-model.ts'
 import {
-  activateRunspaceAtom,
   draggedTabIdAtom,
   moveTabToRunspaceAtom,
-  pickTileAtom,
   reorderRunspacesAtom,
   sidebarAtom,
   toggleSectionAtom,
 } from './store.ts'
+import { sectionKey, tileNumberOf } from './tile-assignment.ts'
 
 const OUTSIDE_LABEL = 'その他'
 

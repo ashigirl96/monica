@@ -2,15 +2,14 @@ import { useAtomValue, useSetAtom } from 'jotai'
 import { type ReactNode, useCallback, useRef } from 'react'
 
 import { baseName } from '../paths.ts'
+import { layoutAtom } from './backend-copy.ts'
 import { useImageDrop } from './image-drop.ts'
 import { jumpHintsActiveAtom, pendingCloseTabIdAtom } from './jump-hints.ts'
+import { activeRunspaceAtom, activeTerminalTabAtom } from './navigation.ts'
 import {
-  activeRunspaceAtom,
-  activeTerminalTabAtom,
   closeTerminalTabAtom,
   createTerminalTabAtom,
   deadTabsAtom,
-  layoutAtom,
   startNewShellForTabAtom,
   tabExitedAtom,
   updateTabCwdAtom,
