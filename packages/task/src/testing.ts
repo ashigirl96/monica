@@ -54,7 +54,7 @@ export function setup() {
     ptydPath: join(home, 'no-ptyd'),
     notify: (notification) => notifications.push(notification),
     nameAgentSession,
-    badge: () => {},
+    unread: () => {},
   })
   onCleanup(() => workbenchLedger.stop())
   const workbenchClient = createRouterClient(workbenchRouter, {

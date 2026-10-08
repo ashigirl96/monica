@@ -1,4 +1,5 @@
 use std::path::Path;
+use std::ptr::NonNull;
 use std::sync::{Mutex, MutexGuard, OnceLock};
 
 use block2::{DynBlock, RcBlock};
@@ -6,7 +7,7 @@ use objc2::rc::Retained;
 use objc2::runtime::{AnyObject, Bool, ProtocolObject};
 use objc2::{define_class, msg_send, AllocAnyThread, DefinedClass};
 use objc2_foundation::{
-    NSBundle, NSDictionary, NSError, NSObject, NSObjectProtocol, NSString, NSUUID,
+    NSArray, NSBundle, NSDictionary, NSError, NSObject, NSObjectProtocol, NSString,
 };
 use objc2_user_notifications::{
     UNAuthorizationOptions, UNMutableNotificationContent, UNNotification,
@@ -89,15 +90,118 @@ fn post_to_center(
     let user_info = NSDictionary::<NSString, AnyObject>::from_slices(&[&*key], &[value.as_ref()]);
     // SAFETY: userInfo は property list の値だけを持てばよく、NSString どうしの辞書はそれを満たす。
     unsafe { content.setUserInfo(&Retained::cast_unchecked::<NSDictionary>(user_info)) };
-    let request = UNNotificationRequest::requestWithIdentifier_content_trigger(
-        &NSUUID::UUID().UUIDString(),
-        &content,
-        None,
-    );
+    // 同じ Terminal Session の届いた通知を置き換え、未読でなくなったら id で取り下げられるようにする。
+    let request =
+        UNNotificationRequest::requestWithIdentifier_content_trigger(&value, &content, None);
     let added =
         RcBlock::new(|error: *mut NSError| log_error("failed to post a notification", error));
     UNUserNotificationCenter::currentNotificationCenter()
         .addNotificationRequest_withCompletionHandler(&request, Some(&added));
+}
+
+/// Backend ごとに作る。その Backend からの最初の集合でだけ、前の起動の通知を届いた通知から探すため（ADR-0025）。
+#[derive(Default)]
+pub struct UnreadNotifications {
+    previous: Option<Vec<String>>,
+}
+
+#[derive(Debug, PartialEq)]
+enum Withdrawal {
+    Identifiers(Vec<String>),
+    // 前の起動で出した通知と、identifier が Terminal Session の id でない古い通知は、届いた通知から探す。
+    DeliveredNotIn(Vec<String>),
+}
+
+impl UnreadNotifications {
+    pub fn keep_only(&mut self, unread: &[String]) {
+        let withdrawal = self.next(unread);
+        if in_app_bundle() {
+            withdrawal.carry_out();
+        }
+    }
+
+    fn next(&mut self, unread: &[String]) -> Withdrawal {
+        match self.previous.replace(unread.to_vec()) {
+            Some(previous) => Withdrawal::Identifiers(no_longer_unread(&previous, unread)),
+            None => Withdrawal::DeliveredNotIn(unread.to_vec()),
+        }
+    }
+}
+
+impl Withdrawal {
+    fn carry_out(self) {
+        match self {
+            Withdrawal::Identifiers(identifiers) => withdraw(&identifiers),
+            Withdrawal::DeliveredNotIn(unread) => withdraw_delivered_not_in(unread),
+        }
+    }
+}
+
+fn no_longer_unread(previous: &[String], unread: &[String]) -> Vec<String> {
+    previous
+        .iter()
+        .filter(|id| !unread.contains(id))
+        .cloned()
+        .collect()
+}
+
+struct Delivered {
+    identifier: String,
+    terminal_session_id: Option<String>,
+}
+
+fn delivered_not_unread(delivered: &[Delivered], unread: &[String]) -> Vec<String> {
+    delivered
+        .iter()
+        .filter(|notification| {
+            !notification
+                .terminal_session_id
+                .as_ref()
+                .is_some_and(|id| unread.contains(id))
+        })
+        .map(|notification| notification.identifier.clone())
+        .collect()
+}
+
+fn withdraw_delivered_not_in(unread: Vec<String>) {
+    // block は background thread で呼ばれうるので、呼び手の集合を借りずに自分の複製を持つ。
+    let on_delivered = RcBlock::new(move |notifications: NonNull<NSArray<UNNotification>>| {
+        // SAFETY: completion handler の配列は nil でない有効な NSArray。
+        let notifications = unsafe { notifications.as_ref() };
+        let delivered: Vec<Delivered> = notifications
+            .to_vec()
+            .iter()
+            .map(|notification| Delivered {
+                identifier: notification.request().identifier().to_string(),
+                terminal_session_id: terminal_session_of(notification),
+            })
+            .collect();
+        withdraw(&delivered_not_unread(&delivered, &unread));
+    });
+    UNUserNotificationCenter::currentNotificationCenter()
+        .getDeliveredNotificationsWithCompletionHandler(&on_delivered);
+}
+
+fn withdraw(identifiers: &[String]) {
+    if identifiers.is_empty() {
+        return;
+    }
+    let identifiers: Vec<Retained<NSString>> = identifiers
+        .iter()
+        .map(|id| NSString::from_str(id))
+        .collect();
+    UNUserNotificationCenter::currentNotificationCenter()
+        .removeDeliveredNotificationsWithIdentifiers(&NSArray::from_retained_slice(&identifiers));
+}
+
+fn terminal_session_of(notification: &UNNotification) -> Option<String> {
+    notification
+        .request()
+        .content()
+        .userInfo()
+        .objectForKey(&NSString::from_str(TERMINAL_SESSION_ID))
+        .and_then(|value| value.downcast::<NSString>().ok())
+        .map(|id| id.to_string())
 }
 
 fn log_error(what: &str, error: *mut NSError) {
@@ -149,12 +253,8 @@ define_class!(
             response: &UNNotificationResponse,
             handler: &DynBlock<dyn Fn()>,
         ) {
-            let user_info = response.notification().request().content().userInfo();
-            let terminal_session_id = user_info
-                .objectForKey(&NSString::from_str(TERMINAL_SESSION_ID))
-                .and_then(|value| value.downcast::<NSString>().ok());
-            if let Some(terminal_session_id) = terminal_session_id {
-                clicked(self.ivars(), terminal_session_id.to_string());
+            if let Some(terminal_session_id) = terminal_session_of(&response.notification()) {
+                clicked(self.ivars(), terminal_session_id);
             }
             handler.call(());
         }
@@ -182,5 +282,62 @@ mod tests {
         assert!(is_app_bundle("/Applications/Monica.app"));
         assert!(!is_app_bundle("/Users/me/src/monica/target/debug"));
         assert!(!is_app_bundle("/Users/me/src/monica.apps"));
+    }
+
+    fn ids(ids: &[&str]) -> Vec<String> {
+        ids.iter().map(|id| id.to_string()).collect()
+    }
+
+    #[test]
+    fn only_the_first_set_from_a_backend_reads_the_delivered_notifications() {
+        let mut notifications = UnreadNotifications::default();
+
+        assert_eq!(
+            notifications.next(&ids(&["ts-a", "ts-b"])),
+            Withdrawal::DeliveredNotIn(ids(&["ts-a", "ts-b"])),
+        );
+        assert_eq!(
+            notifications.next(&ids(&["ts-b"])),
+            Withdrawal::Identifiers(ids(&["ts-a"])),
+        );
+    }
+
+    #[test]
+    fn withdraws_only_the_terminal_sessions_that_left_the_unread_set() {
+        assert_eq!(
+            no_longer_unread(&ids(&["ts-a", "ts-b", "ts-c"]), &ids(&["ts-b", "ts-d"])),
+            ids(&["ts-a", "ts-c"]),
+        );
+        assert_eq!(
+            no_longer_unread(&ids(&["ts-a"]), &ids(&["ts-a"])),
+            Vec::<String>::new()
+        );
+    }
+
+    #[test]
+    fn the_first_set_withdraws_delivered_notifications_whose_terminal_session_is_not_unread() {
+        let delivered = [
+            Delivered {
+                identifier: "ts-a".into(),
+                terminal_session_id: Some("ts-a".into()),
+            },
+            Delivered {
+                identifier: "uuid-of-an-older-monica".into(),
+                terminal_session_id: Some("ts-b".into()),
+            },
+            Delivered {
+                identifier: "ts-c".into(),
+                terminal_session_id: Some("ts-c".into()),
+            },
+            Delivered {
+                identifier: "without-a-terminal-session".into(),
+                terminal_session_id: None,
+            },
+        ];
+
+        assert_eq!(
+            delivered_not_unread(&delivered, &ids(&["ts-a", "ts-b"])),
+            ids(&["ts-c", "without-a-terminal-session"]),
+        );
     }
 }

@@ -11,7 +11,7 @@ import type { Atom, Store } from 'jotai'
 
 import { startFakePtyd, tempHome, untilSettled } from './fake-ptyd.ts'
 import { createWorkbenchLedger, migrations, router } from './server.ts'
-import type { Badge, NotificationDeps } from './workbench.ts'
+import type { NotificationDeps, Unread } from './workbench.ts'
 
 const cleanups: (() => void)[] = []
 
@@ -32,8 +32,8 @@ export function stderrLines() {
 export function setup({
   notify = () => {},
   nameAgentSession = () => null,
-  badge = () => {},
-}: Partial<NotificationDeps & { badge: Badge }> = {}) {
+  unread = () => {},
+}: Partial<NotificationDeps & { unread: Unread }> = {}) {
   const home = tempHome(onCleanup)
   const ptyd = startFakePtyd(home)
   onCleanup(() => ptyd.stop())
@@ -50,7 +50,7 @@ export function setup({
       ptydPath: join(home, 'no-ptyd'),
       notify,
       nameAgentSession,
-      badge,
+      unread,
     })
     onCleanup(() => workbenchLedger.stop())
     const client = createRouterClient(router, { context: { db, workbenchLedger } })

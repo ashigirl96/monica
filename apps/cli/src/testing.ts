@@ -61,7 +61,7 @@ export function inMemoryBackend({ home, ghq = noGhq }: { home?: string; ghq?: Gh
     ptydPath: join(ptydHome, 'no-ptyd'),
     notify() {},
     nameAgentSession: () => null,
-    badge() {},
+    unread() {},
   })
   onCleanup(() => workbenchLedger.stop())
   // CLI のテストは GitHub に届かせない。

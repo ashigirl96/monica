@@ -15,14 +15,18 @@ pub struct Notification {
 }
 
 #[derive(Debug, PartialEq, Deserialize)]
-pub struct UnreadCount {
-    pub count: u32,
+#[serde(rename_all = "camelCase")]
+pub struct Unread {
+    pub terminal_session_ids: Vec<String>,
 }
 
-impl UnreadCount {
+impl Unread {
+    /// 終了でない Agent Session は Terminal Session に 1 つまでなので、id の数が未読の数になる。
     pub fn dock_count(&self) -> Option<i64> {
         // tauri の macOS 実装は Some(0) を "0" の label にして出すので、None で消す。
-        (self.count > 0).then_some(i64::from(self.count))
+        i64::try_from(self.terminal_session_ids.len())
+            .ok()
+            .filter(|&count| count > 0)
     }
 }
 
@@ -32,7 +36,7 @@ impl UnreadCount {
 pub enum Announcement {
     Endpoint(Endpoint),
     Notify(Notification),
-    Badge(UnreadCount),
+    Unread(Unread),
 }
 
 pub fn parse(line: &str) -> Option<Announcement> {
@@ -69,17 +73,22 @@ mod tests {
     }
 
     #[test]
-    fn reads_the_badge_line() {
+    fn reads_the_unread_line() {
         assert_eq!(
-            parse(r#"{"type":"badge","count":3}"#),
-            Some(Announcement::Badge(UnreadCount { count: 3 })),
+            parse(r#"{"type":"unread","terminalSessionIds":["ts-1","ts-2"]}"#),
+            Some(Announcement::Unread(Unread {
+                terminal_session_ids: vec!["ts-1".into(), "ts-2".into()],
+            })),
         );
     }
 
     #[test]
-    fn a_badge_of_zero_clears_the_dock() {
-        assert_eq!(UnreadCount { count: 0 }.dock_count(), None);
-        assert_eq!(UnreadCount { count: 3 }.dock_count(), Some(3));
+    fn the_dock_shows_how_many_terminal_sessions_are_unread_and_clears_at_none() {
+        let unread = |ids: &[&str]| Unread {
+            terminal_session_ids: ids.iter().map(|id| id.to_string()).collect(),
+        };
+        assert_eq!(unread(&[]).dock_count(), None);
+        assert_eq!(unread(&["ts-1", "ts-2", "ts-3"]).dock_count(), Some(3));
     }
 
     #[test]
@@ -90,7 +99,10 @@ mod tests {
             None
         );
         assert_eq!(parse(r#"{"type":"endpoint","port":"x"}"#), None);
-        assert_eq!(parse(r#"{"type":"badge","count":-1}"#), None);
+        assert_eq!(
+            parse(r#"{"type":"unread","terminalSessionIds":"ts-1"}"#),
+            None
+        );
         assert_eq!(parse("[backend] stray print"), None);
     }
 }

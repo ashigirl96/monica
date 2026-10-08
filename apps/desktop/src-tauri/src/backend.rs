@@ -11,7 +11,8 @@ use shared_child::unix::SharedChildExt;
 use shared_child::SharedChild;
 use tauri::{AppHandle, Emitter, Manager};
 
-use crate::announcement::{self, Announcement, Endpoint, UnreadCount};
+use crate::announcement::{self, Announcement, Endpoint, Unread};
+use crate::notification::UnreadNotifications;
 use crate::respawn::Respawn;
 use crate::{locations, notification, orphan, STOP_GRACE};
 
@@ -40,6 +41,7 @@ struct Running {
     child: Arc<SharedChild>,
     // write 側を握ったまま何も書かない。Shell が死ぬと閉じ、Backend は stdin の EOF で抜ける。
     _stdin: ChildStdin,
+    notifications: UnreadNotifications,
 }
 
 impl Supervisor {
@@ -144,6 +146,7 @@ impl Supervisor {
         state.running = Some(Running {
             child: child.clone(),
             _stdin: stdin,
+            notifications: UnreadNotifications::default(),
         });
         relay(app.clone(), stdout, child.clone());
         Ok(Some(child))
@@ -152,19 +155,23 @@ impl Supervisor {
     fn announce(&self, app: &AppHandle, from: &Arc<SharedChild>, endpoint: Endpoint) {
         let mut state = self.lock();
         // 終わった Backend の書き残しで、次の Backend の endpoint を上書きしない。
-        if !state.is_running(from) {
+        if state.running_from(from).is_none() {
             return;
         }
         state.endpoint = Some(endpoint.clone());
         let _ = app.emit("backend-endpoint", Some(endpoint));
     }
 
-    fn badge(&self, app: &AppHandle, from: &Arc<SharedChild>, unread: UnreadCount) {
-        let state = self.lock();
-        // 終わった Backend の書き残しで、消した後の Dock に数を戻さない。
-        if state.is_running(from) {
-            show_badge(app, unread.dock_count());
-        }
+    fn sync_unread(&self, app: &AppHandle, from: &Arc<SharedChild>, unread: Unread) {
+        let mut state = self.lock();
+        // 終わった Backend の書き残しで、消した後の Dock に数を戻さず、次の Backend が揃えた通知も取り下げない。
+        let Some(running) = state.running_from(from) else {
+            return;
+        };
+        show_badge(app, unread.dock_count());
+        running
+            .notifications
+            .keep_only(&unread.terminal_session_ids);
     }
 
     fn lock(&self) -> MutexGuard<'_, State> {
@@ -173,10 +180,10 @@ impl Supervisor {
 }
 
 impl State {
-    fn is_running(&self, child: &Arc<SharedChild>) -> bool {
+    fn running_from(&mut self, child: &Arc<SharedChild>) -> Option<&mut Running> {
         self.running
-            .as_ref()
-            .is_some_and(|running| Arc::ptr_eq(&running.child, child))
+            .as_mut()
+            .filter(|running| Arc::ptr_eq(&running.child, child))
     }
 }
 
@@ -188,8 +195,8 @@ fn relay(app: AppHandle, stdout: ChildStdout, child: Arc<SharedChild>) {
                     app.state::<Supervisor>().announce(&app, &child, endpoint);
                 }
                 Some(Announcement::Notify(notice)) => notification::post(&app, notice),
-                Some(Announcement::Badge(unread)) => {
-                    app.state::<Supervisor>().badge(&app, &child, unread);
+                Some(Announcement::Unread(unread)) => {
+                    app.state::<Supervisor>().sync_unread(&app, &child, unread);
                 }
                 None => eprintln!("[shell] unrecognized Backend stdout: {line}"),
             }

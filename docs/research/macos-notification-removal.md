@@ -2,7 +2,7 @@
 
 通知をクリックしなくても、Tab を見て未読でなくなったらその通知を通知センターから消し、Mac の通知の数を未読の数（`GLOSSARY.md` の未読）に揃えられるかを調べた事実。調べた版は Cargo.lock の objc2 0.6.4、objc2-user-notifications 0.3.2、block2 0.6.2、tauri 2.12.1、tauri-runtime-wry 2.12.1、tao 0.37.1、tauri-plugin-notification 2.5.1、notify-rust 4.18.1、mac-notification-sys 0.6.15 と、Xcode の macOS 27.0 SDK の UserNotifications framework の header。repo は `0968898`。2026-10-08 時点で、macOS 26.6.2。
 
-実機での試作はしていない。試作は scratchpad（`/private/tmp` の下）に限ったが、`/private/tmp` の下に置いた .app は許可の要求が `UNErrorDomain code=1` で失敗する（`docs/research/macos-notifications.md` の「objc2-user-notifications で試作して確かめたこと」）ので、通知を出すところまで進めない。以下は docs、header、forum、ソースから読んだ事実で、確かめていない主張には「推論」と付ける。forum の投稿は、Apple の社員（DTS Engineer などの印があるもの）とそれ以外を書き分ける。
+実機での試作はしていない。試作は scratchpad（`/private/tmp` の下）に限ったが、`/private/tmp` の下に置いた .app は許可の要求が `UNErrorDomain code=1` で失敗する（`docs/research/macos-notifications.md` の「objc2-user-notifications で試作して確かめたこと」）ので、通知を出すところまで進めない。以下は docs、header、forum、ソースから読んだ事実で、確かめていない主張には「推論」と付ける。取り下げを実装した後に release で確かめたことは、末尾の「release で確かめたこと」にある。forum の投稿は、Apple の社員（DTS Engineer などの印があるもの）とそれ以外を書き分ける。
 
 ## UNUserNotificationCenter で届いた通知を取り下げる
 
@@ -195,3 +195,14 @@ Apple の規則は、同じ identifier の届いた通知があれば置き換�
 ## 結論
 
 release では、Tab を見たら通知を消せる。`removeDeliveredNotificationsWithIdentifiers:` と `getDeliveredNotificationsWithCompletionHandler:` は macOS 10.14 からあり、objc2-user-notifications 0.3.2 の binding を Shell が今の feature のまま呼べる。前面であることは求められず、再起動の前に出した通知も `userInfo` の `terminalSessionId` で探して消せる（Chromium と Electron がその前提で動いている。monica では推論）。取り下げは非同期で終わりが分からず、表示中のバナーや Persistent の alert まで消えるかは一次資料に無いので、実機で確かめる必要がある。未読でなくなる瞬間を知るのは Backend だけで、今の Shell への行には取り下げる相手が載っていない。identifier を Agent Session か Terminal Session の id にすれば、同じ相手の通知は 1 件に置き換わる。ただし「Mac の通知数 = 未読数」は片方向にしか保てない。ユーザーが通知センターで消したことは、dismiss action が届く操作（1 件の × など）でしか分からず、stack の Clear All では 1 件分しか届かないという報告がある。許可が無いとき、通知センターに出さない設定のとき、古い通知が見えなくなったとき（macOS 12 の User Guide は 7 日）も数はずれる。dev（Terminal 名義の tauri-plugin-notification）には取り下げの手段が無い。Dock の badge の数はすでに未読の数で、release でも出ている。
+
+## release で確かめたこと
+
+2026-10-08、macOS 26.6.2。#233 の branch（`f75edf9` の上）を `bun run build` と `bun run install-app` で入れた release で、claude の代わりに hook の CLI で待ちを作って確かめた。request identifier は Terminal Session の id で、Backend から届いた最初の未読の集合では、届いた通知を `userInfo` の `terminalSessionId` で選んで取り下げる（`docs/packages/notifications.md` の「取り下げ」）。#233 で Backend から Shell への `badge { count }` の行は、Terminal Session の id の集合を運ぶ `unread { terminalSessionIds }` の行に替わった。
+
+- 表示中のバナーは、取り下げると画面から消えた。monica を背面にして手空きの通知を出し、バナーが出ている間（出してから約 3 秒後）に待ちを解いて取り下げると、その 1.2 秒後の screenshot にバナーは無かった。先に届いて同じ時に表示していた別の app のバナーは残っていたので、時間切れで消えたのではない。消えるまでの時間は測っていない。通知の形を Persistent にした alert は確かめていない。
+- 前面でない app からの取り下げは効いた。上のバナーは monica が背面の間に消えた。
+- 前回の起動で出した通知を、再起動した process が `getDeliveredNotificationsWithCompletionHandler:` で読んで消せた。#233 より前の版が UUID の identifier で出した通知も、新しい版の起動で `userInfo` の `terminalSessionId` から選んで消えた。monica を終了している間に Tab の shell を終わらせると、起動し直した後にその Tab の通知だけが消え、未読の Tab の通知は残り、押すとその Tab に移った。
+- 同じ identifier で 2 回出すと（許可を続けて求めた）、通知センターのその Tab の通知は 1 件だった。
+- 通知センターで通知を手で消しても、monica の未読と Dock の数は残った。
+- 通知センターの中身は `~/Library/Group Containers/group.com.apple.usernoted/db2/db` の `record` table にあり、読み取り専用で開けた。ただし、このときは通知を出してから数分のあいだ DB にも WAL にも書き込みが無く、取り下げの直後の状態を確かめるのには使えなかった。
