@@ -23,6 +23,8 @@
     "apps/*/src",
     "apps/desktop/vite.config.ts",
     "apps/web/vite.config.ts",
+    "apps/extension-wxt/wxt.config.ts",
+    "apps/extension-wxt/.wxt/wxt.d.ts",
     "packages/*/src",
     "packages/*/migrations",
     "packages/*/drizzle.config.ts",
