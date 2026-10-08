@@ -6,7 +6,7 @@ import { fromMarkdown, toMarkdown } from './index.ts'
 
 const noteName = (noteId: string) => (noteId === 'note-42' ? 'Target Note' : null)
 
-// monica の `to_markdown` が full-doc.json から書き出した markdown。Synced Block は参照のまま。
+// 旧 Monica の `to_markdown` が full-doc.json から書き出した markdown。Synced Block は参照のまま。
 const FULL_DOC_MD = `plain ***styled***<u> under</u>~~ gone~~\` mono\`[ linked](https://example.com)
 [Example](https://example.com/x)**[Marked](https://example.com/y)**[[note-42|Target Note]]
 
@@ -40,7 +40,7 @@ fn main() {}
 | --- | --- |
 | a1 | b1 \\| piped |`
 
-test('every kind of block in the full doc is written as monica wrote it', () => {
+test('every kind of block in the full doc is written as old Monica wrote it', () => {
   expect(toMarkdown(fullDoc, noteName)).toBe(FULL_DOC_MD)
 })
 

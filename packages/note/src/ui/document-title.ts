@@ -1,6 +1,6 @@
 import { useEffect } from 'react'
 
-const APP_NAME = 'tania'
+const APP_NAME = 'monica'
 
 // タブを並べたときに見分けられるよう、開いているものの表示名を先に置く。
 export function useDocumentTitle(name: string | null): void {

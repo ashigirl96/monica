@@ -1,5 +1,5 @@
 {
-  "name": "@tania/job",
+  "name": "@monica/job",
   "private": true,
   "type": "module",
   "exports": {
@@ -12,9 +12,9 @@
     "generate": "drizzle-kit generate"
   },
   "dependencies": {
+    "@monica/ui": "workspace:*",
     "@orpc/contract": "catalog:",
     "@orpc/server": "catalog:",
-    "@tania/ui": "workspace:*",
     "croner": "catalog:",
     "drizzle-orm": "catalog:",
     "drizzle-zod": "catalog:",

@@ -15,8 +15,8 @@ function homeAt(...segments: string[]): string {
 }
 
 test('既定の home は release と分けた identifier と port 1420、notes の口は 19381', () => {
-  expect(devInstance(join(homedir(), '.tania-dev'))).toEqual({
-    identifier: 'com.ashigirl96.tania.dev',
+  expect(devInstance(join(homedir(), '.monica-dev'))).toEqual({
+    identifier: 'com.ashigirl96.monica.dev',
     preferredPort: 1420,
     notesPort: 19381,
     webPort: 19581,
@@ -24,8 +24,8 @@ test('既定の home は release と分けた identifier と port 1420、notes �
 })
 
 test('ほかの home は basename の先頭の . を外し、使えない文字を - にして hash を付ける', () => {
-  const { identifier, preferredPort } = devInstance(homeAt('.tania_s46'))
-  expect(identifier).toMatch(/^com\.ashigirl96\.tania\.dev\.tania-s46-[0-9a-f]{6}$/)
+  const { identifier, preferredPort } = devInstance(homeAt('.monica_s46'))
+  expect(identifier).toMatch(/^com\.ashigirl96\.monica\.dev\.monica-s46-[0-9a-f]{6}$/)
   expect(preferredPort).toBeGreaterThan(1420)
 })
 
@@ -41,19 +41,19 @@ test('ほかの home の notes の口と Vite の port は、既定の home と�
 
 // macOS の $TMPDIR の下は /var と /private/var の 2 通りに書ける。
 test('同じ home を symlink 経由で書いても同じ instance になる', () => {
-  const home = homeAt('real', 'tania-s2')
+  const home = homeAt('real', 'monica-s2')
   const link = join(scratch, 'link')
   symlinkSync(home, link)
   expect(devInstance(link)).toEqual(devInstance(home))
 })
 
 test('basename が同じでも場所が違う home は別の identifier になる', () => {
-  const a = devInstance(homeAt('a', 'tania-s3'))
-  const b = devInstance(homeAt('b', 'tania-s3'))
+  const a = devInstance(homeAt('a', 'monica-s3'))
+  const b = devInstance(homeAt('b', 'monica-s3'))
   expect(a.identifier).not.toBe(b.identifier)
 })
 
-test('release の ~/.tania だけを release の home とし、名前が前方一致する dev の home は含めない', () => {
-  expect(isReleaseHome(join(homedir(), '.tania'))).toBe(true)
-  expect(isReleaseHome(join(homedir(), '.tania-dev'))).toBe(false)
+test('release の ~/.monica だけを release の home とし、名前が前方一致する dev の home は含めない', () => {
+  expect(isReleaseHome(join(homedir(), '.monica'))).toBe(true)
+  expect(isReleaseHome(join(homedir(), '.monica-dev'))).toBe(false)
 })

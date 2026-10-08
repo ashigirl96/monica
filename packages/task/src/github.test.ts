@@ -14,7 +14,7 @@ afterEach(() => {
 })
 
 function fakeGh(script: string) {
-  const dir = mkdtempSync(join(tmpdir(), 'tania-gh-'))
+  const dir = mkdtempSync(join(tmpdir(), 'monica-gh-'))
   dirs.push(dir)
   writeFileSync(join(dir, 'gh'), `#!/bin/sh\n${script}\n`)
   chmodSync(join(dir, 'gh'), 0o755)

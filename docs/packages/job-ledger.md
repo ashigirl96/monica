@@ -1,6 +1,6 @@
 # Job Ledger
 
-`packages/job` の contract と、Job Execution の記録と起こし方の規則。決定の理由は ADR-0016 にある。Job には、Backend が渡す system の Job（`task.sync` など）と、ユーザーが `tania job add` で登録して shell command を走らせる Job がある。
+`packages/job` の contract と、Job Execution の記録と起こし方の規則。決定の理由は ADR-0016 にある。Job には、Backend が渡す system の Job（`task.sync` など）と、ユーザーが `monica job add` で登録して shell command を走らせる Job がある。
 
 ## contract（root は `job`）
 
@@ -25,9 +25,9 @@ resume  { name } → { name, nextAt }                                           
 
 ## createJobLedger
 
-`createJobLedger({ db, home, systemJobs, now? })`。`home` はユーザーの Job の log を置く `$TANIA_HOME`。`systemJobs` は `{ name, every, run }` の配列で、`run` は失敗なら reject する。名前に `.` が無いか、名前が重なれば throw する。`.` はユーザーの Job の名前に使えないので、system の Job と名前が重ならない。`now` はテストが時計を進めるための口。
+`createJobLedger({ db, home, systemJobs, now? })`。`home` はユーザーの Job の log を置く `$MONICA_HOME`。`systemJobs` は `{ name, every, run }` の配列で、`run` は失敗なら reject する。名前に `.` が無いか、名前が重なれば throw する。`.` はユーザーの Job の名前に使えないので、system の Job と名前が重ならない。`now` はテストが時計を進めるための口。
 
-job は task も workbench も note も import しない（ADR-0016）。system の Job は task が `@tania/task/server` の `systemJobs(taskLedger)` で、note が `@tania/note/server` の `systemJobs(noteLedger)` で並びを出し、Backend の組み立てがその 2 つをつないで渡す。`task.sync` の `run` は `taskLedger.syncInBackground()` を、`task.setup-log-cleanup` の `run` は `taskLedger.cleanSetupLogs()` を、`note.image-cleanup` の `run` は `noteLedger.cleanImages()` を呼ぶ。`Db` の型も drizzle の `BunSQLiteDatabase` を直に使う。
+job は task も workbench も note も import しない（ADR-0016）。system の Job は task が `@monica/task/server` の `systemJobs(taskLedger)` で、note が `@monica/note/server` の `systemJobs(noteLedger)` で並びを出し、Backend の組み立てがその 2 つをつないで渡す。`task.sync` の `run` は `taskLedger.syncInBackground()` を、`task.setup-log-cleanup` の `run` は `taskLedger.cleanSetupLogs()` を、`note.image-cleanup` の `run` は `noteLedger.cleanImages()` を呼ぶ。`Db` の型も drizzle の `BunSQLiteDatabase` を直に使う。
 
 ## ユーザーの Job
 
@@ -39,7 +39,7 @@ job は task も workbench も note も import しない（ADR-0016）。system 
 - command は 1 つの文字列で受け、`/bin/sh -c` に渡す。pipe・redirect・`"$(cat ~/prompts/dreaming.md)"` を書けるようにするため。
 - cwd は既定で Backend の `$HOME`。CLI と Backend は cwd が違うので、絶対 path だけを受ける。相対 path か、directory でなければ `BAD_REQUEST`。
 - timeout は `<数>s`・`<数>m`・`<数>h` の形で受け、既定は 1 時間、上限は 24 時間。Bun は 2^31 ms（約 24.8 日）を超える `setTimeout` の遅延を 1 ms に丸めるので上限が要り、1 日を超えて走る Job は想定しないので 24 時間にする。形が違うか上限を超えれば `BAD_REQUEST`。
-- `remove` は Job の行と、その Job Execution の行を 1 つの transaction で消し、commit の後に `$TANIA_HOME/logs/jobs/<name>/` を消す。走っている間は `CONFLICT`。
+- `remove` は Job の行と、その Job Execution の行を 1 つの transaction で消し、commit の後に `$MONICA_HOME/logs/jobs/<name>/` を消す。走っている間は `CONFLICT`。
 - `pause` は行の pause を立て、次の予定を null にする。DB に持つので、再起動しても残る。pause の間も `run` では起こせる。`resume` は pause を下ろし、今から次の予定を計算する。
 - system の Job への `remove`・`pause`・`resume` は `BAD_REQUEST`。`add` は名前の `.` で断られる。
 
@@ -52,7 +52,7 @@ job は task も workbench も note も import しない（ADR-0016）。system 
 
 ### process
 
-- `/bin/sh -c <command>` を、cwd、`env: process.env`、stdin なしで、自分の process group（`detached: true`）として起こす。stdout と stderr は `$TANIA_HOME/logs/jobs/<name>/<開始時刻>.log` に書く。開始時刻は local time の `2026-10-07T030020.000` の形。
+- `/bin/sh -c <command>` を、cwd、`env: process.env`、stdin なしで、自分の process group（`detached: true`）として起こす。stdout と stderr は `$MONICA_HOME/logs/jobs/<name>/<開始時刻>.log` に書く。開始時刻は local time の `2026-10-07T030020.000` の形。
 - PATH は Backend が login shell から取った PATH（`docs/packages.md` の「Backend の組み立て」）なので、`claude` は Tab の wrapper ではなく本物の claude になり、hook は付かない。
 - 結果:
   - exit 0 なら `succeeded`。
@@ -64,11 +64,11 @@ job は task も workbench も note も import しない（ADR-0016）。system 
 
 ### claude を呼ぶ Job の成否
 
-tania は exit code だけを見る（ADR-0016）。`claude -p` は tool を拒否された回も exit 0 で終わりうるので、Job が呼ぶ script が `--output-format json` の result 行と成果を確かめ、何もできていなければ 0 以外で終わる。
+monica は exit code だけを見る（ADR-0016）。`claude -p` は tool を拒否された回も exit 0 で終わりうるので、Job が呼ぶ script が `--output-format json` の result 行と成果を確かめ、何もできていなければ 0 以外で終わる。
 
 ```sh
 #!/bin/sh
-# tania job add dreaming --schedule '0 3 * * *' --command ~/bin/dreaming.sh
+# monica job add dreaming --schedule '0 3 * * *' --command ~/bin/dreaming.sh
 set -u
 result=$(claude -p "$(cat ~/prompts/dreaming.md)" --output-format json)
 status=$?

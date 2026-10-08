@@ -5,8 +5,8 @@ use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::{Duration, Instant};
 
 use anyhow::{bail, Context, Result};
-use tania_terminal_client::{ClientEvent, PtydClient};
-use tania_terminal_protocol::PROTOCOL_VERSION;
+use monica_terminal_client::{ClientEvent, PtydClient};
+use monica_terminal_protocol::PROTOCOL_VERSION;
 use tauri::{AppHandle, Emitter, Manager};
 
 use crate::locations;
@@ -41,10 +41,10 @@ impl PtydHandle {
         if let Some(client) = guard.as_ref() {
             return Ok(Arc::clone(client));
         }
-        let client = wait_for_connect(app, &locations::tania_home().join("ptyd.sock"))?;
+        let client = wait_for_connect(app, &locations::monica_home().join("ptyd.sock"))?;
         let version = client.hello().context("daemon handshake failed")?;
         if version != PROTOCOL_VERSION {
-            bail!("tania-ptyd speaks protocol {version} (want {PROTOCOL_VERSION}); the Backend replaces it");
+            bail!("monica-ptyd speaks protocol {version} (want {PROTOCOL_VERSION}); the Backend replaces it");
         }
         *guard = Some(Arc::clone(&client));
         Ok(client)
@@ -57,7 +57,7 @@ fn wait_for_connect(app: &AppHandle, socket: &Path) -> Result<Arc<PtydClient>> {
         match try_connect(app, socket) {
             Ok(client) => return Ok(client),
             Err(e) if Instant::now() >= deadline => {
-                return Err(e).context("tania-ptyd is not running (the Backend starts it)")
+                return Err(e).context("monica-ptyd is not running (the Backend starts it)")
             }
             Err(_) => std::thread::sleep(CONNECT_RETRY_INTERVAL),
         }
@@ -81,11 +81,11 @@ fn handle_event(app: &AppHandle, event: ClientEvent) {
             exit_code,
         } => {
             if let Err(e) = app.emit(&format!("terminal:exit:{session_id}"), &exit_code) {
-                eprintln!("[tania-desktop] failed to emit terminal exit {session_id}: {e}");
+                eprintln!("[monica-desktop] failed to emit terminal exit {session_id}: {e}");
             }
         }
         ClientEvent::Disconnected => {
-            eprintln!("[tania-desktop] tania-ptyd connection lost");
+            eprintln!("[monica-desktop] monica-ptyd connection lost");
             app.state::<PtydHandle>().mark_disconnected();
         }
     }

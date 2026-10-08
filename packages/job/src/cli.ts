@@ -1,5 +1,5 @@
+import { table } from '@monica/ui/table'
 import type { ContractRouterClient } from '@orpc/contract'
-import { table } from '@tania/ui/table'
 
 import type {
   AddOutput,

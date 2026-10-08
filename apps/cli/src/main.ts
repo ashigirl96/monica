@@ -2,8 +2,8 @@
 import { homedir } from 'node:os'
 import { join } from 'node:path'
 
-import { commands as taskCommands } from '@tania/task/cli'
-import { commands as workbenchCommands } from '@tania/workbench/cli'
+import { commands as taskCommands } from '@monica/task/cli'
+import { commands as workbenchCommands } from '@monica/workbench/cli'
 
 import { type Client, connect } from './backend.ts'
 
@@ -15,7 +15,7 @@ type Command = {
   run: (argv: string[], deps: { connect: Connect }) => Promise<number>
 }
 
-const home = process.env.TANIA_HOME || join(homedir(), '.tania')
+const home = process.env.MONICA_HOME || join(homedir(), '.monica')
 const argv = process.argv.slice(2)
 const deps: { connect: Connect } = { connect: (options) => connect(home, options) }
 
@@ -28,7 +28,7 @@ const { runCli } = await import('./program.ts')
 process.exit(
   await runCli(argv, {
     ...deps,
-    terminalSessionId: process.env.TANIA_TERMINAL_SESSION_ID || undefined,
+    terminalSessionId: process.env.MONICA_TERMINAL_SESSION_ID || undefined,
     stdout: (text) => process.stdout.write(text),
     stderr: (text) => process.stderr.write(text),
   }),

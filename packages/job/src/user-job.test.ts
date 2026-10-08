@@ -19,7 +19,7 @@ afterEach(() => {
 const sync: SystemJob = { name: 'task.sync', every: 5 * 60_000, run: () => Promise.resolve() }
 
 function tempDir(): string {
-  const dir = mkdtempSync(join(tmpdir(), 'tania-job-'))
+  const dir = mkdtempSync(join(tmpdir(), 'monica-job-'))
   cleanups.push(() => rmSync(dir, { recursive: true, force: true }))
   return dir
 }

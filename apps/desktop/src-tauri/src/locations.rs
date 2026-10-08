@@ -3,14 +3,14 @@
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-pub fn tania_home() -> PathBuf {
-    std::env::var_os("TANIA_HOME")
+pub fn monica_home() -> PathBuf {
+    std::env::var_os("MONICA_HOME")
         .map(PathBuf::from)
         .unwrap_or_else(|| {
             user_home().join(if cfg!(debug_assertions) {
-                ".tania-dev"
+                ".monica-dev"
             } else {
-                ".tania"
+                ".monica"
             })
         })
 }
@@ -24,17 +24,17 @@ pub fn backend() -> Command {
             .arg(repo().join("apps/backend/src/main.ts"));
         command
     } else {
-        Command::new(bundled_binary("tania-backend"))
+        Command::new(bundled_binary("monica-backend"))
     }
 }
 
 pub fn ptyd() -> PathBuf {
     if cfg!(debug_assertions) {
-        std::env::var_os("TANIA_PTYD_PATH")
+        std::env::var_os("MONICA_PTYD_PATH")
             .map(PathBuf::from)
-            .unwrap_or_else(|| repo().join("target/debug/tania-ptyd"))
+            .unwrap_or_else(|| repo().join("target/debug/monica-ptyd"))
     } else {
-        bundled_binary("tania-ptyd")
+        bundled_binary("monica-ptyd")
     }
 }
 
@@ -44,14 +44,14 @@ pub fn notes_port() -> Option<&'static str> {
 }
 
 pub fn cli() -> Option<PathBuf> {
-    std::env::var_os("TANIA_BIN")
+    std::env::var_os("MONICA_BIN")
         .map(PathBuf::from)
-        .or_else(|| (!cfg!(debug_assertions)).then(|| bundled_binary("tania")))
+        .or_else(|| (!cfg!(debug_assertions)).then(|| bundled_binary("monica")))
 }
 
 /// dev の desktop が張ると release の CLI を dev のもので上書きするので、release だけが返す。
 pub fn user_cli_link() -> Option<PathBuf> {
-    (!cfg!(debug_assertions)).then(|| user_home().join(".local/bin/tania"))
+    (!cfg!(debug_assertions)).then(|| user_home().join(".local/bin/monica"))
 }
 
 fn bundled_binary(name: &str) -> PathBuf {

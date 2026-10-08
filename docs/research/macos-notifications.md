@@ -49,7 +49,7 @@ ADR-0022 のために、objc2 0.6.5、objc2-user-notifications 0.3.2、block2 0.
 - bundle の無い process で `currentNotificationCenter` を呼ぶと、`NSInternalInconsistencyException 'bundleProxyForCurrentProcess is nil'` で abort する。例外は dispatch_once の中で投げられ、`objc2::exception::catch` で捕まえられない。Info.plist を `-sectcreate __TEXT __info_plist` で埋め込んでも、`bundleIdentifier` を swizzle しても同じ。`tauri dev` の binary に埋め込まれる plist には CFBundleIdentifier が無い。
 - 実行ファイルが .app の `Contents/MacOS` にあれば、center を取得できる。未署名の .app は許可の要求が `UNErrorDomain code=1 "Notifications are not allowed for this application"` で失敗する。
 - `/private/tmp` の下に置いた .app は、ad-hoc でも自己署名でも許可の要求が同じ code=1 で失敗した。LaunchServices が `in-temp-dir` の印を付け、usernoted が `Failed to find or validate client` を返すため。
-- `~/Applications` に置き、Keychain の自己署名 identity `tania` で codesign した .app では、許可の要求が通り（`granted=true`）、`userInfo` に載せた値を持つ通知のクリックが delegate の `didReceive` に届いた（`actionIdentifier` は `com.apple.UNNotificationDefaultActionIdentifier`）。
+- `~/Applications` に置き、Keychain の自己署名 identity で codesign した .app では、許可の要求が通り（`granted=true`）、`userInfo` に載せた値を持つ通知のクリックが delegate の `didReceive` に届いた（`actionIdentifier` は `com.apple.UNNotificationDefaultActionIdentifier`）。
 - center は delegate を weak で持つ。自分の `Retained` を落とすと `center.delegate()` が None になるので、delegate は持ち続ける。
 - `requestAuthorization` と `addNotificationRequest` の completion handler は main 以外の thread で呼ばれた。
 - Tauri の `setup` は、tao の `applicationDidFinishLaunching:` から同期的に、main thread で呼ばれる（tao `did_finish_launching` → `AppState::launched` → tauri-runtime-wry の `RunEvent::Ready` → `setup`）。

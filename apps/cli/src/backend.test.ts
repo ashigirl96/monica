@@ -6,7 +6,7 @@ import { join } from 'node:path'
 import { RPCHandler } from '@orpc/server/fetch'
 
 import { connect } from './backend.ts'
-import { cleanUp, inMemoryBackend, tania } from './testing.ts'
+import { cleanUp, inMemoryBackend, monica } from './testing.ts'
 
 const cleanups: (() => void)[] = []
 afterEach(() => {
@@ -14,8 +14,8 @@ afterEach(() => {
   cleanUp()
 })
 
-function taniaHome(): string {
-  const home = mkdtempSync(join(tmpdir(), 'tania-'))
+function monicaHome(): string {
+  const home = mkdtempSync(join(tmpdir(), 'monica-'))
   cleanups.push(() => rmSync(home, { recursive: true, force: true }))
   return home
 }
@@ -59,10 +59,10 @@ async function deadPid(): Promise<number> {
 const list = ['workbench', 'terminal-session', 'list']
 
 test('a procedure that fails in the Backend prints one CODE: message line on stderr and exits 1', async () => {
-  const home = taniaHome()
+  const home = monicaHome()
   serveBackend(home).sqlite.close()
 
-  const result = await tania(list, () => connect(home))
+  const result = await monica(list, () => connect(home))
 
   expect(result.code).toBe(1)
   expect(result.stdout).toBe('')
@@ -70,18 +70,18 @@ test('a procedure that fails in the Backend prints one CODE: message line on std
 })
 
 test('while the Backend refuses connections the CLI rereads backend.json and reaches the restarted one', async () => {
-  const home = taniaHome()
+  const home = monicaHome()
   writeEndpoint(home, { port: refusedPort(), pid: process.pid })
   setTimeout(() => serveBackend(home), 300)
 
-  const result = await tania(list, () => connect(home))
+  const result = await monica(list, () => connect(home))
 
   expect(result).toEqual({ code: 0, stdout: 'No live Terminal Sessions\n', stderr: '' })
 })
 
 test('no backend.json, or one whose pid is dead, means no Backend', async () => {
-  const missing = taniaHome()
-  const stale = taniaHome()
+  const missing = monicaHome()
+  const stale = monicaHome()
   writeEndpoint(stale, { port: refusedPort(), pid: await deadPid() })
 
   expect(connect(missing)).toBeNull()

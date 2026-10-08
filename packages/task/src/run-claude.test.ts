@@ -2,7 +2,7 @@ import { afterEach, expect, mock, test } from 'bun:test'
 import { mkdirSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 
-import { startFakePtyd } from '@tania/workbench/testing'
+import { startFakePtyd } from '@monica/workbench/testing'
 
 import { bench, issue, run } from './schema.ts'
 import { cleanUp, failure, onCleanup, setup } from './testing.ts'

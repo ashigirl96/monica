@@ -1,7 +1,7 @@
 import { appendFileSync, closeSync, existsSync, openSync, realpathSync } from 'node:fs'
 import { join } from 'node:path'
 
-import { inheritableEnv } from '@tania/workbench/server'
+import { inheritableEnv } from '@monica/workbench/server'
 import type { Subprocess } from 'bun'
 
 import { oneLine } from './github.ts'
@@ -10,7 +10,7 @@ import type { bench } from './schema.ts'
 
 const SETUP_TIMEOUT_MS = 600_000
 const SETUP_KILL_GRACE_MS = 2000
-const SETUP_SCRIPT = '.tania/setup.sh'
+const SETUP_SCRIPT = '.monica/setup.sh'
 
 export type Ghq = {
   root(): Promise<string>
@@ -95,7 +95,7 @@ async function isLinkedWorktree(path: string): Promise<boolean> {
 
 async function addWorktree(checkout: string, path: string, branch: string): Promise<string[]> {
   // 消した worktree の登録が残っていると、同じ path にも同じ branch にも add できない。
-  // prune は外付けの disk の上の worktree のような、tania と関係の無い登録まで外すので使わない。
+  // prune は外付けの disk の上の worktree のような、monica と関係の無い登録まで外すので使わない。
   if (!existsSync(path)) await succeeds(git(checkout, 'worktree', 'remove', path))
   if (await succeeds(git(checkout, 'rev-parse', '--verify', '--quiet', `refs/heads/${branch}`))) {
     await git(checkout, 'worktree', 'add', path, branch)
@@ -129,7 +129,7 @@ async function defaultBranch(checkout: string): Promise<string> {
 async function runSetup(worktree: string, log: string, setups: Set<Subprocess>) {
   const script = join(worktree, SETUP_SCRIPT)
   if (!existsSync(script)) {
-    appendFileSync(log, `tania: no ${SETUP_SCRIPT}, so there is nothing to set up\n`)
+    appendFileSync(log, `monica: no ${SETUP_SCRIPT}, so there is nothing to set up\n`)
     return
   }
   const output = openSync(log, 'a')
@@ -138,7 +138,7 @@ async function runSetup(worktree: string, log: string, setups: Set<Subprocess>) 
     // 自分の process group で起こし、timeout と Backend の終了で子孫ごと止める。
     setup = Bun.spawn([script], {
       cwd: worktree,
-      // Tab の外で動くので、TANIA_HOME も付け直さない。
+      // Tab の外で動くので、MONICA_HOME も付け直さない。
       env: inheritableEnv(),
       stdin: 'ignore',
       stdout: output,

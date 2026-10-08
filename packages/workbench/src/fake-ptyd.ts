@@ -12,7 +12,7 @@ type Waiter = { match: (op: RequestOp) => boolean; resolve: (op: RequestOp) => v
 
 // ptyd の socket の path は macOS で 104 byte を超えると bind できないので、home は短くする。
 export function tempHome(register: (cleanup: () => void) => void): string {
-  const home = mkdtempSync(join(tmpdir(), 'tania-'))
+  const home = mkdtempSync(join(tmpdir(), 'monica-'))
   register(() => rmSync(home, { recursive: true, force: true }))
   return home
 }
@@ -139,7 +139,7 @@ export function startFakePtyd(home: string) {
   function handle(socket: Socket<Connection>, { id, ...op }: Frame) {
     // 数でない id の応答は client の待ち手に届かず test が timeout でしか落ちないので、受けた時点で落とす。
     if (id !== undefined && typeof id !== 'number') {
-      throw new Error(`a frame to tania-ptyd carries a non-numeric id: ${JSON.stringify(id)}`)
+      throw new Error(`a frame to monica-ptyd carries a non-numeric id: ${JSON.stringify(id)}`)
     }
     if (op.op === 'terminate' && fake.dropNextTerminate) {
       fake.dropNextTerminate = false

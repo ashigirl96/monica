@@ -28,7 +28,7 @@ const afterTransaction = (work: () => void) => queueMicrotask(work)
 async function write(ptyd: PtydClient, id: string, data: string) {
   const outcome = await ptyd.write(id, data)
   if (outcome.kind === 'done') return
-  const reason = outcome.kind === 'refused' ? outcome.error : 'the connection to tania-ptyd closed'
+  const reason = outcome.kind === 'refused' ? outcome.error : 'the connection to monica-ptyd closed'
   console.error(`[workbench] could not type into Terminal Session ${id}: ${reason}`)
 }
 

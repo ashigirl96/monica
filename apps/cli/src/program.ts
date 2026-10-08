@@ -36,7 +36,7 @@ export function createProgram(argv: string[], deps: Deps) {
     terminalSessionId: deps.terminalSessionId,
     write: deps.stdout,
   })
-  const cli = createCli({ router, name: 'tania' })
+  const cli = createCli({ router, name: 'monica' })
   const params: TrpcCliRunParams = {
     argv,
     prompts: false,
@@ -60,7 +60,9 @@ export function createProgram(argv: string[], deps: Deps) {
   )
   program
     .command('completions')
-    .description('Print the zsh script that completes the commands, options and Task refs of tania')
+    .description(
+      'Print the zsh script that completes the commands, options and Task refs of monica',
+    )
     .addArgument(new Argument('<shell>', 'the shell to complete in').choices(['zsh']))
     .action(() => deps.stdout(zshScript))
   program

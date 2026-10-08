@@ -52,7 +52,7 @@ function wheelEvent(overrides: Partial<WheelEvent> = {}) {
 }
 
 /// Wires the handler to a terminal that has already announced SGR mouse reporting, which is
-/// what every app Monica cares about does (and what the attach replay now restores).
+/// what every app old Monica cared about does (and what the attach replay now restores).
 function handlerWithSink(term: Terminal & FakeTerm = fakeTerm(), sgr = true) {
   const writes: string[] = []
   const onWheel = createWheelHandler(term, (text) => writes.push(text))

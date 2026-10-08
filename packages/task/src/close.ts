@@ -1,6 +1,6 @@
+import { agentSession, tab } from '@monica/workbench/schema'
+import type { Db } from '@monica/workbench/server'
 import { ORPCError, type ORPCErrorConstructorMap } from '@orpc/server'
-import { agentSession, tab } from '@tania/workbench/schema'
-import type { Db } from '@tania/workbench/server'
 import { and, eq, ne, type SQL } from 'drizzle-orm'
 
 import { type Bench, type BenchDeps, type Issue, refuseClosing } from './bench.ts'

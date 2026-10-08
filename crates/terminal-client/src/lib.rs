@@ -11,7 +11,7 @@ use std::time::Duration;
 
 use anyhow::{bail, Context, Result};
 
-use tania_terminal_protocol::{
+use monica_terminal_protocol::{
     read_frames, write_frame, Request, RequestOp, ResponseBody, ServerMessage, PROTOCOL_VERSION,
 };
 

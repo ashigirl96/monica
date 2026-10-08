@@ -1,6 +1,6 @@
+import { agentSession, tab } from '@monica/workbench/schema'
+import type { Db } from '@monica/workbench/server'
 import { ORPCError } from '@orpc/server'
-import { agentSession, tab } from '@tania/workbench/schema'
-import type { Db } from '@tania/workbench/server'
 import { and, eq, type SQL } from 'drizzle-orm'
 
 import type { CurrentOutput } from './contract.ts'
@@ -13,7 +13,7 @@ import { bench, issue, run, task } from './schema.ts'
 export function callerTerminalSession(terminalSessionId: string | undefined): string {
   if (!terminalSessionId) {
     throw new ORPCError('BAD_REQUEST', {
-      message: 'not in a Tab of the Workbench: TANIA_TERMINAL_SESSION_ID is not set',
+      message: 'not in a Tab of the Workbench: MONICA_TERMINAL_SESSION_ID is not set',
     })
   }
   return terminalSessionId

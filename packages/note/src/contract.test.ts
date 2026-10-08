@@ -28,7 +28,7 @@ test('a Daily is named by its date, an Essay and a Repo Note by the title or Unt
   expect(displayName({ kind: 'essay', title: '' })).toBe('Untitled')
   expect(displayName({ kind: 'repo_note', title: 'Release plan' })).toBe('Release plan')
   expect(displayName({ kind: 'repo_note', title: '' })).toBe('Untitled')
-  expect(displayName({ kind: 'scratch', repo: 'Ashigirl96/Tania' })).toBe('Ashigirl96/Tania')
+  expect(displayName({ kind: 'scratch', repo: 'Ashigirl96/Monica' })).toBe('Ashigirl96/Monica')
 })
 
 test('the Logical Date counts 4:59 as the day before and 5:00 as the day itself', () => {

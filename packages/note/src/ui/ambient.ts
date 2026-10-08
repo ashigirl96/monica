@@ -63,7 +63,7 @@ export type AmbientName = keyof typeof AMBIENTS
 export const AMBIENT_NAMES = Object.keys(AMBIENTS) as AmbientName[]
 
 const DEFAULT_AMBIENT: AmbientName = 'universe'
-const STORAGE_KEY = 'tania-ambient'
+const STORAGE_KEY = 'monica-ambient'
 
 // hasOwn で見るのは prototype 継承分を弾くため。`in` だと "constructor" や "__proto__" が
 // 通り、apply() が opacity を持たない値を触って最初の描画の前に throw する

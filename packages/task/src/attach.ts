@@ -1,7 +1,7 @@
 import { existsSync } from 'node:fs'
 
+import { agentSession, tab } from '@monica/workbench/schema'
 import { ORPCError } from '@orpc/server'
-import { agentSession, tab } from '@tania/workbench/schema'
 import { and, eq } from 'drizzle-orm'
 
 import { type BenchDeps, insertBench, refuseClosing } from './bench.ts'

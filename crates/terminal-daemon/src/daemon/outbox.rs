@@ -5,7 +5,7 @@ use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::mpsc::{Receiver, SyncSender};
 use std::sync::Arc;
 
-use tania_terminal_protocol::{to_frame, ServerMessage};
+use monica_terminal_protocol::{to_frame, ServerMessage};
 
 /// macOS hands out at most 1024 bytes per PTY read, so a 200 KB burst is 200+ frames and a
 /// Shell that stalls for a few hundred ms is enough to fill the queue.

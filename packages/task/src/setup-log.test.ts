@@ -21,7 +21,7 @@ function lastWritten(path: string, daysAgo: number) {
 function writeLog(home: string, path: string, daysAgo: number): string {
   const log = join(home, 'logs/setup', path)
   mkdirSync(dirname(log), { recursive: true })
-  writeFileSync(log, 'tania: exit 1\n')
+  writeFileSync(log, 'monica: exit 1\n')
   lastWritten(log, daysAgo)
   return log
 }

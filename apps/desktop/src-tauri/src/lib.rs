@@ -36,7 +36,7 @@ fn bring_main_window_forward(app: &AppHandle) {
 }
 
 pub fn run() {
-    let home = locations::tania_home();
+    let home = locations::monica_home();
     // 2 つ目の起動は build の中（setup より前）で抜けるので、孤児の掃除が 1 つ目の Backend を止めることはない。
     let builder = tauri::Builder::default()
         .plugin(tauri_plugin_single_instance::init(|app, _, _| {

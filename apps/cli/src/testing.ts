@@ -1,31 +1,31 @@
 import { Database } from 'bun:sqlite'
 import { join } from 'node:path'
 
-import { createRouterClient, os } from '@orpc/server'
 import {
   createJobLedger,
   migrations as jobMigrations,
   router as jobRouter,
-} from '@tania/job/server'
+} from '@monica/job/server'
 import {
   createNoteLedger,
   migrations as noteMigrations,
   systemJobs as noteSystemJobs,
-} from '@tania/note/server'
-import { issue, issueBlocker, task as taskTable } from '@tania/task/schema'
+} from '@monica/note/server'
+import { issue, issueBlocker, task as taskTable } from '@monica/task/schema'
 import {
   createTaskLedger,
   type Ghq,
   migrations as taskMigrations,
   router as taskRouter,
   systemJobs as taskSystemJobs,
-} from '@tania/task/server'
+} from '@monica/task/server'
 import {
   createWorkbenchLedger,
   migrations as workbenchMigrations,
   router as workbenchRouter,
-} from '@tania/workbench/server'
-import { startFakePtyd, tempHome, untilSettled } from '@tania/workbench/testing'
+} from '@monica/workbench/server'
+import { startFakePtyd, tempHome, untilSettled } from '@monica/workbench/testing'
+import { createRouterClient, os } from '@orpc/server'
 import { drizzle } from 'drizzle-orm/bun-sqlite'
 import { migrate } from 'drizzle-orm/bun-sqlite/migrator'
 
@@ -125,7 +125,7 @@ export function backendWithTasks() {
   return () => client
 }
 
-export async function tania(
+export async function monica(
   argv: string[],
   connect: () => Client | null,
   { terminalSessionId }: { terminalSessionId?: string } = {},

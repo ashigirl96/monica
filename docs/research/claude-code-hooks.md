@@ -1,6 +1,6 @@
 # Claude Code Hook 現行仕様と --settings 注入の成立
 
-2026 年 10 月現在、Monica が Claude Code の hook メカニズムに依存している方法を確認します。
+2026 年 10 月現在、旧 Monica が Claude Code の hook メカニズムに依存している方法を確認します。
 
 ## 結論
 
@@ -22,10 +22,10 @@
   - Matcher フィールドで条件分岐できる（e.g., `PermissionRequest` イベントで `ExitPlanMode` matcher）
   
 - ✅ **ZDOTDIR shim で claude 関数の wrapper 手法は引き続き成立**
-  - Monica の現在の実装（shell_scaffold.rs）でも同じ手法を使用
+  - 旧 Monica の現在の実装（shell_scaffold.rs）でも同じ手法を使用
   - `--settings` フラグをシェル関数内から挿入して hook を追加
 
-## Monica が現在依存しているイベント・フィールド・CLI フラグ
+## 旧 Monica が現在依存しているイベント・フィールド・CLI フラグ
 
 File: `crates/monica-adapters/src/filesystem/shell_scaffold.rs` (Mon 実装)
 
@@ -39,7 +39,7 @@ File: `crates/monica-adapters/src/filesystem/shell_scaffold.rs` (Mon 実装)
 - **SubagentStart** (matcher: "") → Inert
 - **SubagentStop** (matcher: "") → SubagentFinished
 
-File: `crates/monica-domain/src/agent_signal.rs` (Monica domain model)
+File: `crates/monica-domain/src/agent_signal.rs` (旧 Monica domain model)
 
 ### SignalKind の型
 ```
@@ -60,7 +60,7 @@ Inert
 - **設定ファイル場所**: `{agent_shell_dir}/settings.json`
 - **Hook コマンド**: `MONICA_HOME={monica_base} {monica_cli} hook {agent}`
 - **環境変数チェック**:
-  - `MONICA_TERMINAL_SESSION_ID`: hook を有効化（Monica PTY session 内でのみ）
+  - `MONICA_TERMINAL_SESSION_ID`: hook を有効化（旧 Monica PTY session 内でのみ）
   - `MONICA_TASK_ID`: `--session-id` を自動生成（uuidgen 使用）
 
 ## 現行仕様：Claude Code Hook 2.1.286 時点
@@ -134,7 +134,7 @@ Agent-related:
 ### Settings の優先順位（`--settings` の位置付け）
 
 1. **Managed Settings** （組織設定）- 最高
-2. **CLI `--settings`** ← Monica が使用する層
+2. **CLI `--settings`** ← 旧 Monica が使用する層
 3. **Project Local** `.claude/settings.local.json`
 4. **Shared Project** `.claude/settings.json`
 5. **User** `~/.claude/settings.json` - 最低
@@ -159,31 +159,31 @@ Agent-related:
 
 2. **Matcher の仕様**:
    - Tool 名による正確なマッチ（"Bash"）、パイプ区切り（"Edit|Write"）、正規表現（"^Notebook"）をサポート
-   - Monica が使用する "AskUserQuestion" と "ExitPlanMode" は hook の出力フィールド（tool_input の値ではなく、hook event の metadata）に基づく
+   - 旧 Monica が使用する "AskUserQuestion" と "ExitPlanMode" は hook の出力フィールド（tool_input の値ではなく、hook event の metadata）に基づく
    - PermissionRequest イベントでの "ExitPlanMode" matcher は、plan approval 時のみ hook を発火させる仕組み
 
 3. **`--settings` の動作**:
    - Merge-add: 既存設定の上に追加マージされる（上書きでなく additive）
-   - Wrapper による中継: Monica の shim は wrapper 関数内で `--settings` を展開、claude プロセスに渡す
-   - Path resolution: ファイルパス指定時は、Hook handler コマンド実行時の cwd を基準に解決される（Monica は絶対パス指定で回避）
+   - Wrapper による中継: 旧 Monica の shim は wrapper 関数内で `--settings` を展開、claude プロセスに渡す
+   - Path resolution: ファイルパス指定時は、Hook handler コマンド実行時の cwd を基準に解決される（旧 Monica は絶対パス指定で回避）
 
 4. **Session ID の扱い**:
    - Hook payload 内の `session_id` 値が毎回のイベントで一貫性を保つ
-   - Monica は wrapper で `--session-id` を自動生成して、複数 task run を session レベルで区別可能
+   - 旧 Monica は wrapper で `--session-id` を自動生成して、複数 task run を session レベルで区別可能
    - Resume / Compact / Fork では continuation パラメータで継続の形態を指示
 
 ### 未確認事項
 
 1. **Hook async 実行と timeout**:
    - Settings では `"async": false` がデフォルトか、実際の timeout 値の既定値がいくつかは確認未了
-   - Monica の現実装では timeout を設定していない（デフォルト値に依存）
+   - 旧 Monica の現実装では timeout を設定していない（デフォルト値に依存）
 
 2. **MCP Tool Hook（新機能）との互換性**:
-   - Hook type が "command" 以外に "mcp_tool" や "prompt" が選択肢として存在し、Monica が将来対応する可能性
-   - 現状 Monica は "command" type のみ使用
+   - Hook type が "command" 以外に "mcp_tool" や "prompt" が選択肢として存在し、旧 Monica が将来対応する可能性
+   - 現状旧 Monica は "command" type のみ使用
 
 3. **`prompt_id` フィールドの用途**:
-   - Hook payload に含まれるが、Monica の現実装では参照していない
+   - Hook payload に含まれるが、旧 Monica の現実装では参照していない
 
 4. **SubagentStart と SubagentStop の payload 詳細**:
    - どのフィールドで subagent 識別情報が渡されるかは、実際の webhook 実行で確認が必要
@@ -199,7 +199,7 @@ Source: https://code.claude.com/docs/en/hooks.md、https://code.claude.com/docs/
 - **StopFailure**: API エラーで turn が終わったときに Stop の代わりに発火する（両方は来ない）。`error_type`（rate_limit / overloaded / authentication_failed / oauth_org_not_allowed / account_on_hold / billing_error / invalid_request / model_not_found / server_error / max_output_tokens / cloud_credential_error / unknown）と `error_message`。出力と exit code は無視される観測専用。
 - **SessionStart** の `source` は startup / resume / clear / compact / fork。**SessionEnd** の `reason` は clear / resume / logout / prompt_input_exit / other。`/clear` は旧 session_id に SessionEnd(clear)、新 session_id に SessionStart(clear)。`--resume` は同じ session_id、`--fork-session` は新しい session_id で SessionStart(fork)。
 - **SubagentStart / SubagentStop** は `agent_id` / `agent_type`（Stop は `last_assistant_message` も）を持ち、session_id は親と同じ。
-- **Stop の payload に subagent の生存を示す field は公式には無い**。monica が読んでいる `background_tasks[]`（`{id, status}`）と `stop_hook_active` は docs に載っていない。
+- **Stop の payload に subagent の生存を示す field は公式には無い**。旧 Monica が読んでいる `background_tasks[]`（`{id, status}`）と `stop_hook_active` は docs に載っていない。
 - **Notification** の matcher は permission_prompt / idle_prompt（約 60 秒放置で発火）/ auth_success / elicitation_* / agent_needs_input / agent_completed / quota_auto_resume_*。
 - hook payload に Claude Code の **pid は無い**。
 - AskUserQuestion を Esc で捨てたときに何か発火するかは **未記載**。

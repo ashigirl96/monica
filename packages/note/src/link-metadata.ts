@@ -22,7 +22,7 @@ export async function readLinkMetadata(url: string, stopped: AbortSignal): Promi
 }
 
 async function readPage(url: string, signal: AbortSignal): Promise<LinkMetadata> {
-  const response = await fetch(url, { signal, headers: { 'user-agent': 'tania' } })
+  const response = await fetch(url, { signal, headers: { 'user-agent': 'monica' } })
   if (!response.ok) {
     void response.body?.cancel()
     throw new ORPCError('BAD_GATEWAY', { message: `${url} answered ${response.status}` })

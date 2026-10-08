@@ -14,8 +14,8 @@ await mock.module('@tauri-apps/api/core', () => ({
 
 // toast は画面の外にあるので、出した文言だけを記録する。
 const toasts: string[] = []
-const ui = await import('@tania/ui')
-await mock.module('@tania/ui', () => ({
+const ui = await import('@monica/ui')
+await mock.module('@monica/ui', () => ({
   ...ui,
   pushErrorToast: (message: string) => {
     toasts.push(message)

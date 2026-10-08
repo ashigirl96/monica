@@ -1,7 +1,7 @@
 [package]
-name = "tania-terminal-protocol"
+name = "monica-terminal-protocol"
 version.workspace = true
-description = "Wire protocol for the tania terminal daemon (serde DTOs, version handshake)"
+description = "Wire protocol for the monica terminal daemon (serde DTOs, version handshake)"
 edition.workspace = true
 rust-version.workspace = true
 

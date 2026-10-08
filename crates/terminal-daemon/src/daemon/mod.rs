@@ -1,4 +1,4 @@
-//! The daemon side of tania-ptyd: a Unix-socket NDJSON server owning all PTY sessions.
+//! The daemon side of monica-ptyd: a Unix-socket NDJSON server owning all PTY sessions.
 //! It never touches SQLite — durable state is the app's job — so an old daemon binary can
 //! keep serving sessions across app/schema upgrades without running migrations.
 
@@ -40,7 +40,7 @@ pub fn run_daemon(config: DaemonConfig) -> Result<()> {
         .open(&config.pid_path)
         .with_context(|| format!("failed to open {}", config.pid_path.display()))?;
     if pid_file.try_lock().is_err() {
-        log::info!("another tania-ptyd already holds the lock; exiting");
+        log::info!("another monica-ptyd already holds the lock; exiting");
         return Ok(());
     }
     pid_file.set_len(0)?;
@@ -52,7 +52,7 @@ pub fn run_daemon(config: DaemonConfig) -> Result<()> {
     let listener = UnixListener::bind(&config.socket_path)
         .with_context(|| format!("failed to bind {}", config.socket_path.display()))?;
     log::info!(
-        "tania-ptyd listening on {} (pid {})",
+        "monica-ptyd listening on {} (pid {})",
         config.socket_path.display(),
         std::process::id()
     );

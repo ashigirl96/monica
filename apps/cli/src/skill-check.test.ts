@@ -11,7 +11,7 @@ afterEach(() => {
 })
 
 function plugin(files: Record<string, string>): string {
-  const root = mkdtempSync(join(tmpdir(), 'tania-skills-'))
+  const root = mkdtempSync(join(tmpdir(), 'monica-skills-'))
   cleanups.push(() => rmSync(root, { recursive: true, force: true }))
   for (const [path, content] of Object.entries(files)) {
     mkdirSync(dirname(join(root, path)), { recursive: true })
@@ -20,7 +20,7 @@ function plugin(files: Record<string, string>): string {
   return root
 }
 
-const manifest = (...skills: string[]) => JSON.stringify({ name: 'tania', skills })
+const manifest = (...skills: string[]) => JSON.stringify({ name: 'monica', skills })
 
 const skill = (name: string, body: string) => `---\nname: ${name}\ndescription: x\n---\n\n${body}`
 
@@ -28,14 +28,14 @@ test('the Skills the plugin ships call only commands and flags the CLI has', () 
   expect(inspectSkills(join(import.meta.dir, '../../..'))).toEqual([])
 })
 
-test('a tania command the CLI does not have fails the check', () => {
+test('a monica command the CLI does not have fails the check', () => {
   const root = plugin({
     '.claude-plugin/plugin.json': manifest('./packages/task/skills'),
-    'packages/task/skills/look/SKILL.md': skill('look', '```bash\ntania task nope\n```\n'),
+    'packages/task/skills/look/SKILL.md': skill('look', '```bash\nmonica task nope\n```\n'),
   })
 
   expect(inspectSkills(root)).toEqual([
-    "packages/task/skills/look/SKILL.md: `tania task nope`: unknown command 'nope'",
+    "packages/task/skills/look/SKILL.md: `monica task nope`: unknown command 'nope'",
   ])
 })
 
@@ -46,10 +46,10 @@ test('a flag the command does not take fails the check, while its own flags, --f
       'look',
       [
         '```bash',
-        'tania task list --closed --format json',
-        'tania --format=json task run acme/app#1 --in-place --force',
-        'tania task attach --help',
-        'tania task list --in-place',
+        'monica task list --closed --format json',
+        'monica --format=json task run acme/app#1 --in-place --force',
+        'monica task attach --help',
+        'monica task list --in-place',
         '```',
         '',
       ].join('\n'),
@@ -57,7 +57,7 @@ test('a flag the command does not take fails the check, while its own flags, --f
   })
 
   expect(inspectSkills(root)).toEqual([
-    "packages/task/skills/look/SKILL.md: `tania task list --in-place`: unknown option '--in-place'",
+    "packages/task/skills/look/SKILL.md: `monica task list --in-place`: unknown option '--in-place'",
   ])
 })
 
@@ -68,8 +68,8 @@ test('a boolean flag before an argument fails the check, since commander takes t
       'look',
       [
         '```bash',
-        'tania task close acme/app#1 --force',
-        'tania task close --force acme/app#1',
+        'monica task close acme/app#1 --force',
+        'monica task close --force acme/app#1',
         '```',
         '',
       ].join('\n'),
@@ -77,7 +77,7 @@ test('a boolean flag before an argument fails the check, since commander takes t
   })
 
   expect(inspectSkills(root)).toEqual([
-    "packages/task/skills/look/SKILL.md: `tania task close --force acme/app#1`: option '--force' takes 'acme/app#1' as its value",
+    "packages/task/skills/look/SKILL.md: `monica task close --force acme/app#1`: option '--force' takes 'acme/app#1' as its value",
   ])
 })
 
@@ -86,12 +86,12 @@ test('a line in a shell block names a command to run, not a group, and its comme
     '.claude-plugin/plugin.json': manifest('./packages/task/skills'),
     'packages/task/skills/look/SKILL.md': skill(
       'look',
-      '```sh\ntania task list  # --all は無い\ntania task\n```\n',
+      '```sh\nmonica task list  # --all は無い\nmonica task\n```\n',
     ),
   })
 
   expect(inspectSkills(root)).toEqual([
-    "packages/task/skills/look/SKILL.md: `tania task`: missing a command under 'tania task'",
+    "packages/task/skills/look/SKILL.md: `monica task`: missing a command under 'monica task'",
   ])
 })
 
@@ -104,12 +104,12 @@ test('a shell block indented under a list item is checked, and one inside a long
         '1. 一覧を見る。',
         '',
         '   ```bash',
-        '   tania task lsit',
+        '   monica task lsit',
         '   ```',
         '',
         '````markdown',
         '```bash',
-        'tania task nope',
+        'monica task nope',
         '```',
         '````',
         '',
@@ -118,7 +118,7 @@ test('a shell block indented under a list item is checked, and one inside a long
   })
 
   expect(inspectSkills(root)).toEqual([
-    "packages/task/skills/look/SKILL.md: `tania task lsit`: unknown command 'lsit'",
+    "packages/task/skills/look/SKILL.md: `monica task lsit`: unknown command 'lsit'",
   ])
 })
 
@@ -160,16 +160,16 @@ test('plugin.json fails the check unless it lists exactly the packages/*/skills 
   ])
 })
 
-test('an inline tania in prose is checked for its command path only', () => {
+test('an inline monica in prose is checked for its command path only', () => {
   const root = plugin({
     '.claude-plugin/plugin.json': manifest('./packages/task/skills'),
     'packages/task/skills/look/SKILL.md': skill(
       'look',
-      '`tania` の `tania task` から `tania task list --nope` を打ち、`tania task lsit` は打たない。\n',
+      '`monica` の `monica task` から `monica task list --nope` を打ち、`monica task lsit` は打たない。\n',
     ),
   })
 
   expect(inspectSkills(root)).toEqual([
-    "packages/task/skills/look/SKILL.md: `tania task lsit`: unknown command 'lsit'",
+    "packages/task/skills/look/SKILL.md: `monica task lsit`: unknown command 'lsit'",
   ])
 })

@@ -1,5 +1,5 @@
+import { AgentSessionSchema } from '@monica/workbench/contract'
 import { eventIterator, oc } from '@orpc/contract'
-import { AgentSessionSchema } from '@tania/workbench/contract'
 import { createSchemaFactory } from 'drizzle-zod'
 import { z } from 'zod'
 

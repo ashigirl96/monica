@@ -3,16 +3,16 @@ use std::path::PathBuf;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use anyhow::{anyhow, bail, Result};
-use tania_logfile::DailyLog;
-use tania_terminal_daemon::daemon::{run_daemon, DaemonConfig};
+use monica_logfile::DailyLog;
+use monica_terminal_daemon::daemon::{run_daemon, DaemonConfig};
 
 fn base_dir() -> Result<PathBuf> {
-    if let Some(home) = std::env::var_os("TANIA_HOME") {
+    if let Some(home) = std::env::var_os("MONICA_HOME") {
         return Ok(PathBuf::from(home));
     }
     let home =
-        std::env::var_os("HOME").ok_or_else(|| anyhow!("neither TANIA_HOME nor HOME is set"))?;
-    Ok(PathBuf::from(home).join(".tania"))
+        std::env::var_os("HOME").ok_or_else(|| anyhow!("neither MONICA_HOME nor HOME is set"))?;
+    Ok(PathBuf::from(home).join(".monica"))
 }
 
 enum Sink {
@@ -82,10 +82,10 @@ fn main() -> Result<()> {
     let mut args = std::env::args().skip(1);
     while let Some(arg) = args.next() {
         match arg.as_str() {
-            "--tania-home" => {
+            "--monica-home" => {
                 let path = args
                     .next()
-                    .ok_or_else(|| anyhow!("--tania-home requires a path"))?;
+                    .ok_or_else(|| anyhow!("--monica-home requires a path"))?;
                 base = Some(PathBuf::from(path));
             }
             "--foreground" => foreground = true,
@@ -100,7 +100,7 @@ fn main() -> Result<()> {
     init_logging(&base, foreground)?;
 
     if !foreground {
-        // Detach from the launching app's session so quitting tania (or the shell that
+        // Detach from the launching app's session so quitting monica (or the shell that
         // spawned us) never HUPs the daemon. setsid fails iff we're already a group
         // leader, in which case ignoring SIGHUP is the part that matters.
         // SAFETY: setsid(2) and signal(2) with SIG_IGN take plain values and install no handler code.

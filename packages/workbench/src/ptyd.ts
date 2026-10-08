@@ -89,7 +89,7 @@ export class PtydClient {
           client.flush()
         },
         close() {
-          client.shutdown('tania-ptyd connection closed')
+          client.shutdown('monica-ptyd connection closed')
         },
         error(_s, error) {
           client.shutdown(error.message)
@@ -147,7 +147,7 @@ export class PtydClient {
   }
 
   private request(op: RequestOp): Promise<ResponseBody> {
-    if (this.closed) return Promise.reject(new Disconnected('tania-ptyd connection closed'))
+    if (this.closed) return Promise.reject(new Disconnected('monica-ptyd connection closed'))
     const id = this.nextId++
     return new Promise((resolve, reject) => {
       this.pending.set(id, { resolve, reject })
@@ -244,7 +244,8 @@ export function inheritableEnv(): Record<string, string> {
   const env: Record<string, string> = {}
   for (const [key, value] of Object.entries(process.env)) {
     if (value === undefined) continue
-    if (key.startsWith('TANIA_') || key === 'CLAUDECODE' || key.startsWith('CLAUDE_CODE_')) continue
+    if (key.startsWith('MONICA_') || key === 'CLAUDECODE' || key.startsWith('CLAUDE_CODE_'))
+      continue
     env[key] = value
   }
   return env
@@ -252,13 +253,13 @@ export function inheritableEnv(): Record<string, string> {
 
 // ptyd は自分の env を全 tab に渡すので、Backend だけの env を落とす。
 function daemonEnv(home: string): Record<string, string> {
-  return { ...inheritableEnv(), TANIA_HOME: home }
+  return { ...inheritableEnv(), MONICA_HOME: home }
 }
 
 function spawnDaemon({ home, ptydPath }: DaemonPaths) {
-  if (!existsSync(ptydPath)) throw new Error(`tania-ptyd not found at ${ptydPath}`)
+  if (!existsSync(ptydPath)) throw new Error(`monica-ptyd not found at ${ptydPath}`)
   // ptyd は setsid と SIGHUP の無視で自分を切り離すので、起こした Backend より長生きする。
-  const child = Bun.spawn([ptydPath, '--tania-home', home], {
+  const child = Bun.spawn([ptydPath, '--monica-home', home], {
     stdio: ['ignore', 'ignore', 'ignore'],
     env: daemonEnv(home),
   })
@@ -302,7 +303,7 @@ export async function openDaemon(paths: DaemonPaths, handlers: PtydHandlers): Pr
   const version = await client.hello()
   if (version !== PROTOCOL_VERSION) {
     console.error(
-      `[workbench] tania-ptyd speaks protocol ${version} (want ${PROTOCOL_VERSION}); replacing it`,
+      `[workbench] monica-ptyd speaks protocol ${version} (want ${PROTOCOL_VERSION}); replacing it`,
     )
     client.shutdownDaemon()
     await Bun.sleep(300)
@@ -311,7 +312,7 @@ export async function openDaemon(paths: DaemonPaths, handlers: PtydHandlers): Pr
     client = await connectWithin(socket, silent, 2000)
     const replacedVersion = await client.hello()
     if (replacedVersion !== PROTOCOL_VERSION) {
-      throw new Error(`tania-ptyd still speaks protocol ${replacedVersion} after restart`)
+      throw new Error(`monica-ptyd still speaks protocol ${replacedVersion} after restart`)
     }
   }
   client.setHandlers(handlers)

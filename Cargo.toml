@@ -11,10 +11,10 @@ rust-version = "1.95"
 undocumented_unsafe_blocks = "warn"
 
 [workspace.dependencies]
-tania-logfile = { path = "crates/logfile" }
-tania-terminal-client = { path = "crates/terminal-client" }
-tania-terminal-daemon = { path = "crates/terminal-daemon" }
-tania-terminal-protocol = { path = "crates/terminal-protocol" }
+monica-logfile = { path = "crates/logfile" }
+monica-terminal-client = { path = "crates/terminal-client" }
+monica-terminal-daemon = { path = "crates/terminal-daemon" }
+monica-terminal-protocol = { path = "crates/terminal-protocol" }
 
 anyhow = "1.0.102"
 base64 = { version = "0.23", default-features = false, features = ["std"] }

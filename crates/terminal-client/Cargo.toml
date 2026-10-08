@@ -1,14 +1,14 @@
 [package]
-name = "tania-terminal-client"
+name = "monica-terminal-client"
 version.workspace = true
-description = "Client transport for the tania terminal daemon"
+description = "Client transport for the monica terminal daemon"
 edition.workspace = true
 rust-version.workspace = true
 
 [dependencies]
 anyhow.workspace = true
 log.workspace = true
-tania-terminal-protocol.workspace = true
+monica-terminal-protocol.workspace = true
 
 [lints]
 workspace = true

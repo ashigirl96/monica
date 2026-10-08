@@ -4,7 +4,7 @@ status: accepted
 
 # Tab を閉じるとその Terminal Session も終了し、Tab の無い Terminal Session を残さない
 
-monica から引き継いだ Workbench は、tmux や zellij にならって UI の寿命と process の寿命を分けていた（monica-v1 #75）。Tab を閉じても Terminal Session は止めずに detached として残し、sidebar の Detached から Tab に開き直す（reattach）か kill するまで生かす。しかし tania の Tab は Ctrl-D か `exit` で閉じ、reattach は使っていない。Detached は、閉じた Tab の shell と claude が溜まる場所になっていた。そこで Ghostty と同じく、Tab を閉じる（Close Tab）とその Terminal Session も終了させる。Tab の無い live な Terminal Session は作らず、見つけたら終了させる。これで sidebar の Detached、reattach、Tab の無い Terminal Session の未読と Dock の数の扱いが要らなくなる。app の再起動を越えて shell を生かすこと（ADR-0007、ADR-0011）は変えない。#75 の主な動機はそちらで、Tab の寿命とは独立しているため。
+旧 Monica から引き継いだ Workbench は、tmux や zellij にならって UI の寿命と process の寿命を分けていた（monica-v1 #75）。Tab を閉じても Terminal Session は止めずに detached として残し、sidebar の Detached から Tab に開き直す（reattach）か kill するまで生かす。しかし monica の Tab は Ctrl-D か `exit` で閉じ、reattach は使っていない。Detached は、閉じた Tab の shell と claude が溜まる場所になっていた。そこで Ghostty と同じく、Tab を閉じる（Close Tab）とその Terminal Session も終了させる。Tab の無い live な Terminal Session は作らず、見つけたら終了させる。これで sidebar の Detached、reattach、Tab の無い Terminal Session の未読と Dock の数の扱いが要らなくなる。app の再起動を越えて shell を生かすこと（ADR-0007、ADR-0011）は変えない。#75 の主な動機はそちらで、Tab の寿命とは独立しているため。
 
 ## Considered Options
 

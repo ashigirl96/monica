@@ -1,4 +1,4 @@
-import type { BenchLabel, BenchSetup } from '@tania/workbench/ui'
+import type { BenchLabel, BenchSetup } from '@monica/workbench/ui'
 
 import type { BenchItem } from '../contract.ts'
 

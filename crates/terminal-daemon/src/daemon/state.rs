@@ -16,7 +16,7 @@ use crate::manager::PtyManager;
 use crate::terminal_modes::TerminalModes;
 use crate::transcript::{self, Transcript};
 use crate::types::{PtySize, SpawnRequest};
-use tania_terminal_protocol::{CreateParams, ServerMessage, SessionInfo};
+use monica_terminal_protocol::{CreateParams, ServerMessage, SessionInfo};
 
 const DEFAULT_REPLAY_BYTES: u32 = 256 * 1024;
 /// Larger than a PTY read, so a backlog drains in fewer frames.
@@ -596,13 +596,13 @@ mod tests {
     use std::path::Path;
     use std::time::{Duration, Instant};
 
-    use tania_terminal_protocol::{read_frames, write_frame, Request, RequestOp, ResponseBody};
+    use monica_terminal_protocol::{read_frames, write_frame, Request, RequestOp, ResponseBody};
 
     use crate::daemon::connection::serve_connection;
 
     fn temp_dir(name: &str) -> PathBuf {
         let dir = std::env::temp_dir().join(format!(
-            "tania-ptyd-state-{name}-{}-{:?}",
+            "monica-ptyd-state-{name}-{}-{:?}",
             std::process::id(),
             std::thread::current().id()
         ));

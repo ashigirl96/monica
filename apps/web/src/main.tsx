@@ -1,9 +1,9 @@
 import './globals.css'
+import type { contract as noteContract } from '@monica/note/contract'
+import { type CallContext, NotesApp, noteLinkOptions } from '@monica/note/ui'
 import { createORPCClient } from '@orpc/client'
 import { RPCLink } from '@orpc/client/fetch'
 import type { ContractRouterClient } from '@orpc/contract'
-import type { contract as noteContract } from '@tania/note/contract'
-import { type CallContext, NotesApp, noteLinkOptions } from '@tania/note/ui'
 import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
 

@@ -3,7 +3,7 @@ import { afterEach, expect, test } from 'bun:test'
 import { createRouterClient } from '@orpc/server'
 
 import type { Client } from './backend.ts'
-import { cleanUp, inMemoryBackend, openTabOutsideBench, tania } from './testing.ts'
+import { cleanUp, inMemoryBackend, openTabOutsideBench, monica } from './testing.ts'
 
 afterEach(cleanUp)
 
@@ -16,7 +16,7 @@ test('terminal-session list prints the live sessions as text', async () => {
   const client = inProcessClient()
   const id = await openTabOutsideBench(client)
 
-  const result = await tania(['workbench', 'terminal-session', 'list'], () => client)
+  const result = await monica(['workbench', 'terminal-session', 'list'], () => client)
 
   expect(result).toEqual({
     code: 0,
@@ -38,7 +38,7 @@ test('agent-session list prints each live Agent Session with its state and reaso
     },
   })
 
-  const result = await tania(['workbench', 'agent-session', 'list'], () => client)
+  const result = await monica(['workbench', 'agent-session', 'list'], () => client)
 
   expect(result).toEqual({
     code: 0,
@@ -53,7 +53,7 @@ test('--format json prints the procedure output as it is', async () => {
   const client = inProcessClient()
   const id = await openTabOutsideBench(client)
 
-  const result = await tania(
+  const result = await monica(
     ['workbench', 'terminal-session', 'list', '--format', 'json'],
     () => client,
   )
@@ -76,7 +76,7 @@ test('--format json prints the procedure output as it is', async () => {
 })
 
 test('without a Backend the CLI exits 2', async () => {
-  const result = await tania(['workbench', 'terminal-session', 'list'], () => null)
+  const result = await monica(['workbench', 'terminal-session', 'list'], () => null)
 
   expect(result.code).toBe(2)
   expect(result.stdout).toBe('')
@@ -86,15 +86,15 @@ test('without a Backend the CLI exits 2', async () => {
 test('a usage error prints one CODE: message line on stderr and exits 1', async () => {
   const client = inProcessClient()
 
-  const unknownFlag = await tania(
+  const unknownFlag = await monica(
     ['workbench', 'terminal-session', 'list', '--no-such-flag'],
     () => client,
   )
-  const badFormat = await tania(
+  const badFormat = await monica(
     ['workbench', 'terminal-session', 'list', '--format', 'xml'],
     () => client,
   )
-  const unknownCommand = await tania(['workbench', 'nope'], () => client)
+  const unknownCommand = await monica(['workbench', 'nope'], () => client)
 
   expect(unknownFlag).toEqual({
     code: 1,

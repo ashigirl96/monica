@@ -1,5 +1,5 @@
+import { type PopoverAnchor, pushErrorToast, pushInfoToast } from '@monica/ui'
 import type { ContractRouterClient } from '@orpc/contract'
-import { type PopoverAnchor, pushErrorToast, pushInfoToast } from '@tania/ui'
 import { atom, type Getter, type Setter, type Store } from 'jotai'
 import { atomWithDefault } from 'jotai/utils'
 

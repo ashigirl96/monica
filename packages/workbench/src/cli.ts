@@ -1,5 +1,5 @@
+import { table } from '@monica/ui/table'
 import type { ContractRouterClient } from '@orpc/contract'
-import { table } from '@tania/ui/table'
 
 import type { AgentSession, contract, TerminalSession } from './contract.ts'
 
@@ -18,7 +18,7 @@ export const commands = [
 
 // tool 1 回ごとに起動するので、contract や zod の実体を import しない。
 async function hookClaude(_argv: string[], { connect }: { connect: Connect }): Promise<number> {
-  const terminalSessionId = process.env.TANIA_TERMINAL_SESSION_ID
+  const terminalSessionId = process.env.MONICA_TERMINAL_SESSION_ID
   if (!terminalSessionId) return 0
   // Backend の不在・失敗・timeout のどれでも claude を止めない。retry もしない（ADR-0007）。
   try {
@@ -32,7 +32,7 @@ async function hookClaude(_argv: string[], { connect }: { connect: Connect }): P
       { signal: AbortSignal.timeout(2000) },
     )
   } catch (error) {
-    console.error(`tania workbench hook claude: ${error instanceof Error ? error.message : error}`)
+    console.error(`monica workbench hook claude: ${error instanceof Error ? error.message : error}`)
   }
   return 0
 }

@@ -1,8 +1,8 @@
 //! Terminal Session の作成・一覧・終了は行を持つ Backend が行うので、ここの command は byte を運ぶだけにする。
 
 use anyhow::bail;
+use monica_terminal_protocol::{RequestOp, ResponseBody};
 use serde::Serialize;
-use tania_terminal_protocol::{RequestOp, ResponseBody};
 use tauri::{AppHandle, Manager};
 
 use crate::ptyd::PtydHandle;
