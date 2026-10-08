@@ -22,5 +22,5 @@ ADR-0013 は tauri-plugin-notification で通知を出し、クリックは OS �
 - .app の外の process で `currentNotificationCenter` を呼ぶと、catch できない例外で abort する。Shell は main bundle が .app かどうかで経路を分け、.app の外では UNUserNotificationCenter に触らない。
 - release は初回の起動で通知の許可を求める。Keychain の自己署名 identity で codesign した .app で許可が通り、クリックで `userInfo` が届くことを確かめた。release は通知を出すのに plugin を使わない。
 - monica が前面の間は、今までどおりバナーを出さず通知センターにだけ入れる（`willPresent` で list だけを返す）。前面では sidebar の未読と status dot が代わりになる。
-- 通知の request identifier は Shell が決められるので、待ちが解けたら取り下げる、同じ Tab の古い通知を置き換える、を後から足せる。この ADR では足さない。
+- 通知の request identifier は Shell が決められるので、待ちが解けたら取り下げる、同じ Tab の古い通知を置き換える、を後から足せる。この ADR では足さない（ADR-0025 が足した）。
 - ADR-0013 のうち、クリックは monica を前面に出すだけで Tab には移らない、という帰結をこの ADR が置き換える。判定と本文を workbench が持ち、Shell は渡された行を出すだけ、という分担は変えない。
