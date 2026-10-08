@@ -22,7 +22,7 @@ status: accepted
 - claude の Job の成否は、Job が呼ぶ script が決める。`claude -p` は tool を拒否された回も質問できずに終えた回も exit 0 で終わりうるので、script が `--output-format json` の result 行（`is_error`、`permission_denials`）と成果を確かめ、何もできていなければ 0 以外で終わる。monica は exit code だけを見る。
 - ユーザーの Job の process は Backend の `process.env`（login shell の PATH）で起こすので、PATH の `claude` は Tab の wrapper ではなく本物になり、hook が付かず、Agent Session にならない。
 - Backend が Job Execution の途中で止まると process group を kill し、次の起動でその行を中断にする（Bench の準備の `failInterruptedPreparations` と同じ形）。
-- `docs/packages.md` の「domain は 2 つしかないので」は 3 つになるが、汎用の domain の登録機構を作らずに直接並べる方針は変えない。
+- `docs/packages/backend.md` の「domain は 2 つしかないので」は 3 つになるが、汎用の domain の登録機構を作らずに直接並べる方針は変えない。
 - task は sync の関数だけでなく、system の Job の並び（名前・間隔・`run`）も `@monica/task/server` の `systemJobs(taskLedger)` で出し、Backend の組み立てはそれを job に渡すだけにした（#110）。Backend の組み立てと CLI のテストの in-memory の Backend の 2 か所に同じ並びを写すと、CLI のテストが本物の名前と間隔を確かめないため。task は job を import せず、`{ name, every, run }` と同じ構造の素のオブジェクトを返すので、退けた task → job の依存は生まれない。
 - 一覧は CLI だけで、画面も通知も持たない。失敗に気づくのは一覧を見た時になる。
 - Job の追加は CLI に出すので、Tab の agent も呼べる。関門は Claude Code の Bash の許可で、agent が今も crontab や launchd でできることを超えない。
