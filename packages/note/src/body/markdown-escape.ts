@@ -40,13 +40,8 @@ export function writeEscaped(pieces: Piece[], lineStart: LineStart): string {
 function writeCell(glyphs: Glyph[]): string {
   const line = glyphs.map((glyph) => (glyph.char === '\n' ? { ...glyph, char: ' ' } : glyph))
   escapeInline(line)
-  // `|` は code や href の中でもセルを区切るので escape し、直前に続く `\` も重ねて `\|` の escape を食わせない。
-  let beforePipe = false
-  for (const glyph of line.toReversed()) {
-    if (glyph.char === '|') beforePipe = true
-    else if (glyph.char !== '\\') beforePipe = false
-    if (beforePipe) glyph.escaped = true
-  }
+  // `|` は code・href・Note Mention の中でもセルを区切り、fromMarkdown はセルの `\|` を inline として読む前に `|` に戻す。
+  for (const glyph of line) if (glyph.char === '|') glyph.escaped = true
   return lineText(line)
 }
 

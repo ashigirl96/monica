@@ -218,16 +218,25 @@ test('only the lines that would read as a table are escaped', () => {
 })
 
 test('a backslash in code before a pipe in a table cell does not split the cell', () => {
-  type Tree = { content?: Tree[] }
   const coded = doc(
     table([
       [text('a\\|b', { type: 'code' }), 'c'],
       ['d', 'e'],
     ]),
   )
-  const read = (readBack(coded) as Tree).content?.[0]?.content?.[0]?.content?.[0]
 
-  expect(read?.content?.map((row) => row.content?.length)).toEqual([2, 2])
+  expect(readBack(coded)).toEqual(coded)
+})
+
+test('a named Note Mention, code and a link holding a pipe read back the same in a table cell', () => {
+  const piped = doc(
+    table([
+      [{ type: 'noteMention', attrs: { noteId: 'note-1' } }, text('a|b', { type: 'code' })],
+      [text('x', { type: 'link', attrs: { href: 'https://example.com/a|b\\|c' } }), 'd'],
+    ]),
+  )
+
+  expect(readBack(piped, () => 'pi|ped')).toEqual(piped)
 })
 
 test('a delimiter in code does not pair with the one outside, and one in a link does', () => {
