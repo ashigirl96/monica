@@ -114,7 +114,7 @@ _Avoid_: Execution（単独で使わない）, Job Run, Run（Task の語）, ti
 ### Note
 
 **Note**:
-本文を持つ 1 枚の文書。Daily・Essay・Repo Note・Scratch のどれか 1 つの種類に属し、種類も作った時点の Logical Date も後から変えない。削除すると一覧と Note Mention の候補から消え、その Note を指す Note Mention と Synced Block には削除されたと出る。削除した画面にいる間は取り消せる。
+本文を持つ 1 枚の文書。Daily・Essay・Repo Note・Scratch のどれか 1 つの種類に属し、種類も作った時点の Logical Date も後から変えない。削除すると一覧と Note Mention の候補から消え、その Note を指す Note Mention と Synced Block には削除されたと出る。削除した画面にいる間は取り消せる。Essay の一覧と編集は合わせて 1 つの画面、Repo Note は Repo ごとに 1 つの画面と数える。
 _Avoid_: memo, journal, page, document, ノート
 
 **Daily**:
