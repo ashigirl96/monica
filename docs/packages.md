@@ -30,7 +30,7 @@ monica/
 ├── tsconfig.json       1 つだけ
 ├── Cargo.toml          Rust の workspace（crates/* と apps/desktop/src-tauri）
 ├── .claude-plugin/     plugin.json・marketplace.json（ADR-0006）
-├── scripts/            desktop.ts・dev-instance.ts・dev.ts・extension.ts・extension-panel.ts・cdp.ts・build.ts・install-app.ts・check-brief.ts・test.ts・monica-dev・oxlint/
+├── scripts/            desktop.ts・dev-instance.ts・dev.ts・extension.ts・extension-panel.ts・cdp.ts・build.ts・install-app.ts・bundled-claude.ts・check-brief.ts・test.ts・monica-dev・oxlint/
 ├── apps/
 │   ├── backend/        @monica/backend   Backend の組み立て
 │   ├── cli/            @monica/cli       bin は monica
@@ -88,7 +88,7 @@ entry は層ではなく、import してよい実行環境で切る（ADR-0009�
 | `@monica/<d>/ui` | React の component と atom。画面を持たない job には無い | browser | apps/desktop、apps/web（note）、apps/extension（chat）、他 package の ui |
 | `@monica/<d>/cli` | 出力の整形関数、補完の候補を返す関数、手で書く command。CLI に出す procedure の無い note と chat には無い | Bun | apps/cli |
 | `@monica/<d>/body` | Note の本文の JSON を読む関数と、本文と markdown の変換（`docs/packages/note-ledger.md`）。今は note だけが持つ | どこでも | 自分の contract と server と ui |
-| `@monica/<d>/testing` | 他の package のテストに出す fake。今は workbench だけが持ち、`src/fake-ptyd.ts` の fake の ptyd（`startFakePtyd`）、短い home を作る `tempHome`、Terminal Session が starting を抜けるのを待つ `untilSettled` を出す | Bun | 他 package のテストと `testing.ts` |
+| `@monica/<d>/testing` | 他の package のテストに出す fake。今は workbench と chat が持つ。workbench は `src/fake-ptyd.ts` の fake の ptyd（`startFakePtyd`）、短い home を作る `tempHome`、Terminal Session が starting を抜けるのを待つ `untilSettled` を出す。chat は `src/testing.ts` の、偽の claude を起こす wrapper を書く `writeFakeClaude` を出す | Bun | 他 package のテストと `testing.ts` |
 
 - 依存の向きは task → workbench だけ。workbench は task を import しない（ADR-0005）。job は task も workbench も import しない（ADR-0016）。note は他の domain を import せず、他の domain からも import されない。chat も同じ。
 - task の schema は workbench の table を FK のために import するが、re-export しない（ADR-0010）。

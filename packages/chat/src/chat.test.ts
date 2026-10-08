@@ -1,13 +1,5 @@
 import { afterEach, expect, spyOn, test } from 'bun:test'
-import {
-  chmodSync,
-  existsSync,
-  mkdtempSync,
-  readFileSync,
-  realpathSync,
-  rmSync,
-  writeFileSync,
-} from 'node:fs'
+import { existsSync, mkdtempSync, readFileSync, realpathSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
@@ -15,6 +7,7 @@ import { createRouterClient } from '@orpc/server'
 
 import type { AskInput } from './contract.ts'
 import { createChatAgent, router } from './server.ts'
+import { writeFakeClaude } from './testing.ts'
 
 type Record =
   | { pid: number; kind: 'start'; argv: string[]; env: { [key: string]: string }; cwd: string }
@@ -54,14 +47,7 @@ function startChat() {
   const claudes = () => liveChildren().filter((pid) => !others.has(pid))
   const home = mkdtempSync(join(tmpdir(), 'monica-chat-'))
   const recordPath = join(home, 'claude.jsonl')
-  writeFileSync(recordPath, '')
-  // claude の env には PATH が無く、SDK は .ts の path を bun の名前で起こすので、拡張子の無い wrapper から絶対 path で起こす。
-  const claudePath = join(home, 'claude')
-  writeFileSync(
-    claudePath,
-    `#!/bin/sh\nexec "${process.execPath}" "${join(import.meta.dir, 'fake-claude.ts')}" "${recordPath}" "$@"\n`,
-  )
-  chmodSync(claudePath, 0o755)
+  const claudePath = writeFakeClaude(home, recordPath)
   const chatAgent = createChatAgent({ home, claudePath })
   const records = () =>
     readFileSync(recordPath, 'utf8')

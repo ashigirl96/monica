@@ -88,7 +88,8 @@ const jobLedger = createJobLedger({
   home,
   systemJobs: [...taskSystemJobs(taskLedger), ...noteSystemJobs(noteLedger)],
 })
-const chatAgent = createChatAgent({ home })
+// MONICA_PTYD_PATH と違って検めない。claude を起こせなくても Workbench は動き、失敗は Chat の答えに出る。
+const chatAgent = createChatAgent({ home, claudePath: process.env.MONICA_CLAUDE_PATH })
 
 const context = { db, workbenchLedger, taskLedger, jobLedger }
 const router = os

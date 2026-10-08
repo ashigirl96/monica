@@ -5,7 +5,8 @@
   "exports": {
     "./contract": "./src/contract.ts",
     "./server": "./src/server.ts",
-    "./ui": "./src/ui/index.ts"
+    "./ui": "./src/ui/index.ts",
+    "./testing": "./src/testing.ts"
   },
   "dependencies": {
     "@anthropic-ai/claude-agent-sdk": "catalog:",
