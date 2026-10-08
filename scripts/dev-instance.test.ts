@@ -14,11 +14,11 @@ function homeAt(...segments: string[]): string {
   return home
 }
 
-test('既定の home は release と分けた identifier と port 1420、notes の口は 19381、Chrome Extension の Vite は 19781', () => {
+test('既定の home は release と分けた identifier と port 1420、ブラウザの口は 19381、Chrome Extension の Vite は 19781', () => {
   expect(devInstance(join(homedir(), '.monica-dev'))).toEqual({
     identifier: 'com.ashigirl96.monica.dev',
     preferredPort: 1420,
-    notesPort: 19381,
+    browserPort: 19381,
     webPort: 19581,
     extensionPort: 19781,
   })
@@ -30,15 +30,15 @@ test('ほかの home は basename の先頭の . を外し、使えない文字�
   expect(preferredPort).toBeGreaterThan(1420)
 })
 
-// 散らした port が既定の home の port や、notes の口と 2 つの Vite の port どうしで重なると、片方の bind が落ちる。
-test('ほかの home の notes の口と 2 つの Vite の port は、既定の home とも互いとも重ならない範囲に散らす', () => {
+// 散らした port が既定の home の port や、ブラウザの口と 2 つの Vite の port どうしで重なると、片方の bind が落ちる。
+test('ほかの home のブラウザの口と 2 つの Vite の port は、既定の home とも互いとも重ならない範囲に散らす', () => {
   const ports = ['s1', 's2', 's3', 's4', 's5'].map((name) => devInstance(homeAt(name)))
-  for (const { notesPort, webPort, extensionPort } of ports) {
-    expect(notesPort).toBeWithin(19382, 19482)
+  for (const { browserPort, webPort, extensionPort } of ports) {
+    expect(browserPort).toBeWithin(19382, 19482)
     expect(webPort).toBeWithin(19582, 19682)
     expect(extensionPort).toBeWithin(19782, 19882)
   }
-  expect(new Set(ports.map((p) => p.notesPort)).size).toBeGreaterThan(1)
+  expect(new Set(ports.map((p) => p.browserPort)).size).toBeGreaterThan(1)
   expect(new Set(ports.map((p) => p.extensionPort)).size).toBeGreaterThan(1)
 })
 

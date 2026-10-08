@@ -5,7 +5,7 @@ import { z } from 'zod'
 import { IMAGE_URL_PREFIX } from './body/image-url.ts'
 import { note } from './schema.ts'
 
-// notes の口にだけ載せ、CLI には出さないので、meta に cli を持たない。
+// ブラウザの口にだけ載せ、CLI には出さないので、meta に cli を持たない。
 const meta = oc.$meta<{ description?: string }>({})
 const { createSelectSchema } = createSchemaFactory({ coerce: { date: true } })
 
@@ -13,7 +13,7 @@ const NoteRowSchema = createSelectSchema(note)
 
 export { IMAGE_URL_PREFIX }
 
-// notes の口は Host がこれ以外の request を断る（DNS rebinding）ので、名前を足すとその口に届く経路も増える。
+// ブラウザの口は Host がこれ以外の request を断る（DNS rebinding）ので、名前を足すとその口に届く経路も増える。
 // 保存される link は monica.localhost で書かれるが、ユーザーが同じ Backend を別の名前で開くこともある。
 export const NOTES_HOSTNAMES = ['monica.localhost', 'localhost', '127.0.0.1']
 
@@ -73,7 +73,9 @@ export const NoteSummarySchema = z.discriminatedUnion('kind', [
   z.object({ kind: z.literal('scratch'), repo: z.string(), ...summaryCommon }),
 ])
 
-const ImageUrlSchema = z.string().describe(`${IMAGE_URL_PREFIX}<uuid>.<ext> on the notes listener`)
+const ImageUrlSchema = z
+  .string()
+  .describe(`${IMAGE_URL_PREFIX}<uuid>.<ext> on the browser listener`)
 
 export const RepoNoteSummarySchema = z.object({
   id: NoteIdSchema,

@@ -9,7 +9,7 @@ import { createRoot } from 'react-dom/client'
 
 type Client = ContractRouterClient<{ note: typeof noteContract }, CallContext>
 
-// notes の口は token を持たず、Host と Sec-Fetch-Site で守る（ADR-0017）。
+// ブラウザの口は token を持たず、Host と Sec-Fetch-Site で守る（ADR-0017）。
 const client: Client = createORPCClient(
   new RPCLink({ url: `${location.origin}/rpc`, ...noteLinkOptions }),
 )

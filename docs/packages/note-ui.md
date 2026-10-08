@@ -54,9 +54,9 @@ notes の ui は旧 Monica の `web/` と `shared/` を移して作る。
 
 | 文字列 | 置き場所 |
 |---|---|
-| 画像の URL の prefix（`/api/assets/`） | `@monica/note/contract` の `IMAGE_URL_PREFIX`。notes の口の画像の route も同じ定数を読む |
+| 画像の URL の prefix（`/api/assets/`） | `@monica/note/contract` の `IMAGE_URL_PREFIX`。ブラウザの口の画像の route も同じ定数を読む |
 | Note の path（`/notes/:id`） | `src/ui/routes.ts` の `notePath` と `noteIdOfPath`。Note Mention の href（`noteHref`）と内部リンクの判定（`internalNoteId`）が読む |
-| 内部リンクとして扱う host 名 | `@monica/note/contract` の `NOTES_HOSTNAMES`。notes の口の Host の照合も同じ定数を読む |
+| 内部リンクとして扱う host 名 | `@monica/note/contract` の `NOTES_HOSTNAMES`。ブラウザの口の Host の照合も同じ定数を読む |
 | clipboard の MIME（`application/x-monica-blocks+json`） | `clipboard.ts` の `BLOCKS_MIME` |
 | テーマの localStorage の key（`monica-theme`）と、保存値から light / dark を決める規則 | `src/ui/theme.ts` と `apps/web/index.html` の描画前の script の 2 箇所。index.html の script は描画を止めて走る classic script で、module を import できないため。`theme.test.ts` が index.html の script を走らせ、`setThemePref` と同じテーマになるかを確かめる |
 
@@ -87,7 +87,7 @@ notes の ui は旧 Monica の `web/` と `shared/` を移して作る。
 ### root と apps/web の分担
 
 - root は `NotesApp`（`notes-app.tsx`）。QueryClient を作り、client を React の context に置き、autosave・router・rail・競合の通知・再接続の帯を持つ。
-- `apps/web` の main.tsx は、notes の口への RPCLink を作って `client.note` を `NotesApp` に渡すだけで、TanStack Query を知らない。desktop と同じく、domain の ui には自分の client だけを渡す。
+- `apps/web` の main.tsx は、ブラウザの口への RPCLink を作って `client.note` を `NotesApp` に渡すだけで、TanStack Query を知らない。desktop と同じく、domain の ui には自分の client だけを渡す。
 - RPCLink には `@monica/note/ui` の `noteLinkOptions` を展開する。keepalive と再接続の合図は link でしか扱えないので、その設定は ui が持つ。client の型は `NoteClient`（note の contract に、`keepalive` を持つ `CallContext` を付けたもの）。
 
 ### データ取得
@@ -237,7 +237,7 @@ Essay と Repo Note の削除と ⌥Z の判断は `notes/removals.ts` の `Remo
 - ⌥; だけは変換中も効く。ambient は本文に触らないので、変換中に奪っても害が無いため。⌥B と ⌥D は変換中は効かない。
 - テーマは `apps/web` の `index.html` の描画前の script が、最初の描画の前に当てる（上の「直書きの文字列の置き場所」）。ambient と本文の幅は CSS 変数で読むので、`NotesApp` の layout effect が最初の描画の前に当てる。
 - App は `/daily` から今日への replace の間も AppShell を外さない。外すと zen が解け、⌃1 で Daily に移るたびに zen を抜ける。
-- 写真（JPG、計 1.7MB）は `src/ui/ambients/` に置き、Vite の asset として import する。build では `assets/` に hash 付きで出て、notes の口が immutable の cache で配る。
+- 写真（JPG、計 1.7MB）は `src/ui/ambients/` に置き、Vite の asset として import する。build では `assets/` に hash 付きで出て、ブラウザの口が immutable の cache で配る。
 - 右下のピルの popup は、外側の mousedown、Escape、外の要素への focus で閉じる（`components/use-popup-dismiss.ts`）。Escape は capture phase で取る。bubble では、エディタにいるときに ProseMirror がブロック選択に使って届かないため。
 
 notes の画面が localStorage に書く key は次の 6 つで、どれも `monica-` で始まる。旧 Monica の `monica-*` は読まない（origin が違うので、どちらにしても値は引き継がれない）。

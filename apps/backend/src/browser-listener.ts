@@ -16,7 +16,7 @@ type Deps = {
   webDist: string
 }
 
-export function listenNotes(
+export function listenBrowser(
   port: string | undefined,
   { context, webDist }: Deps,
 ): { stop(): void } | null {
@@ -29,10 +29,7 @@ export function listenNotes(
   const app = new Hono()
   app.use('*', async (c, next) => {
     if (!hosts.has(c.req.header('host') ?? '')) return c.text('Forbidden', 403)
-    // token の代わりに CSRF を止め、port を見ない same-site は localhost の別の app からも付くので通さない。
-    if (c.req.method !== 'GET' && c.req.header('sec-fetch-site') !== 'same-origin') {
-      return c.text('Forbidden', 403)
-    }
+    if (c.req.method !== 'GET' && !fromSameOriginOrExtension(c)) return c.text('Forbidden', 403)
     return next()
   })
   app.use('/rpc/*', async (c) => {
@@ -52,7 +49,7 @@ export function listenNotes(
     }
   } catch (error) {
     for (const server of servers) void server.stop(true)
-    console.error(`[backend] not serving notes on port ${port}: ${(error as Error).message}`)
+    console.error(`[backend] no browser listener on port ${port}: ${(error as Error).message}`)
     return null
   }
   return {
@@ -60,6 +57,13 @@ export function listenNotes(
       for (const server of servers) void server.stop(true)
     },
   }
+}
+
+// token の代わりに CSRF を止める。port を見ない same-site は localhost の別の app からも付き、
+// none は user の navigation にも付くので、Chrome Extension の fetch が作る cors との組だけを通す（ADR-0028）。
+function fromSameOriginOrExtension(c: Context): boolean {
+  const site = c.req.header('sec-fetch-site')
+  return site === 'same-origin' || (site === 'none' && c.req.header('sec-fetch-mode') === 'cors')
 }
 
 // 配るのは build の出力に在る file だけなので、path を file system の path として解かない。
