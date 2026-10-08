@@ -5,9 +5,9 @@ import { startFakePtyd, tempHome } from '@monica/workbench/testing'
 
 import { freePort } from './testing.ts'
 
-const cleanups: (() => void)[] = []
-afterEach(() => {
-  for (const cleanup of cleanups.splice(0).toReversed()) cleanup()
+const cleanups: (() => unknown)[] = []
+afterEach(async () => {
+  for (const cleanup of cleanups.splice(0).toReversed()) await cleanup()
 })
 
 type Announcement =
@@ -53,7 +53,11 @@ async function startBackend(notesPort: number) {
     stdout: 'pipe',
     stderr: 'inherit',
   })
-  cleanups.push(() => backend.kill())
+  // Backend が exit で消す backend.json と競うと、Bun の rmSync は ENOENT で黙って止まり home を残す。
+  cleanups.push(() => {
+    backend.kill()
+    return backend.exited
+  })
   const next = announcements(backend.stdout)
   const beforeEndpoint: Announcement[] = []
   for (;;) {
