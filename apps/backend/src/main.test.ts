@@ -13,7 +13,7 @@ afterEach(() => {
 type Announcement =
   | { type: 'endpoint'; port: number; token: string }
   | { type: 'notify'; title: string; body: string; terminalSessionId: string }
-  | { type: 'badge'; count: number }
+  | { type: 'unread'; terminalSessionIds: string[] }
 
 function announcements(stdout: ReadableStream<Uint8Array>) {
   const reader = stdout.getReader()
@@ -124,13 +124,16 @@ async function nextOf(
   return line
 }
 
-test('the Backend tells the Shell the unread count before its endpoint and again when a notified wait adds one', async () => {
+test('the Backend tells the Shell the unread Terminal Sessions before its endpoint and again when a notified wait adds one', async () => {
   const backend = await startBackend(freePort())
 
-  await waitInANewTab(backend)
+  const terminalSessionId = await waitInANewTab(backend)
 
-  expect(backend.beforeEndpoint).toEqual([{ type: 'badge', count: 0 }])
-  expect(await nextOf(backend, 'badge')).toEqual({ type: 'badge', count: 1 })
+  expect(backend.beforeEndpoint).toEqual([{ type: 'unread', terminalSessionIds: [] }])
+  expect(await nextOf(backend, 'unread')).toEqual({
+    type: 'unread',
+    terminalSessionIds: [terminalSessionId],
+  })
 }, 20_000)
 
 test('the Backend tells the Shell to post a notification that carries the Terminal Session of the wait', async () => {

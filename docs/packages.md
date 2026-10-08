@@ -9,7 +9,7 @@ monica の repo の形、package の entry、domain 間の呼び出し、CLI の
 - `docs/packages/workbench-ledger.md`: Workbench Ledger。workbench の contract と、Runspace・Tab・Terminal Session の起動と終了・pin・終わった行・Agent Session の終了・未読の規則。workbench の procedure、ptyd に送るもの、reconcile、Agent Session の行に触るとき。
 - `docs/packages/workbench-ui-state.md`: Workbench の UI 状態と sidebar と status dot。webview に置く画面の状態、sidebar の Rail と Tile・セクション・行・数、Agent Session の状態の dot と未読の出し方。Workbench の画面の状態か sidebar か dot か未読に触るとき。
 - `docs/packages/tab-env-and-shim.md`: tab の env と shim。Tab に渡す env、shim、claude wrapper、hook の settings、hook CLI、payload の decoder。Tab の env、claude の起動、hook の受け口に触るとき。
-- `docs/packages/notifications.md`: 通知と Dock の数。出す遷移、title と body、Backend から Shell への渡し方、未読の数え方。通知の判定と本文、Agent Session の遷移、Dock の数に触るとき。
+- `docs/packages/notifications.md`: 通知と Dock の数と取り下げ。出す遷移、title と body、Backend から Shell への渡し方、未読の集合の数え直し、通知の置き換えと取り下げ。通知の判定と本文、Agent Session の遷移、Dock の数、通知センターの通知の扱いに触るとき。
 - `docs/packages/task-ledger.md`: Task Ledger。task の contract と、Run・Attach・Bench・Run の起動・close と reopen・sync の規則。task の procedure に触るとき。
 - `docs/packages/job-ledger.md`: Job Ledger。job の contract と、Job Execution の記録・tick・飛ばす回・中断・保持の規則。job の procedure か、裏で定期的に走る処理に触るとき。
 - `docs/packages/note-ledger.md`: Note Ledger。note の contract と、種類ごとの不変条件・保存の楽観ロック・削除と取り消し・OGP・`body` entry の規則。note の procedure か本文の扱いに触るとき。
@@ -102,7 +102,7 @@ export function createWorkbenchLedger(deps: {
   ptydPath: string;
   notify: (n: { title: string; body: string; terminalSessionId: string }) => void;
   nameAgentSession: (db: Db, agentSessionId: string) => string | null;
-  badge: (count: number) => void;
+  unread: (terminalSessionIds: string[]) => void;
 }): WorkbenchLedger;
 
 // @monica/task/server
@@ -143,7 +143,7 @@ export function systemJobs(
 ): { name: string; every: number; run: () => Promise<void> }[];
 ```
 
-`ptydPath` は spawn する ptyd の場所（ADR-0011）。`notify` と `nameAgentSession` は通知のための口、`badge` は未読の数を Dock に出すための口（`docs/packages/notifications.md`）。`github` は GraphQL の URL と token の取り方で、省けば `https://api.github.com/graphql` と `gh auth token --hostname github.com` になる。task の `home` は Bench の worktree と setup の log を置く場所（`docs/packages/task-ledger.md` の「Bench」）。`ghq` は `root()` と `get(repo)` で、省けば `ghq` の command を呼ぶ。テストは偽の GitHub と ghq を渡す。
+`ptydPath` は spawn する ptyd の場所（ADR-0011）。`notify` と `nameAgentSession` は通知のための口、`unread` は未読の Agent Session が居る Terminal Session の集合を渡し、Dock の数と通知の取り下げに使わせる口（`docs/packages/notifications.md`）。`github` は GraphQL の URL と token の取り方で、省けば `https://api.github.com/graphql` と `gh auth token --hostname github.com` になる。task の `home` は Bench の worktree と setup の log を置く場所（`docs/packages/task-ledger.md` の「Bench」）。`ghq` は `root()` と `get(repo)` で、省けば `ghq` の command を呼ぶ。テストは偽の GitHub と ghq を渡す。
 
 job の `home` はユーザーの Job の log を置く場所。`systemJobs` は system の Job の並びで、名前は `<domain>.<name>`、`run` は失敗なら reject する。`now` はテストが時計を進めるための口（`docs/packages/job-ledger.md`）。
 
@@ -185,7 +185,7 @@ Bun.spawn は `env` を渡さないと、子に起動時の environ を渡し、
 
 1. `$MONICA_HOME/monica.db` を開き、`locking_mode=EXCLUSIVE` → `journal_mode=WAL` → `foreign_keys=ON` の順に設定する（ADR-0007）。
 2. `migrate()` を workbench → task → job → note の順に呼ぶ。`migrationsTable` は各 package の `migrations.table` を渡す。
-3. `createWorkbenchLedger` → `createTaskLedger` → `createNoteLedger` → `createJobLedger` の順に作る。`createWorkbenchLedger` には、env の `MONICA_PTYD_PATH`（`ptydPath`）、stdout に通知の行を書く `notify`、`@monica/task/server` の `nameAgentSession`、stdout に未読の数の行を書く `badge` を渡す。`createTaskLedger` と `createNoteLedger` と `createJobLedger` には同じ `home` を渡す。`createJobLedger` の `systemJobs` には、`@monica/task/server` の `systemJobs(taskLedger)` と `@monica/note/server` の `systemJobs(noteLedger)` の戻り値をこの順につないで渡す。Job Ledger が両方の Ledger を呼ぶので、Note Ledger を先に作る。`MONICA_PTYD_PATH` が無ければ stderr に 1 行出して exit 1 する。
+3. `createWorkbenchLedger` → `createTaskLedger` → `createNoteLedger` → `createJobLedger` の順に作る。`createWorkbenchLedger` には、env の `MONICA_PTYD_PATH`（`ptydPath`）、stdout に通知の行を書く `notify`、`@monica/task/server` の `nameAgentSession`、stdout に未読の Terminal Session の集合の行を書く `unread` を渡す。`createTaskLedger` と `createNoteLedger` と `createJobLedger` には同じ `home` を渡す。`createJobLedger` の `systemJobs` には、`@monica/task/server` の `systemJobs(taskLedger)` と `@monica/note/server` の `systemJobs(noteLedger)` の戻り値をこの順につないで渡す。Job Ledger が両方の Ledger を呼ぶので、Note Ledger を先に作る。`MONICA_PTYD_PATH` が無ければ stderr に 1 行出して exit 1 する。
 4. router を `{ workbench: workbenchRouter, task: taskRouter, job: jobRouter }` で mount し、context は `{ db, workbenchLedger, taskLedger, jobLedger }`。note の router はこの口に載せず、notes の口だけに載せる（下の「notes の口」）。
 5. hono に CORS（`tauri://localhost`・`http://tauri.localhost`。env の `MONICA_DEV_URL` があればその origin も。`docs/packages/dev-loop.md` の「dev loop」）、`/health`（token 無し）、`/rpc/*` の bearer を載せ、`Bun.serve({ hostname: "127.0.0.1", port: 0, idleTimeout: 0 })` で立てる。
 6. `start()` を Workbench Ledger → Task Ledger → Job Ledger → Note Ledger の順に呼び、notes の口を立てる。Workbench Ledger の `start()`（ptyd への接続と reconcile）を最大 3 秒待ってから、`backend.json` と stdout の endpoint 行を書く（ADR-0007 / 0011）。

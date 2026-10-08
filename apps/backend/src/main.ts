@@ -72,7 +72,7 @@ const workbenchLedger = createWorkbenchLedger({
   notify: ({ title, body, terminalSessionId }) =>
     announce({ type: 'notify', title, body, terminalSessionId }),
   nameAgentSession,
-  badge: (count) => announce({ type: 'badge', count }),
+  unread: (terminalSessionIds) => announce({ type: 'unread', terminalSessionIds }),
 })
 const taskLedger = createTaskLedger({ db, workbenchLedger, home })
 const noteLedger = createNoteLedger({ db, home })

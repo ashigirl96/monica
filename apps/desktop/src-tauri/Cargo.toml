@@ -29,7 +29,6 @@ objc2-foundation = { version = "0.3", default-features = false, features = [
   "NSError",
   "NSString",
   "NSURL",
-  "NSUUID",
 ] }
 objc2-user-notifications = { version = "0.3", default-features = false, features = [
   "bitflags",

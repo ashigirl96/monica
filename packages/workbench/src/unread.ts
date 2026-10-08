@@ -3,40 +3,50 @@ import { ne } from 'drizzle-orm'
 
 import type { AgentSession, WorkbenchChange } from './contract.ts'
 import { agentSession } from './schema.ts'
-import type { Badge, Db } from './workbench.ts'
+import type { Db, Unread } from './workbench.ts'
 
 export function isUnread(row: Pick<AgentSession, 'notifiedAt' | 'seenAt'>): boolean {
   return row.notifiedAt !== null && row.seenAt === null
 }
 
-function countUnread(db: Db): number {
+function unreadTerminalSessions(db: Db): string[] {
   // 終わった行は未読でなく、消さずに溜まるので読まない。
   return db
-    .select({ notifiedAt: agentSession.notifiedAt, seenAt: agentSession.seenAt })
+    .select({
+      terminalSessionId: agentSession.terminalSessionId,
+      notifiedAt: agentSession.notifiedAt,
+      seenAt: agentSession.seenAt,
+    })
     .from(agentSession)
     .where(ne(agentSession.state, 'ended'))
+    .orderBy(agentSession.terminalSessionId)
     .all()
-    .filter(isUnread).length
+    .filter(isUnread)
+    .map((row) => row.terminalSessionId)
+}
+
+function sameIds(a: string[], b: string[]): boolean {
+  return a.length === b.length && a.every((id, i) => id === b[i])
 }
 
 export function followUnread(deps: {
   db: Db
   events: EventPublisher<{ change: WorkbenchChange }>
-  badge: Badge
+  unread: Unread
 }): () => void {
-  const { db, events, badge } = deps
-  let badged: number | null = null
+  const { db, events, unread } = deps
+  let passed: string[] | null = null
   let queued = false
 
   function recount() {
     queued = false
     try {
-      const count = countUnread(db)
-      if (count === badged) return
-      badge(count)
-      badged = count
+      const terminalSessionIds = unreadTerminalSessions(db)
+      if (passed && sameIds(passed, terminalSessionIds)) return
+      unread(terminalSessionIds)
+      passed = terminalSessionIds
     } catch (error) {
-      console.error(`[workbench] could not badge the unread count: ${error}`)
+      console.error(`[workbench] could not pass the unread Terminal Sessions: ${error}`)
     }
   }
 
