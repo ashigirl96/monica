@@ -25,8 +25,8 @@ import {
   useScratchQuery,
   useSeedNote,
 } from '../../notes/queries.ts'
-import { Removals } from '../../notes/removals.ts'
 import { SaveStatus } from '../../notes/save-status.tsx'
+import { useRemovals } from '../../notes/use-removals.ts'
 import { navigate } from '../../router.ts'
 import { repoNotePath, repoNoteRedirect, repoPath } from '../../routes.ts'
 import { RepoSidebar } from './sidebar.tsx'
@@ -41,7 +41,7 @@ export function RepoEditor({ repo, noteId }: { repo: string; noteId: string | nu
   const [pickerOpen, setPickerOpen] = useState(false)
 
   const autosave = useAutosaveContext()
-  const { schedule, flush, discard, resume, hasUnsaved } = autosave
+  const { schedule, flush, discard } = autosave
   const editorHandleRef = useRef<BlockEditorHandle | null>(null)
   const titleRef = useRef<HTMLInputElement>(null)
   // ⌥N で作った Repo Note は、本文ではなく title から書き始める。
@@ -49,17 +49,7 @@ export function RepoEditor({ repo, noteId }: { repo: string; noteId: string | nu
   const contentRef = useRef<unknown>(null)
   const noteRef = useRef<Note | null>(null)
   // Repo を切り替えると画面ごと作り直すので、取り消せるのはこの Repo で消した Note だけになる。
-  const [removals] = useState(
-    () =>
-      new Removals({
-        flush,
-        hasUnsaved,
-        remove: (id) => client.remove({ id }),
-        restore: (id) => client.restore({ id }),
-        discard,
-        resume,
-      }),
-  )
+  const removals = useRemovals('repo_note')
 
   const scratchQuery = useScratchQuery(repo)
   const scratch = scratchQuery.data ?? null
@@ -109,11 +99,6 @@ export function RepoEditor({ repo, noteId }: { repo: string; noteId: string | nu
     discard(goneId)
     navigate(repoPath(repo), { replace: true })
   }, [goneId, discard, repo])
-
-  const openIdRef = useRef(noteId)
-  useEffect(() => {
-    openIdRef.current = noteId
-  }, [noteId])
 
   const isScratch = note?.kind === 'scratch'
 
@@ -166,9 +151,7 @@ export function RepoEditor({ repo, noteId }: { repo: string; noteId: string | nu
   const deleteById = useCallback(
     async (targetId: string) => {
       const removed = await removals.remove(targetId, {
-        noteRef,
-        reschedule: scheduleSave,
-        openId: () => openIdRef.current,
+        editor: { noteRef, reschedule: scheduleSave },
         leave: () => navigate(repoPath(repo), { replace: true }),
       })
       if (removed) patchRepoNotes((notes) => notes.filter((s) => s.id !== targetId))

@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test'
 
 import type { Note } from '../contract.ts'
-import { notePagePath, repoNoteRedirect, routeOf, todayPath } from './routes.ts'
+import { notePagePath, openNoteIdOfPath, repoNoteRedirect, routeOf, todayPath } from './routes.ts'
 
 const now = new Date(2026, 9, 6, 12)
 
@@ -49,6 +49,14 @@ describe('routeOf', () => {
       expect(routeOf(path)).toEqual({ page: 'not-found' })
     }
   })
+})
+
+test('the open Note is the Essay or Repo Note the path names', () => {
+  expect(openNoteIdOfPath('/essays/note-7')).toBe('note-7')
+  expect(openNoteIdOfPath('/repos/acme/app/notes/note-7')).toBe('note-7')
+  for (const path of ['/essays', '/repos/acme/app', '/daily/2026-10-06', '/notes/note-7']) {
+    expect(openNoteIdOfPath(path)).toBeNull()
+  }
 })
 
 test("today is the Logical Date of the moment it is asked, the day before when it is before 5 o'clock", () => {

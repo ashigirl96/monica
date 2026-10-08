@@ -10,33 +10,15 @@ import { cycleSelect, persistableContent, titleFieldKeyDown } from '../../notes/
 import { NoteBlockEditor } from '../../notes/note-block-editor.tsx'
 import { useServerDoc } from '../../notes/note-sync.ts'
 import { NotesShell } from '../../notes/notes-shell.tsx'
-import {
-  useEssaysCache,
-  useEssaysQuery,
-  useForgetNote,
-  useNoteQuery,
-  useSeedNote,
-} from '../../notes/queries.ts'
+import { useEssaysCache, useEssaysQuery, useNoteQuery, useSeedNote } from '../../notes/queries.ts'
 import { SaveStatus } from '../../notes/save-status.tsx'
 import { noteLabel } from '../../notes/summary.ts'
 import { navigate } from '../../router.ts'
-import { ESSAYS_PATH, essayPath, routeOf } from '../../routes.ts'
-import { removeOpenEssay, setOpenEssayStatus } from './actions.ts'
+import { ESSAYS_PATH, essayPath } from '../../routes.ts'
+import { setOpenEssayStatus } from './actions.ts'
+import { useEssayRemovals } from './removals.tsx'
 import { EssaysSidebar } from './sidebar.tsx'
-import {
-  dropEssay,
-  otherEssayTab,
-  patchEssay,
-  pushDeletedEssay,
-  restoreLastDeletedEssay,
-  splitEssaysByStatus,
-} from './support.ts'
-
-// navigate は URL をその場で書き換えるが、prop の id が追いつくのは描画の後なので、URL で見る。
-function isOpenEssay(id: string): boolean {
-  const route = routeOf(window.location.pathname)
-  return route.page === 'essay' && route.id === id
-}
+import { dropEssay, otherEssayTab, patchEssay, splitEssaysByStatus } from './support.ts'
 
 function StatusChip({ status, onToggle }: { status: EssayStatus; onToggle: () => void }) {
   const writing = status === 'writing'
@@ -66,11 +48,11 @@ export function EssayEditorPage({ id }: { id: string }) {
   // ⌥H/⌥L の手動の切り替えと、開いた Essay の status への同期で動く
   const [tab, setTab] = useState<EssayStatus>('writing')
   const autosave = useAutosaveContext()
-  const { schedule, flush, discard, resume, setBase, hasUnsaved } = autosave
+  const { schedule, flush, setBase, hasUnsaved } = autosave
+  const removals = useEssayRemovals()
   const { data: essays = null } = useEssaysQuery()
   const { patchEssays, invalidateEssays } = useEssaysCache()
   const seedNote = useSeedNote()
-  const forgetNote = useForgetNote()
   const editorHandleRef = useRef<BlockEditorHandle | null>(null)
   const titleRef = useRef<HTMLInputElement>(null)
   // ⌥N で作った Essay は本文ではなく title から書き始める。title を離れたら手放す
@@ -154,38 +136,31 @@ export function EssayEditorPage({ id }: { id: string }) {
     }
   }, [client, flush, seedNote, invalidateEssays])
 
-  const deleteCurrent = useCallback(async () => {
-    const removed = await removeOpenEssay({
-      gate: noteRef,
-      isOpen: isOpenEssay,
-      flush,
-      hasUnsaved,
-      remove: (essayId) => client.remove({ id: essayId }),
-      reschedule: scheduleSave,
-    })
-    if (removed === null) return
-    // 消した Essay への保存の再試行が NOT_FOUND を繰り返さないよう止める
-    discard(removed.id)
-    forgetNote(removed.id)
-    pushDeletedEssay(removed.id)
-    patchEssays((list) => dropEssay(list, removed.id))
-    if (!isOpenEssay(removed.id)) return
-    // 表示中のタブにあった Essay はタブの次へ送って書く流れを切らない。タブの外の Essay は
-    // 送り先が画面に見えていないので一覧へ帰す
-    const next = cycleIds.includes(removed.id) ? cycleSelect(cycleIds, removed.id, 1) : undefined
-    navigate(next !== undefined && next !== removed.id ? essayPath(next) : ESSAYS_PATH, {
-      replace: true,
-    })
-  }, [client, flush, hasUnsaved, discard, forgetNote, scheduleSave, cycleIds, patchEssays])
+  const deleteEssay = useCallback(
+    async (targetId: string) => {
+      const removed = await removals.remove(targetId, {
+        editor: { noteRef, reschedule: scheduleSave },
+        leave: () => {
+          // 表示中のタブにあった Essay はタブの次へ送って書く流れを切らない。タブの外の Essay は
+          // 送り先が画面に見えていないので一覧へ帰す
+          const next = cycleIds.includes(targetId) ? cycleSelect(cycleIds, targetId, 1) : undefined
+          navigate(next !== undefined && next !== targetId ? essayPath(next) : ESSAYS_PATH, {
+            replace: true,
+          })
+        },
+      })
+      if (removed) patchEssays((list) => dropEssay(list, targetId))
+    },
+    [removals, scheduleSave, cycleIds, patchEssays],
+  )
 
   const undoDelete = useCallback(async () => {
-    const restored = await restoreLastDeletedEssay((essayId) => client.restore({ id: essayId }))
-    if (restored === undefined) return
-    resume(restored.id)
+    const restored = await removals.undo()
+    if (restored === null) return
     invalidateEssays()
     seedNote(restored)
     navigate(essayPath(restored.id))
-  }, [client, seedNote, resume, invalidateEssays])
+  }, [removals, seedNote, invalidateEssays])
 
   // 連打した 2 回が同じ status を読んで 1 回に潰れないよう、切り替えを直列にする
   const statusChainRef = useRef<Promise<void>>(Promise.resolve())
@@ -252,10 +227,12 @@ export function EssayEditorPage({ id }: { id: string }) {
         return
       }
       if (e.code === 'Backspace' || e.code === 'Delete') {
-        if (noteRef.current === null) return
+        // 種類の違う Note はこの画面にエディタが無く、単語の削除に渡す先が無いので、それでも呑む
+        const target = noteRef.current
+        if (target === null) return
         e.preventDefault()
         e.stopPropagation()
-        void deleteCurrent()
+        void deleteEssay(target.id)
         return
       }
       if (e.code === 'KeyZ') {
@@ -280,7 +257,7 @@ export function EssayEditorPage({ id }: { id: string }) {
     }
     window.addEventListener('keydown', onKey, true)
     return () => window.removeEventListener('keydown', onKey, true)
-  }, [cycleIds, id, selectEssay, createNew, toggleStatus, deleteCurrent, undoDelete])
+  }, [cycleIds, id, selectEssay, createNew, toggleStatus, deleteEssay, undoDelete])
 
   const onTitleChange = useCallback(
     (title: string) => {

@@ -5,19 +5,12 @@ import { displayName, type EssaySummary } from '../../../contract.ts'
 import { useNoteClient } from '../../client.ts'
 import { useDocumentTitle } from '../../document-title.ts'
 import { altOnly } from '../../keys.ts'
-import { useAutosaveContext } from '../../notes/autosave-context.tsx'
 import { slashDate } from '../../notes/dates.ts'
-import { useEssaysCache, useEssaysQuery, useForgetNote } from '../../notes/queries.ts'
+import { useEssaysCache, useEssaysQuery } from '../../notes/queries.ts'
 import { navigate, spaLinkClick } from '../../router.ts'
-import { essayPath } from '../../routes.ts'
-import { removeEssay } from './actions.ts'
-import {
-  dropEssay,
-  nextEssayStatus,
-  patchEssay,
-  pushDeletedEssay,
-  restoreLastDeletedEssay,
-} from './support.ts'
+import { ESSAYS_PATH, essayPath } from '../../routes.ts'
+import { useEssayRemovals } from './removals.tsx'
+import { dropEssay, nextEssayStatus, patchEssay } from './support.ts'
 
 import '../../notes/notes.css'
 
@@ -76,8 +69,7 @@ type Menu = { x: number; y: number; target: EssaySummary }
 /** /essays: Essay のカードの一覧。右クリックで status の切り替えと削除。 */
 export function EssaysListPage() {
   const client = useNoteClient()
-  const { flush, hasUnsaved, discard, resume } = useAutosaveContext()
-  const forgetNote = useForgetNote()
+  const removals = useEssayRemovals()
   const { data: essays = null, error: listQueryError } = useEssaysQuery()
   const listError = listQueryError === null ? null : listQueryError.message
   const { patchEssays, invalidateEssays } = useEssaysCache()
@@ -106,29 +98,20 @@ export function EssaysListPage() {
 
   const deleteEssay = useCallback(
     async (id: string) => {
-      const removed = await removeEssay({
-        id,
-        flush,
-        hasUnsaved,
-        remove: (essayId) => client.remove({ id: essayId }),
+      const removed = await removals.remove(id, {
+        leave: () => navigate(ESSAYS_PATH, { replace: true }),
       })
-      if (!removed) return
-      discard(id)
-      forgetNote(id)
-      pushDeletedEssay(id)
-      patchEssays((list) => dropEssay(list, id))
+      if (removed) patchEssays((list) => dropEssay(list, id))
     },
-    [client, flush, hasUnsaved, discard, forgetNote, patchEssays],
+    [removals, patchEssays],
   )
 
   const undoDelete = useCallback(async () => {
-    const restored = await restoreLastDeletedEssay((id) => client.restore({ id }))
-    if (restored === undefined) return
-    // 消した Essay は保存の再試行を止めてあるので、戻したら再試行させる。
-    resume(restored.id)
+    const restored = await removals.undo()
+    if (restored === null) return
     // 戻した Essay の preview まで正しく並べ直すため、繕わずに取り直す。
     invalidateEssays()
-  }, [client, resume, invalidateEssays])
+  }, [removals, invalidateEssays])
 
   useEffect(() => {
     function onKey(e: KeyboardEvent) {

@@ -10,54 +10,6 @@ type Saving = {
 }
 
 /**
- * Essay を消し、消せたかを返す。⌥Z で戻せるのは Backend に届いた本文までなので、
- * flush しても未保存が残れば消さない。
- */
-export async function removeEssay({
-  id,
-  flush,
-  hasUnsaved,
-  remove,
-}: Saving & { id: string; remove: (id: string) => Promise<void> }): Promise<boolean> {
-  await flush()
-  if (hasUnsaved(id)) return false
-  try {
-    await remove(id)
-  } catch {
-    return false
-  }
-  return true
-}
-
-/** 開いている Essay を `removeEssay` で消す。消した Essay を返し、消さなかったら null を返す。 */
-export async function removeOpenEssay({
-  gate,
-  isOpen,
-  flush,
-  hasUnsaved,
-  remove,
-  reschedule,
-}: Saving & {
-  gate: Gate
-  isOpen: (id: string) => boolean
-  remove: (id: string) => Promise<void>
-  reschedule: (note: Note) => void
-}): Promise<Note | null> {
-  const target = gate.current
-  // `/essays/:id` はほかの種類の id でも開くので、ここで種類を見ないと Repo Note を消してしまう。
-  if (target?.kind !== 'essay') return null
-  // 往復の間に打った分を予約させない。予約すると flush の成否に入らず、消した後に保存が 404 を繰り返す。
-  gate.current = null
-  if (await removeEssay({ id: target.id, flush, hasUnsaved, remove })) return target
-  // 別の Note へ移った後に戻すと、その Note の本文を target に保存してしまう。
-  if (gate.current === null && isOpen(target.id)) {
-    gate.current = target
-    reschedule(target)
-  }
-  return null
-}
-
-/**
  * 開いている Essay の status を次へ進め、返った Essay を返す。進めなかったら null を返す。
  * 未保存が残る間は進めない。進めた版を基準版にすると、競合で残った古い本文が次の保存で外の変更を上書きする。
  */
