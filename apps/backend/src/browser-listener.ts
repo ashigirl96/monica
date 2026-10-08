@@ -1,6 +1,8 @@
 import { existsSync } from 'node:fs'
 import { join } from 'node:path'
 
+import { MAX_ASK_BODY_BYTES } from '@monica/chat/contract'
+import { router as chatRouter } from '@monica/chat/server'
 import { IMAGE_URL_PREFIX, NOTES_HOSTNAMES } from '@monica/note/contract'
 import { router as noteRouter } from '@monica/note/server'
 import { type InferRouterInitialContext, os } from '@orpc/server'
@@ -9,10 +11,11 @@ import { type Context, Hono } from 'hono'
 
 const IMMUTABLE = 'public, max-age=31536000, immutable'
 
-type NoteContext = InferRouterInitialContext<typeof noteRouter>
+type BrowserContext = InferRouterInitialContext<typeof noteRouter> &
+  InferRouterInitialContext<typeof chatRouter>
 
 type Deps = {
-  context: NoteContext
+  context: BrowserContext
   webDist: string
 }
 
@@ -24,7 +27,9 @@ export function listenBrowser(
   // DNS rebinding で別の名前から届いた request を止める。
   const hosts = new Set(NOTES_HOSTNAMES.map((name) => `${name}:${port}`))
   // openTab の input は shell に打鍵されるので、token の無い口に workbench・task・job を載せると任意のコマンドになる（ADR-0017）。
-  const handler = new RPCHandler(os.$context<NoteContext>().router({ note: noteRouter }))
+  const handler = new RPCHandler(
+    os.$context<BrowserContext>().router({ note: noteRouter, chat: chatRouter }),
+  )
 
   const app = new Hono()
   app.use('*', async (c, next) => {
@@ -45,7 +50,15 @@ export function listenBrowser(
   const servers: Bun.Server<undefined>[] = []
   try {
     for (const hostname of ['127.0.0.1', '::1']) {
-      servers.push(Bun.serve({ hostname, port: Number(port), idleTimeout: 0, fetch: app.fetch }))
+      servers.push(
+        Bun.serve({
+          hostname,
+          port: Number(port),
+          idleTimeout: 0,
+          maxRequestBodySize: MAX_ASK_BODY_BYTES,
+          fetch: app.fetch,
+        }),
+      )
     }
   } catch (error) {
     for (const server of servers) void server.stop(true)

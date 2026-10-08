@@ -13,14 +13,14 @@ Bun.spawn は `env` を渡さないと、子に起動時の environ を渡し、
 ## 起動と終了
 
 1. `$MONICA_HOME/monica.db` を開き、`locking_mode=EXCLUSIVE` → `journal_mode=WAL` → `foreign_keys=ON` の順に設定する（ADR-0007）。
-2. `migrate()` を workbench → task → job → note の順に呼ぶ。`migrationsTable` は各 package の `migrations.table` を渡す（`docs/packages/migration.md`）。
-3. `createWorkbenchLedger` → `createTaskLedger` → `createNoteLedger` → `createJobLedger` の順に作る。`createWorkbenchLedger` には、env の `MONICA_PTYD_PATH`（`ptydPath`）、stdout に通知の行を書く `notify`、`@monica/task/server` の `nameAgentSession`、stdout に未読の Terminal Session の集合の行を書く `unread` を渡す。`createTaskLedger` と `createNoteLedger` と `createJobLedger` には同じ `home` を渡す。`createJobLedger` の `systemJobs` には、`@monica/task/server` の `systemJobs(taskLedger)` と `@monica/note/server` の `systemJobs(noteLedger)` の戻り値をこの順につないで渡す。Job Ledger が両方の Ledger を呼ぶので、Note Ledger を先に作る。
-4. router を `{ workbench: workbenchRouter, task: taskRouter, job: jobRouter }` で mount し、context は `{ db, workbenchLedger, taskLedger, jobLedger }`。note の router はこの口に載せず、ブラウザの口だけに載せる（下の「ブラウザの口」）。
+2. `migrate()` を workbench → task → job → note → chat の順に呼ぶ。chat は table を持たず、空の journal だけを持つ。`migrationsTable` は各 package の `migrations.table` を渡す（`docs/packages/migration.md`）。
+3. `createWorkbenchLedger` → `createTaskLedger` → `createNoteLedger` → `createJobLedger` の順に作る。`createWorkbenchLedger` には、env の `MONICA_PTYD_PATH`（`ptydPath`）、stdout に通知の行を書く `notify`、`@monica/task/server` の `nameAgentSession`、stdout に未読の Terminal Session の集合の行を書く `unread` を渡す。`createTaskLedger` と `createNoteLedger` と `createJobLedger` には同じ `home` を渡す。`createJobLedger` の `systemJobs` には、`@monica/task/server` の `systemJobs(taskLedger)` と `@monica/note/server` の `systemJobs(noteLedger)` の戻り値をこの順につないで渡す。Job Ledger が両方の Ledger を呼ぶので、Note Ledger を先に作る。続けて `createChatAgent({ home })` で ChatAgent を作る。claude の場所（`claudePath`）は渡さず、SDK が node_modules の claude を使う（`docs/packages/chat.md`）。
+4. router を `{ workbench: workbenchRouter, task: taskRouter, job: jobRouter }` で mount し、context は `{ db, workbenchLedger, taskLedger, jobLedger }`。note と chat の router はこの口に載せず、ブラウザの口だけに載せる（下の「ブラウザの口」）。
 5. hono に CORS（`tauri://localhost`・`http://tauri.localhost`。env の `MONICA_DEV_URL` があればその origin も。`docs/packages/dev-loop.md` の「dev loop」）、`/health`（token 無し）、`/rpc/*` の bearer を載せ、`Bun.serve({ hostname: "127.0.0.1", port: 0, idleTimeout: 0 })` で立てる。
-6. `start()` を Workbench Ledger → Task Ledger → Job Ledger → Note Ledger の順に呼び、ブラウザの口を立てる。Workbench Ledger の `start()`（ptyd への接続と reconcile）を最大 3 秒待ってから、`backend.json` と stdout の endpoint 行を書く（ADR-0007 / 0011）。
-7. 終了時はブラウザの口を止め、`stop()` を逆順に呼んでから ADR-0007 の手順で抜ける。
+6. `start()` を Workbench Ledger → Task Ledger → Job Ledger → Note Ledger の順に呼び、ブラウザの口を立てる。ChatAgent は `start()` を持たない。Workbench Ledger の `start()`（ptyd への接続と reconcile）を最大 3 秒待ってから、`backend.json` と stdout の endpoint 行を書く（ADR-0007 / 0011）。
+7. 終了時はブラウザの口を止め、ChatAgent の `stop()` で spare も含めて持っている claude すべてに SIGKILL を送る。新しい質問を受けなくしてから止めるため。続けて Ledger の `stop()` を逆順に呼んでから ADR-0007 の手順で抜ける。
 
-domain は 4 つしかないので、汎用の「domain の登録」機構は作らずに直接並べる。
+domain は 5 つしかないので、汎用の「domain の登録」機構は作らずに直接並べる。
 
 Backend の stdout は Shell 宛ての JSON 行専用で、log は stderr に出す（ADR-0007）。行の種類は `endpoint`・`notify`・`unread`（`docs/packages/notifications.md` の「Backend と Shell」）。
 
@@ -36,12 +36,13 @@ Backend の stdout は Shell 宛ての JSON 行専用で、log は stderr に出
   - Origin の拡張 ID は照合しない。拡張の page と service worker は Origin を書き換えられ、他の拡張も偽れる見込みで守りにならないため（ADR-0028）。
   - CORS の header は返さない。Chrome Extension の fetch は host_permissions に書いた host には CORS を受けず、preflight も出ない。
 - 載せるもの:
-  - `/rpc` の `{ note }` の router。context は `{ db, noteLedger }`。workbench・task・job は載せない。`openTab` の `input` は shell に打鍵されるので、token の無い口では任意のコマンドになる。
+  - `/rpc` の `{ note, chat }` の router。context は `{ db, noteLedger, chatAgent }`。workbench・task・job は載せない。`openTab` の `input` は shell に打鍵されるので、token の無い口では任意のコマンドになる。
   - 画像の素の GET（`/api/assets/<file>`、`@monica/note/contract` の `IMAGE_URL_PREFIX`）。prefix の後ろを Note Ledger の `serveImage` に渡し、応答をそのまま返す。oRPC の RPCHandler は File を必ず multipart に包むので、`<img src>` が読む生のバイト列は procedure では返せない（ADR-0019）。
   - SPA の静的ファイル。`/rpc` と画像以外の GET は、build の出力に在る file ならそれを、無ければ `index.html` を返す。path は file system の path として解かず、起動時に集めた file の一覧から引く。`assets/` の下（Vite が hash を付けた file）は `public, max-age=31536000, immutable`、ほかは `no-cache`。
+- 2 つの `Bun.serve` に `maxRequestBodySize` で `@monica/chat/contract` の `MAX_ASK_BODY_BYTES`（50MB）を渡す。質問に添えるページの本文とスクリーンショットを受けるための上限で、超えた body は oRPC に届く前に 413 で断られる。note の画像は 20MB までなので、note の upload は変わらない。
 - SPA は compiled binary に `--asset` で同梱した `apps/web/dist` を、entry の隣（`/$bunfs/root/dist`）から読む（`docs/packages/dev-loop.md` の「release build と install」）。`bun run` の Backend には無いので、dev の Backend は SPA の GET に 404 を返し、画面は `apps/web` の Vite が配る。
 
 ## テスト
 
-- 組み立て（`src/main.ts`）は、Shell と同じく process として起こし、fake の ptyd の home を渡して確かめる。token の口とブラウザの口に同じ path を投げ、口ごとに載る procedure を見る。
-- ブラウザの口の照合と SPA と画像の GET は `listenBrowser` を直に呼んで確かめる。
+- 組み立て（`src/main.ts`）は、Shell と同じく process として起こし、fake の ptyd の home を渡して確かめる。token の口とブラウザの口に同じ path を投げ、口ごとに載る procedure を見る。chat は不正な input を送り、ブラウザの口の 400 と token の口の 404 で見る。不正な input は handler の前で断られるので、claude を起こさない。
+- ブラウザの口の照合と SPA と画像の GET と body の上限は `listenBrowser` を直に呼んで確かめる。

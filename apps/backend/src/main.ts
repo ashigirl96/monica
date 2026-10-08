@@ -3,6 +3,7 @@ import { chmodSync, mkdirSync, renameSync, unlinkSync, writeFileSync } from 'nod
 import { homedir } from 'node:os'
 import { join } from 'node:path'
 
+import { createChatAgent, migrations as chatMigrations } from '@monica/chat/server'
 import {
   createJobLedger,
   migrations as jobMigrations,
@@ -61,7 +62,13 @@ sqlite.run('PRAGMA journal_mode = WAL')
 sqlite.run('PRAGMA foreign_keys = ON')
 const db = drizzle(sqlite)
 
-for (const m of [workbenchMigrations, taskMigrations, jobMigrations, noteMigrations]) {
+for (const m of [
+  workbenchMigrations,
+  taskMigrations,
+  jobMigrations,
+  noteMigrations,
+  chatMigrations,
+]) {
   migrate(db, { migrationsFolder: m.folder, migrationsTable: m.table })
 }
 
@@ -81,6 +88,7 @@ const jobLedger = createJobLedger({
   home,
   systemJobs: [...taskSystemJobs(taskLedger), ...noteSystemJobs(noteLedger)],
 })
+const chatAgent = createChatAgent({ home })
 
 const context = { db, workbenchLedger, taskLedger, jobLedger }
 const router = os
@@ -113,7 +121,7 @@ jobLedger.start()
 noteLedger.start()
 // compiled binary の --asset は entry の隣に置かれ、bun run の Backend には無い。
 const browserListener = listenBrowser(process.env.MONICA_BROWSER_PORT, {
-  context: { db, noteLedger },
+  context: { db, noteLedger, chatAgent },
   webDist: join(import.meta.dir, 'dist'),
 })
 if (!(await Promise.race([workbenchStarted, Bun.sleep(3000).then(() => false)]))) {
@@ -136,6 +144,7 @@ function exit() {
   if (exiting) return
   exiting = true
   browserListener?.stop()
+  chatAgent.stop()
   noteLedger.stop()
   jobLedger.stop()
   taskLedger.stop()

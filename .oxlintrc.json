@@ -400,6 +400,35 @@
       }
     },
     {
+      "files": ["packages/chat/**"],
+      "rules": {
+        "no-restricted-imports": [
+          "error",
+          {
+            "patterns": [
+              {
+                "group": ["@monica/*/cli"],
+                "message": "cli entry を import するのは apps/cli だけ（docs/packages.md の entry）"
+              },
+              {
+                "group": [
+                  "@monica/task",
+                  "@monica/task/*",
+                  "@monica/workbench",
+                  "@monica/workbench/*",
+                  "@monica/job",
+                  "@monica/job/*",
+                  "@monica/note",
+                  "@monica/note/*"
+                ],
+                "message": "chat は他の domain を import しない（docs/packages/chat.md）"
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
       "files": ["packages/ui/**"],
       "rules": {
         "no-restricted-imports": [

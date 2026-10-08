@@ -4,6 +4,8 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 
+import { MAX_ASK_BODY_BYTES } from '@monica/chat/contract'
+import { createChatAgent } from '@monica/chat/server'
 import type { contract } from '@monica/note/contract'
 import { createNoteLedger, migrations } from '@monica/note/server'
 import { createORPCClient } from '@orpc/client'
@@ -36,7 +38,11 @@ function listen(port: number | undefined, dist = webDist({ 'index.html': '<p>not
   const db = drizzle(new Database(':memory:'))
   migrate(db, { migrationsFolder: migrations.folder, migrationsTable: migrations.table })
   const noteLedger = createNoteLedger({ db, home })
-  const listener = listenBrowser(port?.toString(), { context: { db, noteLedger }, webDist: dist })
+  const chatAgent = createChatAgent({ home })
+  const listener = listenBrowser(port?.toString(), {
+    context: { db, noteLedger, chatAgent },
+    webDist: dist,
+  })
   if (listener) cleanups.push(() => listener.stop())
   return { listener, home }
 }
@@ -125,6 +131,28 @@ test('a GET for a path of the SPA gets index.html uncached, and a hashed asset i
     expect(notPage.headers.get('content-type') ?? '').not.toStartWith('text/html')
     expect(notPage.ok).toBe(false)
   }
+})
+
+// 1 つの質問に添えるページの本文とスクリーンショットを受けられる上限で、それを超える body は読まずに断る。
+test('a body larger than the limit for a question is refused with 413', async () => {
+  const port = freePort()
+  listen(port)
+
+  const ask = (bytes: number) =>
+    fetch(`http://127.0.0.1:${port}/rpc/chat/ask`, {
+      method: 'POST',
+      headers: {
+        host: `127.0.0.1:${port}`,
+        'sec-fetch-site': 'none',
+        'sec-fetch-mode': 'cors',
+        'content-type': 'application/json',
+      },
+      body: new Uint8Array(bytes),
+    })
+
+  expect((await ask(MAX_ASK_BODY_BYTES + 1)).status).toBe(413)
+  // 上限の内側の壊れた body は oRPC まで届く。
+  expect((await ask(1024)).status).toBe(400)
 })
 
 const PNG = Uint8Array.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 0x0d])
