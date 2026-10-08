@@ -2,7 +2,7 @@ import { existsSync, readdirSync, readFileSync, rmSync } from 'node:fs'
 import { homedir, tmpdir } from 'node:os'
 import { basename, dirname, isAbsolute, join, resolve } from 'node:path'
 
-import { RELEASE_HOME } from './dev-instance'
+import { BRAVE, RELEASE_HOME } from './dev-instance'
 
 type Process = { pid: number; ppid: number; command: string }
 
@@ -12,6 +12,7 @@ type Dev = {
   desktop?: number
   backend?: number
   ptyd?: number
+  brave?: number
   bridgePort?: string
   repo?: string
 }
@@ -61,6 +62,12 @@ function entriesWithPrefix(dir: string, prefix: string): string[] {
     : []
 }
 
+// Helper も同じ --user-data-dir を command line に持つので、実行ファイルの path まで合わせて main process だけを拾う。
+function braveHomeOf(proc: Process): string | undefined {
+  if (!proc.command.startsWith(`${BRAVE} `)) return undefined
+  return proc.command.match(/ --user-data-dir=(.+?)\/dev-brave(?: |$)/)?.[1]
+}
+
 function homesOnDisk(): string[] {
   return [
     ...entriesWithPrefix(userHome, '.monica-'),
@@ -93,6 +100,14 @@ function devs(): Dev[] {
     dev.ptyd = proc.pid
     dev.repo = repoOf(binary, proc.pid)
   }
+  for (const proc of procs.values()) {
+    const home = braveHomeOf(proc)
+    if (!home || home === RELEASE_HOME) continue
+    const dev = devAt(home)
+    dev.brave = proc.pid
+    // Brave の親は bun run extension で、repo の root を cwd に持つ。
+    dev.repo ??= cwdOf(proc.ppid)
+  }
   for (const home of homesOnDisk()) devAt(home)
   for (const dev of byHome.values()) {
     dev.backend = backendOf(dev.home, procs)
@@ -108,7 +123,8 @@ function devs(): Dev[] {
 function kind(dev: Dev): string {
   if (dev.desktop) return 'desktop'
   if (dev.backend) return 'headless'
-  return dev.ptyd ? 'ptyd' : '-'
+  if (dev.ptyd) return 'ptyd'
+  return dev.brave ? 'extension' : '-'
 }
 
 function worktree(repo: string | undefined): string {
@@ -121,7 +137,7 @@ function list(all: Dev[]) {
     console.log('dev はありません')
     return
   }
-  const header = ['NAME', 'KIND', 'DESKTOP', 'BACKEND', 'PTYD', 'BRIDGE', 'WORKTREE']
+  const header = ['NAME', 'KIND', 'DESKTOP', 'BACKEND', 'PTYD', 'BRAVE', 'BRIDGE', 'WORKTREE']
   const rows = [
     header,
     ...all.map((dev) => [
@@ -130,6 +146,7 @@ function list(all: Dev[]) {
       String(dev.desktop ?? '-'),
       String(dev.backend ?? '-'),
       String(dev.ptyd ?? '-'),
+      String(dev.brave ?? '-'),
       dev.bridgePort ?? '-',
       worktree(dev.repo),
     ]),
@@ -172,7 +189,9 @@ async function kill(name: string | undefined, all: Dev[]) {
     process.exit(1)
   }
   // 親から止める。Shell は落ちた Backend を、Backend は居なくなった ptyd を起こし直す。
+  // Brave が止まると bun run extension が Vite を止める。
   const order = [
+    ['brave', dev.brave],
     ['desktop', dev.desktop],
     ['backend', dev.backend],
     ['ptyd', dev.ptyd],

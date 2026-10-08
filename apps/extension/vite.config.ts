@@ -1,0 +1,60 @@
+import { resolve } from 'node:path'
+
+import { crx, defineManifest } from '@crxjs/vite-plugin'
+import tailwindcss from '@tailwindcss/vite'
+import react from '@vitejs/plugin-react'
+import { defineConfig } from 'vite'
+
+import {
+  DEFAULT_HOME,
+  RELEASE_HOME,
+  devInstance,
+  extensionDevOutput,
+  isReleaseHome,
+} from '../../scripts/dev-instance.ts'
+
+// key は公開鍵の DER の base64 で、ID を固定する（ADR-0029）。ID と鍵の作り方は docs/packages/extension.md にある。
+const RELEASE = {
+  name: 'Monica',
+  key: 'MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAuHoAgFcS1qQ4pN2xjNjHf6YprMN+GS1cf1Xa3b/BCHrWAujmObBMXHTL3Wt1FtskqE3YViSYzW1C9VyTy08qptaY8zDWb36bYS6QUy3vr3V9FlNI6FhqQz/dcBdwZHQ5AbdI56sqeB3ddunp9PT8eSpR+7EzqBXnFf30/Xxyn2OGJ0rOCLYnZ4EoBWR7YKNRAzEMl1ezYDwhNOD+4QMUh1o0dceBJe5K3jQNMzvhia4YICblk8QEMl1Uzkw2/pyHxnLJXrPCyqstMAqwREplyL8J52sr8u4UPR2LFvnZLfW3FLWJtoVK05SVr66w31wmLA66H6eCJrkzFVafSoHUFwIDAQAB',
+}
+const DEV = {
+  name: 'Monica (dev)',
+  key: 'MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAtH8oUl7mUkzcANrl/ZmduZ/cPvMmzl+dInEsA3kX+9f94ulc0vnCL0sirzttz2fbz+hZnDzX9vohsqI/LoVHpvSgMOrtbRWYqK34dqcYGgTjEhwZN350FE/f9p5JkULNKyfDcCzzyOukIiw5scRC1WMZM7GjXNchi9NH13gkNz32EII61r02rGZ8jw9w/YILCC+GpWO2umtKSum/f/r9598SallGjuXfFDg1c7fwl9X+6Ew5FIBYKxiRGfnXQUpq4WvH59AXMrAoxpyK6zaHuTOAsArIWBaj3fB4qaafaMEW9DWGjhWqm4+QkvEBZsHAW5wkgiAT3b1o0dTbrP3f6QIDAQAB',
+}
+
+// key を outDir と同じ mode で選ぶので、dev の出力に release の key が入らない。
+const manifest = defineManifest(({ mode }) => ({
+  manifest_version: 3,
+  ...(mode === 'production' ? RELEASE : DEV),
+  version: '0.1.0',
+  action: {},
+  background: { service_worker: 'src/background.ts', type: 'module' },
+  side_panel: { default_path: 'src/sidepanel/index.html' },
+  permissions: ['sidePanel'],
+}))
+
+export default defineConfig(({ command, mode }) => {
+  const plugins = [react(), tailwindcss(), crx({ manifest })]
+  if (command === 'build') return { plugins, build: { outDir: `dist/${mode}` } }
+  const home = resolve(process.env.MONICA_HOME || DEFAULT_HOME)
+  if (isReleaseHome(home)) {
+    throw new Error(
+      `MONICA_HOME が release の home（${RELEASE_HOME}）です。dev の home を渡してください`,
+    )
+  }
+  // dev の出力に port が焼き込まれるので、空いている別の port に移らない。
+  const { extensionPort } = devInstance(home)
+  return {
+    plugins,
+    // CRXJS は dev も build.outDir に書くので、check:ts の build が dev で読み込んでいる中身を置き換えないよう分ける。
+    build: { outDir: extensionDevOutput(home) },
+    clearScreen: false,
+    server: {
+      port: extensionPort,
+      strictPort: true,
+      // check:ts の build が dist/production に書くたびに、dev の side panel を読み直させない。
+      watch: { ignored: ['**/dist/**'] },
+    },
+  }
+})

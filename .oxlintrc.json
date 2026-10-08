@@ -23,7 +23,15 @@
     // `JSON.parse(…) as { pid: number }` のように、検査せずに型を付ける `as` をすべて咎める。
     "typescript/no-unsafe-type-assertion": "off",
     // React の effect の cleanup や網羅した switch のように、値を返さない分岐が意図どおりの関数に出る。返り値の抜けは tsc の noImplicitReturns が見る。
-    "typescript/consistent-return": "off"
+    "typescript/consistent-return": "off",
+    // tsconfig が 1 つなので @types/chrome の chrome は全 file で型が付く。使ってよい file は override で外す。
+    "no-restricted-globals": [
+      "error",
+      {
+        "name": "chrome",
+        "message": "chrome を使うのは apps/extension と chat の ui だけ（ADR-0029）"
+      }
+    ]
   },
   // 1 つの file に複数の override が当たると、後の override が no-restricted-imports の設定を丸ごと置き換える。
   // そのため file の集合ごとに、そこで守る制限をすべて並べる。
@@ -497,6 +505,8 @@
                   "@monica/cli/*",
                   "@monica/desktop",
                   "@monica/desktop/*",
+                  "@monica/extension",
+                  "@monica/extension/*",
                   "@monica/web",
                   "@monica/web/*"
                 ],
@@ -520,6 +530,8 @@
                   "@monica/backend/*",
                   "@monica/desktop",
                   "@monica/desktop/*",
+                  "@monica/extension",
+                  "@monica/extension/*",
                   "@monica/web",
                   "@monica/web/*"
                 ],
@@ -550,6 +562,8 @@
                   "@monica/backend/*",
                   "@monica/desktop",
                   "@monica/desktop/*",
+                  "@monica/extension",
+                  "@monica/extension/*",
                   "@monica/web",
                   "@monica/web/*"
                 ],
@@ -588,6 +602,8 @@
                   "@monica/backend/*",
                   "@monica/cli",
                   "@monica/cli/*",
+                  "@monica/extension",
+                  "@monica/extension/*",
                   "@monica/web",
                   "@monica/web/*"
                 ],
@@ -627,7 +643,9 @@
                   "@monica/cli",
                   "@monica/cli/*",
                   "@monica/desktop",
-                  "@monica/desktop/*"
+                  "@monica/desktop/*",
+                  "@monica/extension",
+                  "@monica/extension/*"
                 ],
                 "message": "apps どうしは import しない（ADR-0002）"
               },
@@ -640,6 +658,51 @@
           }
         ]
       }
+    },
+    {
+      "files": ["apps/extension/**"],
+      "rules": {
+        "no-restricted-imports": [
+          "error",
+          {
+            "paths": [
+              {
+                "name": "bun:sqlite",
+                "message": "DB に触るのは Backend だけで、ブラウザは procedure を呼ぶ（ADR-0003）"
+              }
+            ],
+            "patterns": [
+              {
+                "group": ["@monica/*/cli"],
+                "message": "cli entry を import するのは apps/cli だけ（docs/packages.md の entry）"
+              },
+              {
+                "group": [
+                  "@monica/backend",
+                  "@monica/backend/*",
+                  "@monica/cli",
+                  "@monica/cli/*",
+                  "@monica/desktop",
+                  "@monica/desktop/*",
+                  "@monica/web",
+                  "@monica/web/*"
+                ],
+                "message": "apps どうしは import しない（ADR-0002）"
+              },
+              {
+                "group": ["@monica/*/server", "@monica/*/schema", "drizzle-orm", "drizzle-orm/**"],
+                "allowTypeImports": true,
+                "message": "DB に触るのは Backend だけで、ブラウザは procedure を呼ぶ（ADR-0003）"
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      // Chrome Extension の side panel と service worker でだけ動く。
+      "files": ["apps/extension/**", "packages/chat/src/ui/**"],
+      "rules": { "no-restricted-globals": "off" }
     },
     {
       "files": ["packages/*/src/**", "apps/backend/src/**"],
