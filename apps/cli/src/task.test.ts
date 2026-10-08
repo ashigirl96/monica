@@ -137,6 +137,16 @@ test('task run prints where the Bench is, that claude started, and that GitHub c
   })
 })
 
+test('task run takes the prompt to claude as the argument after the ref', async () => {
+  const { connect, ptyd } = inPlaceBench()
+
+  const result = await monica(['task', 'run', 'acme/app#12', 'fix the bug', '--in-place'], connect)
+
+  expect(result.code).toBe(0)
+  await ptyd.received((op) => op.op === 'write')
+  expect(ptyd.sessionRequests().at(-1)).toMatchObject({ data: "claude 'fix the bug'\r" })
+})
+
 test('task run exits 1 naming the open Blockers, and --force starts claude past them', async () => {
   const { db, issueId, connect } = inPlaceBench()
   const upstream = db

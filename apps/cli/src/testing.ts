@@ -87,6 +87,7 @@ export function inMemoryBackend({ home, ghq = noGhq }: { home?: string; ghq?: Gh
   return {
     sqlite,
     db,
+    ptyd,
     router: os
       .$context<typeof context>()
       .router({ workbench: workbenchRouter, task: taskRouter, job: jobRouter }),
