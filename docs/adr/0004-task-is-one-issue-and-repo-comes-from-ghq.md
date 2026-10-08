@@ -8,7 +8,7 @@ status: accepted
 
 ## Considered Options
 
-- **GitHub 無しの raw Task を残す**（旧 Monica 踏襲）: wayfinder も track-issue も「先に issue を立てる」運用で、使われていなかった。Task に title / body を持たせる理由がこれだけだったので捨てた。
+- **GitHub 無しの raw Task を残す**（旧 Monica 踏襲）: wayfinder など旧 Monica の手順書は「先に issue を立てる」運用で、使われていなかった。Task に title / body を持たせる理由がこれだけだったので捨てた。
 - **Task と Issue を 1 つに畳む**: 「PR が merge されて issue は閉じたが Task はまだ片付け待ち」「issue は open のまま Task だけ閉じる」の 2 つの状態が表せない。
 - **Project テーブルを残す**: 持っていた 4 つ（`owner/repo`、path、default branch、実行設定）のうち前 3 つは導出でき、実行設定は settings に置ける。導出できるものを登録させると、登録漏れの NULL と二重管理が戻る。
 

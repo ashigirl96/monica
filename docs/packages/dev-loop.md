@@ -26,21 +26,6 @@
 - `bun run dev:kill <NAME>` は desktop → Backend → ptyd の順に止める。逆にすると、Shell が Backend を、Backend が ptyd を起こし直す。`$TMPDIR` の下の home は消し、`~/.monica-*` は Workbench Ledger の layout があるので残す。
 - Shell は起動時に `$MONICA_HOME/bin/monica` → `MONICA_BIN` の symlink を張る。release の desktop だけが `~/.local/bin/monica` にも張る（ADR-0006）。dev の desktop が張ると release の CLI を上書きするため。Workbench の tab の PATH に `$MONICA_HOME/bin` を前置するのは shim（`docs/packages/tab-env-and-shim.md`）。
 - `MONICA_HOME` は direnv に書かない（ADR-0006）。
-- `.claude/skills` は生成しない。Skill は plugin として repo から in-place で読まれる（ADR-0006）。
-- Skill を使うには、user scope の `~/.claude/settings.json` に monica の checkout を directory marketplace として登録し、`monica@monica` を enable する。登録はユーザーが行う。project scope には書かない。Skill はどの repo で動く agent にも配るため。
-
-  ```json
-  {
-    "extraKnownMarketplaces": {
-      "monica": { "source": { "source": "directory", "path": "<ghq root>/github.com/ashigirl96/monica" } }
-    },
-    "enabledPlugins": { "monica@monica": true }
-  }
-  ```
-
-  - `path` は worktree ではなく main の checkout を指す。worktree は消すと plugin ごと読めなくなる。
-  - checkout はその場で読まれ、SKILL.md の編集は `/reload-plugins` で効く。呼び名は `/monica:<name>`。
-  - manifest は `claude plugin validate .` で確かめる。`version` が無いという warning は意図どおり（ADR-0006）。
 - cargo の初回 build は約 36 秒（#8）。
 
 ## release build と install
