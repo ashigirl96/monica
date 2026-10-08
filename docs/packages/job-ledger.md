@@ -16,7 +16,7 @@ resume  { name } → { name, nextAt }                                           
 
 - `schedule` は、system の Job なら `{ type: "every", ms }`、ユーザーの Job なら `{ type: "cron", expression }`。
 - `state` は `running` / `paused` / `active` の順に決める。pause したユーザーの Job を `run` で起こした間は `running` になる。system の Job は `paused` にならない。
-- `last` は終わった Job Execution のうち最新のもの。走っている回は `state` の `running` で分かるので、`last` には前回の結果を残す。`nextAt` は `start()` の前の system の Job と、pause したユーザーの Job では null。
+- `last` は終わった Job Execution のうち最新のもの。走っている回は `state` の `running` で分かるので、`last` には前回の結果を残す。`nextAt` は `start()` の前と、pause したユーザーの Job では null。
 - `list` は system の Job を渡された順に、その後にユーザーの Job を add した順に並べる。
 - `show` の `shell` はユーザーの Job の command・cwd・timeout で、system の Job では null。`executions` は新しい順に 20 件。
 - 無い名前は `NOT_FOUND`。
@@ -48,15 +48,15 @@ job は task も workbench も note も import しない（ADR-0016）。system 
 - `start()`・`add`・`resume` のときは、今から次の予定を計算する（`cron.nextRun(now)`）。予定の時刻に Backend が居なかった回は飛ばし、記録しない。
 - tick が予定の時刻を過ぎたのに気づいたら起こし、次の予定はその時から計算する。
 - tick が予定の時刻から 60 秒（tick の間隔の 2 倍）を超えて遅れて気づいた回は、起こさず、記録もせず、次の予定を今から計算する。Mac がスリープすると Backend の process は終わらずに凍り、起きた後の最初の tick には予定を大きく過ぎたように見える。深夜 3 時の Job を朝に走らせないよう、ADR-0016 の「予定の時刻に Backend が居なければその回は飛ばす」を凍っていた間にも当てる。system の Job はこの扱いをせず、1 回だけ走る（「tick」の節）。
-- 前の Job Execution が走っている間に来た予定は飛ばし、次の予定を今から計算する。走っている回が予定の時刻より後で tick より前に終わっても飛ばす（system の Job と同じ）。
+- 前の Job Execution が走っている間に来た予定は飛ばし、次の予定を今から計算する（「tick」の節）。
 
 ### process
 
 - `/bin/sh -c <command>` を、cwd、`env: process.env`、stdin なしで、自分の process group（`detached: true`）として起こす。stdout と stderr は `$MONICA_HOME/logs/jobs/<name>/<開始時刻>.log` に書く。開始時刻は local time の `2026-10-07T030020.000` の形。
-- PATH は Backend が login shell から取った PATH（`docs/packages.md` の「Backend の組み立て」）なので、`claude` は Tab の wrapper ではなく本物の claude になり、hook は付かない。
+- PATH は Backend が login shell から取った PATH（`docs/packages/backend.md` の「PATH と spawn の env」）なので、`claude` は Tab の wrapper ではなく本物の claude になり、hook は付かない。
 - 結果:
   - exit 0 なら `succeeded`。
-  - それ以外は `failed` で、エラーの 1 行を `exit <code>: <出力の最後の 1 行>` にする。最後の 1 行は log の末尾 4 KiB の、空でない最後の行で、200 文字で切る。出力が無ければ `exit <code>` だけ。signal で終わったら `killed by <signal>` で始め、exit code は null。
+  - それ以外は `failed` で、エラーの 1 行を `exit <code>: <出力の最後の 1 行>` にする。最後の 1 行は log の末尾 4 KiB の、空でない最後の行で、200 文字を超えれば切って `…` を付ける。出力が無ければ `exit <code>` だけ。signal で終わったら `killed by <signal>` で始め、exit code は null。
   - spawn できなければ（add の後に cwd が消えたなど）`failed` で、エラーは `spawn failed: <理由>`。
   - timeout になったら process group に SIGTERM → 最大 2 秒 → SIGKILL を送り、`timed_out` にする。エラーは `timed out after <秒>s`。Bench の setup（`docs/packages/task-ledger.md` の「Bench」）と同じ形で、job は task を import しないので、同じ処理を `command.ts` に持つ。
 - `stop()` は走っている process group に SIGKILL を送る。その行は次の起動で `interrupted` になる（「中断」の節）。
