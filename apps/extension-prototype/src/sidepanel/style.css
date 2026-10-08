@@ -1,0 +1,59 @@
+@import "tailwindcss";
+@import "@fontsource-variable/inter/opsz.css";
+@import "./fluid/fluid.css";
+
+/* ChatMessage の吹き出しは中身の min-content で広がるので、表とコードを幅の計算から外し、長い URL も途中で折れるようにする。 */
+.typeset :is(pre, .typeset-scroll) {
+  contain: inline-size;
+}
+
+.typeset {
+  overflow-wrap: anywhere;
+}
+
+html[data-tokens="fluid"] body {
+  font-family: "Inter Variable", system-ui, sans-serif;
+}
+
+/* monica の字と色: apps/web の token を light-dark() で張り直し、日本語に合わせて字を大きく、行を広げる。 */
+html[data-tokens="monica"] {
+  --surface-1: light-dark(oklch(1 0 0), oklch(0.135 0.015 265));
+  --surface-2: light-dark(oklch(0.975 0.005 250), oklch(0.175 0.02 265));
+  --surface-3: light-dark(oklch(1 0 0), oklch(0.205 0.02 265));
+  --foreground: light-dark(oklch(0.2 0.025 265), oklch(1 0 0));
+  --card-foreground: var(--foreground);
+  --muted: light-dark(oklch(0.965 0.005 250), oklch(0.22 0.02 260));
+  --muted-foreground: light-dark(oklch(0.49 0.02 255), oklch(0.85 0 0));
+  --border: light-dark(oklch(0.895 0.012 255), oklch(0.275 0.025 260));
+  --accent: light-dark(oklch(0.55 0.21 263), oklch(0.72 0.13 266));
+  --accent-foreground: light-dark(oklch(0.985 0 0), oklch(0.135 0.015 265));
+  --focus-ring: light-dark(oklch(0.55 0.21 263), oklch(0.72 0.13 266));
+
+  --fs-title: 16px;
+  --lh-title: 24px;
+  --fs-subtitle: 14px;
+  --lh-subtitle: 22px;
+  --fs-body: 14px;
+  --lh-body: 23px;
+  --fs-caption: 12px;
+  --lh-caption: 18px;
+  --fs-subtitle-compact: 13px;
+  --lh-subtitle-compact: 21px;
+  --fs-body-compact: 13px;
+  --lh-body-compact: 21px;
+}
+
+html[data-tokens="monica"] body {
+  font-family:
+    -apple-system, BlinkMacSystemFont, "Hiragino Kaku Gothic ProN", "Hiragino Sans", "Noto Sans JP",
+    sans-serif;
+}
+
+/* typeset は太さを font-variation-settings だけで付けるので、可変軸の無い日本語のフォントでは太字と見出しが太くならない。 */
+html[data-tokens="monica"] .typeset {
+  color: var(--foreground);
+}
+
+html[data-tokens="monica"] .typeset :is(strong, b, h1, h2, h3, h4, h5, h6, th) {
+  font-weight: 600;
+}
