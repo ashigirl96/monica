@@ -40,7 +40,6 @@ import {
   onTerminalExit,
   onTerminalOutput,
   terminalAttach,
-  terminalDetach,
   terminalResize,
   terminalWrite,
 } from './terminal.ts'
@@ -108,21 +107,16 @@ async function runConnect(optionsRef: React.RefObject<UseTerminalOptions>, conn:
       await onTerminalExit(sessionId, (code) => optionsRef.current.onExit(sessionId, code)),
     )
 
-    // Released while subscribing: the closer already ended the session by id; attaching
-    // now would pull it back out of the Detached group with no tab to own it.
+    // Released while subscribing or attaching: the Tab closed or moved to a new shell, and
+    // its session is ending, so nothing here may write into the pane.
     if (getTabConnection(tabId) !== conn) {
       dropListeners(conn)
       return
     }
 
     const attach = await terminalAttach(sessionId)
-    // Released mid-attach: the closer's detach may have landed before this attach, so
-    // detach again to leave the session where the closer put it.
     if (getTabConnection(tabId) !== conn) {
       dropListeners(conn)
-      terminalDetach(sessionId).catch((e: unknown) => {
-        console.warn(`terminal detach failed for released session ${sessionId}:`, e)
-      })
       return
     }
     // No reset before the replay: the terminal here is always a freshly mounted (empty)

@@ -3,7 +3,7 @@ import { afterEach, expect, test } from 'bun:test'
 import { createStore, type Store } from 'jotai'
 
 import { cleanUp, onCleanup, setup, until } from '../testing.ts'
-import type { SidebarRow } from './sidebar-model.ts'
+import type { RunspaceRow } from './sidebar-model.ts'
 import {
   activateRunspaceAtom,
   activateTerminalTabAtom,
@@ -56,7 +56,7 @@ function untilUnread(store: Store, terminalSessionId: string, unread: boolean) {
   )
 }
 
-function rowsOf(store: Store): SidebarRow[] {
+function rowsOf(store: Store): RunspaceRow[] {
   return store.get(sidebarAtom).tiles.flatMap((tile) => tile.sections.flatMap((s) => s.rows))
 }
 

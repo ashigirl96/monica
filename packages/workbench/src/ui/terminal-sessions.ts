@@ -18,8 +18,6 @@ export function canAttach(status: TerminalSessionStatus | undefined): boolean {
   return status !== 'starting' && !isDeadStatus(status)
 }
 
-const terminalSessionsAtom = atom<TerminalSession[]>([])
-
 // 読み直しの合間は pane が attach と Exit で知った状態を書き込み、map に無い Terminal Session は不明として pane が attach を試みる。
 export const terminalSessionStatusAtom = atom<Record<string, TerminalSessionStatusEntry>>({})
 
@@ -30,18 +28,11 @@ export const setTerminalSessionStatusAtom = atom(
   },
 )
 
-// Exit を受けたか終了を頼んだ Terminal Session は、Backend が exit を記録するまで一覧では live のままなので、exited として扱い Detached にも出さない。
+// Exit を受けた Terminal Session は、Backend が exit を記録するまで一覧では live のままなので、exited として扱う。
 const endedAtom = atom<ReadonlySet<string>>(new Set<string>())
 
 export const markEndedAtom = atom(null, (_get, set, terminalSessionId: string) => {
   set(endedAtom, (prev) => new Set(prev).add(terminalSessionId))
-})
-
-export const detachedTerminalSessionsAtom = atom((get) => {
-  const ended = get(endedAtom)
-  return get(terminalSessionsAtom).filter(
-    (s) => !isDeadStatus(s.status) && s.tabId === null && !ended.has(s.id),
-  )
 })
 
 export const applyTerminalSessionListAtom = atom(
@@ -50,7 +41,6 @@ export const applyTerminalSessionListAtom = atom(
     const ended = get(endedAtom)
     const previous = get(terminalSessionStatusAtom)
     const live = new Set(terminalSessions.filter((s) => !isDeadStatus(s.status)).map((s) => s.id))
-    set(terminalSessionsAtom, terminalSessions)
     set(
       terminalSessionStatusAtom,
       Object.fromEntries(

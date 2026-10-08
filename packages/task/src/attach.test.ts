@@ -246,14 +246,14 @@ test('attach refuses a Tab whose claude is a Run of another Task, changing nothi
   expect(runsOf(fixture)).toEqual([{ number: 13, agentSessionId: 's-1', origin: 'started' }])
 })
 
-test('attach refuses a detached Terminal Session, a call from outside a Tab, a closed Task, and an untracked one', async () => {
+test('attach refuses a Terminal Session whose Tab was closed, a call from outside a Tab, a closed Task, and an untracked one', async () => {
   const fixture = started()
   await fixture.openBench(ref)
-  const detached = await fixture.openTabOutsideBench()
-  await fixture.workbenchClient.tab.close({ id: tabIdOf(fixture, detached) })
+  const closed = await fixture.openTabOutsideBench()
+  await fixture.workbenchClient.tab.close({ id: tabIdOf(fixture, closed) })
   const outside = await fixture.openTabOutsideBench()
 
-  expect((await failure(fixture.client.attach({ ref, terminalSessionId: detached }))).code).toBe(
+  expect((await failure(fixture.client.attach({ ref, terminalSessionId: closed }))).code).toBe(
     'BAD_REQUEST',
   )
   expect((await failure(fixture.client.attach({ ref }))).code).toBe('BAD_REQUEST')

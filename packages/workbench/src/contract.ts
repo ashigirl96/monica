@@ -57,12 +57,6 @@ export const contract = {
     list: meta
       .meta({ description: 'List Terminal Sessions that are live or shown in a Tab', cli: true })
       .output(z.array(TerminalSessionSchema)),
-    terminate: meta
-      .meta({
-        description: 'Kill a Terminal Session; its row turns exited when ptyd reports the exit',
-      })
-      .input(z.object({ id: z.string() }))
-      .output(z.void()),
   },
   layout: {
     get: meta
@@ -87,17 +81,13 @@ export const contract = {
   },
   tab: {
     open: meta
-      .meta({
-        description:
-          'Open a Tab on a new Terminal Session, or on a detached one given its id to reattach it',
-      })
+      .meta({ description: 'Open a Tab on a new Terminal Session' })
       .input(
         z.object({
           runspaceId: z.string(),
           cwd: z.string().optional(),
           index: index.optional(),
           ...size,
-          terminalSessionId: z.string().optional(),
         }),
       )
       .output(TabSchema),
@@ -108,7 +98,7 @@ export const contract = {
       .input(z.object({ id: z.string(), ...size }))
       .output(TabSchema),
     close: meta
-      .meta({ description: 'Close a Tab, leaving its Terminal Session detached' })
+      .meta({ description: 'Close a Tab and terminate its Terminal Session' })
       .input(z.object({ id: z.string() }))
       .output(
         z.object({

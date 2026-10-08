@@ -1,4 +1,4 @@
-import type { Layout, RepoPlace, Tab, TerminalSession } from '../contract.ts'
+import type { Layout, RepoPlace, Tab } from '../contract.ts'
 import { shortPath } from '../paths.ts'
 import { type AgentDot, type AgentTally, tallyAgentDots } from './agent-dot.ts'
 
@@ -21,7 +21,6 @@ export type BenchLabelOf = (runspaceId: string) => BenchLabel | null
 
 // 普通の Runspace は Tab の dot を色ごとに数えた agentTallies を、Bench は代表の Tab の agentDot を持つ。
 export type RunspaceRow = {
-  type: 'runspace'
   id: string
   isActive: boolean
   unreadCount: number
@@ -36,19 +35,7 @@ export type RunspaceRow = {
   branch: string | null
 }
 
-export type DetachedRow = {
-  type: 'detached'
-  id: string
-  terminalSession: TerminalSession
-  unreadCount: number
-  agentDot: AgentDot | null
-  repo: string | null
-  path: string
-}
-
-export type SidebarRow = RunspaceRow | DetachedRow
-
-export type SectionKind = 'bench' | 'runspaces' | 'detached'
+export type SectionKind = 'bench' | 'runspaces'
 
 // 畳んだセクションは rows を空にし、見出しに出す行の数と未読の Tab の数だけを持つ。
 export type SidebarSection = {
@@ -57,7 +44,7 @@ export type SidebarSection = {
   collapsed: boolean
   rowCount: number
   unreadCount: number
-  rows: SidebarRow[]
+  rows: RunspaceRow[]
 }
 
 export type Tile = {
@@ -86,7 +73,6 @@ export type SidebarInput = {
   unreadOf: (terminalSessionId: string) => boolean
   agentDotOf: (terminalSessionId: string) => AgentDot | null
   benchLabelOf: BenchLabelOf
-  detached: TerminalSession[]
   tileChoice: string | null
   collapsed: ReadonlySet<string>
 }
@@ -154,7 +140,6 @@ function runspaceRow(input: SidebarInput, runspace: Runspace): RunspaceRow {
   const place = input.places[cwd]
   const path = pathOf(cwd, place)
   return {
-    type: 'runspace',
     id: runspace.id,
     isActive: runspace.id === input.activeRunspaceId,
     unreadCount: runspace.tabs.filter((t) => input.unreadOf(t.terminalSessionId)).length,
@@ -172,29 +157,14 @@ function runspaceRow(input: SidebarInput, runspace: Runspace): RunspaceRow {
   }
 }
 
-function detachedRow(input: SidebarInput, terminalSession: TerminalSession): DetachedRow {
-  const place = input.places[terminalSession.cwd]
-  return {
-    type: 'detached',
-    id: terminalSession.id,
-    terminalSession,
-    unreadCount: input.unreadOf(terminalSession.id) ? 1 : 0,
-    agentDot: input.agentDotOf(terminalSession.id),
-    repo: place?.repo ?? null,
-    path: pathOf(terminalSession.cwd, place),
-  }
-}
-
 function sum(items: { unreadCount: number }[]): number {
   return items.reduce((total, item) => total + item.unreadCount, 0)
 }
 
-function tileOf(input: SidebarInput, key: string, rows: SidebarRow[]): Tile {
-  const isBench = (row: SidebarRow) => row.type === 'runspace' && row.bench !== null
+function tileOf(input: SidebarInput, key: string, rows: RunspaceRow[]): Tile {
   const parts = [
-    { kind: 'bench' as const, rows: rows.filter(isBench) },
-    { kind: 'runspaces' as const, rows: rows.filter((r) => r.type === 'runspace' && !isBench(r)) },
-    { kind: 'detached' as const, rows: rows.filter((r) => r.type === 'detached') },
+    { kind: 'bench' as const, rows: rows.filter((r) => r.bench !== null) },
+    { kind: 'runspaces' as const, rows: rows.filter((r) => r.bench === null) },
   ].filter((part) => part.rows.length > 0)
   // セクションが 1 つなら見出しを出さないので、畳んだままでも行を隠さない。
   const headed = parts.length > 1
@@ -218,12 +188,9 @@ export function buildSidebar(input: SidebarInput): Sidebar {
     row: runspaceRow(input, runspace),
     pinned: holdsPin(runspace),
   }))
-  const listed: SidebarRow[] = [
-    ...runspaces.filter((r) => !r.pinned).map((r) => r.row),
-    ...input.detached.map((s) => detachedRow(input, s)),
-  ]
+  const listed = runspaces.filter((r) => !r.pinned).map((r) => r.row)
   // GitHub の Repo 名は大小文字を区別しないので、Task の nameWithOwner と checkout の path が違っても同じ Tile にする。
-  const tileKey = (row: SidebarRow) => row.repo?.toLowerCase() ?? OUTSIDE
+  const tileKey = (row: RunspaceRow) => row.repo?.toLowerCase() ?? OUTSIDE
   const keys = new Set(listed.map(tileKey))
   keys.delete(OUTSIDE)
   const tiles = [...keys, OUTSIDE].map((key) =>
@@ -233,9 +200,7 @@ export function buildSidebar(input: SidebarInput): Sidebar {
       listed.filter((r) => tileKey(r) === key),
     ),
   )
-  const tileKeys = Object.fromEntries(
-    listed.filter((r) => r.type === 'runspace').map((r) => [r.id, tileKey(r)]),
-  )
+  const tileKeys = Object.fromEntries(listed.map((r) => [r.id, tileKey(r)]))
   const cwdTileKeys = Object.fromEntries(
     input.runspaces
       .filter((r) => r.id in tileKeys && !r.owned && input.places[leftmostCwd(r)])
@@ -266,23 +231,15 @@ export function tileAt(sidebar: Sidebar, n: number): Tile | undefined {
   return sidebar.tiles.find((tile) => tileNumberOf(sidebar, tile.key) === n)
 }
 
-function runspaceRowsOf(rows: SidebarRow[]): RunspaceRow[] {
-  return rows.filter((row): row is RunspaceRow => row.type === 'runspace')
-}
-
-function shownRunspaceRowsOf(tile: Tile): RunspaceRow[] {
-  return tile.sections.flatMap((s) => runspaceRowsOf(s.rows))
-}
-
 export function shownRunspaceIds(sidebar: Sidebar): string[] {
-  return [...sidebar.pinned, ...shownRunspaceRowsOf(sidebar.selected)].map((r) => r.id)
+  return [...sidebar.pinned, ...sidebar.selected.sections.flatMap((s) => s.rows)].map((r) => r.id)
 }
 
 // Workbench Ledger の並びは 1 本なので、並べ替えは同じセクションの中に限る。
 export function sectionPeersOf(sidebar: Sidebar, runspaceId: string): string[] {
   const groups = [
     sidebar.pinned,
-    ...sidebar.tiles.flatMap((tile) => tile.sections.map((s) => runspaceRowsOf(s.rows))),
+    ...sidebar.tiles.flatMap((tile) => tile.sections.map((s) => s.rows)),
   ]
   return groups.find((rows) => rows.some((r) => r.id === runspaceId))?.map((r) => r.id) ?? []
 }

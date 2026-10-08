@@ -96,39 +96,23 @@ export function openTab(
   terminalSessions: TerminalSessions,
   input: { runspaceId: string; cwd?: string; index?: number; size?: Size; input?: string },
 ) {
-  const cwd = input.cwd ?? runspaceOf(tx, input.runspaceId).cwd
-  return attachTab(tx, {
-    runspaceId: input.runspaceId,
+  const { runspaceId } = input
+  const runspaceCwd = runspaceOf(tx, runspaceId).cwd
+  const cwd = input.cwd ?? runspaceCwd
+  const terminalSessionId = terminalSessions.start(tx, {
     cwd,
-    index: input.index,
-    terminalSessionId: terminalSessions.start(tx, { cwd, size: input.size, input: input.input }),
+    size: input.size,
+    input: input.input,
   })
-}
-
-export function reattachTab(
-  tx: Tx,
-  input: { runspaceId: string; cwd?: string; index?: number; terminalSessionId: string },
-) {
-  const row = tx
-    .select({ status: terminalSession.status, cwd: terminalSession.cwd, tabId: tab.id })
-    .from(terminalSession)
-    .leftJoin(tab, eq(tab.terminalSessionId, terminalSession.id))
-    .where(eq(terminalSession.id, input.terminalSessionId))
+  const id = `tab-${Bun.randomUUIDv7()}`
+  const order = insertAt(tabIds(tx, runspaceId), id, input.index)
+  const opened = tx
+    .insert(tab)
+    .values({ id, runspaceId, cwd, sortOrder: order.indexOf(id), terminalSessionId })
+    .returning()
     .get()
-  if (!row) {
-    throw new ORPCError('NOT_FOUND', { message: `no Terminal Session ${input.terminalSessionId}` })
-  }
-  if (row.tabId !== null || !isLive(row.status)) {
-    throw new ORPCError('CONFLICT', {
-      message: `Terminal Session ${input.terminalSessionId} is not detached`,
-    })
-  }
-  return attachTab(tx, {
-    runspaceId: input.runspaceId,
-    cwd: input.cwd ?? row.cwd,
-    index: input.index,
-    terminalSessionId: input.terminalSessionId,
-  })
+  restack(tx, tab, order)
+  return opened
 }
 
 export function moveTab(tx: Tx, input: { id: string; runspaceId: string; index?: number }) {
@@ -141,10 +125,15 @@ export function moveTab(tx: Tx, input: { id: string; runspaceId: string; index?:
   if (moved.runspaceId !== input.runspaceId) afterTabLeft(tx, moved.runspaceId)
 }
 
-export function closeTab(tx: Tx, id: string): { emptiedRunspaceId: string | null } {
+export function closeTab(
+  tx: Tx,
+  terminalSessions: TerminalSessions,
+  id: string,
+): { emptiedRunspaceId: string | null } {
   const closed = tabOf(tx, id)
   if (closed.pinned) throw new ORPCError('CONFLICT', { message: `Tab ${id} is pinned` })
   tx.delete(tab).where(eq(tab.id, id)).run()
+  terminalSessions.terminateRemoved([{ tabId: id, terminalSessionId: closed.terminalSessionId }])
   return { emptiedRunspaceId: afterTabLeft(tx, closed.runspaceId) ? closed.runspaceId : null }
 }
 
@@ -166,12 +155,10 @@ export function unpinTab(tx: Tx, id: string) {
 
 // title から取った cwd は `~` で始まるが、Workbench Ledger の cwd は git や fs にそのまま渡すので絶対 path にする。
 export function setTabCwd(tx: Tx, input: { id: string; cwd: string }) {
-  const { terminalSessionId } = tabOf(tx, input.id)
+  tabOf(tx, input.id)
   const cwd =
     input.cwd === '~' || input.cwd.startsWith('~/') ? homedir() + input.cwd.slice(1) : input.cwd
   tx.update(tab).set({ cwd }).where(eq(tab.id, input.id)).run()
-  // Tab を閉じると Tab の cwd は消えるので、detach した shell が最後にいた directory を Terminal Session の行に残す。
-  tx.update(terminalSession).set({ cwd }).where(eq(terminalSession.id, terminalSessionId)).run()
 }
 
 export function respawnTab(
@@ -192,23 +179,6 @@ export function respawnTab(
     }
     return terminalSessions.rebind(tx, { id, cwd }, size)
   })
-}
-
-function attachTab(
-  tx: Tx,
-  input: { runspaceId: string; cwd: string; index?: number; terminalSessionId: string },
-) {
-  const { runspaceId, cwd, terminalSessionId } = input
-  runspaceOf(tx, runspaceId)
-  const id = `tab-${Bun.randomUUIDv7()}`
-  const order = insertAt(tabIds(tx, runspaceId), id, input.index)
-  const attached = tx
-    .insert(tab)
-    .values({ id, runspaceId, cwd, sortOrder: order.indexOf(id), terminalSessionId })
-    .returning()
-    .get()
-  restack(tx, tab, order)
-  return attached
 }
 
 function runspaceOf(tx: Tx, id: string) {

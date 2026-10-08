@@ -8,10 +8,6 @@ export function terminalAttach(sessionId: string, replayBytes?: number): Promise
   return shell('terminal_attach', { sessionId, replayBytes: replayBytes ?? null })
 }
 
-export function terminalDetach(sessionId: string): Promise<void> {
-  return shell('terminal_detach', { sessionId })
-}
-
 // Shell は command を別々の thread で走らせ順番を保たないので、書き込みと resize は前の 1 つが届いてから送る。
 const lastSends = new Map<string, Promise<void>>()
 
