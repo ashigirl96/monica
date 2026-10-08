@@ -1,7 +1,12 @@
 import { afterEach, expect, test } from 'bun:test'
 import { join } from 'node:path'
 
+import type { contract as chatContract } from '@monica/chat/contract'
+import { writeFakeClaude } from '@monica/chat/testing'
 import { startFakePtyd, tempHome } from '@monica/workbench/testing'
+import { createORPCClient } from '@orpc/client'
+import { RPCLink } from '@orpc/client/fetch'
+import type { ContractRouterClient } from '@orpc/contract'
 
 import { freePort } from './testing.ts'
 
@@ -35,19 +40,20 @@ function announcements(stdout: ReadableStream<Uint8Array>) {
 }
 
 // main.ts は Backend の組み立てそのものなので、Shell と同じく process として起こす。
-async function startBackend(browserPort: number) {
+async function startBackend(browserPort: number, env: { [key: string]: string | undefined } = {}) {
   const home = tempHome((cleanup) => cleanups.push(cleanup))
   const ptyd = startFakePtyd(home)
   cleanups.push(() => ptyd.stop())
-  const { MONICA_BROWSER_PORT: _, ...env } = process.env
+  const { MONICA_BROWSER_PORT: _, MONICA_CLAUDE_PATH: __, ...inherited } = process.env
   const backend = Bun.spawn([process.execPath, join(import.meta.dir, 'main.ts')], {
     env: {
-      ...env,
+      ...inherited,
       MONICA_HOME: home,
       MONICA_PTYD_PATH: join(home, 'no-ptyd'),
       MONICA_BROWSER_PORT: String(browserPort),
       // login shell の rc を読む時間を短くする。
       SHELL: '/bin/sh',
+      ...env,
     },
     stdin: 'pipe',
     stdout: 'pipe',
@@ -121,6 +127,32 @@ test('the browser listener carries chat for a Chrome Extension and the token lis
 
   expect(fromExtension.status).toBe(400)
   expect((await viaToken(backend, 'chat/ask', { question: '' })).status).toBe(404)
+}, 20_000)
+
+test('the Backend answers chat.ask with the claude that MONICA_CLAUDE_PATH names', async () => {
+  const dir = tempHome((cleanup) => cleanups.push(cleanup))
+  const browserPort = freePort()
+  await startBackend(browserPort, {
+    MONICA_CLAUDE_PATH: writeFakeClaude(dir, join(dir, 'claude.jsonl')),
+    // node_modules の claude を起こしてしまっても、keychain の login を読めずに本物の API を呼ばない。
+    USER: undefined,
+  })
+  const client: ContractRouterClient<{ chat: typeof chatContract }> = createORPCClient(
+    new RPCLink({
+      url: `http://127.0.0.1:${browserPort}/rpc`,
+      headers: { 'sec-fetch-site': 'none', 'sec-fetch-mode': 'cors' },
+    }),
+  )
+
+  let answer = ''
+  for await (const event of await client.chat.ask({
+    question: 'What is 1 + 1?',
+    page: {},
+    history: [],
+  }))
+    answer += event.text
+
+  expect(answer).toBe('Two is the answer.')
 }, 20_000)
 
 // 新しい Tab の claude が turn を終え、手空きの通知が出る。

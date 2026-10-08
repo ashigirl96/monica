@@ -227,5 +227,8 @@ fn command(home: &Path) -> Command {
     if let Some(port) = locations::browser_port() {
         command.env("MONICA_BROWSER_PORT", port);
     }
+    if let Some(claude) = locations::claude() {
+        command.env("MONICA_CLAUDE_PATH", claude);
+    }
     command
 }

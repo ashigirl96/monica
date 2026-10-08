@@ -45,6 +45,13 @@ CRXJS は dev も build も `build.outDir` に書く。dir を分けないと、
 - 普段の Brave には release の Chrome Extension だけを入れる。dev の出力は、同じ home の Vite が動いている間しか働かない。
 - agent は `extension-dev` skill の手順で、headless の Brave の side panel を CDP で開いて読む。
 
+## release の読み込み方
+
+`bun run build` が `dist/production` を作り、`bun run install-app` がそれを `/Applications/Monica.app/Contents/Resources/extension` に写す（`docs/packages/dev-loop.md` の「release build と install」）。
+
+- 普段の Brave の `brave://extensions` で開発者モードを on にし、「パッケージ化されていない拡張機能を読み込む」を押す。file の選択で ⌘⇧G を押し、`/Applications/Monica.app/Contents/Resources/extension` を選ぶ。`.app` は Finder では 1 つの file に見え、中に入れないため。読み込むのは一度だけで、ID は release の ID になる。
+- Brave は unpacked で読み込んだものを自分では読み直さない。`install-app` で `.app` を入れ替えた後は、`brave://extensions` で reload を押す（ADR-0029）。reload を押す前の Brave がどう振る舞うか（古い中身のまま動くか、エラーを出すか）はまだ確かめていない。
+
 ## `chrome` の型と lint
 
 - root の tsconfig は `types: ["bun"]` なので、`apps/extension/src/chrome-env.d.ts` の `/// <reference types="chrome" />` で `@types/chrome` を読む。tsconfig は 1 つなので、`chrome` の型は program の全 file から見える。
