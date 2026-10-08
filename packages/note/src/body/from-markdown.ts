@@ -409,33 +409,18 @@ function isClosingFence(text: string, fenceChar: string, minLength: number): boo
 
 /**
  * `| a | b |` の行をセルに分ける。末尾の `|` は省いてよく、`bareOk` なら先頭の `|` も省いてよい
- * （その代わりに区切りの `|` を 1 つ以上求め、本文の 1 行を表の行と読まない）。`\|` では区切らず、escape は inline の読みに任せる。
+ * （その代わりに区切りの `|` を 1 つ以上求め、本文の 1 行を表の行と読まない）。cmark-gfm と同じく、
+ * 直前が `\` の `|` では区切らない。セルの `\|` は、backslash の escape が効かない code span・
+ * Note Mention・href の中でも `|` と読むよう、inline として読む前に `|` に戻す。
  */
 function tableRowCells(text: string, bareOk: boolean): string[] | null {
   const line = trimEnd(text)
   const bare = !line.startsWith('|')
   if (bare && !bareOk) return null
-  let inner = bare ? line : line.slice(1)
-  if (inner.endsWith('|')) inner = inner.slice(0, -1)
-  const cells: string[] = []
-  let current = ''
-  let escaped = false
-  for (const char of inner) {
-    if (escaped) {
-      current += char
-      escaped = false
-    } else if (char === '\\') {
-      current += char
-      escaped = true
-    } else if (char === '|') {
-      cells.push(trim(current))
-      current = ''
-    } else {
-      current += char
-    }
-  }
-  cells.push(trim(current))
-  return bare && cells.length < 2 ? null : cells
+  const cells = (bare ? line : line.slice(1)).split(/(?<!\\)\|/)
+  if (cells.length > 1 && cells.at(-1) === '') cells.pop()
+  if (bare && cells.length < 2) return null
+  return cells.map((cell) => trim(cell.replaceAll('\\|', '|')))
 }
 
 function isDelimiterRow(cells: string[]): boolean {
