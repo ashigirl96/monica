@@ -64,6 +64,14 @@ export function routeOf(pathname: string): Route {
   return { page: 'not-found' }
 }
 
+/** 消せる種類（Essay と Repo Note）の画面が開いている Note の id。 */
+export function openNoteIdOfPath(pathname: string): string | null {
+  const route = routeOf(pathname)
+  if (route.page === 'essay') return route.id
+  if (route.page === 'repo') return route.noteId
+  return null
+}
+
 // 開いたまま日付の境目を越えても、次に開いた時の今日を指すよう、開くたびに now から導く。
 export function todayPath(now: Date): string {
   return dailyPath(logicalDate(now))

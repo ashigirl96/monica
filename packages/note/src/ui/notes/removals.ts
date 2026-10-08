@@ -1,5 +1,7 @@
 import type { Note } from '../../contract.ts'
 
+export type RemovableKind = Extract<Note['kind'], 'essay' | 'repo_note'>
+
 type RemovalDeps = {
   flush: () => Promise<void>
   hasUnsaved: (id: string) => boolean
@@ -7,14 +9,20 @@ type RemovalDeps = {
   restore: (id: string) => Promise<Note>
   discard: (id: string) => void
   resume: (id: string) => void
+  forgetBody: (id: string) => void
+  /** URL が開いている Note の id。待つ間に移ることがあるので、待った後に読む。 */
+  openId: () => string | null
 }
 
-/** 画面のエディタ。保存の経路は `noteRef` の note へ予約するので、外せば予約が止まる。 */
+/** 画面のエディタ。保存の経路は `noteRef` の Note へ予約するので、外せば予約が止まる。 */
 type Editor = {
   noteRef: { current: Note | null }
   reschedule: (note: Note) => void
-  /** 今開いている Note の id。待つ間に移ることがあるので、待った後に読む。 */
-  openId: () => string | null
+}
+
+type Screen = {
+  editor?: Editor
+  /** 消した Note を開いていたときの移り先へ移る。 */
   leave: () => void
 }
 
@@ -23,25 +31,25 @@ type Editor = {
  * stack は画面が持ち、画面と一緒に捨てる。
  */
 export class Removals {
+  #kind: RemovableKind
   #deps: RemovalDeps
   #removed: string[] = []
 
-  constructor(deps: RemovalDeps) {
+  constructor(kind: RemovableKind, deps: RemovalDeps) {
+    this.#kind = kind
     this.#deps = deps
   }
 
   /** 消せたら true。未保存の編集が残る間は消さない（⌥Z で戻せるのが server に届いた本文までになる）。 */
-  async remove(id: string, editor: Editor): Promise<boolean> {
-    const open = editor.noteRef.current?.id === id ? editor.noteRef.current : null
-    if (open !== null) editor.noteRef.current = null
-    const removed = await this.#remove(id)
-    // 待つ間に別の note を開いていたら、その note の打鍵が消せなかった note へ保存されないよう、開き直さない。
-    if (!removed && open !== null && editor.noteRef.current === null) {
-      editor.noteRef.current = open
-      // 締めている間に打った分はエディタが持っているので、保存し直す。
-      editor.reschedule(open)
-    }
-    if (removed && editor.openId() === id) editor.leave()
+  async remove(id: string, { editor, leave }: Screen): Promise<boolean> {
+    const open = editor?.noteRef.current?.id === id ? editor.noteRef.current : null
+    // 種類ごとの route は別の種類の id でも開くので、ここで見ないと別の画面の Note を消してしまう。
+    if (open !== null && open.kind !== this.#kind) return false
+    const removed =
+      open === null || editor === undefined
+        ? await this.#remove(id)
+        : await this.#removeOpen(open, editor)
+    if (removed && this.#deps.openId() === id) leave()
     return removed
   }
 
@@ -49,15 +57,30 @@ export class Removals {
   async undo(): Promise<Note | null> {
     const id = this.#removed.pop()
     if (id === undefined) return null
+    const index = this.#removed.length
     let restored: Note
     try {
       restored = await this.#deps.restore(id)
     } catch {
-      this.#removed.push(id)
+      // 待つ間に積まれた削除より前に戻し、削除の順を崩さない。
+      this.#removed.splice(index, 0, id)
       return null
     }
     this.#deps.resume(id)
     return restored
+  }
+
+  async #removeOpen(open: Note, editor: Editor): Promise<boolean> {
+    // 待つ間の打鍵を予約すると flush の成否に入らず、消した後の保存が NOT_FOUND を繰り返す。
+    editor.noteRef.current = null
+    if (await this.#remove(open.id)) return true
+    // 移った先の打鍵を消せなかった Note へ保存しないよう、待つ間に別の Note へ移っていたら開き直さない（`noteRef` は描画まで空のままなので URL でも見る）。
+    if (editor.noteRef.current === null && this.#deps.openId() === open.id) {
+      editor.noteRef.current = open
+      // 締めている間に打った分はエディタが持っているので、保存し直す。
+      editor.reschedule(open)
+    }
+    return false
   }
 
   async #remove(id: string): Promise<boolean> {
@@ -68,9 +91,21 @@ export class Removals {
     } catch {
       return false
     }
-    // 消した Note への保存の再試行が NOT_FOUND を叩き続けないよう、予約を捨てる。
+    // 往復の間にその Note を開いて打った分は、捨てずに戻した Note へ保存させる。
+    if (this.#deps.hasUnsaved(id) && (await this.#putBack(id))) return false
+    // 予約が残ると保存が NOT_FOUND で再試行を繰り返し、本文の cache が残ると履歴で戻ったときに消した Note を開く。
     this.#deps.discard(id)
+    this.#deps.forgetBody(id)
     this.#removed.push(id)
     return true
+  }
+
+  async #putBack(id: string): Promise<boolean> {
+    try {
+      await this.#deps.restore(id)
+      return true
+    } catch {
+      return false
+    }
   }
 }

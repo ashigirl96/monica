@@ -1,4 +1,4 @@
-import type { EssayStatus, EssaySummary, Note, NoteSummary } from '../../../contract.ts'
+import type { EssayStatus, EssaySummary, NoteSummary } from '../../../contract.ts'
 
 /** サイドバーのタブが引くリスト。両 status のキーが必ず存在する */
 export type EssayGroups = Record<EssayStatus, EssaySummary[]>
@@ -39,30 +39,4 @@ export function patchEssay(
 
 export function dropEssay(list: EssaySummary[] | null, id: string): EssaySummary[] | null {
   return list?.filter((s) => s.id !== id) ?? list
-}
-
-/** ⌥Z の undo 対象。削除後の落ち先が一覧（= 別コンポーネント）になり得るので、
- * スタックをコンポーネント寿命から切り離して一覧とエディタで共有する。 */
-const deletedEssayIds: string[] = []
-
-export function pushDeletedEssay(id: string) {
-  deletedEssayIds.push(id)
-}
-
-/** 直近に削除した essay を復活させる。失敗（既に消えている等）は undefined を返すだけ —
- * ⌥Z は次の操作で押し直せるので呼び手にエラー表示の責務を作らない。 */
-export async function restoreLastDeletedEssay(
-  restore: (id: string) => Promise<Note>,
-): Promise<Note | undefined> {
-  const id = deletedEssayIds.pop()
-  if (id === undefined) return undefined
-  const index = deletedEssayIds.length
-  try {
-    return await restore(id)
-  } catch {
-    // 失敗のたびに id を捨てると ⌥Z が二度と効かなくなる。抜いた位置に戻して押し直せるようにする
-    // （待っている間に別の削除が積まれても順序が壊れないよう index 指定で戻す）
-    deletedEssayIds.splice(index, 0, id)
-    return undefined
-  }
 }

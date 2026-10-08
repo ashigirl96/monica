@@ -1,14 +1,8 @@
 /// <reference types="bun" />
 import { describe, expect, test } from 'bun:test'
 
-import type { EssayStatus, EssaySummary, Note, NoteSummary } from '../../../contract.ts'
-import {
-  ESSAY_TABS,
-  otherEssayTab,
-  pushDeletedEssay,
-  restoreLastDeletedEssay,
-  splitEssaysByStatus,
-} from './support.ts'
+import type { EssayStatus, EssaySummary, NoteSummary } from '../../../contract.ts'
+import { ESSAY_TABS, otherEssayTab, splitEssaysByStatus } from './support.ts'
 
 const at = new Date('2026-07-21T00:00:00.000Z')
 
@@ -27,11 +21,6 @@ function essay(id: string, status: EssayStatus): EssaySummary {
 
 function daily(id: string): NoteSummary {
   return { kind: 'daily', id, date: '2026-07-21', preview: null, createdAt: at, updatedAt: at }
-}
-
-function restored(id: string): Note {
-  const { preview: _, ...rest } = essay(id, 'writing')
-  return { ...rest, content: { type: 'doc' } }
 }
 
 describe('splitEssaysByStatus', () => {
@@ -79,29 +68,5 @@ describe('otherEssayTab', () => {
       expect(otherEssayTab(tab)).not.toBe(tab)
       expect(otherEssayTab(otherEssayTab(tab))).toBe(tab)
     }
-  })
-})
-
-describe('restoreLastDeletedEssay', () => {
-  test('戻すのは最後に消した Essay からで、戻せなかった Essay は次の ⌥Z で戻せる', async () => {
-    pushDeletedEssay('note-1')
-    pushDeletedEssay('note-2')
-    const asked: string[] = []
-
-    const failed = await restoreLastDeletedEssay(async (id) => {
-      asked.push(id)
-      throw new Error('offline')
-    })
-    const first = await restoreLastDeletedEssay(async (id) => {
-      asked.push(id)
-      return restored(id)
-    })
-    const second = await restoreLastDeletedEssay(async (id) => restored(id))
-
-    expect(failed).toBeUndefined()
-    expect(asked).toEqual(['note-2', 'note-2'])
-    expect(first?.id).toBe('note-2')
-    expect(second?.id).toBe('note-1')
-    expect(await restoreLastDeletedEssay(async (id) => restored(id))).toBeUndefined()
   })
 })
