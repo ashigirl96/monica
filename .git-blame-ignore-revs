@@ -1,2 +1,4 @@
 # TS の整形を semicolon 無し・single quote にし、import と Tailwind の class を並べる (#85)
 b06847c54c886e7dcda6fa221b03c3a147f3b690
+# repo の中の tania を monica に改名し、旧 Monica を指す monica を「旧 Monica」と書き分ける (#221)
+40f175f85182bfb3a482cc19ed522da2052243ab
