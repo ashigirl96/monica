@@ -77,7 +77,7 @@ release の Shell は、`unread` の行で通知センターの monica の通知
 - Shell は今の Backend から前に届いた集合を、Backend ごとに持つ。2 つ目以降の集合では、前の集合から抜けた id を `removeDeliveredNotificationsWithIdentifiers:` に渡す。identifier が Terminal Session の id なので、届いた通知を読まずに選べる。
 - 今の Backend から最初の集合（Shell の起動と、Backend の respawn の後）では、`getDeliveredNotificationsWithCompletionHandler:` で届いた通知を読み、`userInfo` の `terminalSessionId` が集合に無い通知（`terminalSessionId` の無い通知も）の request identifier を取り下げる。前の起動で出した通知と、ADR-0025 より前の UUID の identifier で出た通知はこれで消える。block は background thread で呼ばれうるので、closure には集合の複製を持たせる。
 - 最初の集合で未読だった Terminal Session の、UUID の identifier の古い通知は、後で未読でなくなっても id では消えない。次に Backend とつながった時の最初の集合で消える。
-- 最初の集合を元に届いた通知を取り下げる間に、同じ Terminal Session の新しい通知が出て、それを消すことは無い（推論）。最初の集合の行は `start()` が endpoint の行より前に書き、hook の CLI は endpoint と一緒に書かれる `backend.json` を読むまで Backend に届かないため。
+- 最初の集合では、届いた通知を読んで取り下げを center に出すまで（最大 2 秒）、その Backend の次の行を扱わない。読む間に同じ Terminal Session の新しい通知を出すと、古い集合で選んだ取り下げがそれを消すため。待つのは Supervisor の lock を放してからにし、webview の `backend_endpoint` などを止めない。
 - 取り下げる identifier を選ぶ処理（前の集合と今の集合から、最初の集合なら届いた通知の identifier と `terminalSessionId` から）と、最初の集合かどうかの判定は、objc2 に触らない関数と型にして Rust の test で確かめる。.app の外で走る `cargo test` で `currentNotificationCenter` を呼ぶと abort するため。
 - Shell は stdout の行を届いた順に 1 つの thread で扱い、center は要求を system が受けた順に 1 つずつ処理する（`docs/research/macos-notification-removal.md`）。同じ待ちの notify の行は、それを含む集合の行より先に出る（上の「未読の集合」）ので、通知を出す要求はそれを取り下げる要求より先に center に届く。
 - Backend が終わっても通知は取り下げない。Dock の数と違い、残った通知はクリックで Tab に移れるため。respawn した Backend の最初の集合で揃う。終わった Backend の書き残しの行では取り下げない。

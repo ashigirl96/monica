@@ -1,6 +1,7 @@
 use std::path::Path;
 use std::ptr::NonNull;
-use std::sync::{Mutex, MutexGuard, OnceLock};
+use std::sync::{mpsc, Mutex, MutexGuard, OnceLock};
+use std::time::Duration;
 
 use block2::{DynBlock, RcBlock};
 use objc2::rc::Retained;
@@ -20,6 +21,8 @@ use tauri_plugin_notification::NotificationExt;
 use crate::announcement::Notification;
 
 const TERMINAL_SESSION_ID: &str = "terminalSessionId";
+// completion handler が返らなくても、Backend の行を扱い続ける。
+const FIRST_WITHDRAWAL_TIMEOUT: Duration = Duration::from_secs(2);
 
 /// 通知で起こした monica では webview が listen を張る前にクリックが届くので、webview が取り出すまで持つ。
 #[derive(Default)]
@@ -106,21 +109,14 @@ pub struct UnreadNotifications {
 }
 
 #[derive(Debug, PartialEq)]
-enum Withdrawal {
+pub enum Withdrawal {
     Identifiers(Vec<String>),
     // 前の起動で出した通知と、identifier が Terminal Session の id でない古い通知は、届いた通知から探す。
     DeliveredNotIn(Vec<String>),
 }
 
 impl UnreadNotifications {
-    pub fn keep_only(&mut self, unread: &[String]) {
-        let withdrawal = self.next(unread);
-        if in_app_bundle() {
-            withdrawal.carry_out();
-        }
-    }
-
-    fn next(&mut self, unread: &[String]) -> Withdrawal {
+    pub fn next(&mut self, unread: &[String]) -> Withdrawal {
         match self.previous.replace(unread.to_vec()) {
             Some(previous) => Withdrawal::Identifiers(no_longer_unread(&previous, unread)),
             None => Withdrawal::DeliveredNotIn(unread.to_vec()),
@@ -129,7 +125,11 @@ impl UnreadNotifications {
 }
 
 impl Withdrawal {
-    fn carry_out(self) {
+    /// 届いた通知を読むときは取り下げを出し終えるまで返らないので、lock を握ったまま呼ばない。
+    pub fn carry_out(self) {
+        if !in_app_bundle() {
+            return;
+        }
         match self {
             Withdrawal::Identifiers(identifiers) => withdraw(&identifiers),
             Withdrawal::DeliveredNotIn(unread) => withdraw_delivered_not_in(unread),
@@ -164,6 +164,7 @@ fn delivered_not_unread(delivered: &[Delivered], unread: &[String]) -> Vec<Strin
 }
 
 fn withdraw_delivered_not_in(unread: Vec<String>) {
+    let (withdrawn, until_withdrawn) = mpsc::channel();
     // block は background thread で呼ばれうるので、呼び手の集合を借りずに自分の複製を持つ。
     let on_delivered = RcBlock::new(move |notifications: NonNull<NSArray<UNNotification>>| {
         // SAFETY: completion handler の配列は nil でない有効な NSArray。
@@ -177,9 +178,13 @@ fn withdraw_delivered_not_in(unread: Vec<String>) {
             })
             .collect();
         withdraw(&delivered_not_unread(&delivered, &unread));
+        let _ = withdrawn.send(());
     });
     UNUserNotificationCenter::currentNotificationCenter()
         .getDeliveredNotificationsWithCompletionHandler(&on_delivered);
+    // 読む間に同じ Terminal Session の新しい通知を出すと、古い集合で選んだ取り下げがそれを消すので、
+    // 取り下げを center に出すまで、呼び手（Backend の行を順に扱う thread）を次の行へ進ませない。
+    let _ = until_withdrawn.recv_timeout(FIRST_WITHDRAWAL_TIMEOUT);
 }
 
 fn withdraw(identifiers: &[String]) {

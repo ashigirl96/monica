@@ -163,15 +163,16 @@ impl Supervisor {
     }
 
     fn sync_unread(&self, app: &AppHandle, from: &Arc<SharedChild>, unread: Unread) {
-        let mut state = self.lock();
-        // 終わった Backend の書き残しで、消した後の Dock に数を戻さず、次の Backend が揃えた通知も取り下げない。
-        let Some(running) = state.running_from(from) else {
-            return;
+        let withdrawal = {
+            let mut state = self.lock();
+            // 終わった Backend の書き残しで、消した後の Dock に数を戻さず、次の Backend が揃えた通知も取り下げない。
+            let Some(running) = state.running_from(from) else {
+                return;
+            };
+            show_badge(app, unread.dock_count());
+            running.notifications.next(&unread.terminal_session_ids)
         };
-        show_badge(app, unread.dock_count());
-        running
-            .notifications
-            .keep_only(&unread.terminal_session_ids);
+        withdrawal.carry_out();
     }
 
     fn lock(&self) -> MutexGuard<'_, State> {
