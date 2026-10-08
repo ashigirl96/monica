@@ -1,6 +1,6 @@
 # tab の env と shim
 
-Terminal Session を作るときに Backend が ptyd の Create に渡す env と、Backend が `start()` で書く 3 つのファイル（shim、claude wrapper、hook の settings）の仕様。3 つのファイルは内容に差分があるときだけ書き直す。ここと ADR-0008 の Agent Session の観測は、Workbench を持ち込む骨格の実装に含める。Task が無い Tab でも観測するため（ADR-0005）。
+Terminal Session を作るときに Backend が ptyd の Create に渡す env と、Backend が `start()` で書くファイル（4 枚の shim、claude wrapper、hook の settings）の仕様。どれも内容に差分があるときだけ書き直す。ここと ADR-0008 の Agent Session の観測は workbench が持つ。Task が無い Tab でも観測するため（ADR-0005）。
 
 ## env
 
@@ -27,7 +27,7 @@ ptyd は shell を常に `--login` で起こすので、zsh は `.zshenv` → `.
 
 ## claude wrapper（`$MONICA_HOME/bin/claude`）
 
-- PATH から自分の directory 以外の `claude` を探して exec する。
+- PATH から自分と同じファイルでない `claude` を探して exec する。無ければ stderr に 1 行出して exit 127 で終わる。
 - PATH に別の wrapper（他の home の monica、旧 Monica）があると、どちらも PATH の先頭の `claude` へ戻すので exec が巡回する。wrapper は exec した `claude` を env の `MONICA_CLAUDE_TRAIL`（pid と path の列）に残し、同じ pid で戻ってきたら、それを飛ばして次を探し、`--settings` も足し直さない。exec は pid を変えないので、claude の子に漏れた値とは見分けられる。
 - `MONICA_TERMINAL_SESSION_ID` があり、`CLAUDECODE` が無いときだけ `--settings $MONICA_HOME/shell/claude/settings.json` を足す。`CLAUDECODE` があるのは agent の Bash tool から起こした入れ子の claude で、hook を付けると同じ Terminal Session の SessionStart が親の Agent Session を superseded にする（ADR-0008）。
 - 最初の引数が claude の subcommand（`mcp`、`doctor`、`update` など。claude 2.1.288 の `--help` の Commands）なら `--settings` を足さない。claude は `--settings` の後ろの subcommand を prompt として読み、後ろに置くと `unknown option` で落ちる。最初の引数が prompt（`claude "fix the bug"`）なら足す。
@@ -43,7 +43,7 @@ ptyd は shell を常に `--login` で起こすので、zsh は `.zshenv` → `.
 ## hook CLI（`monica workbench hook claude`）
 
 - `MONICA_TERMINAL_SESSION_ID` が無ければ即 exit 0。
-- PermissionRequest で `tool_name == "ExitPlanMode"` なら、Backend を待たずに stdout へ allow を書く（`updatedInput` に `tool_input` を返し、`updatedPermissions` に `setMode: auto` を付ける。#16）。
+- PermissionRequest で `tool_name == "ExitPlanMode"` なら、Backend に送らずに stdout へ allow を書いて終わる（`updatedInput` に `tool_input` を返し、`updatedPermissions` に `setMode: auto` を付ける。#16）。
 - stdin の payload と env の Terminal Session id を `agentSession.recordHook` に渡す。呼び出しは 2 秒で打ち切り、不在・失敗・timeout のどれでも exit 0。retry しない（ADR-0007）。
 
 ## payload と decoder

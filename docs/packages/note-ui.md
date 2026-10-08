@@ -1,6 +1,6 @@
 # note の ui
 
-`packages/note/src/ui` に置く notes の画面とエディタ。`@monica/note/ui` から import する。決定の理由は ADR-0019 と #115・#118 の決定にある。今あるのはエディタと、Daily と Essay と Repo の画面と、見た目の設定。
+`packages/note/src/ui` に置く notes の画面とエディタ。`@monica/note/ui` から import する。決定の理由は ADR-0017・0018・0019 と #115・#118 の決定にある。
 
 ## 旧 Monica のコードを移すとき
 
@@ -16,7 +16,7 @@ notes の ui は旧 Monica の `web/` と `shared/` を移して作る。
 
 ## エディタ
 
-旧 Monica の `shared/block-editor` を `src/ui/editor/` に振る舞いを変えずに移したもの。ProseMirror を直に組み（`new Schema`・`EditorState.create`・`new EditorView`）、NodeView は React ではなく `document.createElement` で組む。entry が出すのは `BlockEditor`（と `BlockEditorHandle`）と、保存の前にアップロード中の画像を外す `stripPendingImages` だけ。
+旧 Monica の `shared/block-editor` を `src/ui/editor/` に振る舞いを変えずに移したもの。ProseMirror を直に組み（`new Schema`・`EditorState.create`・`new EditorView`）、NodeView は React ではなく `document.createElement` で組む。`@monica/note/ui` がエディタから出すのは `BlockEditor`（と `BlockEditorHandle`）と、保存の前にアップロード中の画像を外す `stripPendingImages` だけ。
 
 ### 置き場所
 
@@ -46,7 +46,7 @@ notes の ui は旧 Monica の `web/` と `shared/` を移して作る。
 
 - `create-editor.ts` の `docFromJSON` は、`Node.fromJSON` か `check()` に失敗した本文を空の doc にして開く。開いたまま 1 打鍵すると、autosave がその空の doc を保存する。node 型か mark が 1 つでも欠けたエディタは、それを含む保存済みの本文を消す。
 - module どうしが循環して import している（`node-views` と `synced-block`、`note-mention-menu` と `clipboard` など）ので、一部の plugin だけを外して持ち込むこともできない。
-- 機能を止めたいときは、`BlockEditor` の props を渡さない。`fetchLinkMetadata`・`searchNoteMentions`・`resolveNoteMention`・`resolveBlock`・`uploadImage`・`renderMarkdown`・`parseMarkdown` は、渡さなければその機能が無効になる（`block-editor.tsx`、`create-editor.ts`、`synced-block.ts`）。後続の issue はこの props を 1 つずつ足して機能を有効にする。有効にした plugin の経路は移してから初めて動くので、CODING_STANDARDS の「眠っていた経路を有効にする変更」で見直す。今 `NoteBlockEditor` が渡しているのは、Note Mention と Synced Block の props（`searchNoteMentions`・`resolveNoteMention`・`onNoteMentionClick`・`noteId`・`resolveBlock`・`onOpenBlock`）、画像の `uploadImage`・`importExternalImage`、OGP の `fetchLinkMetadata`。props の有無は mount 時に固定され、差し替えは `key` を変えた再 mount で行う。
+- 機能を止めたいときは、`BlockEditor` の props を渡さない。`fetchLinkMetadata`・`searchNoteMentions`・`resolveNoteMention`・`resolveBlock`・`uploadImage`・`renderMarkdown`・`parseMarkdown` は、渡さなければその機能が無効になる（`block-editor.tsx`、`create-editor.ts`、`synced-block.ts`）。`NoteBlockEditor` は今この 7 つをすべて渡し、ほかに Note Mention と Synced Block の `onNoteMentionClick`・`noteId`・`onOpenBlock` と、画像の取り込みの `importExternalImage` を渡す。props の有無は mount 時に固定され、差し替えは `key` を変えた再 mount で行う。
 - 画像の props は `notes/editor-support.ts` の `imageCallbacks` が作る。どちらも `image.upload` と `image.import` を呼び、失敗は null にする。エディタは upload の失敗を再試行のボタンで、取り込みの失敗を外部 URL のままで見せ、理由では分岐しない。
 - `fetchLinkMetadata` は note の `linkMetadata` を呼ぶ。link-menu は呼び出しの失敗を値の無い OGP として扱う（旧 Monica と同じ）。そのため、取れなかった URL は既定の URL のままなら普通の link、「Mention」を選べば URL を title にした favicon の無い `linkMention`、「Bookmark」を選べば URL だけの `bookmark` になる。
 
@@ -108,13 +108,13 @@ notes の ui は旧 Monica の `web/` と `shared/` を移して作る。
 | `/repos` | 前回の Repo に replace。無ければ Repo の picker |
 | `/repos/:owner/:repo` | その Repo の Scratch（開くと作られる） |
 | `/repos/:owner/:repo/notes/:id` | Repo Note。その Repo の Repo Note でなければ、その Note の path に replace |
-| `/notes/:id` | id から種類ごとの path に replace。削除済みと不在は「Note not found」 |
+| `/notes/:id` | id から種類ごとの path に replace。削除済み・不在・取れなかったときは「Note not found」 |
 | それ以外 | 「Not found」 |
 
 - path の文字列と route の解釈は `routes.ts` に集める。router は旧 Monica の自作を移したもの（`router.ts`、History API）。
 - 今日は `/daily` を開くたびに `logicalDate(new Date())` で導く（`todayPath`）。開いたまま 5 時を越えても、次に `/daily` を開けば次の日になる。今日を返す procedure は無い。Daily の画面の TODAY は画面を作った時に導き、`/daily` を開き直すと作り直される。
 - `/notes/:id` は `get` で引いた Note の種類から行き先を決める（`notePagePath`）。Daily は `/daily/:date`、Essay は `/essays/:id`、Scratch は `/repos/:owner/:repo`、Repo Note は `/repos/:owner/:repo/notes/:id` に移る。
-- rail は Daily / Essays / Repo で、⌃1 / ⌃2 / ⌃3 で移る。Library と Settings は持ち込まない。
+- rail は Daily / Essay / Repo で、⌃1 / ⌃2 / ⌃3 で移る。Library と Settings は持ち込まない。
 - NotesShell のサイドバーは既定 400px で、境界のドラッグで 260〜720px、ダブルクリックで 400px に戻る。幅は画面の間で共有し、localStorage の `monica-notes-sidebar-w` に持つ。
 - Daily の表示名の書式は `notes/dates.ts` が持つ。サイドバーは今日が `TODAY · TUE 10.6`、ほかは `TUE 10.6`、今年以外は `TUE 2025.10.6`。見出しと競合の通知は年付きの `dayLabelWithYear`（今年なら年を省く）。
 - `document.title` は表示名に ` · monica` を付ける（`TUE 10.6 · monica`、`On ledgers · monica`）。Essay と Repo Note は title（空なら `Untitled`）、Scratch は `owner/repo` で、contract の `displayName` を使う。表示名の無い画面（Essay の一覧など）は `monica`。
@@ -134,7 +134,7 @@ notes の ui は旧 Monica の `web/` と `shared/` を移して作る。
 - 状態を切り替えた版は、返った本文と title が送る前の画面と同じとき（status だけが変わった版）に基準版にする。手元の本文はその上に積んでよい。違えば外で書き換わった版で、基準版にすると画面の古い本文が次の保存でその変更を競合なしに上書きする（旧 Monica にあった不具合）。そのときは、未保存が無ければ返った Note でエディタを mount し直し、未保存があれば基準版を進めずに、保存の CONFLICT に拾わせる。
 - 往復の間に本文か title を書いていたら、返った Note の status だけを取り、本文と title は手元のまま残す（旧 Monica は title も返った値で上書きした）。往復の間に別の Note へ移っていたら、返った Note を画面に採用しない。
 - 削除は、往復を待つ間の打鍵を保存に予約しない。中止したときは、まだ同じ Essay を開いていれば予約を戻す。別の Note へ移った後に戻すと、その Note の本文を消そうとした Essay に保存してしまう（旧 Monica にあった不具合）。消せたときも、往復の間に別の Note へ移っていれば送り先へは移らない。移ったかは prop の id ではなく URL で見る。`navigate` は URL をその場で書き換えるが、prop の id が追いつくのは描画の後なので、その間に削除が返ると移った先から送り先へ移ってしまう。
-- `/essays/:id` は Essay 以外の id でも開き、本文の代わりに「Not an essay」を出す。そこでは削除も状態の切り替えもしない。`remove` は Repo Note も消せる種類として受けるので、画面が種類を見ないと Essay の画面から Repo Note を消してしまう（旧 Monica にあった不具合）。
+- `/essays/:id` は Essay 以外の id でも開き、本文の代わりに「Not an essay — open it in Notes」を出す。そこでは削除も状態の切り替えもしない。`remove` は Repo Note も消せる種類として受けるので、画面が種類を見ないと Essay の画面から Repo Note を消してしまう（旧 Monica にあった不具合）。
 - ⌥N と ⌥Z は、往復の間に別の画面へ移っていても、作った Essay と戻した Essay を開く（旧 Monica どおり）。開くことがその操作の目的で、画面を移っても autosave は router の上で保存を続けるので、本文は失われない。
 
 | キー | 画面 | すること |
@@ -189,7 +189,7 @@ notes の ui は旧 Monica の `web/` と `shared/` を移して作る。
 - Note Mention の素のクリックは、flush を始めてから `/notes/:id` へ移る。⌘ / ⌃ 付きのクリックは、NodeView が新しいタブで開く。
 - 「↗」は Synced Block の先頭の block へ飛ぶ。同じ Note ならその場でスクロールし、別の Note なら飛び先を置いて `/notes/:id` へ移る。移った先の `NoteBlockEditor` が、エディタの mount の後に飛び先を取り出してスクロールする。判断は `notes/block-jump.ts`（`jumpToBlock` と `arrivalAt`）が持つ。
 - dev の StrictMode は effect を片付けてから走らせ直し、その間にエディタを作り直す。`arrivalAt` は一度取り出した飛び先を 2 度目にも返すので、作り直したエディタへも飛ぶ。取り出すたびに消すと、1 度目のエディタだけがスクロールして壊され、画面には何も起きない。
-- Essay はまだ画面を持たないので、Essay を指す Note Mention と「↗」は「Not found」に着く。Repo Note と Scratch を指すものは、`/notes/:id` から Repo の画面へ移る。
+- Note Mention と「↗」は、`/notes/:id` から指す Note の種類の画面へ移る（「route」）。
 
 ### 再接続の表示と beforeunload
 
@@ -197,7 +197,7 @@ notes の ui は旧 Monica の `web/` と `shared/` を移して作る。
 - 届かなかったら、1 秒ごとに `daily.dates` を呼んで戻ったかを確かめる。最初の失敗から 1 秒たっても届かなければ上端に「monica に再接続中…」を出し、届いたら消す（`reach.ts`）。Backend の再起動（bun --watch で約 100ms）で帯がちらつかないよう、1 秒待つ。
 - 失敗の後に届いたら（帯を出す前の短い停止も含む）、エラーのまま残った query を取り直す（`Reach.onRecover`）。retry しないので、届かない間に開いた Daily は、取り直さないと focus し直すまでエラーのまま残るため。
 - 届いている間は定期的に呼ばない。そのため、何も操作していない間に Backend が止まっても、次に保存か取り直しが走るまで帯は出ない。
-- dev の Vite の proxy は、Backend に届かないとき 502 を返さずに接続を切る。release の口では接続が拒まれるので、どちらでも画面に同じ network error を見せるため。
+- dev の Vite の proxy も、Backend に届かないときは接続を切り、release の口と同じ network error を見せる（`docs/packages/dev-loop.md` の「dev loop」）。
 - 閉じると失われる編集がある間だけ、`beforeunload` でタブを閉じる前に確かめる。数えるのは、競合で残った編集、保存に失敗して再試行を待つ編集、送信中の保存の後ろに待つ編集（pagehide の flush はその保存の後ろに並ぶので、ページと一緒に消える）、届かない間の未保存（debounce 中と送信中）。届く Backend への未保存は pagehide の保存が送るので、書いた直後に閉じても確かめない（`SaveQueue` の `wouldLoseOnLeave`）。
 - そのため、書いてから最初の保存が失敗するまでの間に Backend が止まった場合と、keepalive の上限を超える本文を書いた直後に閉じた場合は、確かめずに最後の編集を失う（旧 Monica と同じ）。
 - IndexedDB への退避と Service Worker は使わない（ADR-0017）。
@@ -227,7 +227,7 @@ notes の ui は旧 Monica の `web/` と `shared/` を移して作る。
 - 写真（JPG、計 1.7MB）は `src/ui/ambients/` に置き、Vite の asset として import する。build では `assets/` に hash 付きで出て、notes の口が immutable の cache で配る。
 - 右下のピルの popup は、外側の mousedown、Escape、外の要素への focus で閉じる（`components/use-popup-dismiss.ts`）。Escape は capture phase で取る。bubble では、エディタにいるときに ProseMirror がブロック選択に使って届かないため。
 
-notes の画面が localStorage に書く key は次の 5 つで、どれも `monica-` で始まる。旧 Monica の `monica-*` は読まない（origin が違うので、どちらにしても値は引き継がれない）。
+notes の画面が localStorage に書く key は次の 6 つで、どれも `monica-` で始まる。旧 Monica の `monica-*` は読まない（origin が違うので、どちらにしても値は引き継がれない）。
 
 | key | 値 |
 |---|---|
@@ -236,11 +236,12 @@ notes の画面が localStorage に書く key は次の 5 つで、どれも `mo
 | `monica-note-extra-w` | 本文の幅に足す px |
 | `monica-notes-density` | `relaxed` か `compact` |
 | `monica-notes-sidebar-w` | NotesShell のサイドバーの幅の px |
+| `monica-repos-last` | 前回開いた Repo の `owner/repo` |
 
 ### テスト
 
 - エディタと同じく DOM の環境は入れず、純関数と link を確かめる。
-- 旧 Monica の save-state（14 本）・note-sync（10 本）・summary（4 本）のテストを、contract の形（平らな種類、Date の版）に直して移してある。summary には `summaryTitle` の 1 本と `withSavedPreview` の 2 本を足してある。
+- 旧 Monica の save-state（14 本）・note-sync（10 本）・summary（4 本）のテストを、contract の形（平らな種類、Date の版）に直して移してある。summary には `summaryTitle` の 1 本と `withSavedPreview` の 2 本を、note-sync には `reloadLatest` の 4 本と `noteToOpen` の 5 本を足してある。
 - 保存は `save-queue.test.ts` が、偽の保存と `spyOn` で捕まえた timer で確かめる（debounce、基準版、CONFLICT、再試行、直列、keepalive、title を省くこと、閉じると失われる編集の数え方）。
 - Essay の画面は `support.test.ts` と `actions.test.ts` で確かめる。`support.test.ts` は、旧 Monica の `pages/essays/support.test.ts`（7 本）を contract の形に直して移したものに、取り消しの stack の 1 本を足してある。`actions.test.ts` は、削除と状態の切り替えの判断を偽の保存の口で確かめる。確かめるのは、flush が返るまで待ってから未保存を見ること、残れば中止すること、往復の間の編集と移動、外で書き換わった版を基準版にしないこと、Essay 以外を消さないこと。
 - 削除と取り消しは `removals.test.ts` が、偽の保存と procedure で確かめる。

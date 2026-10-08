@@ -26,6 +26,26 @@ changes     → { type: "task", ref } | { type: "synced" }
 - `current` は呼び手の Terminal Session の live な Agent Session が Run ならその Task を返し（`source: run`、`agentSessionId` はその Agent Session）、そうでなければ Tab → Runspace → Bench の Task を引く（`source: bench`、`agentSessionId` は null）。`terminalSessionId` が無ければ `BAD_REQUEST`、どちらでも引けなければ `NOT_FOUND`。
 - Bench の行の変化（作成、準備の終わり）と、Run の Agent Session の変化（Run になったときを含む）は `{ type: "task", ref }` で知らせる。表示状態は Run の Agent Session から導くので、`task.changes` だけで `list` を描き直せるようにする。
 
+## createTaskLedger
+
+```ts
+createTaskLedger(deps: {
+  db: Db;
+  workbenchLedger: WorkbenchLedger;
+  home: string;
+  github?: GitHub;
+  ghq?: Ghq;
+}): TaskLedger;
+```
+
+- `home` は Bench の worktree と setup の log を置く場所（「Bench」）。`github` は GraphQL の URL と token の取り方で、省けば `https://api.github.com/graphql` と `gh auth token --hostname github.com` になる。`ghq` は `root()` と `get(repo)` で、省けば `ghq` の command を呼ぶ。テストは偽の GitHub と ghq を渡す（「テスト」）。
+- Workbench Ledger の書き込みは `docs/packages/workbench-ledger.md` の「他の domain が呼ぶ書き込み」の method を通す。
+- `start()` は preparing のまま残った Bench を失敗にし（「Bench」）、Workbench Ledger の `events` を購読して Run の不変条件を当てる（「Run」）。`stop()` は購読を外し、走っている sync と準備を打ち切り、setup の process group を kill する。
+- `TaskLedger` は `events`・`start()`・`stop()` のほかに `syncInBackground()` と `cleanSetupLogs()` だけを持ち、どちらも task の system の Job が呼ぶ。
+  - `syncInBackground()`: open な Task すべての Sync で、失敗した repo があるか throw したら reject する（「sync」）。
+  - `cleanSetupLogs()`: setup の log を消し、消せなかった log か directory があれば残りを消してから reject する（「Bench」）。
+- `@monica/task/server` は、ほかに `systemJobs(taskLedger)` と `nameAgentSession(db, agentSessionId)` を出す。`systemJobs` は `syncInBackground()` を呼ぶ `task.sync` と、`cleanSetupLogs()` を呼ぶ `task.setup-log-cleanup` を出す。`nameAgentSession` は Backend が Workbench Ledger に渡し、通知の呼び名になる（`docs/packages/notifications.md` の「title と body」）。
+
 ## Run
 
 `GLOSSARY.md` の Run を不変条件で保つ。「Bench の Runspace にある Tab の live な（`agent_session.state != 'ended'`）Agent Session で、どの Run でもないものは、その Bench の Task の Run になる」（ADR-0005）。
@@ -35,7 +55,6 @@ changes     → { type: "task", ref } | { type: "synced" }
 - 全件は workbench の reconcile を待たずに当てるので、不在中に Terminal Session が終わった Agent Session も、終了になる前に Run になることがある。Backend が止まる前に Bench の Tab で動いていた agent なので、Task の Run にして差し支えない。
 - どちらの経路も `origin = started` で insert する。一度 Run になった Agent Session は、Tab がどこに移っても、終わるまでその Task の Run のまま（`run.agent_session_id` の UNIQUE が守る）。closed な Task には Bench が無いので、Run は生まれない。
 - `layout` の合図（Tab の移動）でも、同じく commit の後に当てる。合図はどの Tab が動いたかを持たないので、Bench の Tab すべてに当てる。この経路で生まれる Run は Tab ごと Bench に入った Agent Session なので `origin = attached` にする（GUI の drag）。Bench の Tab で始まった claude の Run は、hook の commit と同じ同期の区間で積まれた `agentSession` の合図の microtask が先に作るので、この経路に横取りされない。
-- task のテストは、Tab を workbench の router で開き（shell の起動は fake の ptyd が受ける）、hook は workbench の `agentSession.recordHook` に渡す（`testing.ts` の `openTab`・`openTabOutsideBench`・`hook`）。Tab・Terminal Session・Agent Session の行と合図を Backend と同じ経路で作るため。
 
 ## Attach
 
@@ -62,10 +81,10 @@ changes     → { type: "task", ref } | { type: "synced" }
 - cwd は作る前に決め、その後は変えない。worktree は `$MONICA_HOME/worktrees/<owner>/<repo>/issue-<n>`、`--in-place` は `$(ghq root)/github.com/<owner>/<repo>`。`--in-place` で ghq root が引けなければ、Bench を作らずに `PRECONDITION_FAILED`。worktree の Bench に `--in-place` を打つと `BAD_REQUEST`、flag の無い `run` は今の Bench の mode に従う。
 - 準備: in-place は、checkout（cwd）が無ければ `ghq get <owner>/<repo>` して終わる。ghq は repo の今の名前の場所に clone するので、改名の後で cwd に来なければ失敗にする。worktree は、cwd が linked worktree ならそのまま使う。repo が改名されても、作った worktree は作った時の checkout に登録されているので、checkout を引き直さない。cwd が worktree でなければ、checkout が無いときに `ghq get` する。ただし、改名の前に作った worktree が消えていたら（cwd が今の名前の path と違えば）失敗にする。元の branch は改名前の checkout にしか無く、新しい名前の clone から作り直すと黙って別の branch になるため。そのうえで、path が消えていればその登録だけを `git worktree remove <path>` で外し（`prune` は外付けの disk の上の worktree のような、関係の無い登録まで外すので使わない）、branch `issue-<n>` があれば `git worktree add <path> issue-<n>`。無ければ default branch（`refs/remotes/origin/HEAD`、取れなければ `git remote set-head origin --auto` を 1 回）を求め、`git fetch origin <default>` を best-effort で打ってから `git worktree add -b issue-<n> <path> origin/<default>`。fetch の失敗は output の `warnings` に載せる。git と ghq には `GIT_TERMINAL_PROMPT=0` を渡す。Backend が端末から起こされていると、git は認証を /dev/tty で尋ねて止まるため。
 - setup は `<worktree>/.monica/setup.sh` を直接 exec する（shebang と実行権限が要る）。無ければ ready。cwd は worktree、stdin は null、env は Backend の env から `MONICA_*`・`CLAUDECODE`・`CLAUDE_CODE_*` を落としたもの。自分の process group（`detached`）で起こし、600 秒で group に SIGTERM を送り、group が空になるか 2 秒たったら SIGKILL を送る。script が先に抜けても、後始末をしている子孫に猶予を残すため。env の除外は workbench の `inheritableEnv()` を ptyd と共有する。
-- log は `$MONICA_HOME/logs/setup/<owner>/<repo>/issue-<n>.log` に試行ごとに上書きで書く。setup の stdout と stderr のほかに、失敗の理由を `monica: <理由>` の 1 行で足す。
+- log は `$MONICA_HOME/logs/setup/<owner>/<repo>/issue-<n>.log` に試行ごとに上書きで書く。setup の stdout と stderr のほかに、失敗の理由と setup.sh が無いことを `monica: ` で始まる 1 行で足す。
 - log は、system の Job `task.setup-log-cleanup` が起動時と 24 時間おきに `cleanSetupLogs()` で消す。消すのは、最後に書かれて（mtime）から 14 日たった log のうち、Bench の無い Task の log で、close した Task の log と、Task に対応しない log（repo の改名で path が変わった古い log など）が当たる。14 日は ptyd の log（`crates/logfile`）の保持にそろえる。Bench のある Task の log は古くても残す。準備に失敗した `run` は log の path を返すので、それを指したまま消えないようにするため。Bench の Task の log かは、今の repo の名前から作った path と小文字にそろえて比べる。repo の名前の大小だけを変えた改名の後も、macOS の file system では同じ log を指すため。
 - 最後に書かれた時刻は消す直前に見る。掃除は同期の fs で 1 回で走らせる。reopen の後の `run` は Bench を作り直して log を書き直すので、掃除を async にすると、Bench の有無を見てから消すまでの間に書き直された log を消すため。Bench の準備は Bench の行を書いてから log を空にするまでを同期で進めるので、掃除はその間に割り込まない。log を消した後、空になった `<owner>/<repo>` と `<owner>` の directory も消す。消せなかった log か directory があれば、残りを消してから reject する。Job Execution は `failed` になり、エラーの 1 行に理由が出る。
-- 成功したら `ready` と `prepared_at`、失敗したら `failed` と `setup_error`（`exit 1`、`timed out after 600s`、`spawn failed: <message>`、git の失敗の最後の行）を書く。`run` は `PRECONDITION_FAILED` で `setup_error` と log の path を出す。
+- 成功したら `ready` と `prepared_at`、失敗したら `failed` と `setup_error`（`exit 1`、`killed by <signal>`、`timed out after 600s`、`spawn failed: <message>`、`git <subcommand> failed: <stderr の最後の行>`）を書く。`run` は `PRECONDITION_FAILED` で `setup_error` と log の path を出す。
 - `failed` の Bench への `run` は同じ手順をやり直す。worktree が残っていれば setup だけが走る。準備中の Bench への `run` は同じ準備の完了を待つ。CLI を Ctrl-C しても準備は続く。
 - `start()` は `preparing` のまま残った行を `failed`（`the Backend stopped while preparing`）にする。`stop()` は setup の group に SIGKILL を送り、その後の準備の結果は書かない。
 
@@ -88,23 +107,23 @@ changes     → { type: "task", ref } | { type: "synced" }
 `GLOSSARY.md` の Bench と、ADR-0012 の close の順序。
 
 - `close` は Task を引き（未 track は `NOT_FOUND`、closed は `BAD_REQUEST`）、返るまでその Task を Backend の memory で予約する。予約の間は、同じ Task への `close`、`run`（Bench を開く・準備をやり直す・Tab を開く直前）、`attach` と `reopen`（transaction の中）を `CONFLICT` で断る。git を待つ間に準備や Tab が片付ける Bench に入らないように、また close の呼び手が閉じた結果を受け取るようにするため。Bench の準備が走っていれば、close も `--force` でも `CONFLICT` で断る。準備は worktree と Bench の行を書き続け、走っている準備は reopen の後の `run` にも待たれるため。
-- Task を sync（5 秒。`--force` でも sync）してから、行の id で引き直す。GitHub に届かなければ手元の写しで続け、`warnings` に載せる（`run` と同じ `syncOrUseCopy`）。
+- `run` と同じく Task を sync してから（`syncOrUseCopy`。「Run の起動」）、行の id で引き直す。
 - guard は当たったものをすべて集め、`.errors()` で宣言した `CLOSE_REFUSED`（`data.reasons`）で返す。`--force` なら見ない。理由は `data.reasons` だけで 1 行の文にできるよう、UncommittedChanges は worktree の path（`worktree`）を持つ。文は `refusal.ts` の `describeRefusal` が作り、CLI の message と webview の toast が共有する。
   - ActiveRun: Task の live な Run。呼び手の Terminal Session の Agent Session の Run は除く。Bench が無くても見る。reopen の前に close を頼んだ claude が残っていることがあるため。
   - UncommittedChanges（worktree の Bench だけ）: `git -C <worktree> status --porcelain --untracked-files=normal` が空でない。untracked を含め、ignored は含めない。worktree が無ければ当たらない。
-  - UnpublishedCommits（worktree の Bench だけ）: `git -C <checkout> rev-list --max-count=1 --ignore-missing refs/heads/<branch> --not --remotes <head>…` が commit を返す。`<head>` は、sync が `source = branch` で対応に入れた merged な PR の head の commit。fetch しないので、push 済みなら merge されていなくても止めない。squash merge で remote の branch が消えても、merged な PR の head から辿れる commit は止めないので、`--force` 無しで close できる。merge の後や reopen の後に同じ branch へ積んだ commit は head から辿れないので止める。closing reference だけの merged な PR は別の branch の仕事なので数えない（ADR-0004）。手元に無い head（GitHub の画面で足して fetch していない commit）は無視するので、そのときは `--force` が要る。branch が無ければ当たらない。
-- #15 は branch 一致の merged な PR があれば UnpublishedCommits を免除するとしていたが、それでは reopen の後の新しい `issue-<n>` や merge の後に積んだ commit まで免除し、`branch -D` で消すので、`pull_request` に head の commit（`head_oid`）を足して免除を head から辿れる commit に絞った。
+  - UnpublishedCommits（worktree の Bench だけ）: `git -C <checkout> rev-list --max-count=1 --ignore-missing refs/heads/<branch> --not --remotes <head>…` が commit を返す。`<head>` は、sync が `source = branch` で対応に入れた merged な PR の head の commit。fetch しないので、push 済みなら merge されていなくても止めない。squash merge で remote の branch が消えても、merged な PR の head から辿れる commit は止めないので、`--force` 無しで close できる。merge の後や reopen の後に同じ branch へ積んだ commit は head から辿れないので止める。closing reference だけの merged な PR は別の branch の仕事なので数えない（ADR-0004）。手元に無い head（GitHub の画面で足して fetch していない commit）は無視するので、そのときは `--force` が要る。branch が無ければ当たらない。免除を branch 一致の merged な PR ごとにしないのは、reopen の後の新しい `issue-<n>` や merge の後に積んだ commit まで免除し、`branch -D` で消すため。そのため `pull_request` は head の commit（`head_oid`）を持つ。
 - checkout は、worktree があればその `--git-common-dir` の親を使う。repo の改名の後も、作った時の checkout に当たる。worktree が無ければ今の名前の ghq の checkout を使い、それも無ければ git は何もしない。別の Task の Bench が同じ cwd を持てば、worktree にも branch にも触らない。repo の改名の後に旧名を別の repo が使うと、その repo の同じ番号の Task の worktree が同じ path にできるため。
-- worktree の Bench は `git -C <checkout> worktree remove <path>` → `git -C <checkout> branch -D <branch>` を実行する。`--force` の close だけが `worktree remove --force` にする。素の `worktree remove` は ignored の file を通し、untracked と変更のある worktree を断るので、guard の後に書かれた変更も git が守る。`branch -D` の前には remote に無い commit を見直し（merged な PR の head から辿れる commit は UnpublishedCommits と同じく数えない）、あれば branch を残して `warnings` に載せ、close は続ける。worktree を外した後は、その branch に commit が積まれないため。path が消えていれば、その登録だけを `worktree remove --force` で外す（失敗は無視する）。消えた worktree の登録が残っていると、その branch を消せないため。`prune` は関係の無い登録まで外すので使わない（「Bench」の節）。git か ghq が失敗したら `PRECONDITION_FAILED` で、DB を何も変えずに止まる。in_place の Bench は checkout も branch も触らない。
+- worktree の Bench は `git -C <checkout> worktree remove <path>` → `git -C <checkout> branch -D <branch>` を実行する。`--force` の close だけが `worktree remove --force` にする。素の `worktree remove` は ignored の file を通し、untracked と変更のある worktree を断るので、guard の後に書かれた変更も git が守る。`--force` でなければ、`branch -D` の前に remote に無い commit を見直し（merged な PR の head から辿れる commit は UnpublishedCommits と同じく数えない）、あれば branch を残して `warnings` に載せ、close は続ける。worktree を外した後は、その branch に commit が積まれないため。path が消えていれば、その登録だけを `worktree remove --force` で外す（失敗は無視する）。消えた worktree の登録が残っていると、その branch を消せないため。`prune` は関係の無い登録まで外すので使わない（「Bench」の節）。git か ghq が失敗したら `PRECONDITION_FAILED` で、DB を何も変えずに止まる。in_place の Bench は checkout も branch も触らない。
 - tx で Task を引き直して ref を作り直す。`closed_at` を入れ、`bench` の行を消し、`removeRunspace(tx, runspaceId, { spare })` を呼ぶ。`spare` は呼び手の Terminal Session と、`--force` でなければ git を待つ間に Bench の Tab で起こした claude（hook から Run になっている）の Terminal Session。後者も呼び手と同じく所有を解いた Runspace に残し、`warnings` に載せる。guard の後に見つけたものは、壊した後で断らずに守ったまま close を終えるため。output の `spared` は呼び手の Tab が残ったかどうか。commit の後に `{ type: "task", ref }` で知らせて返る。消した Tab の Terminal Session は、close を待たせずに workbench が終わらせる（ADR-0015）。
 - Run の行は残す。close を頼んだ claude は、終わるまで closed な Task の Run のままで、`current` もその Task を返す。
 - CLI は拒否を、1 行目の `CLOSE_REFUSED: <ref> stays open:`、理由を 1 行ずつ、最後の `pass --force to close anyway` で出し、exit 1 にする。Skill は stderr の 1 行目で失敗を読むので、1 行目は `CODE: message` の形を保つ。
-- Workbench で Bench の最後の Tab を閉じると、webview の task の ui が `close({ ref })` を `force` も `terminalSessionId` も無しで呼ぶ（呼び方と toast は `docs/packages/desktop.md` の slot、きっかけは `docs/packages/workbench-ledger.md` の「Runspace と Tab」）。止める条件は CLI の close と同じで、push 済みでレビュー中の PR があっても guard は当たらないので、その Task も閉じる。閉じた Tab の claude は、Tab を閉じると終わり、webview は Backend がその Exit を記録してから close を呼ぶので、ActiveRun に当たらない。git の guard だけが止める（ADR-0023）。reopen の後の `run` は `issue-<n>` を origin の default branch から作り直す。close の間に Bench へ開いた shell の Tab は、その claude が Run になっていなければ close が消す（`spare` が守るのは Run の Tab だけ）。guard で止まった Bench は Tab の無いまま残り、Workbench が「New shell in …」のボタンを出す。準備中の Bench では close を呼ばない。
-- `reopen` は closed な Task だけを受ける（open は `BAD_REQUEST`）。sync（5 秒。届かなければ警告）してから `closed_at` を NULL に戻し、`{ type: "task", ref }` で知らせる。Bench は作らないので、表示状態は `not_started`（Issue が closed なら `issue_closed`）。次の `run` か `attach` が Bench を作り直す。`run` は close で消えた branch `issue-<n>` を origin の default branch から作り直し、Bench より前の Run は resume しない（「Run の起動」の節）。
+- Workbench で Bench の最後の Tab を閉じると、webview の task の ui が `close({ ref })` を `force` も `terminalSessionId` も無しで呼ぶ（呼び方と toast は `docs/packages/desktop.md` の slot、きっかけは `docs/packages/workbench-ledger.md` の「Runspace と Tab」）。止める条件は CLI の close と同じで、push 済みでレビュー中の PR があっても guard は当たらないので、その Task も閉じる。閉じた Tab の claude は、Tab を閉じると終わり、webview は Backend がその Exit を記録してから close を呼ぶので、ActiveRun に当たらない。git の guard だけが止める（ADR-0023）。close の間に Bench へ開いた shell の Tab は、その claude が Run になっていなければ close が消す（`spare` が守るのは Run の Tab だけ）。guard で止まった Bench は Tab の無いまま残り、Workbench が「New shell in …」のボタンを出す。準備中の Bench では close を呼ばない。
+- `reopen` は closed な Task だけを受ける（open は `BAD_REQUEST`）。`run` と同じく sync してから `closed_at` を NULL に戻し、`{ type: "task", ref }` で知らせる。Bench は作らないので、表示状態は `not_started`（Issue が closed なら `issue_closed`）。次の `run` か `attach` が Bench を作り直す。`run` は close で消えた branch `issue-<n>` を origin の default branch から作り直し、Bench より前の Run は resume しない（「Run の起動」の節）。
 
 ## sync
 
-- GitHub client（`github.ts`）は repo ごとに 1 本の GraphQL で最大 50 件を alias（`i<number>`）で引く。null の alias（削除・transfer・PR の番号）は写しを消さずに `missing` に回し、`errors` があっても返った alias は書く。`repository` ごと null なら（削除・権限の喪失）その repo の失敗にする。新しい Issue の `track` だけは、打ち間違いを GitHub の障害に見せないよう `NOT_FOUND` にする。多くは gh のアカウント違いや SSO による権限の喪失で、`missing` にすると背景 sync の警告に出ず、写しが黙って古くなるため。
+- GitHub client（`github.ts`）は repo ごとに 1 本の GraphQL で最大 50 件を alias（`i<number>`）で引く。null の alias（削除・transfer・PR の番号）は写しを消さずに `missing` に回し、`errors` があっても返った alias は書く。`repository` ごと null なら（削除・権限の喪失）その repo の失敗にする。多くは gh のアカウント違いや SSO による権限の喪失で、`missing` にすると背景 sync の警告に出ず、写しが黙って古くなるため。新しい Issue の `track` だけは、打ち間違いを GitHub の障害に見せないよう `NOT_FOUND` にする。
+- `track` は、track 済みの Task でも GitHub が Issue を返さなければ `NOT_FOUND`、repo の失敗なら `BAD_GATEWAY` にする。未 track の ref への `sync <ref>` は `NOT_FOUND`。
 - Pull Request は 2 つの経路で引く。各 Issue からは closing reference の PR（`closedByPullRequestsReferences(first: 10, includeClosedPrs: true)`、手動のリンクを含む）を引き、parent と Blocker の node からは引かない。worktree の Bench を持つ Task には、同じ repo の query に `pr<n>: pullRequests(headRefName: "<Bench の branch>", states: [OPEN, CLOSED, MERGED], first: 10)` の alias を足す。Bench が無いか in_place の Bench なら、head が一致する branch も無いので、alias を足さずに branch の経路を空とする。
 - PR の写しは小文字の repo と番号で照らして upsert し、repo は GitHub の今の名前に書き直す。state は GraphQL の値を小文字にし、head は branch の名前と commit（`headRefOid`）を写す。行は消さない。repo の改名で旧名の行が残っても、対応は sync のたびに置き換えるのでどこからも指されない。
 - `task_pull_request` は Task ごと・経路（`branch` / `closing_reference`）ごとに delete → insert で置き換え、両方に当たる PR は 2 行になる。GitHub が答えなかった経路（null の alias や connection）、Issue が返らなかった Task、失敗した repo の分は置き換えず、前の行を残す。reopen した Task は Bench を作り直すまで branch の対応を持たない。`track` は Task の行を足してから対応を書く。closed な Task は背景と全件の sync で引かないので、対応も close した時点のまま残る。
@@ -113,9 +132,18 @@ changes     → { type: "task", ref } | { type: "synced" }
 - 範囲（open な Task すべて、または 1 つの Task）ごとに走る sync を 1 つにし、後から来た要求はその完了を自分の timeout まで待つ。5 秒の直前の sync が 30 秒の sync に合流しても 5 秒で返すため。
 - 背景の sync は `TaskLedger` の `syncInBackground()` で、open な Task すべてを sync する。起動時と 5 分おきに呼ぶのは system の Job `task.sync`（`docs/packages/job-ledger.md`）で、task は timer を持たない。失敗した repo があるか throw したら reject し、Job Execution の結果は `failed` になる。retry と backoff は持たず、次の回がやり直す。
 - repo ごとに引けた分をその都度 1 transaction で書く。失敗した repo は `owner/repo: 理由` で並べ、`sync` は `BAD_GATEWAY` を投げ、背景は stderr の 1 行と `list` の `backgroundSyncError` に出す。背景の次の回が成功すれば消える。`backgroundSyncError` は job の記録から読まずに task の memory に置く。読み出しを job に移すと task → job の依存が生まれるため（ADR-0016）。`stop()` の後に終わった回は記録しない。
-- 写しの行が同じ issue かは、GitHub の node ID（`issue.node_id`）で決める。node ID で見つからなければ、node ID の無い行（node ID を足す前に書いた行）を `(lower(repo), number)` で照らす。Task の Issue は、query に渡した ref（改名前の名前のこともある）の行を先に照らす。Task が指すのはその行だから。どれでも見つからなければ足す。見つけた行の repo と番号は、GitHub の今の値に書き直す。同じ node ID か、書き直す先の `(repo, number)` に別の行があれば、同じ issue の写しが 2 つあるので、その repo の sync の失敗にする。
+- 写しの行が同じ issue かは、GitHub の node ID（`issue.node_id`）で決める。repo の改名で GitHub は旧名の query にも新しい名前で答え、parent や Blocker の node は新しい名前でしか来ないので、repo と番号だけでは同じ issue の行が 2 つに分かれるため。node ID で見つからなければ、node ID の無い行（node ID を足す前に書いた行）を `(lower(repo), number)` で照らす。Task の Issue は、query に渡した ref（改名前の名前のこともある）の行を先に照らす。Task が指すのはその行だから。どれでも見つからなければ足す。見つけた行の repo と番号は、GitHub の今の値に書き直す。同じ node ID か、書き直す先の `(repo, number)` に別の行があれば、同じ issue の写しが 2 つあるので、その repo の sync の失敗にする。
 - repo の query 1 本分の写しを書くときは、parent や Blocker を書く前に、その batch の Task の Issue の行に node ID と今の名前を付ける。改名した repo の Task が同じ batch の別の Task の parent や Blocker として先に出てきても、Task の行に当たるようにするため。別の repo の Task の parent や Blocker として先に写った場合は 2 行になり、失敗になる（node ID を足す前に書いた行が残る DB で、repo を改名したときだけ）。
-- 同じ `(repo, number)` に node ID の違う行があれば、その番号は GitHub で別の issue に使われている（repo を消して作り直したときなど）。黙って付け替えず、その repo の sync の失敗にする。#15 は node ID を保存しないと決めていたが、repo の改名で GitHub は旧名の query にも新しい名前で答え、parent や Blocker の node は新しい名前でしか来ないので、repo と番号だけでは同じ issue の行が 2 つに分かれる。
+- 同じ `(repo, number)` に node ID の違う行があれば、その番号は GitHub で別の issue に使われている（repo を消して作り直したときなど）。黙って付け替えず、その repo の sync の失敗にする。
 - `track` が既に track 済みかは、Task の行の insert が重なったかで決める。改名した repo の issue は旧名でも新しい名前でも引けるので、入力の ref の名前では決められない。
 - 新しい Issue の `track` は写しと Task の行を同じ transaction で書くので、失敗か `missing` なら何も書かない。
 - `syncTask` は 1 つの Task を sync し、成否を投げずに `{ synced, missing, failures }` で返す。`run` / `close` / `reopen` の直前の 5 秒の sync はこれを呼ぶ。
+
+## テスト
+
+共通の規則と、Workbench Ledger と fake の ptyd の組み方は `docs/packages.md` の「テスト」にある。
+
+- Bench の Tab は Workbench Ledger の `openTab` で、Bench の外の Tab は workbench の router の `runspace.create` で開き（shell の起動は fake の ptyd が受ける）、hook は workbench の `agentSession.recordHook` に渡す（`testing.ts` の `openTab`・`openTabOutsideBench`・`hook`）。Tab・Terminal Session・Agent Session の行と合図を Backend と同じ経路で作るため。
+- GitHub は `packages/task/src/fake-github.ts` に差し替える。fake は GraphQL の `repository { issue(number:) }` と `pullRequests(headRefName:)` の alias だけを話し、届いた request を記録し、repo ごとの失敗、branch ごとの null の応答、未認証、応答の保留を起こせる。CLI のテストの Task Ledger は `gh auth token` が失敗する GitHub を持ち、本物の GitHub に届かない。
+- ghq は `packages/task/src/fake-ghq.ts` に差し替える。CI の ts job に ghq は無い。fake は一時 directory の `origins/<owner>/<repo>` を origin（default branch は main）にし、`get` でそれを clone して記録する。Bench の準備は本物の git で確かめる。CLI のテストの Task Ledger は失敗する ghq を持つ。
+- setup の 600 秒の timeout は、`setTimeout` を `spyOn` してその callback を捕まえ、手で呼ぶ。
