@@ -8,6 +8,7 @@
     "postinstall": "wxt prepare"
   },
   "dependencies": {
+    "@monica/ui": "workspace:*",
     "react": "catalog:",
     "react-dom": "catalog:"
   },
