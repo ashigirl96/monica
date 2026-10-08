@@ -1,15 +1,8 @@
 import { expect, test } from 'bun:test'
-import {
-  copyFileSync,
-  mkdirSync,
-  mkdtempSync,
-  readFileSync,
-  rmSync,
-  symlinkSync,
-  writeFileSync,
-} from 'node:fs'
-import { tmpdir } from 'node:os'
+import { readFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
+
+import { lintProbes } from './lint-probes'
 
 const repo = join(import.meta.dir, '../..')
 
@@ -42,38 +35,21 @@ function probes(): Probe[] {
   return found
 }
 
-// 設定を読まずに oxlint を当てるので、override の書き方を変えてもこのテストは直さずに済む。
 async function refusedImports(probed: Probe[]): Promise<Map<string, Set<string>>> {
-  const dir = mkdtempSync(join(tmpdir(), 'monica-entry-boundaries-'))
-  try {
-    copyFileSync(join(repo, '.oxlintrc.json'), join(dir, '.oxlintrc.json'))
-    symlinkSync(join(repo, 'scripts'), join(dir, 'scripts'))
-    symlinkSync(join(repo, 'node_modules'), join(dir, 'node_modules'))
-    for (const { path, specifiers } of probed) {
-      mkdirSync(join(dir, dirname(path)), { recursive: true })
+  const files = Object.fromEntries(
+    probed.map(({ path, specifiers }) => {
       const imports = specifiers.map((specifier, i) => `import * as m${i} from '${specifier}'\n`)
       const used = `export const used = [${specifiers.map((_, i) => `m${i}`).join(', ')}]\n`
-      writeFileSync(join(dir, path), imports.join('') + used)
-    }
-    const oxlint = Bun.spawn([join(repo, 'node_modules/.bin/oxlint'), '-f', 'json', 'packages'], {
-      cwd: dir,
-      env: process.env,
-      stdout: 'pipe',
-    })
-    const report = (await new Response(oxlint.stdout).json()) as {
-      diagnostics: { filename: string; code: string; message: string }[]
-    }
-    await oxlint.exited
-    const refused = new Map<string, Set<string>>()
-    for (const { filename, code, message } of report.diagnostics) {
-      const specifier = /^'(.+?)' import is restricted/.exec(message)?.[1]
-      if (code !== 'eslint(no-restricted-imports)' || !specifier) continue
-      refused.set(filename, (refused.get(filename) ?? new Set()).add(specifier))
-    }
-    return refused
-  } finally {
-    rmSync(dir, { recursive: true, force: true })
+      return [path, imports.join('') + used]
+    }),
+  )
+  const refused = new Map<string, Set<string>>()
+  for (const { filename, code, message } of await lintProbes(files)) {
+    const specifier = /^'(.+?)' import is restricted/.exec(message)?.[1]
+    if (code !== 'eslint(no-restricted-imports)' || !specifier) continue
+    refused.set(filename, (refused.get(filename) ?? new Set()).add(specifier))
   }
+  return refused
 }
 
 test('every cli, ui, body and schema entry of a package refuses the imports its boundary forbids', async () => {

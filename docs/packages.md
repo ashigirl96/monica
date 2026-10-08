@@ -16,6 +16,7 @@ monica の repo の形、package の entry、domain 間の呼び出し、テス�
 - `docs/packages/note-ui.md`: note の ui。`packages/note/src/ui` か `apps/web` に触るとき、旧 Monica のコードを移すとき。
 - `docs/packages/backend.md`: Backend の組み立て（apps/backend）。起動と終了の順序、PATH、Ledger の配線、notes の口に触るとき。
 - `docs/packages/cli.md`: CLI（apps/cli）。`cli: true` の procedure か SKILL.md を足すとき、argv の振り分け・出力・エラー・補完・CLI のテストに触るとき。
+- `docs/packages/extension.md`: Chrome Extension（apps/extension）。manifest、permission、ID と鍵、mode ごとの出力の dir、dev の読み込み方、`chrome` の型と lint に触るとき。
 - `docs/packages/desktop.md`: desktop（apps/desktop）。webview の枠、キーの扱い、domain の ui の載せ方と Task の slot、Shell（`src-tauri`）に触るとき。
 - `docs/packages/migration.md`: migration。table を足すか変えるとき、domain の package を足すとき。
 - `docs/packages/dev-loop.md`: dev loop、release、検査、版。dev の起動、scripts、release の build、CI、依存と tsconfig に触るとき、テストが誤りを捕まえるかを変異で確かめるとき。
@@ -28,11 +29,12 @@ monica/
 ├── tsconfig.json       1 つだけ
 ├── Cargo.toml          Rust の workspace（crates/* と apps/desktop/src-tauri）
 ├── .claude-plugin/     plugin.json・marketplace.json（ADR-0006）
-├── scripts/            desktop.ts・dev-instance.ts・dev.ts・build.ts・install-app.ts・check-brief.ts・test.ts・monica-dev・oxlint/
+├── scripts/            desktop.ts・dev-instance.ts・dev.ts・extension.ts・extension-panel.ts・cdp.ts・build.ts・install-app.ts・check-brief.ts・test.ts・monica-dev・oxlint/
 ├── apps/
 │   ├── backend/        @monica/backend   Backend の組み立て
 │   ├── cli/            @monica/cli       bin は monica
 │   ├── desktop/        @monica/desktop   src/ が webview、src-tauri/ が Shell
+│   ├── extension/      @monica/extension Chrome Extension の組み立て
 │   └── web/            @monica/web       ブラウザに配る notes の画面の組み立て
 ├── packages/
 │   ├── workbench/      @monica/workbench
@@ -91,10 +93,11 @@ entry は層ではなく、import してよい実行環境で切る（ADR-0009�
 - 境界は次のものが守る。
   - package の間の向き: package.json。bun の isolated linker では package.json に書いていない依存を解決できない。
   - package の中の entry の境界と apps どうしの向き: `.oxlintrc.json` の overrides。schema が import してよいもの、ui が server の entry と `bun:sqlite` を import しないこと、body が `bun:sqlite`・`drizzle-orm`・schema と server の entry を import しないこと、cli entry を import するのが apps/cli だけであることを見る。no-restricted-imports の設定は override をまたいで重ならないので、file の集合ごとの制限とは別の rule にしている。
-  - CLI と webview とブラウザで動くコード（apps/cli、apps/desktop、apps/web、各 package の cli entry と ui entry）が DB に触るもの（`bun:sqlite`、`drizzle-orm`、schema entry と server entry の値）を import しないこと: 同じ overrides（ADR-0003）。cli entry で見るのは `cli.ts` の import だけで、`cli.ts` が import する内側のファイルは見ない。apps/cli のテストと `testing.ts` は in-memory の Backend を組むので、この制限から外す。
+  - CLI と webview とブラウザで動くコード（apps/cli、apps/desktop、apps/web、apps/extension、各 package の cli entry と ui entry）が DB に触るもの（`bun:sqlite`、`drizzle-orm`、schema entry と server entry の値）を import しないこと: 同じ overrides（ADR-0003）。cli entry で見るのは `cli.ts` の import だけで、`cli.ts` が import する内側のファイルは見ない。apps/cli のテストと `testing.ts` は in-memory の Backend を組むので、この制限から外す。
   - testing entry を import するのがテストと `testing.ts` だけであること: lint の `monica/testing-entry`。
   - body の entry から辿れる module が DB に触るものを読まないこと: `packages/note/src/body/entry.test.ts`。lint は直接の import しか見ないので、contract のような内側の module を経た import はこのテストが見る。
   - entry の override の書き忘れ: `scripts/oxlint/entry-boundaries.test.ts`。各 package の `exports` にある cli・ui・body・schema の entry と同じ path に禁じた import を並べた file を一時 directory に置き、oxlint を当てて全部が止まるかを見る。package を足して override を書き忘れると落ちる。
+  - `chrome` の global を使うのが apps/extension と chat の ui（`packages/chat/src/ui`）だけであること: root の `no-restricted-globals` と、この 2 つで `off` にする override（ADR-0029）。`scripts/oxlint/chrome-global.test.ts` が、apps と `packages/*/src` に `chrome` を使う file を一時 directory に置き、この 2 つの外でだけ止まるかを見る。
   - webview の bundle に `bun:sqlite` や `@orpc/server` が混ざらないこと: `vite build`。混ざれば解決に失敗して落ちる。型だけの import は消えるので対象外。
 
 ## domain 間の呼び出し

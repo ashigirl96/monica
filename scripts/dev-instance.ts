@@ -12,6 +12,8 @@ const DEFAULT_PORT = 1420
 const DEFAULT_NOTES_PORT = 19381
 // notes の口を散らす範囲（19382〜19481）の外に置く。
 const DEFAULT_WEB_PORT = 19581
+// apps/web の Vite の port を散らす範囲（19582〜19681）の外に置く。
+const DEFAULT_EXTENSION_PORT = 19781
 const PORT_SPREAD = 100
 
 // まだ作られていない既定の home は、書かれたとおりの path で比べる。
@@ -27,11 +29,24 @@ export function isReleaseHome(home: string): boolean {
   return canonical(home) === canonical(RELEASE_HOME)
 }
 
+export const BRAVE = '/Applications/Brave Browser.app/Contents/MacOS/Brave Browser'
+
+// bun run extension が dev の Chrome Extension を読み込ませる Brave の user-data-dir。
+export function braveProfile(home: string): string {
+  return join(home, 'dev-brave')
+}
+
+// dev の出力は Vite の port を焼き込むので、同じ checkout の別の home と分ける。
+export function extensionDevOutput(home: string): string {
+  return join(home, 'dev-extension')
+}
+
 type DevInstance = {
   identifier: string
   preferredPort: number
   notesPort: number
   webPort: number
+  extensionPort: number
 }
 
 // 同じ home を別の書き方で渡しても single-instance をすり抜けないよう、realpath を key にする。
@@ -43,6 +58,7 @@ export function devInstance(home: string): DevInstance {
       preferredPort: DEFAULT_PORT,
       notesPort: DEFAULT_NOTES_PORT,
       webPort: DEFAULT_WEB_PORT,
+      extensionPort: DEFAULT_EXTENSION_PORT,
     }
   }
   const hash = createHash('sha256').update(key).digest()
@@ -55,5 +71,6 @@ export function devInstance(home: string): DevInstance {
     preferredPort: DEFAULT_PORT + offset,
     notesPort: DEFAULT_NOTES_PORT + offset,
     webPort: DEFAULT_WEB_PORT + offset,
+    extensionPort: DEFAULT_EXTENSION_PORT + offset,
   }
 }
