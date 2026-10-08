@@ -5,7 +5,7 @@ import { join } from 'node:path'
 import type { Store } from 'jotai'
 
 import type { Tab, TerminalSession } from '../contract.ts'
-import { OUTSIDE, shownRunspaceIds } from './sidebar-model.ts'
+import { OUTSIDE } from './tile-assignment.ts'
 
 // Shell の command は Tauri の外では呼べないので、呼ばれた command だけを記録する。
 const shellCalls: { command: string; args: Record<string, unknown> }[] = []
@@ -29,20 +29,22 @@ await mock.module('@monica/ui', () => ({
 
 const { createStore } = await import('jotai')
 const { cleanUp, onCleanup, setup, until } = await import('../testing.ts')
+const { agentDotOfTerminalSessionAtom, layoutAtom } = await import('./backend-copy.ts')
 const {
   activateRunspaceAtom,
   activateTerminalTabAtom,
   activeRunspaceAtom,
   activeTerminalTabAtom,
-  agentDotOfTerminalSessionAtom,
+  showTerminalSessionAtom,
+  shownRunspaceIdsAtom,
+} = await import('./navigation.ts')
+const {
   closeTabFromJumpModeAtom,
   closeTerminalTabAtom,
   createRunspaceAtom,
   createTerminalTabAtom,
-  cycleRunspaceAtom,
   deadTabsAtom,
   lastTabClosedAtom,
-  layoutAtom,
   moveActiveRunspaceAtom,
   moveTabToRunspaceAtom,
   reloadAgentSessionsAtom,
@@ -58,7 +60,8 @@ const {
   workbenchClientAtom,
 } = await import('./store.ts')
 const { terminalSessionStatusAtom } = await import('./terminal-sessions.ts')
-const { jumpHintsActiveAtom, pendingCloseTabIdAtom } = await import('./jump-hints.ts')
+const { jumpHintsActiveAtom, leaveJumpModeOnSwitch, pendingCloseTabIdAtom } =
+  await import('./jump-hints.ts')
 const { getTabConnection, openTabConnection } = await import('./terminal-connections.ts')
 
 const size = { rows: 24, cols: 80 }
@@ -73,6 +76,7 @@ function bench() {
   const backend = setup()
   const store = createStore()
   store.set(workbenchClientAtom, () => backend.client)
+  onCleanup(leaveJumpModeOnSwitch(store))
   return { ...backend, store }
 }
 
@@ -268,6 +272,21 @@ test('a second d after the Tab it asked about has closed on its own leaves jump 
   expect(store.get(jumpHintsActiveAtom)).toBe(false)
 })
 
+test('jump mode is left once the Tab shown changes, and stays while the layout read again leaves it in front', async () => {
+  const { client, store } = bench()
+  const { runspaceId, tab } = await client.runspace.create(size)
+  const other = await client.tab.open({ runspaceId, ...size })
+  await store.set(reloadAtom)
+  store.set(jumpHintsActiveAtom, true)
+
+  await store.set(reloadAtom)
+  const afterReload = store.get(jumpHintsActiveAtom)
+  store.set(showTerminalSessionAtom, other.terminalSessionId)
+
+  expect(store.get(activeTerminalTabAtom)?.id).not.toBe(tab.id)
+  expect([afterReload, store.get(jumpHintsActiveAtom)]).toEqual([true, false])
+})
+
 test('d in jump mode on a pinned Tab leaves jump mode and the Tab', async () => {
   const { ptyd, client, store } = bench()
   const { tab } = await client.runspace.create(size)
@@ -292,7 +311,6 @@ test('closing the last Tab of the last Runspace leaves a fresh Runspace', async 
 
   const { runspaces } = await client.layout.get()
   expect(runspaces.map((r) => r.id)).toEqual([expect.not.stringMatching(before.id)])
-  expect(store.get(activeRunspaceAtom)?.id).toBe(runspaces[0]!.id)
 })
 
 // Exit は ptyd から Shell と Backend の両方に届く。
@@ -459,13 +477,12 @@ test("dragging a Tab onto another in the header puts it in that one's place", as
   ])
 })
 
-test('dropping the active Tab on another Runspace moves it to the end there, and the view follows it', async () => {
+test('dropping a Tab on another Runspace moves it to the end there', async () => {
   const { client, store } = bench()
   const from = await client.runspace.create(size)
   const kept = await client.tab.open({ runspaceId: from.runspaceId, ...size })
   const to = await client.runspace.create(size)
   await store.set(reloadAtom)
-  store.set(activateTerminalTabAtom, from.tab.id)
 
   await store.set(moveTabToRunspaceAtom, from.tab.id, to.runspaceId)
 
@@ -475,8 +492,6 @@ test('dropping the active Tab on another Runspace moves it to the end there, and
     { id: from.runspaceId, tabs: [kept.id] },
     { id: to.runspaceId, tabs: [to.tab.id, from.tab.id] },
   ])
-  expect(store.get(activeRunspaceAtom)?.id).toBe(to.runspaceId)
-  expect(store.get(activeTerminalTabAtom)?.id).toBe(from.tab.id)
 })
 
 test('the view follows the front Tab when the Backend moves it to another Runspace on its own, as an Attach does', async () => {
@@ -495,7 +510,7 @@ test('the view follows the front Tab when the Backend moves it to another Runspa
   expect(store.get(activeTerminalTabAtom)?.id).toBe(from.tab.id)
 })
 
-test('pinning the front Tab of a Runspace with siblings follows it into its own Runspace atop the sidebar, and pinning again unpins it', async () => {
+test('pinning the front Tab of a Runspace with siblings splits it into its own Runspace atop the sidebar, and pinning it again unpins it', async () => {
   const { client, store } = bench()
   const shells = await client.runspace.create(size)
   const pinned = await client.tab.open({ runspaceId: shells.runspaceId, ...size })
@@ -504,32 +519,15 @@ test('pinning the front Tab of a Runspace with siblings follows it into its own 
 
   await store.set(toggleTabPinAtom)
 
-  const split = store.get(activeRunspaceAtom)!
+  const split = (await client.layout.get()).runspaces.find((r) =>
+    r.tabs.some((t) => t.id === pinned.id),
+  )!
   expect(split.id).not.toBe(shells.runspaceId)
-  expect(store.get(activeTerminalTabAtom)?.id).toBe(pinned.id)
   expect(pinnedAndListed(store)).toEqual({ pinned: [split.id], listed: [shells.runspaceId] })
 
-  await store.set(toggleTabPinAtom)
+  await store.set(toggleTabPinAtom, pinned.id)
 
   expect(pinnedAndListed(store)).toEqual({ pinned: [], listed: [shells.runspaceId, split.id] })
-})
-
-test('cycling Runspaces follows the sidebar, where the Runspaces holding a pin come first', async () => {
-  const { client, store } = bench()
-  const [a, p, b] = [
-    await client.runspace.create(size),
-    await client.runspace.create(size),
-    await client.runspace.create(size),
-  ]
-  await client.tab.pin({ id: p!.tab.id })
-  await store.set(reloadAtom)
-  store.set(activateRunspaceAtom, a!.runspaceId)
-  const visited = () => {
-    store.set(cycleRunspaceAtom, 'down')
-    return store.get(activeRunspaceAtom)?.id
-  }
-
-  expect([visited(), visited(), visited()]).toEqual([b!.runspaceId, p!.runspaceId, a!.runspaceId])
 })
 
 test('a Runspace moves only within its sidebar group, by drag or by key', async () => {
@@ -542,7 +540,7 @@ test('a Runspace moves only within its sidebar group, by drag or by key', async 
   await client.tab.pin({ id: (await client.layout.get()).runspaces[1]!.tabs[0]!.id })
   await store.set(reloadAtom)
   const ledgerOrder = async () => (await client.layout.get()).runspaces.map((r) => r.id)
-  const sidebar = () => shownRunspaceIds(store.get(sidebarAtom))
+  const sidebar = () => store.get(shownRunspaceIdsAtom)
 
   await store.set(reorderRunspacesAtom, a!, p!)
   expect(await ledgerOrder()).toEqual([a!, p!, b!])

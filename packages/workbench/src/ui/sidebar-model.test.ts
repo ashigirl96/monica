@@ -6,37 +6,26 @@ import { createStore, type Store } from 'jotai'
 
 import { cleanUp, ghqCheckout, git, onCleanup, setup, until } from '../testing.ts'
 import type { AgentDot } from './agent-dot.ts'
+import { layoutAtom } from './backend-copy.ts'
 import { jumpHintsActiveAtom, jumpHintTargetsAtom } from './jump-hints.ts'
-import {
-  type BenchLabel,
-  buildSidebar,
-  OUTSIDE,
-  type RunspaceRow,
-  type Sidebar,
-  rowMetaOf,
-} from './sidebar-model.ts'
 import {
   activateRunspaceAtom,
   activateTerminalTabAtom,
-  activeRunspaceAtom,
-  activeTerminalTabAtom,
-  appendRunspacesJoiningTile,
-  benchLabelOfAtom,
-  cycleRunspaceAtom,
-  layoutAtom,
-  moveActiveRunspaceAtom,
   pickTileByNumberAtom,
+} from './navigation.ts'
+import { buildSidebar, type RunspaceRow, type Sidebar, rowMetaOf } from './sidebar-model.ts'
+import {
+  appendRunspacesJoiningTile,
+  moveActiveRunspaceAtom,
   reloadAgentSessionsAtom,
   reloadAtom,
-  showTerminalSessionAtom,
   sidebarAtom,
   toggleSectionAtom,
-  toggleTabPinAtom,
   updateTabCwdAtom,
   updateTabTitleAtom,
   workbenchClientAtom,
 } from './store.ts'
-import { tileChoiceAtom } from './ui-state.ts'
+import { assignTiles, type BenchLabel, benchLabelOfAtom, OUTSIDE } from './tile-assignment.ts'
 
 const size = { rows: 24, cols: 80 }
 
@@ -87,8 +76,12 @@ function untilListed(store: Store, key: string, ids: string[]): Promise<Sidebar>
   })
 }
 
-function shown(sidebar: Sidebar) {
-  return sidebar.selected.sections.map((s) => [s.kind, s.rows.map((r) => r.id)])
+function sectionsOf(sidebar: Sidebar, key: string) {
+  return sidebar.tiles.find((tile) => tile.key === key)?.sections ?? []
+}
+
+function shownUnder(sidebar: Sidebar, key: string) {
+  return sectionsOf(sidebar, key).map((s) => [s.kind, s.rows.map((r) => r.id)])
 }
 
 function listedRows(sidebar: Sidebar): RunspaceRow[] {
@@ -109,11 +102,10 @@ test("a Runspace is listed under the Tile of its leftmost Tab's Repo, and stays 
   await untilListed(store, 'acme/app', [runspaceId])
 
   store.set(activateTerminalTabAtom, right.id)
-  store.set(tileChoiceAtom, 'acme/app')
 
   const sidebar = store.get(sidebarAtom)
   expect(sidebar.tiles.map((tile) => tile.key)).toEqual(['acme/app', OUTSIDE])
-  expect(shown(sidebar)).toEqual([['runspaces', [runspaceId]]])
+  expect(shownUnder(sidebar, 'acme/app')).toEqual([['runspaces', [runspaceId]]])
 })
 
 test("a Bench is listed in the Bench section of its Task's Repo, whichever Repo its cwd is in, if any", async () => {
@@ -135,11 +127,9 @@ test("a Bench is listed in the Bench section of its Task's Repo, whichever Repo 
   }
   store.set(benchLabelOfAtom, () => (runspaceId: string) => labels[runspaceId] ?? null)
   await store.set(reloadAtom)
-  await untilListed(store, 'acme/old-app', [elsewhere.runspaceId])
+  const sidebar = await untilListed(store, 'acme/old-app', [elsewhere.runspaceId])
 
-  store.set(tileChoiceAtom, 'acme/app')
-
-  expect(shown(store.get(sidebarAtom))).toEqual([
+  expect(shownUnder(sidebar, 'acme/app')).toEqual([
     ['bench', [inPlace, beforeRename, unprepared]],
     ['runspaces', [plain.runspaceId]],
   ])
@@ -163,13 +153,12 @@ test('Runspaces in no Repo are listed under the Tile at the bottom of the Rail, 
   const inApp = await client.runspace.create({ cwd: app.checkout, ...size })
   const downloads = await client.runspace.create({ cwd: app.elsewhere, ...size })
   await store.set(reloadAtom)
-  await untilListed(store, 'acme/app', [inApp.runspaceId])
+  const sidebar = await untilListed(store, 'acme/app', [inApp.runspaceId])
 
-  store.set(tileChoiceAtom, OUTSIDE)
-
-  const sidebar = store.get(sidebarAtom)
   expect(sidebar.tiles.map((tile) => tile.key)).toEqual(['acme/app', OUTSIDE])
-  expect(shown(sidebar)).toEqual([['runspaces', [home.runspaceId, downloads.runspaceId]]])
+  expect(shownUnder(sidebar, OUTSIDE)).toEqual([
+    ['runspaces', [home.runspaceId, downloads.runspaceId]],
+  ])
 })
 
 test('collapsing a section hides its rows and leaves their count and unread Tabs on its header, and expanding brings them back', async () => {
@@ -185,18 +174,17 @@ test('collapsing a section hides its rows and leaves their count and unread Tabs
   await untilListed(store, 'acme/app', [shipIt, a.runspaceId, b.runspaceId])
   await leaveUnread(behind.terminalSessionId)
   await leaveUnread(a.tab.terminalSessionId)
-  store.set(tileChoiceAtom, 'acme/app')
 
   store.set(toggleSectionAtom, 'acme/app:runspaces')
 
-  expect(store.get(sidebarAtom).selected.sections).toMatchObject([
+  expect(sectionsOf(store.get(sidebarAtom), 'acme/app')).toMatchObject([
     { kind: 'bench', headed: true, collapsed: false, rowCount: 1, unreadCount: 0 },
     { kind: 'runspaces', headed: true, collapsed: true, rows: [], rowCount: 2, unreadCount: 2 },
   ])
 
   store.set(toggleSectionAtom, 'acme/app:runspaces')
 
-  expect(shown(store.get(sidebarAtom))).toEqual([
+  expect(shownUnder(store.get(sidebarAtom), 'acme/app')).toEqual([
     ['bench', [shipIt]],
     ['runspaces', [a.runspaceId, b.runspaceId]],
   ])
@@ -208,11 +196,10 @@ test('a Repo with one section has no header, and its rows stay shown even if tha
   const { runspaceId } = await client.runspace.create({ cwd: app.checkout, ...size })
   await store.set(reloadAtom)
   await untilListed(store, 'acme/app', [runspaceId])
-  store.set(tileChoiceAtom, 'acme/app')
 
   store.set(toggleSectionAtom, 'acme/app:runspaces')
 
-  expect(store.get(sidebarAtom).selected.sections).toMatchObject([
+  expect(sectionsOf(store.get(sidebarAtom), 'acme/app')).toMatchObject([
     { kind: 'runspaces', headed: false, collapsed: false, rows: [{ id: runspaceId }] },
   ])
 })
@@ -238,22 +225,22 @@ test('a Tile counts the unread Tabs of the rows it brings up, leaving out the Pi
   expect(idsIn(store.get(sidebarAtom), OUTSIDE)).toEqual([home.runspaceId])
 })
 
-test('Pinned Runspaces are listed above whichever Tile is selected, and under no Tile', async () => {
+test('Pinned Runspaces are listed apart from the Tiles, and under no Tile', async () => {
   const { client, store } = bench()
   const app = ghqCheckout('acme/app')
   const pinned = await client.runspace.create({ cwd: app.checkout, ...size })
   await client.tab.pin({ id: pinned.tab.id })
   const plain = await client.runspace.create({ cwd: app.checkout, ...size })
-  await client.runspace.create({ cwd: app.root, ...size })
+  const home = await client.runspace.create({ cwd: app.root, ...size })
   await store.set(reloadAtom)
-  await untilListed(store, 'acme/app', [plain.runspaceId])
 
-  for (const key of ['acme/app', OUTSIDE]) {
-    store.set(tileChoiceAtom, key)
-    const sidebar = store.get(sidebarAtom)
-    expect(sidebar.pinned.map((r) => r.id)).toEqual([pinned.runspaceId])
-    expect(idsIn(sidebar, key)).not.toContain(pinned.runspaceId)
-  }
+  const sidebar = await untilListed(store, 'acme/app', [plain.runspaceId])
+
+  expect(sidebar.pinned.map((r) => r.id)).toEqual([pinned.runspaceId])
+  expect(sidebar.tiles.map((tile) => [tile.key, idsIn(sidebar, tile.key)])).toEqual([
+    ['acme/app', [plain.runspaceId]],
+    [OUTSIDE, [home.runspaceId]],
+  ])
 })
 
 test("a Bench's row reads its Issue's title, then its terminal's title with Claude Code's spinner as it is, and its number", async () => {
@@ -313,20 +300,21 @@ function benchRowWith(dots: (AgentDot | null)[], activeIndex = 0): RunspaceRow |
     terminalSessionId: `ts-${i}`,
     pinned: false,
   }))
-  const runspace = { id: 'rs-bench', cwd: '/work', sortOrder: 0, owned: true, tabs }
+  const runspaces = [{ id: 'rs-bench', cwd: '/work', sortOrder: 0, owned: true, tabs }]
+  const label = { repo: 'acme/app', number: 12, title: 'Ship it', setup: null }
   const sidebar = buildSidebar({
-    runspaces: [runspace],
-    activeRunspaceId: runspace.id,
+    runspaces,
+    assignment: assignTiles({ runspaces, places: {}, benchLabelOf: () => label }),
+    selectedTile: 'acme/app',
+    activeRunspaceId: 'rs-bench',
     activeTabOf: () => tabs[activeIndex] ?? null,
     titles: Object.fromEntries(tabs.map((t, i) => [t.id, `claude ${i}`])),
     places: {},
     unreadOf: () => false,
     agentDotOf: (id) => dots[tabs.findIndex((t) => t.terminalSessionId === id)] ?? null,
-    benchLabelOf: () => ({ repo: 'acme/app', number: 12, title: 'Ship it', setup: null }),
-    tileChoice: null,
     collapsed: new Set(),
   })
-  return rowOf(sidebar, runspace.id)
+  return rowOf(sidebar, 'rs-bench')
 }
 
 test.each([
@@ -475,77 +463,6 @@ test('a branch switched in a terminal that reports nothing reaches the row on a 
   expect(rowOf(sidebar, runspaceId)?.branch).toBe('feature/renamed')
 })
 
-test('keys cycle through the rows shown under the selected Tile without going into another Repo, and while another Tile is shown, the active Runspace stays until a key moves into the rows shown there', async () => {
-  const { client, store } = bench()
-  const app = ghqCheckout('acme/app')
-  const lib = ghqCheckout('acme/lib')
-  const first = await client.runspace.create({ cwd: app.checkout, ...size })
-  const inLib = await client.runspace.create({ cwd: lib.checkout, ...size })
-  const second = await client.runspace.create({ cwd: app.checkout, ...size })
-  await store.set(reloadAtom)
-  await untilListed(store, 'acme/lib', [inLib.runspaceId])
-  store.set(activateRunspaceAtom, first.runspaceId)
-  const visited = () => {
-    store.set(cycleRunspaceAtom, 'down')
-    return store.get(activeRunspaceAtom)?.id
-  }
-
-  expect([visited(), visited()]).toEqual([second.runspaceId, first.runspaceId])
-  expect(store.get(sidebarAtom).selected.key).toBe('acme/app')
-
-  store.set(tileChoiceAtom, 'acme/lib')
-
-  expect(store.get(activeRunspaceAtom)?.id).toBe(first.runspaceId)
-  expect(store.get(sidebarAtom).selected.key).toBe('acme/lib')
-  expect(visited()).toBe(inLib.runspaceId)
-})
-
-test('a number brings up the Tile of the Repo at that place from the top, with the Runspace and the Tab last active under it', async () => {
-  const { client, store, leaveUnread } = bench()
-  const app = ghqCheckout('acme/app')
-  const lib = ghqCheckout('acme/lib')
-  const earlier = await client.runspace.create({ cwd: app.checkout, ...size })
-  const last = await client.runspace.create({ cwd: app.checkout, ...size })
-  const back = await client.tab.open({ runspaceId: last.runspaceId, cwd: app.checkout, ...size })
-  const inLib = await client.runspace.create({ cwd: lib.checkout, ...size })
-  await store.set(reloadAtom)
-  await untilListed(store, 'acme/lib', [inLib.runspaceId])
-  store.set(activateRunspaceAtom, earlier.runspaceId)
-  store.set(activateRunspaceAtom, last.runspaceId)
-  store.set(activateTerminalTabAtom, back.id)
-  // 行を押すと未読の Tab へ移るが、数字は最後に見ていた Tab へ戻す。
-  await leaveUnread(last.tab.terminalSessionId)
-  const onScreen = () => [
-    store.get(sidebarAtom).selected.key,
-    store.get(activeRunspaceAtom)?.id,
-    store.get(activeTerminalTabAtom)?.id,
-  ]
-
-  store.set(pickTileByNumberAtom, 2)
-  const firstVisit = onScreen()
-  store.set(pickTileByNumberAtom, 1)
-
-  expect(firstVisit).toEqual(['acme/lib', inLib.runspaceId, inLib.tab.id])
-  expect(onScreen()).toEqual(['acme/app', last.runspaceId, back.id])
-})
-
-test('a number brings back the Tile of the active Runspace while another Tile is being peeked at', async () => {
-  const { client, store } = bench()
-  const app = ghqCheckout('acme/app')
-  const lib = ghqCheckout('acme/lib')
-  const inApp = await client.runspace.create({ cwd: app.checkout, ...size })
-  const inLib = await client.runspace.create({ cwd: lib.checkout, ...size })
-  await store.set(reloadAtom)
-  await untilListed(store, 'acme/lib', [inLib.runspaceId])
-  store.set(activateRunspaceAtom, inApp.runspaceId)
-  store.set(tileChoiceAtom, 'acme/lib')
-
-  store.set(pickTileByNumberAtom, 1)
-
-  expect(store.get(sidebarAtom).selected.key).toBe('acme/app')
-  expect(store.get(activeRunspaceAtom)?.id).toBe(inApp.runspaceId)
-})
-
 test('a Runspace brought up by a number takes the selected Tile along when its shell moves into another Repo', async () => {
   const { client, store } = bench()
   const app = ghqCheckout('acme/app')
@@ -563,224 +480,6 @@ test('a Runspace brought up by a number takes the selected Tile along when its s
 
   const sidebar = await untilListed(store, 'acme/lib', [inApp.runspaceId])
   expect(sidebar.selected.key).toBe('acme/lib')
-})
-
-test('0 picks the Tile for outside the Repos, below their Tiles, and keeps the active Runspace while no Runspace is under it, and a number with no Tile picks nothing', async () => {
-  const { client, store } = bench()
-  const app = ghqCheckout('acme/app')
-  const { runspaceId } = await client.runspace.create({ cwd: app.checkout, ...size })
-  await store.set(reloadAtom)
-  await untilListed(store, 'acme/app', [runspaceId])
-
-  const picked = [0, 2].map((n) => [n, store.set(pickTileByNumberAtom, n)])
-
-  expect(picked).toEqual([
-    [0, true],
-    [2, false],
-  ])
-  expect(store.get(sidebarAtom).selected.key).toBe(OUTSIDE)
-  expect(store.get(activeRunspaceAtom)?.id).toBe(runspaceId)
-})
-
-test('a Runspace made active before its Repo is known takes the selected Tile along to that Repo once it is', async () => {
-  const { client, store } = bench()
-  const app = ghqCheckout('acme/app')
-  const lib = ghqCheckout('acme/lib')
-  await client.runspace.create({ cwd: app.checkout, ...size })
-  const inLib = await client.runspace.create({ cwd: lib.checkout, ...size })
-  await store.set(reloadAtom)
-  expect(store.get(sidebarAtom).tileKeys[inLib.runspaceId]).toBe(OUTSIDE)
-
-  store.set(activateRunspaceAtom, inLib.runspaceId)
-
-  const sidebar = await untilListed(store, 'acme/lib', [inLib.runspaceId])
-  expect(sidebar.selected.key).toBe('acme/lib')
-})
-
-test('the selected Tile follows the front Tab when the Backend moves it into the first Runspace and its own Runspace goes away', async () => {
-  const { db, workbenchLedger, client, store } = bench()
-  const app = ghqCheckout('acme/app')
-  const lib = ghqCheckout('acme/lib')
-  const first = await client.runspace.create({ cwd: lib.checkout, ...size })
-  const kept = await client.runspace.create({ cwd: app.checkout, ...size })
-  const emptied = await client.runspace.create({ cwd: app.checkout, ...size })
-  await store.set(reloadAtom)
-  await untilListed(store, 'acme/app', [kept.runspaceId, emptied.runspaceId])
-  store.set(activateRunspaceAtom, emptied.runspaceId)
-  store.set(tileChoiceAtom, 'acme/app')
-
-  db.transaction((tx) => workbenchLedger.moveTab(tx, emptied.tab.id, first.runspaceId))
-  await store.set(reloadAtom)
-
-  expect(store.get(activeRunspaceAtom)?.id).toBe(first.runspaceId)
-  expect(store.get(sidebarAtom).selected.key).toBe('acme/lib')
-})
-
-test.each([
-  ['another Runspace under another Tile is active', 'inLib', null],
-  ["the Tab's Runspace is active while another Tile is peeked at", 'inApp', 'acme/lib'],
-] as const)(
-  "a clicked notification brings up its Tab with that Tab's Runspace and Tile when %s",
-  async (_case, active, peeked) => {
-    const { client, store } = bench()
-    const app = ghqCheckout('acme/app')
-    const lib = ghqCheckout('acme/lib')
-    const inApp = await client.runspace.create({ cwd: app.checkout, ...size })
-    const waiting = await client.tab.open({
-      runspaceId: inApp.runspaceId,
-      cwd: app.checkout,
-      ...size,
-    })
-    const inLib = await client.runspace.create({ cwd: lib.checkout, ...size })
-    await store.set(reloadAtom)
-    await untilListed(store, 'acme/app', [inApp.runspaceId])
-    await untilListed(store, 'acme/lib', [inLib.runspaceId])
-    store.set(activateRunspaceAtom, { inApp, inLib }[active].runspaceId)
-    store.set(activateTerminalTabAtom, { inApp, inLib }[active].tab.id)
-    if (peeked) store.set(tileChoiceAtom, peeked)
-
-    store.set(showTerminalSessionAtom, waiting.terminalSessionId)
-
-    expect([
-      store.get(sidebarAtom).selected.key,
-      store.get(activeRunspaceAtom)?.id,
-      store.get(activeTerminalTabAtom)?.id,
-    ]).toEqual(['acme/app', inApp.runspaceId, waiting.id])
-  },
-)
-
-test('a clicked notification of a Pinned Tab brings up that Tab and leaves the Tile that was shown', async () => {
-  const { client, store } = bench()
-  const app = ghqCheckout('acme/app')
-  const lib = ghqCheckout('acme/lib')
-  const pinned = await client.runspace.create({ cwd: lib.checkout, ...size })
-  await client.tab.pin({ id: pinned.tab.id })
-  await client.runspace.create({ cwd: lib.checkout, ...size })
-  const inApp = await client.runspace.create({ cwd: app.checkout, ...size })
-  await store.set(reloadAtom)
-  await untilListed(store, 'acme/app', [inApp.runspaceId])
-  store.set(activateRunspaceAtom, inApp.runspaceId)
-
-  store.set(showTerminalSessionAtom, pinned.tab.terminalSessionId)
-
-  expect(store.get(activeTerminalTabAtom)?.id).toBe(pinned.tab.id)
-  expect(store.get(sidebarAtom).selected.key).toBe('acme/app')
-})
-
-test('a clicked notification of an unpinned Tab in a Bench holding a pin leaves the Tile that was shown, as the Bench stays among the Pinned', async () => {
-  const { db, workbenchLedger, client, store } = bench()
-  const app = ghqCheckout('acme/app')
-  const lib = ghqCheckout('acme/lib')
-  const inApp = await client.runspace.create({ cwd: app.checkout, ...size })
-  const benchRunspace = db.transaction((tx) =>
-    workbenchLedger.createRunspace(tx, { cwd: app.checkout }),
-  )
-  const pinned = await client.tab.open({ runspaceId: benchRunspace, cwd: app.checkout, ...size })
-  const waiting = await client.tab.open({ runspaceId: benchRunspace, cwd: app.checkout, ...size })
-  await client.tab.pin({ id: pinned.id })
-  const inLib = await client.runspace.create({ cwd: lib.checkout, ...size })
-  await store.set(reloadAtom)
-  await untilListed(store, 'acme/app', [inApp.runspaceId])
-  await untilListed(store, 'acme/lib', [inLib.runspaceId])
-  store.set(activateRunspaceAtom, inLib.runspaceId)
-
-  store.set(showTerminalSessionAtom, waiting.terminalSessionId)
-
-  const sidebar = store.get(sidebarAtom)
-  expect(store.get(activeTerminalTabAtom)?.id).toBe(waiting.id)
-  expect(sidebar.pinned.map((r) => r.id)).toEqual([benchRunspace])
-  expect(sidebar.selected.key).toBe('acme/lib')
-})
-
-test('a clicked notification of a Terminal Session no Tab shows leaves the view as it is', async () => {
-  const { client, store } = bench()
-  const app = ghqCheckout('acme/app')
-  const lib = ghqCheckout('acme/lib')
-  const inApp = await client.runspace.create({ cwd: app.checkout, ...size })
-  const closed = await client.tab.open({ runspaceId: inApp.runspaceId, cwd: app.checkout, ...size })
-  const inLib = await client.runspace.create({ cwd: lib.checkout, ...size })
-  await client.tab.close({ id: closed.id })
-  await store.set(reloadAtom)
-  await untilListed(store, 'acme/lib', [inLib.runspaceId])
-  store.set(activateRunspaceAtom, inLib.runspaceId)
-  const onScreen = () => [
-    store.get(sidebarAtom).selected.key,
-    store.get(activeRunspaceAtom)?.id,
-    store.get(activeTerminalTabAtom)?.id,
-  ]
-  const before = onScreen()
-
-  store.set(showTerminalSessionAtom, closed.terminalSessionId)
-
-  expect(onScreen()).toEqual(before)
-})
-
-test('making a Pinned Runspace active leaves the Tile that was shown', async () => {
-  const { client, store } = bench()
-  const app = ghqCheckout('acme/app')
-  const lib = ghqCheckout('acme/lib')
-  const pinned = await client.runspace.create({ cwd: lib.checkout, ...size })
-  await client.tab.pin({ id: pinned.tab.id })
-  await client.runspace.create({ cwd: lib.checkout, ...size })
-  const inApp = await client.runspace.create({ cwd: app.checkout, ...size })
-  await store.set(reloadAtom)
-  await untilListed(store, 'acme/app', [inApp.runspaceId])
-  store.set(activateRunspaceAtom, inApp.runspaceId)
-
-  store.set(activateRunspaceAtom, pinned.runspaceId)
-
-  expect(store.get(sidebarAtom).selected.key).toBe('acme/app')
-})
-
-test('pinning the only Tab of the active Runspace keeps the Tile that was shown', async () => {
-  const { client, store } = bench()
-  const app = ghqCheckout('acme/app')
-  const lib = ghqCheckout('acme/lib')
-  await client.runspace.create({ cwd: app.checkout, ...size })
-  const toPin = await client.runspace.create({ cwd: lib.checkout, ...size })
-  await client.runspace.create({ cwd: lib.checkout, ...size })
-  await store.set(reloadAtom)
-  await untilListed(store, 'acme/lib', [toPin.runspaceId])
-  store.set(activateRunspaceAtom, toPin.runspaceId)
-
-  await store.set(toggleTabPinAtom)
-
-  const sidebar = store.get(sidebarAtom)
-  expect(sidebar.pinned.map((r) => r.id)).toEqual([toPin.runspaceId])
-  expect(sidebar.selected.key).toBe('acme/lib')
-})
-
-test("a Bench and a checkout of the same Repo share a Tile whatever the case of the Repo's name", async () => {
-  const { db, workbenchLedger, client, store } = bench()
-  const app = ghqCheckout('acme/app')
-  const plain = await client.runspace.create({ cwd: app.checkout, ...size })
-  // Task は GitHub の nameWithOwner で Repo を持つので、checkout の path と大小文字が違うことがある。
-  const shipIt = db.transaction((tx) => workbenchLedger.createRunspace(tx, { cwd: app.worktree }))
-  const label: BenchLabel = { repo: 'Acme/App', number: 1, title: 'Ship it', setup: null }
-  store.set(benchLabelOfAtom, () => (runspaceId: string) => (runspaceId === shipIt ? label : null))
-  await store.set(reloadAtom)
-
-  const sidebar = await untilListed(store, 'acme/app', [plain.runspaceId, shipIt])
-
-  expect(sidebar.tiles.map((tile) => tile.key)).toEqual(['acme/app', OUTSIDE])
-})
-
-test('keys going up from an active row hidden in a collapsed section start from the last row shown', async () => {
-  const { db, workbenchLedger, client, store } = bench()
-  const app = ghqCheckout('acme/app')
-  const shipIt = db.transaction((tx) => workbenchLedger.createRunspace(tx, { cwd: app.worktree }))
-  const label: BenchLabel = { repo: 'acme/app', number: 1, title: 'Ship it', setup: null }
-  store.set(benchLabelOfAtom, () => (runspaceId: string) => (runspaceId === shipIt ? label : null))
-  await client.runspace.create({ cwd: app.checkout, ...size })
-  const last = await client.runspace.create({ cwd: app.checkout, ...size })
-  await store.set(reloadAtom)
-  await untilListed(store, 'acme/app', [last.runspaceId])
-  store.set(activateRunspaceAtom, shipIt)
-  store.set(toggleSectionAtom, 'acme/app:bench')
-
-  store.set(cycleRunspaceAtom, 'up')
-
-  expect(store.get(activeRunspaceAtom)?.id).toBe(last.runspaceId)
 })
 
 test('moving a Runspace down past another of its Repo by key keeps the Tiles in their order', async () => {
@@ -864,7 +563,7 @@ test('jump hints number the Pinned rows and the rows shown under the selected Ti
   store.set(benchLabelOfAtom, () => (id: string) => (id === benchId ? label : null))
   await store.set(reloadAtom)
   await untilListed(store, 'acme/app', [listed.runspaceId])
-  store.set(tileChoiceAtom, 'acme/app')
+  store.set(activateRunspaceAtom, listed.runspaceId)
   store.set(toggleSectionAtom, 'acme/app:bench')
 
   store.set(jumpHintsActiveAtom, true)

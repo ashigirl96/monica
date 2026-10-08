@@ -1,13 +1,13 @@
 import { atom, type Store } from 'jotai'
 
-import { activeRunspaceAtom, activeTerminalTabAtom, layoutAtom } from './store.ts'
+import { layoutAtom } from './backend-copy.ts'
+import { activeRunspaceAtom, activeTerminalTabAtom, keptTileAtom } from './navigation.ts'
 import {
   collapsedSectionsAtom,
   savedUiStateAtom,
   saveUiState,
   sidebarOpenAtom,
   sidebarWidthAtom,
-  tileChoiceAtom,
   type UiState,
   uiZoomAtom,
 } from './ui-state.ts'
@@ -24,7 +24,7 @@ const uiStateAtom = atom((get): UiState => {
     sidebarOpen: get(sidebarOpenAtom),
     sidebarWidth: get(sidebarWidthAtom),
     uiZoom: get(uiZoomAtom),
-    tile: get(tileChoiceAtom),
+    tile: get(keptTileAtom),
     collapsedSections: [...get(collapsedSectionsAtom)],
   }
 })

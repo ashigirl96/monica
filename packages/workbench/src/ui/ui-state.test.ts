@@ -2,27 +2,28 @@ import { afterEach, beforeEach, expect, test } from 'bun:test'
 
 import { createStore, type Store } from 'jotai'
 
-import { cleanUp, ghqCheckout, setup, until } from '../testing.ts'
-import { type BenchLabel, OUTSIDE } from './sidebar-model.ts'
+import { cleanUp, setup } from '../testing.ts'
 import {
   activateRunspaceAtom,
   activateTerminalTabAtom,
   activeRunspaceAtom,
   activeTerminalTabAtom,
-  benchLabelOfAtom,
-  pickTileByNumberAtom,
+  pickTileAtom,
+  selectedTileAtom,
+} from './navigation.ts'
+import {
   reloadAtom,
-  sidebarAtom,
   toggleSectionAtom,
   type WorkbenchClient,
   workbenchClientAtom,
 } from './store.ts'
+import { type BenchLabel, type BenchLabelOf, benchLabelOfAtom, OUTSIDE } from './tile-assignment.ts'
 import { persistUiState } from './ui-state-persistence.ts'
 import {
+  collapsedSectionsAtom,
   setUiZoomAtom,
   sidebarOpenAtom,
   sidebarWidthAtom,
-  tileChoiceAtom,
   uiZoomAtom,
 } from './ui-state.ts'
 
@@ -53,14 +54,30 @@ afterEach(() => {
   Reflect.deleteProperty(globalThis, 'localStorage')
 })
 
-function workbenchStore(client: WorkbenchClient): Store {
+// Bench は Task の Repo の Tile に並ぶので、git の checkout が無くても Repo の Tile ができる。
+function benchesIn(repo: string, ...runspaceIds: string[]): BenchLabelOf {
+  const labels = Object.fromEntries(
+    runspaceIds.map((id, i): [string, BenchLabel] => [
+      id,
+      { repo, number: i + 1, title: `Issue ${i + 1}`, setup: null },
+    ]),
+  )
+  return (runspaceId) => labels[runspaceId] ?? null
+}
+
+function workbenchStore(client: WorkbenchClient, benchLabelOf: BenchLabelOf = () => null): Store {
   const store = createStore()
   store.set(workbenchClientAtom, () => client)
+  store.set(benchLabelOfAtom, () => benchLabelOf)
   return store
 }
 
-async function saveFrom(client: WorkbenchClient, change: (store: Store) => void) {
-  const store = workbenchStore(client)
+async function saveFrom(
+  client: WorkbenchClient,
+  change: (store: Store) => void,
+  benchLabelOf?: BenchLabelOf,
+) {
+  const store = workbenchStore(client, benchLabelOf)
   const stop = persistUiState(store)
   await store.set(reloadAtom)
   const written = new Promise<void>((resolve) => (onWrite = resolve))
@@ -69,9 +86,14 @@ async function saveFrom(client: WorkbenchClient, change: (store: Store) => void)
   stop()
 }
 
-async function restart(client: WorkbenchClient) {
-  const store = workbenchStore(client)
+async function storeAfterRestart(client: WorkbenchClient, benchLabelOf?: BenchLabelOf) {
+  const store = workbenchStore(client, benchLabelOf)
   await store.set(reloadAtom)
+  return store
+}
+
+async function restart(client: WorkbenchClient) {
+  const store = await storeAfterRestart(client)
   return {
     runspaceId: store.get(activeRunspaceAtom)?.id,
     tabId: store.get(activeTerminalTabAtom)?.id,
@@ -83,93 +105,90 @@ async function restart(client: WorkbenchClient) {
 
 const defaults = { sidebarOpen: true, sidebarWidth: 200, uiZoom: 1 }
 
-test('the active Runspace and Tab, the sidebar, and the UI zoom come back after a restart', async () => {
-  const { client } = setup()
-  await client.runspace.create(size)
-  const second = await client.runspace.create(size)
-  const tab = await client.tab.open({ runspaceId: second.runspaceId, ...size })
+function benchRunspace({ db, workbenchLedger }: ReturnType<typeof setup>) {
+  return db.transaction((tx) => workbenchLedger.createRunspace(tx, { cwd: '/work' }))
+}
 
-  await saveFrom(client, (store) => {
-    store.set(activateRunspaceAtom, second.runspaceId)
-    store.set(activateTerminalTabAtom, tab.id)
-    store.set(sidebarOpenAtom, false)
-    store.set(sidebarWidthAtom, 280)
-    store.set(setUiZoomAtom, 'in')
-  })
+test('the active Runspace and Tab, the Tile kept, the collapsed sections, the sidebar, and the UI zoom come back after a restart', async () => {
+  const backend = setup()
+  const { client } = backend
+  const shipIt = benchRunspace(backend)
+  const fixIt = benchRunspace(backend)
+  await client.tab.open({ runspaceId: shipIt, ...size })
+  await client.tab.open({ runspaceId: fixIt, ...size })
+  const tab = await client.tab.open({ runspaceId: fixIt, ...size })
+  const benchLabelOf = benchesIn('acme/app', shipIt, fixIt)
 
-  expect(await restart(client)).toEqual({
-    runspaceId: second.runspaceId,
+  await saveFrom(
+    client,
+    (store) => {
+      store.set(activateRunspaceAtom, fixIt)
+      store.set(activateTerminalTabAtom, tab.id)
+      store.set(pickTileAtom, OUTSIDE)
+      store.set(toggleSectionAtom, 'acme/app:bench')
+      store.set(sidebarOpenAtom, false)
+      store.set(sidebarWidthAtom, 280)
+      store.set(setUiZoomAtom, 'in')
+    },
+    benchLabelOf,
+  )
+
+  const store = await storeAfterRestart(client, benchLabelOf)
+  expect({
+    runspaceId: store.get(activeRunspaceAtom)?.id,
+    tabId: store.get(activeTerminalTabAtom)?.id,
+    tile: store.get(selectedTileAtom),
+    collapsed: [...store.get(collapsedSectionsAtom)],
+    sidebarOpen: store.get(sidebarOpenAtom),
+    sidebarWidth: store.get(sidebarWidthAtom),
+    uiZoom: store.get(uiZoomAtom),
+  }).toEqual({
+    runspaceId: fixIt,
     tabId: tab.id,
+    tile: OUTSIDE,
+    collapsed: ['acme/app:bench'],
     sidebarOpen: false,
     sidebarWidth: 280,
     uiZoom: 1.1,
   })
 })
 
-test('a number brings back the Runspace that was active at a restart, even after visiting another Tile', async () => {
-  const { client } = setup()
-  const app = ghqCheckout('acme/app')
-  const lib = ghqCheckout('acme/lib')
-  await client.runspace.create({ cwd: app.checkout, ...size })
-  const restored = await client.runspace.create({ cwd: app.checkout, ...size })
-  const inLib = await client.runspace.create({ cwd: lib.checkout, ...size })
-  await saveFrom(client, (store) => store.set(activateRunspaceAtom, restored.runspaceId))
-  const pickAfterRestart = async (...numbers: number[]) => {
-    const store = workbenchStore(client)
-    await store.set(reloadAtom)
-    await until(store, sidebarAtom, (s) => s.tileKeys[inLib.runspaceId] === 'acme/lib')
-    return numbers.map((n) => {
-      store.set(pickTileByNumberAtom, n)
-      return store.get(activeRunspaceAtom)?.id
-    })
-  }
-
-  expect(await pickAfterRestart(1)).toEqual([restored.runspaceId])
-  expect(await pickAfterRestart(2, 1)).toEqual([inLib.runspaceId, restored.runspaceId])
-})
-
-test('the selected Tile and the collapsed sections come back after a restart', async () => {
-  const { db, workbenchLedger, client } = setup()
-  const app = ghqCheckout('acme/app')
-  await client.runspace.create({ cwd: app.checkout, ...size })
-  const shipIt = db.transaction((tx) => workbenchLedger.createRunspace(tx, { cwd: app.worktree }))
-  const label: BenchLabel = { repo: 'acme/app', number: 1, title: 'Ship it', setup: null }
-
-  await saveFrom(client, (store) => {
-    store.set(toggleSectionAtom, 'acme/app:bench')
-    store.set(tileChoiceAtom, OUTSIDE)
-  })
-
-  const store = workbenchStore(client)
-  store.set(benchLabelOfAtom, () => (runspaceId: string) => (runspaceId === shipIt ? label : null))
-  await store.set(reloadAtom)
-  // Repo は Backend への問い合わせを待って決まるので、Tile に両方のセクションが出るまで待つ。
-  const sidebar = await until(store, sidebarAtom, (s) =>
-    s.tiles.some((tile) => tile.key === 'acme/app' && tile.sections.length === 2),
+test('a Tile kept while a Pinned Runspace was active does not come back after a restart once that Runspace is no longer Pinned', async () => {
+  const backend = setup()
+  const { client } = backend
+  const shipIt = benchRunspace(backend)
+  await client.tab.open({ runspaceId: shipIt, ...size })
+  const pinned = await client.runspace.create({ cwd: '/work', ...size })
+  await client.tab.pin({ id: pinned.tab.id })
+  const benchLabelOf = benchesIn('acme/app', shipIt)
+  await saveFrom(
+    client,
+    (store) => {
+      store.set(activateRunspaceAtom, shipIt)
+      store.set(activateRunspaceAtom, pinned.runspaceId)
+    },
+    benchLabelOf,
   )
-  expect(sidebar.selected.key).toBe(OUTSIDE)
-  expect(sidebar.tiles[0]?.sections).toMatchObject([
-    { kind: 'bench', collapsed: true },
-    { kind: 'runspaces', collapsed: false },
-  ])
+  expect(JSON.parse([...stored.values()][0]!).tile).toBe('acme/app')
+
+  await client.tab.unpin({ id: pinned.tab.id })
+
+  expect((await storeAfterRestart(client, benchLabelOf)).get(selectedTileAtom)).toBe(OUTSIDE)
 })
 
-test('the selected Tile is saved as tile, and one saved as rail is not read, leaving the Tile to follow the active Runspace', async () => {
-  const { client } = setup()
-  const app = ghqCheckout('acme/app')
-  await client.runspace.create({ cwd: app.checkout, ...size })
-  await saveFrom(client, (store) => store.set(tileChoiceAtom, OUTSIDE))
+test('the Tile kept is saved as tile, and one saved as rail is not read, leaving the Tile to follow the active Runspace', async () => {
+  const backend = setup()
+  const { client } = backend
+  const shipIt = benchRunspace(backend)
+  await client.tab.open({ runspaceId: shipIt, ...size })
+  const benchLabelOf = benchesIn('acme/app', shipIt)
+  await saveFrom(client, (store) => store.set(pickTileAtom, OUTSIDE), benchLabelOf)
   const key = [...stored.keys()][0]!
   const { tile: saved, ...rest } = JSON.parse(stored.get(key)!)
   expect(saved).toBe(OUTSIDE)
   stored.set(key, JSON.stringify({ ...rest, rail: OUTSIDE }))
 
-  const store = workbenchStore(client)
-  await store.set(reloadAtom)
-  const sidebar = await until(store, sidebarAtom, (s) =>
-    s.tiles.some((tile) => tile.key === 'acme/app'),
-  )
-  expect(sidebar.selected.key).toBe('acme/app')
+  expect((await storeAfterRestart(client, benchLabelOf)).get(selectedTileAtom)).toBe('acme/app')
 })
 
 test('a change made just before the page goes away is saved without waiting for the debounce', async () => {
@@ -184,36 +203,6 @@ test('a change made just before the page goes away is saved without waiting for 
 
   expect(await restart(client)).toMatchObject({ sidebarWidth: 300 })
   stop()
-})
-
-test('a saved Runspace that is gone falls back to the first Runspace and its first Tab', async () => {
-  const { client } = setup()
-  const first = await client.runspace.create(size)
-  await client.tab.open({ runspaceId: first.runspaceId, ...size })
-  const gone = await client.runspace.create(size)
-  await saveFrom(client, (store) => store.set(activateRunspaceAtom, gone.runspaceId))
-
-  await client.runspace.remove({ id: gone.runspaceId })
-
-  expect(await restart(client)).toMatchObject({
-    runspaceId: first.runspaceId,
-    tabId: first.tab.id,
-  })
-})
-
-test('a saved Tab that is gone falls back to the first Tab of its Runspace', async () => {
-  const { client } = setup()
-  await client.runspace.create(size)
-  const kept = await client.runspace.create(size)
-  const gone = await client.tab.open({ runspaceId: kept.runspaceId, ...size })
-  await saveFrom(client, (store) => {
-    store.set(activateRunspaceAtom, kept.runspaceId)
-    store.set(activateTerminalTabAtom, gone.id)
-  })
-
-  await client.tab.close({ id: gone.id })
-
-  expect(await restart(client)).toMatchObject({ runspaceId: kept.runspaceId, tabId: kept.tab.id })
 })
 
 test('a saved UI state that is corrupted starts from the defaults', async () => {

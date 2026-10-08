@@ -1,12 +1,12 @@
-import { atom } from 'jotai'
+import { atom, type Store } from 'jotai'
 
-import { shownRunspaceIds } from './sidebar-model.ts'
 import {
   activateRunspaceAtom,
   activateTerminalTabAtom,
   activeRunspaceAtom,
-  sidebarAtom,
-} from './store.ts'
+  activeTerminalTabAtom,
+  shownRunspaceIdsAtom,
+} from './navigation.ts'
 
 // 2 度目の d を待つ Tab は jump モードの中にだけ置き、どの経路でモードを抜けても忘れる。
 const jumpModeAtom = atom<{ pendingCloseTabId: string | null } | null>(null)
@@ -23,6 +23,13 @@ export const pendingCloseTabIdAtom = atom(
   },
 )
 
+const frontAtom = atom((get) => `${get(activeRunspaceAtom)?.id}/${get(activeTerminalTabAtom)?.id}`)
+
+// hint は表示している画面の行と Tab に振った番号なので、表示する Tab が替わったら jump モードを抜ける。
+export function leaveJumpModeOnSwitch(store: Store): () => void {
+  return store.sub(frontAtom, () => store.set(jumpHintsActiveAtom, false))
+}
+
 // Both use digits in visual order; Ctrl disambiguates runspace (⌃1) from tab (1).
 const HINT_KEYS = '123456789'.split('')
 
@@ -36,7 +43,7 @@ const NO_HINT_TARGETS: JumpHintTargets = { byRunspaceId: {}, byTabId: {} }
 export const jumpHintTargetsAtom = atom((get): JumpHintTargets => {
   // 2 度目の d を待つ間は、数字を押しても移らず取り消すだけなので hint を出さない。
   if (!get(jumpHintsActiveAtom) || get(pendingCloseTabIdAtom)) return NO_HINT_TARGETS
-  const ordered = shownRunspaceIds(get(sidebarAtom))
+  const ordered = get(shownRunspaceIdsAtom)
   const tabs = get(activeRunspaceAtom)?.tabs ?? []
 
   const byRunspaceId: Record<string, string> = {}

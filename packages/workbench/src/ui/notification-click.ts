@@ -1,8 +1,10 @@
 import { listen } from '@tauri-apps/api/event'
 import type { Store } from 'jotai'
 
+import { layoutAtom } from './backend-copy.ts'
+import { showTerminalSessionAtom } from './navigation.ts'
 import { shell } from './shell.ts'
-import { layoutAtom, reloadAtom, showTerminalSessionAtom, warnFailed } from './store.ts'
+import { reloadAtom, warnFailed } from './store.ts'
 
 // 通知で起こした monica ではクリックが listen より先に届くので、Shell が持っているものを listen を張ってから取り出す。
 // 取り出すと Shell から消えるので、effect を片付けた後に届いた答えも捨てずに Tab を選ぶ。

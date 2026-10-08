@@ -3,14 +3,13 @@ import { useAtomValue, useSetAtom, useStore } from 'jotai'
 import { lazy, Suspense, useEffect } from 'react'
 
 import { WorkbenchHeader } from './header.tsx'
+import { leaveJumpModeOnSwitch } from './jump-hints.ts'
 import { followMetaHold } from './meta-hold.ts'
 import { followNotificationClicks } from './notification-click.ts'
 import { ResizeHandle } from './resize-handle.tsx'
-import type { BenchLabelOf } from './sidebar-model.ts'
 import { TileHeading, WorkbenchSidebar } from './sidebar.tsx'
 import {
   appendRunspacesJoiningTile,
-  benchLabelOfAtom,
   lastTabClosedAtom,
   reloadAgentSessionsAtom,
   reloadAtom,
@@ -19,6 +18,7 @@ import {
   workbenchClientAtom,
 } from './store.ts'
 import { TabContextMenu, type TabMenuItems } from './tab-context-menu.tsx'
+import { type BenchLabelOf, benchLabelOfAtom } from './tile-assignment.ts'
 import { persistUiState } from './ui-state-persistence.ts'
 import { sidebarOpenAtom, sidebarResizingAtom, sidebarWidthAtom, uiZoomAtom } from './ui-state.ts'
 import { followWindowFocus, markSeenWhileShown } from './unread.ts'
@@ -77,6 +77,7 @@ export function Workbench({
   useEffect(() => followNotificationClicks(store), [store])
   useEffect(() => appendRunspacesJoiningTile(store), [store])
   useEffect(() => followMetaHold(store), [store])
+  useEffect(() => leaveJumpModeOnSwitch(store), [store])
   const setLastTabClosed = useSetAtom(lastTabClosedAtom)
   useEffect(
     () => setLastTabClosed(() => onLastTabClosed ?? null),

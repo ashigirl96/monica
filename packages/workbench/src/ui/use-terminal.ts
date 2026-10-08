@@ -11,7 +11,8 @@ import { fromBase64, encoder, toBase64 } from './base64.ts'
 import { EventCleanupManager } from './event-cleanup.ts'
 import { pasteFilePaths } from './file-paste.ts'
 import { jumpHintsActiveAtom } from './jump-hints.ts'
-import { openInEditorAtom, resolveEditorPathsAtom, terminalFocusRequestAtom } from './store.ts'
+import { terminalFocusRequestAtom } from './navigation.ts'
+import { openInEditorAtom, resolveEditorPathsAtom } from './store.ts'
 import { attachTapSelection } from './tap-selection.ts'
 import {
   clearTabTerminal,
