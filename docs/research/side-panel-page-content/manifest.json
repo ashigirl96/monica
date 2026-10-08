@@ -1,0 +1,13 @@
+{
+  "manifest_version": 3,
+  "name": "r258 side panel page content",
+  "version": "0.1.0",
+  "permissions": ["sidePanel", "scripting", "activeTab", "contextMenus", "storage", "webNavigation"],
+  "host_permissions": ["<all_urls>"],
+  "background": { "service_worker": "background.js" },
+  "side_panel": { "default_path": "sidepanel.html" },
+  "action": { "default_title": "r258" },
+  "commands": {
+    "_execute_action": { "suggested_key": { "default": "Alt+Shift+Y" } }
+  }
+}
