@@ -8,8 +8,8 @@
 track       { ref } → { ref, title, alreadyTracked, closed }                                cli
 sync        { ref? } → { synced, missing }                                                  cli
 list        { closed? } → { tasks: ListItem[], backgroundSyncError: { at, message } | null }  cli
-run         { ref, inPlace?, force? } → { ref, cwd, mode, benchCreated, warnings,               cli
-              tabId, terminalSessionId, resumed }  errors: BLOCKED { blockers }
+run         { ref, prompt?, inPlace?, force? } → { ref, title, tracked, cwd, mode,              cli
+              benchCreated, warnings, tabId, terminalSessionId, resumed }  errors: BLOCKED { blockers }
 current     { terminalSessionId? } → { ref, title, displayState, agentSessionId, source }   cli
 attach      { ref, terminalSessionId? } → { ref, title, benchCreated, runCreated,               cli
               agentSessionId }
@@ -20,7 +20,7 @@ bench.list  → { runspaceId, ref, title, setupState }[]
 changes     → { type: "task", ref } | { type: "synced" }
 ```
 
-- ref は `owner/repo#n` と `https://github.com/owner/repo/issues/n`（後ろの `?…` と `#…` は捨てる）だけを受ける。CLI では位置引数にする（zod の `.meta({ positional: true })`）。
+- ref は `owner/repo#n` と `https://github.com/owner/repo/issues/n`（後ろの `?…` と `#…` は捨てる）だけを受ける。CLI では位置引数にする（zod の `.meta({ positional: true })`）。`run` の `prompt` も位置引数で、`monica task run <ref> [prompt]` になる。
 - `ListItem` の `displayState` は純関数 `displayState(task, issue, bench, runs)` が TS で導く（#17 の表）。`runs` はその Task の Run の Agent Session。live な Run があれば `waiting`（`reason`、許可なら `tool`、エラーなら `errorType`）/ `unobserved` / `running` に `since`（`state_changed_at`）と `liveRuns` を付け、無ければ `closed` / `issue_closed` / `not_started` / `preparing` / `setup_failed` / `ended` の 1 語にする。`liveRuns` は代表を先頭に集約の順で並べる。`ListItem` の `cwd` は Bench の cwd。
 - 人間向けの STATE の 1 マスは `waiting:permission(Bash) 12m +1`（理由、許可なら tool 名、`since` からの経過、他の live な Run の件数）。経過は 60 秒未満が `s`、60 分未満が `m`、24 時間未満が `h`、それ以上が `d` で、切り捨てる。
 - `current` は呼び手の Terminal Session の live な Agent Session が Run ならその Task を返し（`source: run`、`agentSessionId` はその Agent Session）、そうでなければ Tab → Runspace → Bench の Task を引く（`source: bench`、`agentSessionId` は null）。`terminalSessionId` が無ければ `BAD_REQUEST`、どちらでも引けなければ `NOT_FOUND`。
@@ -57,7 +57,8 @@ changes     → { type: "task", ref } | { type: "synced" }
 
 `run` の前半。Bench を確保し、準備が終わるのを待つ。後半は「Run の起動」の節。
 
-- `run` は open な Task だけを受ける（closed は `BAD_REQUEST`、未 track は `NOT_FOUND`）。Bench が無ければ、tx で Task が open かを引き直してから `bench` の行（`preparing`）と `workbenchLedger.createRunspace(tx, { cwd })` を作って commit し（`--in-place` の ghq root を待つ間に close が走り終えることがあるため。Tab を開く tx も同じく引き直す）、準備を Backend の中で始める。準備中の Bench は sidebar にすぐ出る。
+- `run` は open な Task だけを受ける（closed は `BAD_REQUEST` で reopen を案内する）。未 track の ref は、`track` と同じく写しと Task の行を 1 つの transaction で書いてから、新しい Run の手順（「Run の起動」の節）に進む。GitHub が issue を返さなければ `track` と同じく `NOT_FOUND` で、何も書かない。track の後で `run` が失敗しても（`BLOCKED`、準備の失敗）track は巻き戻さない（ADR-0024）。output の `tracked` は、この `run` で track したかを示す。track は GitHub の今の名前で Task を書くので、改名前の名前で頼まれても引けるよう、track の後は `track` の返す ref で Task を引き直す。
+- Bench が無ければ、tx で Task が open かを引き直してから `bench` の行（`preparing`）と `workbenchLedger.createRunspace(tx, { cwd })` を作って commit し（`--in-place` の ghq root を待つ間に close が走り終えることがあるため。Tab を開く tx も同じく引き直す）、準備を Backend の中で始める。準備中の Bench は sidebar にすぐ出る。
 - cwd は作る前に決め、その後は変えない。worktree は `$MONICA_HOME/worktrees/<owner>/<repo>/issue-<n>`、`--in-place` は `$(ghq root)/github.com/<owner>/<repo>`。`--in-place` で ghq root が引けなければ、Bench を作らずに `PRECONDITION_FAILED`。worktree の Bench に `--in-place` を打つと `BAD_REQUEST`、flag の無い `run` は今の Bench の mode に従う。
 - 準備: in-place は、checkout（cwd）が無ければ `ghq get <owner>/<repo>` して終わる。ghq は repo の今の名前の場所に clone するので、改名の後で cwd に来なければ失敗にする。worktree は、cwd が linked worktree ならそのまま使う。repo が改名されても、作った worktree は作った時の checkout に登録されているので、checkout を引き直さない。cwd が worktree でなければ、checkout が無いときに `ghq get` する。ただし、改名の前に作った worktree が消えていたら（cwd が今の名前の path と違えば）失敗にする。元の branch は改名前の checkout にしか無く、新しい名前の clone から作り直すと黙って別の branch になるため。そのうえで、path が消えていればその登録だけを `git worktree remove <path>` で外し（`prune` は外付けの disk の上の worktree のような、関係の無い登録まで外すので使わない）、branch `issue-<n>` があれば `git worktree add <path> issue-<n>`。無ければ default branch（`refs/remotes/origin/HEAD`、取れなければ `git remote set-head origin --auto` を 1 回）を求め、`git fetch origin <default>` を best-effort で打ってから `git worktree add -b issue-<n> <path> origin/<default>`。fetch の失敗は output の `warnings` に載せる。git と ghq には `GIT_TERMINAL_PROMPT=0` を渡す。Backend が端末から起こされていると、git は認証を /dev/tty で尋ねて止まるため。
 - setup は `<worktree>/.monica/setup.sh` を直接 exec する（shebang と実行権限が要る）。無ければ ready。cwd は worktree、stdin は null、env は Backend の env から `MONICA_*`・`CLAUDECODE`・`CLAUDE_CODE_*` を落としたもの。自分の process group（`detached`）で起こし、600 秒で group に SIGTERM を送り、group が空になるか 2 秒たったら SIGKILL を送る。script が先に抜けても、後始末をしている子孫に猶予を残すため。env の除外は workbench の `inheritableEnv()` を ptyd と共有する。
@@ -70,16 +71,17 @@ changes     → { type: "task", ref } | { type: "synced" }
 
 ## Run の起動
 
-`run` の後半。Bench の新しい Tab で素の `claude` を起こすか、終わった claude を resume する。Run の行は「Run」の節の不変条件が作る。
+`run` の後半。Bench の新しい Tab で claude に最初の prompt を渡して起こすか、終わった claude を resume する。Run の行は「Run」の節の不変条件が作る。
 
 - Bench があり live な Run があれば、`CONFLICT` で断る。message には live な Run の Agent Session と状態（`s-1 waiting:idle`）を並べ、並行して agent を足すなら Bench に Tab を開いて `claude` を打てば Run になる、と案内する。
 - resume の候補は、今の Bench を作った後に始まった Run（`run.started_at >= bench.created_at`）のうち、Agent Session が最後に動いた（`last_event_at` が新しい）もの。live な Run が無いので、その Agent Session は終わっている。候補があれば sync も Blocker gate もせずに resume する。resume は新しい Run ではないため（#18）。
   - Bench より前の Run は reopen の前の挑戦なので、resume せず新しい会話から始める。
   - `transcript_path` が指す Agent Session Transcript が無い Agent Session は候補から外す。claude は最初の prompt まで Agent Session Transcript を書かず、prompt を送らずに抜けた Agent Session の `--resume` は `No conversation found` で終わるため。外さないと、その Run がいつまでも候補に残り、`run` で新しい claude を起こせなくなる。`transcript_path` を持たない Agent Session は候補に残す。
-- 新しい Run は、Task を sync（5 秒）してから Blocker gate を確かめる。`--force` でも sync する。GitHub に届かないか Issue が返らなければ手元の写しで判定し、`warnings` に理由と写しの古さ（分）を載せて続ける。sync は repo の改名を写すので、Task は名前でなく行の id で引き直す。
+- 新しい Run は、Task を sync（5 秒）してから Blocker gate を確かめる。`--force` でも、track した直後でも sync する。track の sync と重なるが、新しい Run の経路を 1 つに保つため。GitHub に届かないか Issue が返らなければ手元の写しで判定し、`warnings` に理由と写しの古さ（分）を載せて続ける。sync は repo の改名を写すので、Task は名前でなく行の id で引き直す。
 - open な Blocker があれば、`.errors()` で宣言した `BLOCKED`（`data.blockers` に ref の一覧）で断る。`--force` なら越える。gate を通ったら Bench を確保して準備する（「Bench」の節。CLI は準備を待つ）。
-- tx で `openTab(tx, { runspaceId, cwd, input })` を呼び、commit したら返る。`input` は `claude\r`（resume なら `claude --resume '<id>'\r`）。workbench が commit の後に 24×80 で Create し、通ったらすぐに input を Write する（ADR-0015）。表示されていない Tab の shell は attach の resize で追いつく。shell の起動は待たない。起動前に書いた入力が捨てられないことは #13 で確かめた。ptyd に繋がらない間も `run` は返り、Tab は starting のまま残る。shell の失敗は Tab の failed / lost で見える。Tab は前面に出さない。
-- cwd は、新しい Run なら Bench の cwd、resume ならその Agent Session の cwd（その directory が無ければ Bench の cwd）。Agent Session の id は hook の payload から来るので、single quote で囲んで打つ。
+- tx で `openTab(tx, { runspaceId, cwd, input })` を呼び、commit したら返る。`input` は、新しい Run なら `claude '<prompt>'\r`（prompt を省けば `claude '/tackle'\r`）、resume なら `claude --resume '<id>'\r` で、prompt を指定したときだけ後ろに `'<prompt>'` を足す。resume する claude は tackle の途中か後なので、`/tackle` を送ると branch を切るところからやり直すため。prompt は Task にも Run にも保存しない（ADR-0024）。workbench が commit の後に 24×80 で Create し、通ったらすぐに input を Write する（ADR-0015）。表示されていない Tab の shell は attach の resize で追いつく。shell の起動は待たない。起動前に書いた入力が捨てられないことは #13 で確かめた。ptyd に繋がらない間も `run` は返り、Tab は starting のまま残る。shell の失敗は Tab の failed / lost で見える。Tab は前面に出さない。
+- cwd は、新しい Run なら Bench の cwd、resume ならその Agent Session の cwd（その directory が無ければ Bench の cwd）。Agent Session の id（hook の payload から来る）と prompt は、single quote で囲み、中の `'` を `'\''` にして打つ。
+- prompt が空（空白だけのものも含む）、制御文字（改行と tab を含む）を含む、`-` で始まる、のどれかなら、track より前に `BAD_REQUEST` で断る。空の prompt は素の `claude` を起こす抜け道になり、制御文字は shell で Enter や Ctrl-C として働き、`-` で始まる語は claude が option として読むため。
 
 ## close と reopen
 

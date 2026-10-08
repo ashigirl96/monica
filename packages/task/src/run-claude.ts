@@ -15,14 +15,15 @@ import {
 } from './bench.ts'
 import type { RunOutput, runErrors } from './contract.ts'
 import { isIssue, openBlockersOf } from './copy.ts'
-import { findOpenTask } from './open-task.ts'
-import { formatRef, parseRef } from './ref.ts'
+import { findOpenTask, taskIfTracked, refuseClosed } from './open-task.ts'
+import { formatRef, type IssueRef, parseRef } from './ref.ts'
 import { runAgentSessionsByTask } from './run.ts'
 import { issue, run } from './schema.ts'
-import { type SyncDeps, syncOrUseCopy } from './sync.ts'
+import { type SyncDeps, syncOrUseCopy, trackIssue } from './sync.ts'
 
 type Launch = {
   ref: string
+  title: string
   bench: Bench
   benchCreated: boolean
   warnings: string[]
@@ -32,11 +33,12 @@ type Launch = {
 
 export async function runTask(
   deps: SyncDeps & BenchDeps,
-  input: { ref: string; inPlace?: boolean; force?: boolean },
+  input: { ref: string; prompt?: string; inPlace?: boolean; force?: boolean },
   errors: ORPCErrorConstructorMap<typeof runErrors>,
 ): Promise<RunOutput> {
   const asked = parseRef(input.ref)
-  const found = findOpenTask(deps.db, isIssue(asked), formatRef(asked))
+  refuseUnsendable(input.prompt)
+  const { found, tracked } = await findOrTrack(deps, asked)
   if (found.bench) {
     refuseInPlace(found.bench, input.inPlace, formatRef(found.issue))
     refuseLiveRuns(deps.db, found.issue)
@@ -44,9 +46,11 @@ export async function runTask(
   const launch =
     (found.bench && resumeOf(deps.db, found.issue, found.bench)) ??
     (await newRun(deps, found.issue, input, errors))
-  const opened = openClaudeTab(deps, launch)
+  const opened = openClaudeTab(deps, launch, input.prompt)
   return {
     ref: launch.ref,
+    title: launch.title,
+    tracked,
     cwd: launch.bench.cwd,
     mode: launch.bench.mode,
     benchCreated: launch.benchCreated,
@@ -54,6 +58,14 @@ export async function runTask(
     ...opened,
     resumed: launch.resumed,
   }
+}
+
+// track は GitHub の今の名前で Task を書くので、改名前の名前で頼まれても track の返す ref で引き直す。
+async function findOrTrack(deps: SyncDeps, asked: IssueRef) {
+  const found = taskIfTracked(deps.db, isIssue(asked))
+  if (found) return { found: refuseClosed(found), tracked: false }
+  const { ref, alreadyTracked } = await trackIssue(deps, formatRef(asked))
+  return { found: findOpenTask(deps.db, isIssue(parseRef(ref)), ref), tracked: !alreadyTracked }
 }
 
 function refuseLiveRuns(db: Db, forIssue: Issue) {
@@ -84,6 +96,7 @@ function resumeOf(db: Db, forIssue: Issue, row: Bench): Launch | null {
   if (!last) return null
   return {
     ref: formatRef(forIssue),
+    title: forIssue.title,
     bench: row,
     benchCreated: false,
     warnings: [],
@@ -114,6 +127,7 @@ async function newRun(
   const prepared = await prepareBench(deps, synced, inPlace)
   return {
     ref,
+    title: synced.issue.title,
     bench: prepared.bench,
     benchCreated: prepared.created,
     warnings: [...syncWarnings, ...prepared.warnings],
@@ -122,7 +136,7 @@ async function newRun(
   }
 }
 
-function openClaudeTab(deps: BenchDeps, launch: Launch) {
+function openClaudeTab(deps: BenchDeps, launch: Launch, prompt: string | undefined) {
   const { db, workbenchLedger } = deps
   return db.transaction((tx) => {
     findOpenTask(tx, eq(issue.id, launch.bench.taskIssueId), launch.ref)
@@ -130,12 +144,40 @@ function openClaudeTab(deps: BenchDeps, launch: Launch) {
     return workbenchLedger.openTab(tx, {
       runspaceId: launch.bench.runspaceId,
       cwd: launch.tabCwd,
-      input: `${claudeCommand(launch)}\r`,
+      input: `${claudeCommand(launch, prompt)}\r`,
     })
   })
 }
 
-// Agent Session の id は hook の payload から来るので、shell に解釈させない。
-function claudeCommand({ resumed }: Launch): string {
-  return resumed === null ? 'claude' : `claude --resume '${resumed.replaceAll("'", `'\\''`)}'`
+const DEFAULT_PROMPT = '/tackle'
+
+// 空の prompt は素の claude を起こす抜け道になり、shell に打鍵した制御文字は Enter や Ctrl-C として働く。
+function refuseUnsendable(prompt: string | undefined) {
+  if (prompt === undefined) return
+  if (prompt.trim() === '') throw unsendable(`is empty; leave it out to send ${DEFAULT_PROMPT}`)
+  if (/\p{Cc}/u.test(prompt)) {
+    throw unsendable(
+      'has a control character such as a newline, which the shell would take as a key',
+    )
+  }
+  if (prompt.startsWith('-'))
+    throw unsendable('starts with -, which claude would read as an option')
+}
+
+function unsendable(reason: string) {
+  return new ORPCError('BAD_REQUEST', { message: `the prompt ${reason}` })
+}
+
+// resume する claude は tackle の途中か後なので、既定の prompt を送ると branch を切るところからやり直す。
+function claudeCommand({ resumed }: Launch, prompt: string | undefined): string {
+  const words =
+    resumed === null
+      ? [quote(prompt ?? DEFAULT_PROMPT)]
+      : ['--resume', quote(resumed), ...(prompt === undefined ? [] : [quote(prompt)])]
+  return ['claude', ...words].join(' ')
+}
+
+// single quote の中では ' を escape できないので、一度閉じて \' を挟み、開き直す。
+function quote(word: string): string {
+  return `'${word.replaceAll("'", `'\\''`)}'`
 }

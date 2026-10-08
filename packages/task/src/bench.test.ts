@@ -277,12 +277,17 @@ test('run asks origin for its default branch when the checkout does not know it'
   expect(git(cwd, 'rev-parse', '--abbrev-ref', 'HEAD')).toBe('issue-12')
 })
 
-test('run refuses a Task that is closed or not tracked', async () => {
-  const { db, client } = await tracked()
+test('run refuses a closed Task before it syncs, pointing to reopen rather than tracking it again', async () => {
+  const { db, client, github } = await tracked()
   db.update(task).set({ closedAt: new Date() }).run()
+  const sent = github.requests.length
 
-  expect((await failure(client.run({ ref }))).code).toBe('BAD_REQUEST')
-  expect((await failure(client.run({ ref: 'acme/app#99' }))).code).toBe('NOT_FOUND')
+  const error = await failure(client.run({ ref }))
+
+  expect(error.code).toBe('BAD_REQUEST')
+  expect(error.message).toBe(`${ref} is closed, so run \`monica task reopen ${ref}\``)
+  expect(github.requests).toHaveLength(sent)
+  expect(await client.bench.list()).toEqual([])
 })
 
 test('a Bench the Backend stopped preparing fails on the next start, and its setup is killed', async () => {

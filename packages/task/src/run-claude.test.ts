@@ -15,15 +15,20 @@ afterEach(() => {
 const ref = 'acme/app#12'
 const blocker = 'acme/lib#3'
 
-type Fixture = Awaited<ReturnType<typeof tracked>>
+type Fixture = ReturnType<typeof untracked>
 
-async function tracked({ blockedBy = [] as string[] } = {}) {
+function untracked({ blockedBy = [] as string[] } = {}) {
   const fixture = setup()
   fixture.ghq.origin('acme/app', {})
   for (const upstream of blockedBy) fixture.github.issue(upstream, { title: 'Upstream fix' })
   fixture.github.issue(ref, { title: 'Ship it', blockedBy })
-  await fixture.client.track({ ref })
   return { ...fixture, cwd: join(fixture.home, 'worktrees/acme/app/issue-12') }
+}
+
+async function tracked({ blockedBy = [] as string[] } = {}) {
+  const fixture = untracked({ blockedBy })
+  await fixture.client.track({ ref })
+  return fixture
 }
 
 // claude は最初の prompt まで Agent Session Transcript を書かないので、会話の無かった Agent Session は resume できない。
@@ -62,6 +67,19 @@ async function typedInto(fixture: Fixture, terminalSessionId: string) {
   return fixture.ptyd.sessionRequests().filter((op) => op.session_id === terminalSessionId)
 }
 
+// quote が 1 つの引数を保つかは打った文字列の一致では示せないので、本物の shell に解釈させる。
+async function argvTypedInto(fixture: Fixture, terminalSessionId: string): Promise<string[]> {
+  const write = (await typedInto(fixture, terminalSessionId)).find((op) => op.op === 'write')
+  if (write?.op !== 'write') throw new Error('nothing was typed')
+  const bin = join(fixture.home, 'argv')
+  mkdirSync(bin, { recursive: true })
+  writeFileSync(join(bin, 'claude'), `#!/bin/sh\nprintf '%s\\0' "$@"\n`, { mode: 0o755 })
+  const shell = Bun.spawnSync(['/bin/sh', '-c', write.data.replace(/\r$/, '')], {
+    env: { PATH: bin },
+  })
+  return shell.stdout.toString().split('\0').slice(0, -1)
+}
+
 function runsOf({ db }: Fixture) {
   return db.select({ agentSessionId: run.agentSessionId }).from(run).orderBy(run.id).all()
 }
@@ -70,13 +88,15 @@ async function stateOf({ client }: Fixture) {
   return (await client.list({})).tasks.find((t) => t.ref === ref)!.displayState
 }
 
-test('run opens a new Tab at the end of the Bench, starts its shell at 24x80 and types claude into it', async () => {
+test('run opens a new Tab at the end of the Bench, starts its shell at 24x80 and types claude with /tackle into it', async () => {
   const fixture = await tracked()
 
   const output = await fixture.client.run({ ref })
 
   expect(output).toEqual({
     ref,
+    title: 'Ship it',
+    tracked: false,
     cwd: fixture.cwd,
     mode: 'worktree',
     benchCreated: true,
@@ -91,8 +111,106 @@ test('run opens a new Tab at the end of the Bench, starts its shell at 24x80 and
   await typedInto(fixture, output.terminalSessionId)
   expect(fixture.ptyd.sessionRequests()).toMatchObject([
     { op: 'create', session_id: output.terminalSessionId, cwd: fixture.cwd, rows: 24, cols: 80 },
-    { op: 'write', session_id: output.terminalSessionId, data: 'claude\r' },
+    { op: 'write', session_id: output.terminalSessionId, data: "claude '/tackle'\r" },
   ])
+})
+
+test('run types the prompt given in place of /tackle', async () => {
+  const fixture = await tracked()
+
+  const output = await fixture.client.run({ ref, prompt: 'fix the bug' })
+
+  expect((await typedInto(fixture, output.terminalSessionId)).at(-1)).toMatchObject({
+    data: "claude 'fix the bug'\r",
+  })
+})
+
+test("a prompt with ' in it reaches claude as one argument, with nothing in it expanded", async () => {
+  const fixture = await tracked()
+  const prompt = "fix 'run' so it doesn't expand $HOME or `id`"
+
+  const output = await fixture.client.run({ ref, prompt })
+
+  expect(await argvTypedInto(fixture, output.terminalSessionId)).toEqual([prompt])
+})
+
+test.each([
+  ['an empty prompt', '', 'empty'],
+  ['a prompt of only spaces', '  ', 'empty'],
+  ['a prompt with a newline', 'fix\nthe bug', 'control'],
+  ['a prompt with a tab', 'fix\tthe bug', 'control'],
+  ['a prompt with Ctrl-C', 'fix\u0003', 'control'],
+  ['a prompt starting with -', '--help', 'option'],
+])('run refuses %s with BAD_REQUEST before it tracks the Issue', async (_, prompt, reason) => {
+  const fixture = untracked()
+
+  const error = await failure(fixture.client.run({ ref, prompt }))
+
+  expect(error.code).toBe('BAD_REQUEST')
+  expect(error.message).toContain(reason)
+  expect((await fixture.client.list({})).tasks).toEqual([])
+  expect(await fixture.client.bench.list()).toEqual([])
+})
+
+test.each([
+  ['owner/repo#n', ref],
+  ['the issue URL', 'https://github.com/acme/app/issues/12'],
+])(
+  'run given %s of an untracked Issue tracks it, prepares its Bench and starts claude in it',
+  async (_, asked) => {
+    const fixture = untracked()
+
+    const output = await fixture.client.run({ ref: asked })
+
+    expect(output).toMatchObject({
+      ref,
+      title: 'Ship it',
+      tracked: true,
+      cwd: fixture.cwd,
+      benchCreated: true,
+      resumed: null,
+    })
+    expect((await fixture.client.list({})).tasks).toMatchObject([
+      { ref, title: 'Ship it', cwd: fixture.cwd },
+    ])
+    expect((await typedInto(fixture, output.terminalSessionId)).at(-1)).toMatchObject({
+      data: "claude '/tackle'\r",
+    })
+  },
+)
+
+test("run asked by a repo's old name for an untracked Issue tracks it under the new name and starts claude", async () => {
+  const fixture = untracked()
+  fixture.github.renameRepo('acme/app', 'acme/renamed')
+  fixture.ghq.origin('acme/renamed')
+
+  const output = await fixture.client.run({ ref })
+
+  expect(output).toMatchObject({
+    ref: 'acme/renamed#12',
+    tracked: true,
+    cwd: join(fixture.home, 'worktrees/acme/renamed/issue-12'),
+  })
+})
+
+test('run refuses an untracked Issue with an open Blocker, and the Issue stays tracked', async () => {
+  const fixture = untracked({ blockedBy: [blocker] })
+
+  const error = await failure(fixture.client.run({ ref }))
+
+  expect(error.code).toBe('BLOCKED')
+  expect((await fixture.client.list({})).tasks).toMatchObject([{ ref, blockers: [blocker] }])
+  expect(await fixture.client.bench.list()).toEqual([])
+})
+
+test('run refuses a ref GitHub does not return with NOT_FOUND, and neither tracks nor copies it', async () => {
+  const fixture = untracked()
+
+  const error = await failure(fixture.client.run({ ref: 'acme/app#99' }))
+
+  expect(error.code).toBe('NOT_FOUND')
+  expect((await fixture.client.list({})).tasks).toEqual([])
+  expect(fixture.db.select().from(issue).all()).toEqual([])
 })
 
 test('run returns while ptyd cannot be reached, leaving its Tab starting; once ptyd is back, the shell starts and claude is typed into it', async () => {
@@ -110,7 +228,7 @@ test('run returns while ptyd cannot be reached, leaving its Tab starting; once p
   expect(await fixture.settled(output.terminalSessionId)).toMatchObject({ status: 'running' })
   expect(revived.sessionRequests()).toMatchObject([
     { op: 'create', session_id: output.terminalSessionId },
-    { op: 'write', session_id: output.terminalSessionId, data: 'claude\r' },
+    { op: 'write', session_id: output.terminalSessionId, data: "claude '/tackle'\r" },
   ])
 })
 
@@ -125,7 +243,7 @@ test('the claude run started becomes a Run of the Task, waiting idle', async () 
   expect(await stateOf(fixture)).toMatchObject({ state: 'waiting', reason: 'idle' })
 })
 
-test("run resumes the claude of the last Run once it has ended, in a new Tab in that claude's cwd, and makes no new Run", async () => {
+test("run resumes the claude of the last Run once it has ended, sending it no /tackle, in a new Tab in that claude's cwd, and makes no new Run", async () => {
   const fixture = await tracked()
   const where = join(fixture.cwd, 'packages/app')
   const first = await endedRun(fixture, { cwd: where })
@@ -134,7 +252,13 @@ test("run resumes the claude of the last Run once it has ended, in a new Tab in 
   const second = await fixture.client.run({ ref })
   await fixture.hook(second.terminalSessionId, 's-1', 'SessionStart', { source: 'resume' })
 
-  expect(second).toMatchObject({ benchCreated: false, warnings: [], resumed: 's-1' })
+  expect(second).toMatchObject({
+    title: 'Ship it',
+    tracked: false,
+    benchCreated: false,
+    warnings: [],
+    resumed: 's-1',
+  })
   expect(await benchTabs(fixture)).toMatchObject([
     { id: first.tabId },
     { id: second.tabId, cwd: where },
@@ -145,6 +269,18 @@ test("run resumes the claude of the last Run once it has ended, in a new Tab in 
   ])
   expect(runsOf(fixture)).toEqual([{ agentSessionId: 's-1' }])
   expect(await stateOf(fixture)).toMatchObject({ state: 'waiting', reason: 'idle' })
+})
+
+test('a resume passes the prompt given after the Agent Session', async () => {
+  const fixture = await tracked()
+  await endedRun(fixture)
+
+  const output = await fixture.client.run({ ref, prompt: 'fix the review comments' })
+
+  expect(output.resumed).toBe('s-1')
+  expect((await typedInto(fixture, output.terminalSessionId)).at(-1)).toMatchObject({
+    data: "claude --resume 's-1' 'fix the review comments'\r",
+  })
 })
 
 test('a resume neither syncs the Task nor holds it at the Blocker gate', async () => {
@@ -182,7 +318,7 @@ test("run starts a new claude when the Task's Runs all began before its Bench, a
 
   expect(output.resumed).toBeNull()
   expect((await typedInto(fixture, output.terminalSessionId)).at(-1)).toMatchObject({
-    data: 'claude\r',
+    data: "claude '/tackle'\r",
   })
 })
 
@@ -194,7 +330,7 @@ test('run starts a new claude rather than resume one that left no Agent Session 
 
   expect(output.resumed).toBeNull()
   expect((await typedInto(fixture, output.terminalSessionId)).at(-1)).toMatchObject({
-    data: 'claude\r',
+    data: "claude '/tackle'\r",
   })
 })
 
@@ -248,7 +384,7 @@ test('run --force starts a new Run past the open Blockers', async () => {
   const output = await fixture.client.run({ ref, force: true })
 
   expect((await typedInto(fixture, output.terminalSessionId)).at(-1)).toMatchObject({
-    data: 'claude\r',
+    data: "claude '/tackle'\r",
   })
 })
 
@@ -290,7 +426,7 @@ test('when GitHub cannot be reached, run judges the gate on the copy and warns h
     ),
   ])
   expect((await typedInto(fixture, output.terminalSessionId)).at(-1)).toMatchObject({
-    data: 'claude\r',
+    data: "claude '/tackle'\r",
   })
 })
 
