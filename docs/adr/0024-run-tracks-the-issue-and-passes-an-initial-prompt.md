@@ -23,5 +23,5 @@ status: accepted
 - prompt は Task にも Run にも保存しない。Terminal Session Transcript には残る。
 - 素の `claude` で起こす手段は持たない。別のことをさせたいときは別の prompt を渡す。
 - monica は `/tackle` を配らない（ADR-0006 は repo を開発する skill を配らない）。`/tackle` の無い repo では、claude は `/tackle` を実行できない。
-- 未 track の ref は、`track` と同じく写しと Task の行を 1 つの transaction で書いてから、新しい Run の手順（sync・Blocker gate・Bench の準備）に進む。その後で `run` が失敗しても（`BLOCKED`、準備の失敗、ptyd に繋がらない）track は残す。`track` を打ってから `run` を打ったのと同じ状態になる。output の `tracked` が、この `run` で track したかを示す。
+- 未 track の ref は、`track` と同じく写しと Task の行を 1 つの transaction で書いてから、新しい Run の手順（sync・Blocker gate・Bench の準備）に進む。その後で `run` が失敗しても（`BLOCKED`、準備の失敗）track は残す。`track` を打ってから `run` を打ったのと同じ状態になる。output の `tracked` が、この `run` で track したかを示す。
 - closed な Task への `run` は、今どおり `BAD_REQUEST` で reopen を案内する。

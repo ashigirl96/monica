@@ -86,6 +86,8 @@ export const ListOutputSchema = z.object({
 
 export const RunOutputSchema = z.object({
   ref: z.string(),
+  title: z.string(),
+  tracked: z.boolean().describe('whether this run tracked the Issue'),
   cwd: z.string().describe('the cwd of the Bench'),
   mode: BenchSchema.shape.mode,
   benchCreated: z.boolean(),
@@ -193,13 +195,20 @@ export const contract = {
   run: meta
     .meta({
       description:
-        'Start claude in a new Tab of the Bench of an open Task, opening and preparing the Bench first, or resume the last claude of the Bench once it has ended',
+        'Start claude with a first prompt (/tackle if left out) in a new Tab of the Bench of an open Task, tracking the Issue and opening and preparing the Bench first, or resume the last claude of the Bench once it has ended',
       cli: true,
     })
     .errors(runErrors)
     .input(
       z.object({
         ref,
+        prompt: z
+          .string()
+          .meta({
+            positional: true,
+            description: 'the first prompt to claude; /tackle if left out, and nothing on a resume',
+          })
+          .optional(),
         inPlace: z
           .boolean()
           .optional()

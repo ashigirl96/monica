@@ -19,7 +19,7 @@ test('__complete lists the subcommands with their descriptions for zsh', async (
       'track:Track a GitHub Issue as a Task and copy it with its parent and Blockers; a tracked one is synced\n' +
       'sync:Copy the Issues of every open Task, or of one Task given its ref, from GitHub\n' +
       'list:List open Tasks in the order they were tracked\n' +
-      'run:Start claude in a new Tab of the Bench of an open Task, opening and preparing the Bench first, or resume the last claude of the Bench once it has ended\n' +
+      'run:Start claude with a first prompt (/tackle if left out) in a new Tab of the Bench of an open Task, tracking the Issue and opening and preparing the Bench first, or resume the last claude of the Bench once it has ended\n' +
       'current:Show the Task of the Tab this runs in\n' +
       "attach:Move the Tab this runs in into the Bench of an open Task, opening the Bench in place when it has none, and make the Tab's claude a Run of the Task\n" +
       'close:Close a Task and take down its Bench: the worktree, the branch issue-n, the Runspace and its Tabs, all but the Tab this runs in\n' +

@@ -138,6 +138,35 @@ test('list writes the state of a Task with live Runs with its reason, tool, age 
   ])
 })
 
+test('run says first that it tracked the Issue only when it did', () => {
+  const output = {
+    ref: 'acme/app#12',
+    title: 'Ship it',
+    tracked: true,
+    cwd: '/home/worktrees/acme/app/issue-12',
+    mode: 'worktree' as const,
+    benchCreated: true,
+    warnings: [],
+    tabId: 't-1',
+    terminalSessionId: 'ts-1',
+    resumed: null,
+  }
+
+  expect(formatters.run(output)).toBe(
+    [
+      'tracked acme/app#12 (Ship it)',
+      'opened the Bench of acme/app#12 at /home/worktrees/acme/app/issue-12',
+      'started claude in a new Tab',
+    ].join('\n'),
+  )
+  expect(formatters.run({ ...output, tracked: false })).toBe(
+    [
+      'opened the Bench of acme/app#12 at /home/worktrees/acme/app/issue-12',
+      'started claude in a new Tab',
+    ].join('\n'),
+  )
+})
+
 test('attach names the claude of the Tab and whether attach made it a Run', () => {
   const output = {
     ref: 'acme/app#12',
