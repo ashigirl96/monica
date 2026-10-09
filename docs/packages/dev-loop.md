@@ -48,7 +48,7 @@
 - 独自の lint rule は `scripts/oxlint/monica.js` にあり、`.oxlintrc.json` の `jsPlugins` が読む。
 - oxlint は型を見る rule も流す。on にしているのは `.oxlintrc.json` の `options.typeAware` で、型は `oxlint-tsgolint` が読む。
 - Rust の検査は macOS の runner で流す。Tauri の crate が macOS の system library を要るため。
-- Rust の検査は、Rust に関わる file が変わったときだけ走らせる（対象は `ci.yml` の `changes` job の filter）。private repo では macOS の runner の 1 分が 10 分に数えられ、crate は旧 Monica から rename しただけで骨格の後はほとんど変わらないため。GitHub Actions には job 単位の paths filter が無いので、判定は ubuntu の小さな job で行う。
+- Rust の検査は、Rust に関わる file が変わったときだけ走らせる（対象は `ci.yml` の `changes` job の filter）。macOS の runner は ubuntu より待ちが長く遅いうえに、crate は旧 Monica から rename しただけで骨格の後はほとんど変わらないため。GitHub Actions には job 単位の paths filter が無いので、判定は ubuntu の小さな job で行う。
 - テストが誤りを捕まえるかを code に変異を入れて確かめるときは、変異の前に `cp` で控えを取り、控えから戻す。`git checkout -- <file>` は HEAD の内容に戻すので、まだコミットしていない変更ごと消える。
 - Rust のテストが誤りを捕まえるかを、code に変異を入れて確かめたら、戻したファイルを `touch` してから次のテストを流す。cargo は mtime で作り直しを決めるので、`cp` で取った控えを `mv` で戻すと mtime が古くなり、変異入りの binary のまま走る。
 - 整形だけの commit は、SHA を `.git-blame-ignore-revs` に書いて blame から外す。repo は squash merge なので、SHA は merge の後の main のものを後続の PR で足す。GitHub の blame はこのファイルを自動で読み、手元の git は `git config blame.ignoreRevsFile .git-blame-ignore-revs` を 1 回打つと読む。
