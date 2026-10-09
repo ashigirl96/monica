@@ -7,7 +7,7 @@ import { and, desc, eq, gte } from 'drizzle-orm'
 
 import { type Bench, type BenchDeps, type Issue, prepareBench, refuseInPlace } from './bench.ts'
 import type { RunOutput, runErrors } from './contract.ts'
-import { isIssue, openBlockersOf } from './copy.ts'
+import { isIssue, isLinkedIssue, openBlockersOf } from './copy.ts'
 import { findOpenTask, taskIfTracked, refuseClosed } from './open-task.ts'
 import { formatRef, type IssueRef, parseRef } from './ref.ts'
 import { runAgentSessionsByTask } from './run.ts'
@@ -28,11 +28,11 @@ export async function runTask(
   deps: SyncDeps & BenchDeps,
   input: { ref: string; prompt?: string; inPlace?: boolean; force?: boolean },
   errors: ORPCErrorConstructorMap<typeof runErrors>,
-  { recheck }: { recheck?: (tx: Tx) => void } = {},
+  { recheck, nodeId }: { recheck?: (tx: Tx) => void; nodeId?: string } = {},
 ): Promise<RunOutput> {
   const asked = parseRef(input.ref)
   refuseUnsendable(input.prompt)
-  const { found, tracked } = await findOrTrack(deps, asked)
+  const { found, tracked } = await findOrTrack(deps, asked, nodeId)
   if (found.bench) {
     refuseInPlace(found.bench, input.inPlace, formatRef(found.issue))
     refuseLiveRuns(deps.db, found.issue)
@@ -55,8 +55,12 @@ export async function runTask(
 }
 
 // track は GitHub の今の名前で Task を書くので、改名前の名前で頼まれても track の返す ref で引き直す。
-async function findOrTrack(deps: SyncDeps, asked: IssueRef) {
-  const found = taskIfTracked(deps.db, isIssue(asked))
+// 呼び手が GitHub から node ID を引いてあれば、名前と番号が別の issue に移っていても取り違えない。
+async function findOrTrack(deps: SyncDeps, asked: IssueRef, nodeId?: string) {
+  const found = taskIfTracked(
+    deps.db,
+    nodeId ? isLinkedIssue({ ...asked, nodeId }) : isIssue(asked),
+  )
   if (found) return { found: refuseClosed(found), tracked: false }
   const { ref, alreadyTracked } = await trackIssue(deps, formatRef(asked))
   return { found: findOpenTask(deps.db, isIssue(parseRef(ref)), ref), tracked: !alreadyTracked }

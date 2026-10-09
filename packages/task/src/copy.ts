@@ -16,7 +16,7 @@ export function isIssue({ repo, number }: IssueRef) {
 }
 
 // repo の改名の後は sync まで行の repo が旧名なので node ID で引く。名前と番号で引くのは node ID を持たない行だけで、別の node ID の行は別の issue。
-export function isLinkedIssue({ nodeId, repo, number }: LinkedIssue) {
+export function isLinkedIssue({ nodeId, repo, number }: IssueRef & { nodeId: string }) {
   return or(eq(issue.nodeId, nodeId), and(isNull(issue.nodeId), isIssue({ repo, number })))
 }
 

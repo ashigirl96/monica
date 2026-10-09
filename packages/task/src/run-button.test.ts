@@ -379,7 +379,7 @@ test('a Task whose repo was renamed before any sync still gets its resume button
   })
 })
 
-test('an Issue that GitHub now gives another node ID under the same name and number does not take the button state of the Task tracked there', async () => {
+test('an Issue that GitHub now gives another node ID under the same name and number does not take the button state of the Task tracked there, and running it is refused instead of resuming that Task', async () => {
   const fixture = withRepo()
   const end = await liveRun(fixture, ['needs-triage'])
   await end()
@@ -388,6 +388,11 @@ test('an Issue that GitHub now gives another node ID under the same name and num
   expect(await fixture.client.runButtons({ refs: [ref] })).toEqual({
     buttons: [{ ref, button: { kind: 'triage', run: 'new' } }],
   })
+  const refused = await failure(fixture.client.runFromButton({ ref }))
+  expect(refused.message).toContain('now another issue on GitHub')
+  expect(
+    fixture.ptyd.sessionRequests().some((op) => op.op === 'write' && op.data.includes('--resume')),
+  ).toBe(false)
 })
 
 test('a Task whose Bench was closed and reopened gets a button for a new Run, not a resume', async () => {

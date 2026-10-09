@@ -163,6 +163,7 @@ export async function runFromButton(
   const prompt = seen.task?.run === 'resume' ? undefined : promptOf(verdict.kind, issue)
   const spec = issue.parent && isSpec(issue.parent) ? issue.parent : null
   return runTask(deps, { ref, prompt }, errors, {
+    nodeId: issue.nodeId,
     // GitHub と Bench の準備を待つ間に spec の Run が起動しうるので、Tab を開く transaction の中で見直す。
     recheck(tx) {
       if (spec && hasLiveRun(tx, spec)) throw refused(underRunningSpec(issue, spec))
