@@ -66,6 +66,10 @@ _Avoid_: close（単独では Task の close と紛れる）, Terminate, detach
 Tab を常駐させる印。pin された Tab は閉じられず、その Terminal Session も終了させられず、shell が終わると新しい Terminal Session で張り直される（起動してすぐ終わった時は張り直さない）。pin された Tab は 1 つの Runspace に 1 つまでで、同じ Runspace の別の Tab を pin すると付け替わる。pin された Tab の無い Runspace（Bench を除く）にほかの Tab があれば、pin した Tab を新しい Runspace に切り出す。pin を外しても元の Runspace には戻らない。別の Runspace へ移すと外れる。Bench の Tab も pin できるが、Task を close すると他の Tab と同じく消える。
 _Avoid_: 固定, pinned runspace（印は Tab に付く）
 
+**Layout**:
+Workbench Ledger のうち、Runspace の並び、各 Runspace の Tab の並び、Pin、各 Tab が表示する Terminal Session を合わせたもの。Terminal Session と Agent Session の状態は含まない。
+_Avoid_: 配置, 並び（単独で使わない）, arrangement
+
 **Terminal Session**:
 ptyd が持つ 1 つの PTY。app より長生きし、再 attach すると Terminal Session Transcript を replay する。生きている Terminal Session は必ず 1 つの Tab が表示している。
 _Avoid_: session（Agent Session と紛れる）, detached（Tab の無い Terminal Session は残さない）
