@@ -34,7 +34,7 @@ MONICA_HOME=${TMPDIR%/}/monica-<名前> bun scripts/extension-panel.ts requests 
 - `eval '<js>'`: side panel で式を評価し、値を JSON で出す。user gesture 付きで評価し、Promise は待つ。例外は stderr に出して exit 1 する。worktree に隔離した agent では、worktree の guard が `eval` の語を見て command ごと止める。止められたら言い換えずに、確かめられなかったと報告する。
 - `screenshot <path>`: side panel を png で撮る。Read で見る。
 - `close`: 開いている side panel を、action を押して閉じる。× と同じく side panel の view を捨てる経路で、閉じたときの abort を確かめるのに使う。`open` と同じく最初の Browser Tab で押すので、window が 1 つのときに使う。
-- `requests <path>`: side panel の CDP の Network を有効にし、URL に path を含む request の url・method・body を 1 行の JSON で出す。side panel が閉じるか SIGINT・SIGTERM を受けるまで動くので、Bash の `run_in_background` で起こしてから side panel を操作する。有効にする前の request（開いた時の `chat.prepare`）は拾わない。
+- `requests <path>`: side panel の CDP の Network を有効にし、URL に path を含む request の url・method・body を 1 行の JSON で出す。side panel が閉じるか、Brave が止まって CDP の接続が切れる（`dev:kill` を含む）か、SIGINT・SIGTERM を受けるまで動くので、Bash の `run_in_background` で起こしてから side panel を操作する。有効にする前の request（開いた時の `chat.prepare`）は拾わない。
 - `apps/extension/src/sidepanel/` の編集は、開いたままの side panel に HMR で届く。`src/background.ts` を編集すると、CRXJS が Chrome Extension を reload する。reload の後に side panel を見るときは、もう一度 `open` を打つ。
 - `packages/chat/src/ui` の effect が張った listener（Current Page の追跡）は、HMR の後も前の module のまま残る。編集の後は `close` と `open` で side panel を開き直す。
 

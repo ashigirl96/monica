@@ -50,8 +50,13 @@ process.on('SIGINT', () => void stopAll(130))
 process.on('SIGTERM', () => void stopAll(143))
 
 // 片方が終われば、もう片方も止めて抜ける。
+// Bun.spawn の既定の env は起動時の env で、上で書き換えた MONICA_HOME（resolve した home）を含まない。
 function supervise(argv: string[], options: { cwd?: string } = {}): Subprocess {
-  const child = Bun.spawn(argv, { ...options, stdio: ['ignore', 'inherit', 'inherit'] })
+  const child = Bun.spawn(argv, {
+    ...options,
+    env: process.env,
+    stdio: ['ignore', 'inherit', 'inherit'],
+  })
   children.add(child)
   void child.exited.then((code) => stopAll(code))
   return child
@@ -68,8 +73,11 @@ async function until(ready: () => boolean, child: Subprocess, what: string): Pro
 }
 
 // Chromium は終了時に DevToolsActivePort を消さないので、古い port を読まないよう起こす前に消す。
-function braveArgs(...extra: string[]): string[] {
+function forgetDevToolsPort(): void {
   rmSync(join(profile, 'DevToolsActivePort'), { force: true })
+}
+
+function braveArgs(...extra: string[]): string[] {
   return [
     BRAVE,
     `--user-data-dir=${profile}`,
@@ -94,6 +102,7 @@ function developerModeOn(): boolean {
 // Default/Preferences に書いても Brave は Secure Preferences の MAC で既定に戻すので、Brave 自身に書かせる（ADR-0029）。
 async function enableDeveloperMode(): Promise<void> {
   if (developerModeOn()) return
+  forgetDevToolsPort()
   const brave = Bun.spawn(braveArgs('--headless=new', '--remote-debugging-port=0'), {
     stdio: ['ignore', 'ignore', 'ignore'],
   })
@@ -139,6 +148,7 @@ async function start(): Promise<void> {
   const vite = supervise([join(extensionDir, 'node_modules/.bin/vite')], { cwd: extensionDir })
   await until(() => existsSync(join(devOutput, 'manifest.json')), vite, 'dev の出力')
 
+  forgetDevToolsPort()
   const brave = supervise(
     braveArgs(
       `--load-extension=${devOutput}`,
