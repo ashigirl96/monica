@@ -78,14 +78,15 @@ dock() {
    plutil -p "$A/Contents/_CodeSignature/CodeResources" | grep -A3 '"MacOS/claude"'   # Anthropic の designated requirement
    ```
 
-3. 置いた `.app` の Backend を、`backend-headless` skill の「release の build の Backend」の形で起こす。env は `env -i` で絞り、`MONICA_HOME` は使い捨てにし、`MONICA_PTYD_PATH` と `MONICA_CLAUDE_PATH` は `$A/Contents/MacOS` の `monica-ptyd` と `claude` を指す。ブラウザの口の port は 19380 以外にする（release の Backend が持っている）。`.app` そのものは起こさない。
-4. ブラウザの口へ `chat.ask` を 1 回送る。script を `apps/backend/` の下に置くと `@orpc/client` と `@monica/chat/contract` を解決できるので、終わったら消す。答えている間と答えた後に、Backend の子を `ps -A -o pid=,ppid=,command=` で読む。
+3. 置いた `.app` の Backend を、`backend-headless` skill の「release の build の Backend」の形で起こす。env は `env -i` で絞り、`MONICA_HOME` は使い捨てにし、`MONICA_PTYD_PATH` と `MONICA_CLAUDE_PATH` は `$A/Contents/MacOS` の `monica-ptyd` と `claude` を指す。ブラウザの口の port は渡さなくてよい（Chat は token の口に載る）。`.app` そのものは起こさない。
+4. token の口へ、`backend.json` の chat の token で `chat.ask` を 1 回送る（Chrome Extension と同じ呼び方。ADR-0034）。port と chat の token は、置いた `.app` の CLI を host として起こして受け取ってもよい（`docs/packages/cli.md` の「Native Messaging の host」）。script を `apps/backend/` の下に置くと `@orpc/client` と `@monica/chat/contract` を解決できるので、終わったら消す。答えている間と答えた後に、Backend の子を `ps -A -o pid=,ppid=,command=` で読む。
 
    ```ts
+   const { port, chatToken } = await Bun.file(`${process.env.MONICA_HOME}/backend.json`).json()
    const client: ContractRouterClient<{ chat: typeof contract }> = createORPCClient(
      new RPCLink({
        url: `http://127.0.0.1:${port}/rpc`,
-       headers: { 'sec-fetch-site': 'none', 'sec-fetch-mode': 'cors' },
+       headers: { authorization: `Bearer ${chatToken}` },
      }),
    )
    const answer = await client.chat.ask({
@@ -104,7 +105,8 @@ dock() {
 1. ユーザーの了承を得て、「入れる」の 2 と 3 で入れ替えて起こす。
 2. `~/.monica/backend.json` の pid が新しくなり、その port の `/health` が答える。
 3. `codesign -dvv /Applications/Monica.app/Contents/MacOS/claude` が Anthropic の署名を出す。
-4. 19380 のブラウザの口に `chat.ask` を 1 回送る（side panel から訊ければそれでよい）。答えが返り、答えている間は新しい Backend の子に `/Applications/Monica.app/Contents/MacOS/claude` が居る。
+4. `~/Library/Application Support/Google/Chrome/NativeMessagingHosts/com.ashigirl96.monica.json` を Shell が書き、`path` が `/Applications/Monica.app/Contents/MacOS/monica`、`allowed_origins` が release の ID だけになっている。
+5. 普段の Brave の side panel から 1 問訊く。答えが返り、答えている間は新しい Backend の子に `/Applications/Monica.app/Contents/MacOS/claude` が居る。19380 に別の process を立てても（release の desktop を終了させてから `bun -e 'Bun.serve({ port: 19380, fetch: (r) => (console.log(r.method, r.url), new Response()) })'` を起こし、desktop を起こし直す）、side panel の質問はその process に届かない。
 
 ### Brave での読み込みと reload（PR の確認でユーザーが行う）
 

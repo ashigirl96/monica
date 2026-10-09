@@ -14,6 +14,7 @@ import {
 } from '../contract.ts'
 import { type ChatClient, createChatStore } from './chat-store.ts'
 import type { CurrentPage } from './current-page.ts'
+import { BackendUnreachable } from './native-host.ts'
 
 const cleanups: (() => void)[] = []
 afterEach(() => {
@@ -733,6 +734,20 @@ test('a question the Backend did not take shows that the desktop was not reached
   expect(store.snapshot()).toMatchObject({ answering: false, unreachable: true, retryable: 0 })
 })
 
+// Native Messaging の host が Backend を引けないときと、起き直した Backend が古い chat の token を bearer の 401 で断ったとき。
+test.each([
+  ['the native host finds no Backend', new BackendUnreachable('the monica desktop is not running')],
+  ['the Backend refuses a stale chat token', new ORPCError('UNAUTHORIZED', { status: 401 })],
+])(
+  'a question sent when %s shows that the desktop was not reached, and puts up the banner',
+  async (_, error) => {
+    const { store, entry } = await refusedWith(error)
+
+    expect(entry.failure).toEqual({ line: 'monica の desktop に届きませんでした' })
+    expect(store.snapshot()).toMatchObject({ unreachable: true, retryable: 0 })
+  },
+)
+
 test('an answer whose Backend went away keeps the answer so far, says it was cut off, and puts up the banner', async () => {
   const { store, entry } = await failAfter([text('Tw')], new TypeError('network error'))
 
@@ -762,6 +777,13 @@ test('a claude that is not logged in tells how to log in', async () => {
   expect(entry.failure).toEqual({
     line: 'Claude Code に login していません。terminal で claude を起こし、/login してください',
   })
+})
+
+test('a claude without a login has been reached, though the Backend refused with 401 as for a stale chat token', async () => {
+  const { store, entry } = await refusedWith(declared('NOT_AUTHENTICATED'))
+
+  expect(entry.failure?.line).toStartWith('Claude Code に login していません')
+  expect(store.snapshot().unreachable).toBe(false)
 })
 
 /** その日の時刻を local の時刻帯で作る。 */

@@ -10,7 +10,8 @@ import type { contract } from './contract.ts'
 
 export type Client = ContractRouterClient<typeof contract>
 
-type Endpoint = { port: number; token: string; pid: number }
+/** chatToken は chat の procedure だけを開く token で、Native Messaging の host が Chrome Extension に渡す（ADR-0034）。 */
+type Endpoint = { port: number; token: string; chatToken?: string; pid: number }
 
 export class BackendNotRunning extends Error {
   constructor() {
@@ -48,7 +49,7 @@ export function connect(home: string, { retry = true }: { retry?: boolean } = {}
   return createORPCClient(link)
 }
 
-function liveEndpoint(home: string): Endpoint | null {
+export function liveEndpoint(home: string): Endpoint | null {
   let endpoint: Endpoint
   try {
     endpoint = JSON.parse(readFileSync(join(home, 'backend.json'), 'utf8'))

@@ -3,6 +3,7 @@ mod backend;
 mod cli_link;
 mod clipboard;
 mod locations;
+mod native_host;
 mod notification;
 mod orphan;
 mod ptyd;
@@ -68,6 +69,7 @@ pub fn run() {
             #[cfg(debug_assertions)]
             app.add_capability(include_str!("../capabilities-debug/mcp-bridge.json"))?;
             cli_link::link(&home);
+            native_host::install();
             notification::start(app.handle());
             app.state::<Supervisor>().start(app.handle());
             Ok(())

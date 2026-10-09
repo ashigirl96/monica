@@ -12,6 +12,7 @@ import {
   extensionDevOutput,
   isReleaseHome,
 } from './dev-instance'
+import { writeDevNativeHost } from './native-host'
 
 const extensionDir = join(import.meta.dir, '../apps/extension')
 const headless = process.argv.includes('--headless')
@@ -29,6 +30,8 @@ if (!existsSync(BRAVE)) {
   process.exit(1)
 }
 process.env.MONICA_HOME = home
+// Brave は env を Native Messaging の host に継がせ、host はこの worktree の CLI で MONICA_HOME の Backend を返す。
+process.env.MONICA_REPO = resolve(import.meta.dir, '..')
 mkdirSync(home, { recursive: true, mode: 0o700 })
 const profile = braveProfile(home)
 const devOutput = extensionDevOutput(home)
@@ -141,6 +144,7 @@ async function enableDeveloperMode(): Promise<void> {
 }
 
 async function start(): Promise<void> {
+  writeDevNativeHost()
   await enableDeveloperMode()
 
   // 前の dev の出力が残っていると、書き直される前の古い loader を Brave に読み込ませる。

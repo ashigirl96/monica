@@ -3,7 +3,12 @@ import { chmodSync, existsSync, mkdirSync, renameSync, unlinkSync, writeFileSync
 import { homedir } from 'node:os'
 import { join } from 'node:path'
 
-import { createChatAgent, migrations as chatMigrations } from '@monica/chat/server'
+import { MAX_ASK_BODY_BYTES } from '@monica/chat/contract'
+import {
+  router as chatRouter,
+  createChatAgent,
+  migrations as chatMigrations,
+} from '@monica/chat/server'
 import {
   createJobLedger,
   migrations as jobMigrations,
@@ -33,6 +38,7 @@ import { migrate } from 'drizzle-orm/bun-sqlite/migrator'
 import { Hono } from 'hono'
 import { bearerAuth } from 'hono/bearer-auth'
 import { cors } from 'hono/cors'
+import { timingSafeEqual } from 'hono/utils/buffer'
 
 import { listenBrowser } from './browser-listener.ts'
 import { loginShellPath } from './login-shell-path.ts'
@@ -100,28 +106,52 @@ const chatAgent = createChatAgent({
   ...(existsSync(cMaps) && { cMaps }),
 })
 
-const context = { db, workbenchLedger, taskLedger, jobLedger }
-const router = os
-  .$context<typeof context>()
-  .router({ workbench: workbenchRouter, task: taskRouter, job: jobRouter })
-const handler = new RPCHandler(router)
+const context = { db, workbenchLedger, taskLedger, jobLedger, chatAgent }
+const handler = new RPCHandler(
+  os
+    .$context<typeof context>()
+    .router({ workbench: workbenchRouter, task: taskRouter, job: jobRouter, chat: chatRouter }),
+)
+// Chrome Extension に渡す token は chat の router だけを持つ handler に通すので、path の書き方で workbench に届くことは無い。
+const chatHandler = new RPCHandler(os.$context<typeof context>().router({ chat: chatRouter }))
 
 const origins = ['tauri://localhost', 'http://tauri.localhost']
 // dev の webview は vite から読まれ、vite の port は home ごとに変わる。
 if (process.env.MONICA_DEV_URL) origins.push(new URL(process.env.MONICA_DEV_URL).origin)
 
 const token = crypto.randomUUID()
+// Native Messaging の host が Chrome Extension に渡す。side panel で script が動いても shell に打鍵する workbench.openTab に届かせない（ADR-0034）。
+const chatToken = crypto.randomUUID()
 const startedAt = new Date().toISOString()
-const app = new Hono()
+type TokenEnv = { Variables: { handler: typeof handler } }
+const app = new Hono<TokenEnv>()
 app.use('*', cors({ origin: origins }))
 app.get('/health', (c) => c.json({ name: 'monica-backend', pid: process.pid, startedAt }))
-app.use('/rpc/*', bearerAuth({ token }))
+app.use(
+  '/rpc/*',
+  bearerAuth<TokenEnv>({
+    async verifyToken(presented, c) {
+      if (await timingSafeEqual(token, presented)) c.set('handler', handler)
+      else if (await timingSafeEqual(chatToken, presented)) c.set('handler', chatHandler)
+      else return false
+      return true
+    },
+  }),
+)
 app.use('/rpc/*', async (c, next) => {
-  const { matched, response } = await handler.handle(c.req.raw, { prefix: '/rpc', context })
+  const { matched, response } = await c.var.handler.handle(c.req.raw, { prefix: '/rpc', context })
   if (matched) return c.newResponse(response.body, response)
+  if (c.var.handler === chatHandler) return c.text('Unauthorized', 401)
   return next()
 })
-const server = Bun.serve({ hostname: '127.0.0.1', port: 0, idleTimeout: 0, fetch: app.fetch })
+const server = Bun.serve({
+  hostname: '127.0.0.1',
+  port: 0,
+  idleTimeout: 0,
+  // workbench・task・job の input はどれもこれより小さいので、chat の上限を口全体に掛ける。
+  maxRequestBodySize: MAX_ASK_BODY_BYTES,
+  fetch: app.fetch,
+})
 
 // reconcile の前の Terminal Session を webview と CLI に読ませないため、endpoint は Workbench Ledger の start() の後に出す。
 // ptyd が起きないときに Backend ごと届かなくならないよう、待つのは 3 秒まで。
@@ -131,7 +161,7 @@ jobLedger.start()
 noteLedger.start()
 // compiled binary の --asset は entry の隣に置かれ、bun run の Backend には無い。
 const browserListener = listenBrowser(process.env.MONICA_BROWSER_PORT, {
-  context: { db, noteLedger, chatAgent },
+  context: { db, noteLedger },
   webDist: join(import.meta.dir, 'dist'),
 })
 if (!(await Promise.race([workbenchStarted, Bun.sleep(3000).then(() => false)]))) {
@@ -142,7 +172,7 @@ const endpointPath = join(home, 'backend.json')
 const endpointTmp = `${endpointPath}.${process.pid}.tmp`
 writeFileSync(
   endpointTmp,
-  `${JSON.stringify({ port: server.port, token, pid: process.pid, startedAt })}\n`,
+  `${JSON.stringify({ port: server.port, token, chatToken, pid: process.pid, startedAt })}\n`,
   { mode: 0o600 },
 )
 renameSync(endpointTmp, endpointPath)

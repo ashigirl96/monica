@@ -6,6 +6,7 @@ import { commands as taskCommands } from '@monica/task/cli'
 import { commands as workbenchCommands } from '@monica/workbench/cli'
 
 import { type Client, connect } from './backend.ts'
+import { answerChromeExtension, CHROME_EXTENSION_ORIGIN } from './native-host.ts'
 
 type Connect = (options?: { retry?: boolean }) => Client | null
 
@@ -18,6 +19,9 @@ type Command = {
 const home = process.env.MONICA_HOME || join(homedir(), '.monica')
 const argv = process.argv.slice(2)
 const deps: { connect: Connect } = { connect: (options) => connect(home, options) }
+
+// manifest の path は引数を持てないので、Native Messaging の host は Chromium が第 1 引数に渡す origin で見分ける。
+if (argv[0]?.startsWith(CHROME_EXTENSION_ORIGIN)) process.exit(await answerChromeExtension(home))
 
 // trpc-cli と contract の実体の import だけで compiled の起動が約 30ms 延びるので、手書き command はその前に振り分ける。
 const commands: readonly Command[] = [...workbenchCommands, ...taskCommands]

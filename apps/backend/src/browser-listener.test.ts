@@ -4,12 +4,9 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 
-import { type contract as chatContract, MAX_ASK_BODY_BYTES } from '@monica/chat/contract'
-import { createChatAgent } from '@monica/chat/server'
-import { type FakeScenario, untilFakeClaudesExit, writeFakeClaude } from '@monica/chat/testing'
 import type { contract } from '@monica/note/contract'
 import { createNoteLedger, migrations } from '@monica/note/server'
-import { createORPCClient, ORPCError } from '@orpc/client'
+import { createORPCClient } from '@orpc/client'
 import { RPCLink } from '@orpc/client/fetch'
 import type { ContractRouterClient } from '@orpc/contract'
 import { drizzle } from 'drizzle-orm/bun-sqlite'
@@ -33,27 +30,14 @@ function webDist(files: Record<string, string>): string {
   return dir
 }
 
-function listen(
-  port: number | undefined,
-  dist = webDist({ 'index.html': '<p>notes</p>' }),
-  claude: FakeScenario = 'answer',
-) {
+function listen(port: number | undefined, dist = webDist({ 'index.html': '<p>notes</p>' })) {
   const home = mkdtempSync(join(tmpdir(), 'monica-home-'))
   cleanups.push(() => rmSync(home, { recursive: true, force: true }))
   const db = drizzle(new Database(':memory:'))
   migrate(db, { migrationsFolder: migrations.folder, migrationsTable: migrations.table })
   const noteLedger = createNoteLedger({ db, home })
-  const chatAgent = createChatAgent({
-    home,
-    claudePath: writeFakeClaude(home, join(home, 'claude.jsonl'), claude),
-  })
-  // 偽の claude が居なくなるのを待ってから home を消す（docs/packages/dev-loop.md の「検査と CI」）。
-  cleanups.push(async () => {
-    chatAgent.stop()
-    await untilFakeClaudesExit(home)
-  })
   const listener = listenBrowser(port?.toString(), {
-    context: { db, noteLedger, chatAgent },
+    context: { db, noteLedger },
     webDist: dist,
   })
   if (listener) cleanups.push(() => listener.stop())
@@ -146,56 +130,6 @@ test('a GET for a path of the SPA gets index.html uncached, and a hashed asset i
   }
 })
 
-// 1 つの質問に添えるページの本文とスクリーンショットを受けられる上限で、それを超える body は読まずに断る。
-test('a body larger than the limit for a question is refused with 413', async () => {
-  const port = freePort()
-  listen(port)
-
-  const ask = (bytes: number) =>
-    fetch(`http://127.0.0.1:${port}/rpc/chat/ask`, {
-      method: 'POST',
-      headers: {
-        host: `127.0.0.1:${port}`,
-        'sec-fetch-site': 'none',
-        'sec-fetch-mode': 'cors',
-        'content-type': 'application/json',
-      },
-      body: new Uint8Array(bytes),
-    })
-
-  expect((await ask(MAX_ASK_BODY_BYTES + 1)).status).toBe(413)
-  // 上限の内側の壊れた body は oRPC まで届く。
-  expect((await ask(1024)).status).toBe(400)
-})
-
-// side panel は body が上限から 1MiB の余白を残すまで PDF を送る。RPCLink は File を multipart の別の part で送る。
-test('a PDF 1MiB under the body limit goes through RPCLink to chat.ask, and bytes that are no PDF come back as unparsable', async () => {
-  const port = freePort()
-  listen(port)
-  const client: ContractRouterClient<{ chat: typeof chatContract }> = createORPCClient(
-    new RPCLink({
-      url: `http://127.0.0.1:${port}/rpc`,
-      headers: { 'sec-fetch-site': 'none', 'sec-fetch-mode': 'cors' },
-    }),
-  )
-  const pdf = new File(['%PDF-', new Uint8Array(MAX_ASK_BODY_BYTES - 1024 * 1024 - 5)], 'big.pdf', {
-    type: 'application/pdf',
-  })
-
-  const answer = await client.chat.ask({
-    question: 'What does it say?',
-    page: { url: 'https://example.com/big.pdf', content: { kind: 'pdf', pdf } },
-    history: [],
-  })
-  const { value: snapshot } = await answer.next()
-  await answer.return(undefined)
-
-  expect(snapshot).toMatchObject({
-    type: 'snapshot',
-    page: { content: { kind: 'unreadable', reason: 'unparsable' } },
-  })
-})
-
 const PNG = Uint8Array.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 0x0d])
 
 test('an image uploaded through the browser listener is served back byte for byte and cached for good', async () => {
@@ -241,42 +175,6 @@ test('a GET for an image whose name is not one the Note Ledger makes is not foun
     expect([path, response.status]).toEqual([path, 404])
     expect([path, await response.text()]).not.toEqual([path, 'the DB'])
   }
-})
-
-// 答えの途中の失敗は、流した text の後に、宣言した error の code と data で Chrome Extension に届く。
-test('a failure after some text of the answer reaches an RPCLink client after that text as the declared error with its data', async () => {
-  const port = freePort()
-  listen(port, undefined, 'max-output-tokens')
-  const client: ContractRouterClient<{ chat: typeof chatContract }> = createORPCClient(
-    new RPCLink({
-      url: `http://127.0.0.1:${port}/rpc`,
-      headers: { 'sec-fetch-site': 'none', 'sec-fetch-mode': 'cors' },
-    }),
-  )
-  const texts: string[] = []
-
-  const failing = (async () => {
-    for await (const event of await client.chat.ask({
-      question: 'What is 1+1?',
-      page: { content: { kind: 'unreadable', reason: 'restricted' } },
-      history: [],
-    })) {
-      if (event.type === 'text') texts.push(event.text)
-    }
-  })()
-
-  const error = await failing.then(
-    () => undefined,
-    (e: unknown) => e,
-  )
-  expect(texts).toEqual(['Two', ' is'])
-  expect(error).toBeInstanceOf(ORPCError)
-  expect(error).toMatchObject({
-    code: 'AGENT_FAILED',
-    status: 500,
-    defined: true,
-    data: { detail: expect.stringContaining('output token maximum') },
-  })
 })
 
 // headless で起こした dev の Backend が release の 19380 を取らないよう、env が無ければ既定の port にも倒さない。

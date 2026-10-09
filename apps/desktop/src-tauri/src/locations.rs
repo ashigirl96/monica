@@ -59,6 +59,21 @@ pub fn user_cli_link() -> Option<PathBuf> {
     (!cfg!(debug_assertions)).then(|| user_home().join(".local/bin/monica"))
 }
 
+pub struct NativeHost {
+    pub manifest_dir: PathBuf,
+    pub host: PathBuf,
+}
+
+/// Brave は user-data-dir に依らず Google Chrome の場所の manifest だけを読む。
+/// dev の manifest は `bun run extension` が書くので、debug の Shell は release の host を dev の CLI で上書きしないよう返さない。
+pub fn native_host() -> Option<NativeHost> {
+    (!cfg!(debug_assertions)).then(|| NativeHost {
+        manifest_dir: user_home()
+            .join("Library/Application Support/Google/Chrome/NativeMessagingHosts"),
+        host: bundled_binary("monica"),
+    })
+}
+
 fn bundled_binary(name: &str) -> PathBuf {
     let exe = std::env::current_exe().expect("current_exe is readable");
     exe.parent().expect("exe has a directory").join(name)

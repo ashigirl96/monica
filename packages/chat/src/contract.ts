@@ -1,7 +1,7 @@
 import { eventIterator, oc } from '@orpc/contract'
 import { z } from 'zod'
 
-// ブラウザの口にだけ載せ、CLI には出さないので、meta に cli を持たない。
+// token の口に載るが、CLI の contract には入れず CLI に出さないので、meta に cli を持たない。
 const meta = oc.$meta<{ description?: string }>({})
 
 export const MAX_ASK_BODY_BYTES = 50 * 1024 * 1024

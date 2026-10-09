@@ -1,8 +1,6 @@
 import { existsSync } from 'node:fs'
 import { join } from 'node:path'
 
-import { MAX_ASK_BODY_BYTES } from '@monica/chat/contract'
-import { router as chatRouter } from '@monica/chat/server'
 import { IMAGE_URL_PREFIX, NOTES_HOSTNAMES } from '@monica/note/contract'
 import { router as noteRouter } from '@monica/note/server'
 import { type InferRouterInitialContext, os } from '@orpc/server'
@@ -11,8 +9,7 @@ import { type Context, Hono } from 'hono'
 
 const IMMUTABLE = 'public, max-age=31536000, immutable'
 
-type BrowserContext = InferRouterInitialContext<typeof noteRouter> &
-  InferRouterInitialContext<typeof chatRouter>
+type BrowserContext = InferRouterInitialContext<typeof noteRouter>
 
 type Deps = {
   context: BrowserContext
@@ -27,9 +24,8 @@ export function listenBrowser(
   // DNS rebinding で別の名前から届いた request を止める。
   const hosts = new Set(NOTES_HOSTNAMES.map((name) => `${name}:${port}`))
   // openTab の input は shell に打鍵されるので、token の無い口に workbench・task・job を載せると任意のコマンドになる（ADR-0017）。
-  const handler = new RPCHandler(
-    os.$context<BrowserContext>().router({ note: noteRouter, chat: chatRouter }),
-  )
+  // chat は Current Page を送るので、port を先に握った別の process に渡さないよう token の口に載せる（ADR-0034）。
+  const handler = new RPCHandler(os.$context<BrowserContext>().router({ note: noteRouter }))
 
   const app = new Hono()
   app.use('*', async (c, next) => {
@@ -55,7 +51,6 @@ export function listenBrowser(
           hostname,
           port: Number(port),
           idleTimeout: 0,
-          maxRequestBodySize: MAX_ASK_BODY_BYTES,
           fetch: app.fetch,
         }),
       )
