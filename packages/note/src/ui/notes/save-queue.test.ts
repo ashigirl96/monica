@@ -150,6 +150,23 @@ test('a save on its way to a discarded Note is not retried when it fails', async
   expect(clock.live()).toEqual([])
 })
 
+test('a CONFLICT that comes back for a discarded Note is not listed and leaves nothing unsaved', async () => {
+  const { queue, answers } = setup()
+  const sending = Promise.withResolvers<{ updatedAt: Date }>()
+  answers.push(() => sending.promise)
+
+  queue.schedule('note-1', draft('a'), 'Untitled')
+  const flushed = queue.flush()
+  await Bun.sleep(0)
+  queue.discard('note-1')
+  sending.reject(new ORPCError('CONFLICT', { message: 'stale' }))
+  await flushed
+
+  expect(queue.conflicts()).toEqual([])
+  expect(queue.hasUnsaved('note-1')).toBe(false)
+  expect(queue.wouldLoseOnLeave(false)).toBe(false)
+})
+
 test('an edit made after the Note was discarded is retried when it fails, since the Note was opened again', async () => {
   const { queue, answers, clock } = setup()
   answers.push(() => Promise.reject(new TypeError('Failed to fetch')))

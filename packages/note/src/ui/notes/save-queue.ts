@@ -161,6 +161,8 @@ export class SaveQueue {
         return this.#send(id, draft, keepalive)
           .then((version) => this.setBase(id, version.updatedAt))
           .catch((e: unknown) => {
+            // 消した Note は競合にも未保存にも残さない。外で戻して開き直すと、古い draft が出るため。
+            if (this.#discarded.has(id)) return
             if (e instanceof ORPCError && e.code === 'CONFLICT') {
               // 基準版が古いので同じ payload を投げ直しても永久に CONFLICT。pending へ戻して
               // リトライさせず、競合として保持したうえで通知とバナーに渡す。
@@ -170,7 +172,7 @@ export class SaveQueue {
               this.#setConflicts(upsertConflict(this.#conflicts, { id, label }))
               return
             }
-            if (!this.#discarded.has(id) && !this.#pending.has(id)) {
+            if (!this.#pending.has(id)) {
               this.#pending.set(id, draft)
             }
             failures[id] = e instanceof Error ? e.message : 'Failed to save'
