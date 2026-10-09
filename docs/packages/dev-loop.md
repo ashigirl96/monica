@@ -75,7 +75,7 @@
 - テストは新しく書いた実行 file を exec する回数を減らす。macOS は新しく書いた実行 file を初めて exec するたびに検査を挟み、1 回 0.1〜1 秒かかる。検査は system で 1 列に並ぶので、`--parallel` の worker や同時に流した検査どうしで待ち合い、5 秒の timeout と経過時間の assert を落とす。exec 済みの file を指す symlink と、exec 済みの file を同じ inode のまま書き直したものは数 ms で済む。
   - テストの helper が書く偽の実行 file は、repo に置いた 1 つを symlink で指すか（`writeFakeClaude`）、test file で 1 つを書いて中身を書き直して使い回す（`github.test.ts` の偽の `gh`、`login-shell-path.test.ts` の偽の shell）。test file で持つ一時 directory は `afterAll` で消す。
   - 本番のコードが書いて直に exec する file（Tab の claude の wrapper、checkout した `setup.sh`、git hook）は、その振る舞いと EACCES を見るテストでは直に exec する。setup を見ないテストの Repo には `setup.sh` を置かない。
-  - timeout で打ち切られた test は `finally` を飛ばすので、一時 directory の片付けを `finally` に書かない（`scripts/oxlint/lint-probes.ts` は `afterAll` で消す）。
+  - timeout で打ち切られた test は `finally` を飛ばすので、一時 directory は `afterAll` で消す。`afterAll` は test file に書く。bun test は同じ process の test file どうしで module を使い回すので、共有の module の top level で登録した hook は最初に import した file にしか付かない。`scripts/oxlint/lint-probes.ts` は片付けの関数を出し、呼び手の test file が `afterAll(cleanUpLintProbes)` で登録する。
 - 独自の lint rule は `scripts/oxlint/monica.js` にあり、`.oxlintrc.json` の `jsPlugins` が読む。
 - oxlint は型を見る rule も流す。on にしているのは `.oxlintrc.json` の `options.typeAware` で、型は `oxlint-tsgolint` が読む。
 - Rust の検査は macOS の runner で流す。Tauri の crate が macOS の system library を要るため。
