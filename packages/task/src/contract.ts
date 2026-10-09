@@ -111,14 +111,21 @@ export const PromptKindSchema = z
     'what the Run is started with; tackle leaves the prompt out for /tackle, implement-spec sends /implement-spec #<n> for an Issue with open sub-issues, triage sends /triage #<n>, and wayfinder sends /wayfinder <n> for a map or /wayfinder <map> <n> for an Issue under one',
   )
 
-export const RunButtonSchema = z.object({
-  kind: PromptKindSchema,
-  run: z
-    .enum(['new', 'resume', 'running'])
-    .describe(
-      'new starts a Run, resume resumes the ended one sending no prompt, running is a live Run and cannot be pressed',
-    ),
-})
+export const RunButtonSchema = z.union([
+  z.object({
+    kind: PromptKindSchema,
+    run: z
+      .enum(['new', 'resume', 'running'])
+      .describe(
+        'new starts a Run, resume resumes the ended one sending no prompt, running is a live Run and cannot be pressed',
+      ),
+  }),
+  z.object({
+    run: z
+      .literal('reopen')
+      .describe('the Task is closed; pressing it reopens the Task and starts no Run'),
+  }),
+])
 
 export const RunButtonsOutputSchema = z.object({
   buttons: z.array(
@@ -270,6 +277,13 @@ export const contract = {
     .errors(runErrors)
     .input(z.object({ ref }))
     .output(RunOutputSchema),
+  reopenFromButton: meta
+    .meta({
+      description:
+        'Reopen the closed Task of an Issue whose Run Button is a reopen one now, reading the Issue from GitHub anew, or refuse with PRECONDITION_FAILED and the reason when it is not',
+    })
+    .input(z.object({ ref }))
+    .output(ReopenOutputSchema),
   current: meta
     .meta({ description: 'Show the Task of the Tab this runs in', cli: true })
     .input(z.object({ terminalSessionId: z.string().optional() }))

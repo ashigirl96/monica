@@ -2,7 +2,15 @@ import type { Db } from '@monica/workbench/server'
 import { ORPCError, type ORPCErrorConstructorMap } from '@orpc/server'
 
 import type { BenchDeps } from './bench.ts'
-import type { PromptKind, RunButton, RunButtonsOutput, RunOutput, runErrors } from './contract.ts'
+import { reopenTask } from './close.ts'
+import type {
+  PromptKind,
+  ReopenOutput,
+  RunButton,
+  RunButtonsOutput,
+  RunOutput,
+  runErrors,
+} from './contract.ts'
 import { isLinkedIssue } from './copy.ts'
 import { type GitHubIssue, type LinkedIssue, oneLine } from './github.ts'
 import { taskIfTracked } from './open-task.ts'
@@ -16,13 +24,16 @@ const READ_TIMEOUT_MS = 10_000
 /** ボタンを決める材料。Issue は GitHub の今の答えで、Task は track 済みのときだけある。 */
 type Seen = {
   issue: GitHubIssue
-  task: { closed: boolean; run: RunButton['run'] } | null
+  task: { ref: string; closed: boolean; run: ButtonRun } | null
   /** 親が spec で live な Run を持つとき、その親。 */
   runningSpec: IssueRef | null
 }
 
+type ButtonRun = Exclude<RunButton['run'], 'reopen'>
+
 type Verdict =
   | { type: 'button'; kind: PromptKind }
+  | { type: 'reopen'; message: string; taskRef: string }
   | { type: 'blocked'; message: string; blockers: string[] }
   | { type: 'none'; message: string }
 
@@ -52,7 +63,11 @@ const rules: ((seen: Seen) => Verdict | undefined)[] = [
     issue.state === 'closed' ? noButton(`${formatRef(issue)} is a closed Issue`) : undefined,
   ({ issue, task }) =>
     task?.closed
-      ? noButton(`${formatRef(issue)} is a closed Task; reopen it to run it`)
+      ? {
+          type: 'reopen',
+          message: `${formatRef(issue)} is a closed Task; reopen it to run it`,
+          taskRef: task.ref,
+        }
       : undefined,
   ({ issue }) => {
     const blockers = issue.blockers.filter((b) => b.state === 'open').map(formatRef)
@@ -126,9 +141,14 @@ export async function runButtons(deps: SyncDeps, refs: string[]): Promise<RunBut
       if (!issue) return { ref, button: null, reason: null }
       const seen = seenOf(deps.db, issue)
       const verdict = verdictOf(seen)
-      return verdict.type === 'button'
-        ? { ref, button: { kind: verdict.kind, run: seen.task?.run ?? 'new' }, reason: null }
-        : { ref, button: null, reason: verdict.message }
+      switch (verdict.type) {
+        case 'button':
+          return { ref, button: { kind: verdict.kind, run: seen.task?.run ?? 'new' }, reason: null }
+        case 'reopen':
+          return { ref, button: { run: 'reopen' as const }, reason: null }
+        default:
+          return { ref, button: null, reason: verdict.message }
+      }
     }),
   }
 }
@@ -138,22 +158,13 @@ export async function runFromButton(
   ref: string,
   errors: ORPCErrorConstructorMap<typeof runErrors>,
 ): Promise<RunOutput> {
-  const parsed = parseRef(ref)
-  const { issues, failures } = await readIssues(deps, [parsed])
-  const issue = issues.get(key(parsed))
-  if (!issue) {
-    if (failures.length > 0) {
-      throw new ORPCError('BAD_GATEWAY', {
-        message: `could not read ${formatRef(parsed)} from GitHub: ${failures.join('; ')}`,
-      })
-    }
-    throw new ORPCError('NOT_FOUND', { message: `GitHub did not return ${formatRef(parsed)}` })
-  }
+  const issue = await readIssue(deps, ref)
   const seen = seenOf(deps.db, issue)
   const verdict = verdictOf(seen)
   switch (verdict.type) {
     case 'blocked':
       throw errors.BLOCKED({ message: verdict.message, data: { blockers: verdict.blockers } })
+    case 'reopen':
     case 'none':
       throw refused(verdict.message)
   }
@@ -169,6 +180,45 @@ export async function runFromButton(
   })
 }
 
+export async function reopenFromButton(
+  deps: SyncDeps & Pick<BenchDeps, 'reservations'>,
+  ref: string,
+): Promise<ReopenOutput> {
+  const issue = await readIssue(deps, ref)
+  const verdict = verdictOf(seenOf(deps.db, issue))
+  switch (verdict.type) {
+    // Task Ledger の写しは次の sync まで repo の改名前の名前を持つので、頼まれた ref でなく node ID で引き当てた Task の ref で reopen する。
+    case 'reopen':
+      return reopenTask(
+        deps,
+        { ref: verdict.taskRef },
+        {
+          // reopen の sync が判定の後に closed になった Issue を写すので、写しで見直す。
+          recheck({ issue: copied }) {
+            if (copied.state === 'closed') throw refused(`${formatRef(copied)} is a closed Issue`)
+          },
+        },
+      )
+    case 'button':
+      throw refused(`${formatRef(issue)} is not a closed Task`)
+    default:
+      throw refused(verdict.message)
+  }
+}
+
+async function readIssue(deps: SyncDeps, ref: string): Promise<GitHubIssue> {
+  const parsed = parseRef(ref)
+  const { issues, failures } = await readIssues(deps, [parsed])
+  const issue = issues.get(key(parsed))
+  if (issue) return issue
+  if (failures.length > 0) {
+    throw new ORPCError('BAD_GATEWAY', {
+      message: `could not read ${formatRef(parsed)} from GitHub: ${failures.join('; ')}`,
+    })
+  }
+  throw new ORPCError('NOT_FOUND', { message: `GitHub did not return ${formatRef(parsed)}` })
+}
+
 const refused = (message: string) => new ORPCError('PRECONDITION_FAILED', { message })
 
 function seenOf(db: Db, issue: GitHubIssue): Seen {
@@ -176,7 +226,13 @@ function seenOf(db: Db, issue: GitHubIssue): Seen {
   const { parent } = issue
   return {
     issue,
-    task: tracked ? { closed: tracked.task.closedAt !== null, run: runOf(db, tracked) } : null,
+    task: tracked
+      ? {
+          ref: formatRef(tracked.issue),
+          closed: tracked.task.closedAt !== null,
+          run: runOf(db, tracked),
+        }
+      : null,
     runningSpec: parent && isSpec(parent) && hasLiveRun(db, parent) ? parent : null,
   }
 }
@@ -193,7 +249,7 @@ const liveRunCount = (db: Pick<Db, 'select'>, taskIssueId: number) =>
 function runOf(
   db: Db,
   { issue: { id }, bench }: NonNullable<ReturnType<typeof taskIfTracked>>,
-): RunButton['run'] {
+): ButtonRun {
   if (!bench) return 'new'
   if (liveRunCount(db, id) > 0) return 'running'
   return resumableRunOf(db, id, bench) ? 'resume' : 'new'

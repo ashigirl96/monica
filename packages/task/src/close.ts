@@ -6,7 +6,7 @@ import { and, eq, ne, type SQL } from 'drizzle-orm'
 import type { Bench, BenchDeps, Issue } from './bench.ts'
 import type { CloseOutput, CloseRefusal, closeErrors, ReopenOutput } from './contract.ts'
 import { isIssue } from './copy.ts'
-import { findTrackedTask, refuseOpen } from './open-task.ts'
+import { type FoundTask, findTrackedTask, refuseOpen } from './open-task.ts'
 import { messageOf } from './prepare.ts'
 import { formatRef, parseRef } from './ref.ts'
 import { describeRefusal } from './refusal.ts'
@@ -112,6 +112,7 @@ function tabIn(db: Pick<Db, 'select'>, runspaceId: string, terminalSessionId: st
 export async function reopenTask(
   deps: SyncDeps & Pick<BenchDeps, 'reservations'>,
   input: { ref: string },
+  { recheck }: { recheck?: (found: FoundTask) => void } = {},
 ): Promise<ReopenOutput> {
   const asked = parseRef(input.ref)
   const tracked = refuseOpen(findTrackedTask(deps.db, isIssue(asked), formatRef(asked)))
@@ -120,6 +121,7 @@ export async function reopenTask(
     tracked.issue.id,
     formatRef(tracked.issue),
     (tx, found) => {
+      recheck?.(found)
       tx.update(task).set({ closedAt: null }).where(eq(task.issueId, found.issue.id)).run()
       return found.issue
     },

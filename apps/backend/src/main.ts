@@ -112,11 +112,15 @@ const handler = new RPCHandler(
     .$context<typeof context>()
     .router({ workbench: workbenchRouter, task: taskRouter, job: jobRouter, chat: chatRouter }),
 )
-// Chrome Extension に渡す token は chat と prompt を受け取らない task の 2 つだけを持つ handler に通すので、path の書き方で workbench や task.run に届くことは無い（ADR-0035）。
+// Chrome Extension に渡す token は chat と、prompt を受け取らない task の procedure だけを持つ handler に通すので、path の書き方で workbench や task.run に届くことは無い（ADR-0035）。
 const extensionHandler = new RPCHandler(
   os.$context<typeof context>().router({
     chat: chatRouter,
-    task: { runButtons: taskRouter.runButtons, runFromButton: taskRouter.runFromButton },
+    task: {
+      runButtons: taskRouter.runButtons,
+      runFromButton: taskRouter.runFromButton,
+      reopenFromButton: taskRouter.reopenFromButton,
+    },
   }),
 )
 

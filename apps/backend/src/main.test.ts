@@ -150,7 +150,7 @@ test('the token listener carries workbench, task, job and chat but not note, and
 })
 
 // Chrome Extension で script が動いても、任意の prompt を打つ task.run や shell に打鍵する workbench.openTab には届かせない（ADR-0017・0034・0035）。
-test('the Chrome Extension token in backend.json opens only chat and the two Run button procedures of task on the token listener, the full token opens everything, and no token opens nothing', async () => {
+test('the Chrome Extension token in backend.json opens only chat and the Run Button procedures of task on the token listener, the full token opens everything, and no token opens nothing', async () => {
   const backend = await startBackend(freePort())
   const endpoint = endpointFile(backend.home)
   const viaExtensionToken = { port: backend.port, token: endpoint.extensionToken }
@@ -163,7 +163,7 @@ test('the Chrome Extension token in backend.json opens only chat and the two Run
   expect((await viaToken(viaExtensionToken, 'chat/ask', INVALID_QUESTION)).status).toBe(400)
   expect((await viaToken({ port: backend.port }, 'chat/ask', INVALID_QUESTION)).status).toBe(401)
   // 不正な input は handler の前で 400 になるので、本物の GitHub に届かずに口に載っているかを見られる。
-  for (const path of ['task/runButtons', 'task/runFromButton']) {
+  for (const path of ['task/runButtons', 'task/runFromButton', 'task/reopenFromButton']) {
     expect([path, (await viaToken(viaExtensionToken, path, { ref: 1, refs: 1 })).status]).toEqual([
       path,
       400,

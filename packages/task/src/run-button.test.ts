@@ -114,14 +114,104 @@ test('telling the buttons tracks no Issue', async () => {
   expect(db.select().from(task).all()).toEqual([])
 })
 
-test('a closed Task gets no button', async () => {
+test('a closed Task gets a reopen button, running from it is refused, and once reopened it gets its Run button back', async () => {
   const { github, client } = setup()
   github.issue(ref, { title: 'Ship it', labels: ['ready-for-agent'] })
   await client.track({ ref })
   await client.close({ ref })
 
   expect(await client.runButtons({ refs: [ref] })).toEqual({
-    buttons: [{ ref, button: null, reason: `${ref} is a closed Task; reopen it to run it` }],
+    buttons: [{ ref, button: { run: 'reopen' }, reason: null }],
+  })
+  const refusal = await failure(client.runFromButton({ ref }))
+  expect([refusal.code, refusal.message]).toEqual([
+    'PRECONDITION_FAILED',
+    `${ref} is a closed Task; reopen it to run it`,
+  ])
+
+  await client.reopenFromButton({ ref })
+  expect(await client.runButtons({ refs: [ref] })).toEqual({
+    buttons: [{ ref, button: { kind: 'tackle', run: 'new' }, reason: null }],
+  })
+})
+
+test('reopening from a button reads the Issue anew and refuses a Task whose Issue was closed since, leaving it closed', async () => {
+  const { github, client } = setup()
+  github.issue(ref, { title: 'Ship it', labels: ['ready-for-agent'] })
+  await client.track({ ref })
+  await client.close({ ref })
+  github.issue(ref, { title: 'Ship it', state: 'closed', labels: ['ready-for-agent'] })
+
+  const refusal = await failure(client.reopenFromButton({ ref }))
+  expect([refusal.code, refusal.message]).toEqual([
+    'PRECONDITION_FAILED',
+    `${ref} is a closed Issue`,
+  ])
+  expect((await client.list({ closed: true })).tasks.map((t) => t.ref)).toEqual([ref])
+})
+
+test('a closed Task whose repo was renamed before any sync gets its reopen button by the new name, and reopens from it', async () => {
+  const { github, client } = setup()
+  github.issue(ref, { title: 'Ship it', labels: ['ready-for-agent'] })
+  await client.track({ ref })
+  await client.close({ ref })
+  github.renameRepo('acme/app', 'acme/renamed')
+  const renamed = 'acme/renamed#12'
+
+  expect(await client.runButtons({ refs: [renamed] })).toEqual({
+    buttons: [{ ref: renamed, button: { run: 'reopen' }, reason: null }],
+  })
+  expect((await client.reopenFromButton({ ref: renamed })).ref).toBe(renamed)
+  expect(await client.runButtons({ refs: [renamed] })).toEqual({
+    buttons: [{ ref: renamed, button: { kind: 'tackle', run: 'new' }, reason: null }],
+  })
+})
+
+test('reopening from a button refuses a Task whose Issue is closed between the button and the sync of reopen, leaving it closed', async () => {
+  const fixture = setup()
+  fixture.github.issue(ref, { title: 'Ship it', labels: ['ready-for-agent'] })
+  await fixture.client.track({ ref })
+  await fixture.client.close({ ref })
+
+  const releaseRead = fixture.github.hold()
+  const before = fixture.github.requests.length
+  const reopening = failure(fixture.client.reopenFromButton({ ref }))
+  await fixture.github.received(before + 1)
+  releaseRead()
+  const releaseSync = fixture.github.hold()
+  await fixture.github.received(before + 2)
+  fixture.github.issue(ref, { title: 'Ship it', state: 'closed', labels: ['ready-for-agent'] })
+  releaseSync()
+
+  const refusal = await reopening
+  expect([refusal.code, refusal.message]).toEqual([
+    'PRECONDITION_FAILED',
+    `${ref} is a closed Issue`,
+  ])
+  expect((await fixture.client.list({ closed: true })).tasks.map((t) => t.ref)).toEqual([ref])
+})
+
+test('reopening from a button refuses an open Task', async () => {
+  const { github, client } = setup()
+  github.issue(ref, { title: 'Ship it', labels: ['ready-for-agent'] })
+  await client.track({ ref })
+
+  const refusal = await failure(client.reopenFromButton({ ref }))
+  expect([refusal.code, refusal.message]).toEqual([
+    'PRECONDITION_FAILED',
+    `${ref} is not a closed Task`,
+  ])
+})
+
+test('a closed Task of a closed Issue gets no reopen button', async () => {
+  const { github, client } = setup()
+  github.issue(ref, { title: 'Ship it', labels: ['ready-for-agent'] })
+  await client.track({ ref })
+  await client.close({ ref })
+  github.issue(ref, { title: 'Ship it', state: 'closed', labels: ['ready-for-agent'] })
+
+  expect(await client.runButtons({ refs: [ref] })).toEqual({
+    buttons: [{ ref, button: null, reason: `${ref} is a closed Issue` }],
   })
 })
 

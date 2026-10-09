@@ -8,25 +8,32 @@ import type { ContractRouterClient } from '@orpc/contract'
 export type RunButtonRequest =
   | { type: 'monica.runButtons'; refs: string[] }
   | { type: 'monica.runFromButton'; ref: string }
+  | { type: 'monica.reopenFromButton'; ref: string }
 
 /** null なら Backend に届かなかった。 */
 export type RunButtonsReply = RunButtonsOutput | null
 
-export type RunFromButtonReply = { ran: true } | { ran: false; reason: string }
+export type PressReply = { accepted: true } | { accepted: false; reason: string }
 
 type Client = ContractRouterClient<{
-  task: Pick<typeof taskContract, 'runButtons' | 'runFromButton'>
+  task: Pick<typeof taskContract, 'runButtons' | 'runFromButton' | 'reopenFromButton'>
 }>
 
 /** 自分宛てでない message には undefined を返し、他の listener に任せる。 */
 export function relayRunButton(
   host: string,
   message: unknown,
-): Promise<RunButtonsReply | RunFromButtonReply> | undefined {
+): Promise<RunButtonsReply | PressReply> | undefined {
   if (!isRequest(message)) return undefined
   const client: Client = createORPCClient(new RPCLink(viaNativeHost(host)))
-  if (message.type === 'monica.runButtons') return tellButtons(client, message.refs)
-  return runFromButton(client, message.ref)
+  switch (message.type) {
+    case 'monica.runButtons':
+      return tellButtons(client, message.refs)
+    case 'monica.runFromButton':
+      return press(() => client.task.runFromButton({ ref: message.ref }))
+    case 'monica.reopenFromButton':
+      return press(() => client.task.reopenFromButton({ ref: message.ref }))
+  }
 }
 
 // host が無い・Backend が居ない・古い token は、どれも desktop を起こせば直るので、まとめて null にする。
@@ -38,13 +45,13 @@ async function tellButtons(client: Client, refs: string[]): Promise<RunButtonsRe
   }
 }
 
-async function runFromButton(client: Client, ref: string): Promise<RunFromButtonReply> {
+async function press(call: () => Promise<unknown>): Promise<PressReply> {
   try {
-    await client.task.runFromButton({ ref })
-    return { ran: true }
+    await call()
+    return { accepted: true }
   } catch (error) {
-    if (error instanceof ORPCError) return { ran: false, reason: error.message }
-    return { ran: false, reason: 'the monica desktop is not running' }
+    if (error instanceof ORPCError) return { accepted: false, reason: error.message }
+    return { accepted: false, reason: 'the monica desktop is not running' }
   }
 }
 
@@ -53,7 +60,7 @@ function isRequest(message: unknown): message is RunButtonRequest {
   if (message.type === 'monica.runButtons') {
     return 'refs' in message && Array.isArray(message.refs)
   }
-  if (message.type === 'monica.runFromButton') {
+  if (message.type === 'monica.runFromButton' || message.type === 'monica.reopenFromButton') {
     return 'ref' in message && typeof message.ref === 'string'
   }
   return false
