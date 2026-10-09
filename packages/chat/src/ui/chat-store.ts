@@ -28,12 +28,24 @@ export type ChatEntry = {
 // oRPC が input を包む分の余白。
 const BODY_MARGIN_BYTES = 1024 * 1024
 
+// File は JSON.stringify で {} になり、multipart の別の part で送られる。
+const jsonBytes = (value: unknown) => new TextEncoder().encode(JSON.stringify(value)).byteLength
+
 /**
- * body の上限を超える input は、今のページの HTML と選択範囲を外し、大きすぎて読めなかったことにする。履歴は削らない。
+ * 今のページの PDF に残る bytes。body の上限から、PDF の他の input と余白を引く。
+ * 今のページのスクリーンショットは読むのと並べて撮るので数えず、送る前の withinBodyLimit が数える。
+ */
+function pdfBudget(question: string, history: readonly Turn[]): number {
+  return MAX_ASK_BODY_BYTES - BODY_MARGIN_BYTES - jsonBytes({ question, history })
+}
+
+/**
+ * body の上限を超える input は、今のページの HTML・PDF・選択範囲を外し、大きすぎて読めなかったことにする。履歴は削らない。
  * ユーザーが添えると決めたスクリーンショットは残す。
  */
 function withinBodyLimit(input: AskInput): AskInput {
-  const bytes = new TextEncoder().encode(JSON.stringify(input)).byteLength
+  const { content } = input.page
+  const bytes = jsonBytes(input) + (content.kind === 'pdf' ? content.pdf.size : 0)
   if (bytes + BODY_MARGIN_BYTES <= MAX_ASK_BODY_BYTES) return input
   const { url, title, screenshot, screenshotFailed } = input.page
   return {
@@ -58,8 +70,8 @@ export type ChatSnapshot = {
   withScreenshot: boolean
 }
 
-/** 送る時に Current Page を読む。screenshot なら、その Browser Tab の表示領域も撮る。 */
-export type ReadPage = (options: { screenshot: boolean }) => Promise<Page>
+/** 送る時に Current Page を読む。screenshot なら、その Browser Tab の表示領域も撮る。PDF は maxPdfBytes を超えたら読むのをやめる。 */
+export type ReadPage = (options: { screenshot: boolean; maxPdfBytes: number }) => Promise<Page>
 
 /** side panel の Chat。document の memory にだけあり、どこにも残さない（ADR-0030・0031）。 */
 export type ChatStore = {
@@ -151,7 +163,10 @@ export function createChatStore(client: ChatClient): ChatStore {
       answering = controller
       const id = nextId++
       // captureVisibleTab は送る操作の user gesture の中で呼ばないと quota にかかるので、await を挟まずに読み始める。
-      const reading = readPage({ screenshot: withScreenshot })
+      const reading = readPage({
+        screenshot: withScreenshot,
+        maxPdfBytes: pdfBudget(question, history),
+      })
       withScreenshot = false
       publish([...entries, { id, question, answer: '', status: 'waiting' }])
       void answer(id, question, controller, reading)

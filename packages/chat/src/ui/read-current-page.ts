@@ -10,9 +10,12 @@ import { takeScreenshot } from './screenshot.ts'
  */
 export async function readCurrentPage(
   watch: CurrentPageWatch,
-  { screenshot }: { screenshot: boolean },
+  { screenshot, maxPdfBytes }: { screenshot: boolean; maxPdfBytes: number },
 ): Promise<Page> {
   const taking = screenshot ? takeScreenshot(watch.windowId()) : undefined
-  const [page, taken] = await Promise.all([watch.read().then(readPage), taking])
+  const [page, taken] = await Promise.all([
+    watch.read().then((tab) => readPage(tab, maxPdfBytes)),
+    taking,
+  ])
   return { ...page, ...taken }
 }

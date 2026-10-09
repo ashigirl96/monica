@@ -53,7 +53,7 @@ test('a page without text gives an empty text', async () => {
     [],
   )
 
-  expect(snapshot.content).toEqual({ kind: 'text', text: '', truncated: false })
+  expect(snapshot.content).toEqual({ kind: 'text', source: 'html', text: '', truncated: false })
 })
 
 const paragraph = (n: number) =>
@@ -93,7 +93,7 @@ test('a selection within the limit goes as it is', async () => {
 const turn = (page: PageSnapshot, n: number) => ({ question: `Q${n}?`, answer: `A${n}.`, page })
 const textPage = (url: string, text: string): PageSnapshot => ({
   url,
-  content: { kind: 'text', text, truncated: false },
+  content: { kind: 'text', source: 'html', text, truncated: false },
 })
 
 test('a page whose URL, apart from the hash, and text match an earlier one points at the newest such turn instead of carrying the text', async () => {

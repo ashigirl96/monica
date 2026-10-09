@@ -1,5 +1,5 @@
 import { Database } from 'bun:sqlite'
-import { chmodSync, mkdirSync, renameSync, unlinkSync, writeFileSync } from 'node:fs'
+import { chmodSync, existsSync, mkdirSync, renameSync, unlinkSync, writeFileSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
 
@@ -88,8 +88,16 @@ const jobLedger = createJobLedger({
   home,
   systemJobs: [...taskSystemJobs(taskLedger), ...noteSystemJobs(noteLedger)],
 })
-// MONICA_PTYD_PATH と違って検めない。claude を起こせなくても Workbench は動き、失敗は Chat の答えに出る。
-const chatAgent = createChatAgent({ home, claudePath: process.env.MONICA_CLAUDE_PATH })
+// compiled binary は --asset の cmaps を entry の隣に持ち、bun run の Backend は packages/chat が node_modules から解く。
+const cMaps = join(import.meta.dir, 'cmaps')
+const chatAgent = createChatAgent({
+  home,
+  // MONICA_PTYD_PATH と違って検めない。claude を起こせなくても Workbench は動き、失敗は Chat の答えに出る。
+  claudePath: process.env.MONICA_CLAUDE_PATH,
+  // compiled binary の Worker は build の entrypoint に足したもので、entry の隣に置かれる。
+  pdfWorker: new URL('./pdf-worker.ts', import.meta.url),
+  ...(existsSync(cMaps) && { cMaps }),
+})
 
 const context = { db, workbenchLedger, taskLedger, jobLedger }
 const router = os

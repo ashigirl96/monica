@@ -6,7 +6,8 @@
     "./contract": "./src/contract.ts",
     "./server": "./src/server.ts",
     "./ui": "./src/ui/index.ts",
-    "./testing": "./src/testing.ts"
+    "./testing": "./src/testing.ts",
+    "./pdf-worker": "./src/pdf-worker.ts"
   },
   "dependencies": {
     "@anthropic-ai/claude-agent-sdk": "catalog:",
@@ -19,6 +20,7 @@
     "framer-motion": "catalog:",
     "linkedom": "catalog:",
     "lucide-react": "catalog:",
+    "pdfjs-dist": "catalog:",
     "react": "catalog:",
     "react-markdown": "catalog:",
     "remark-gfm": "catalog:",

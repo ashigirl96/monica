@@ -4,6 +4,7 @@ const UNREADABLE: Record<Unreadable['reason'], string> = {
   restricted: 'このページは Chrome Extension から読めません',
   timeout: '3 秒以内に応えませんでした',
   'too-large': '大きすぎます',
+  'fetch-failed': 'PDF を取得できませんでした',
   unparsable: '本文を取り出せませんでした',
 }
 

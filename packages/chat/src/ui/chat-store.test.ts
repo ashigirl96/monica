@@ -83,7 +83,7 @@ const pageAt = (url: string, title: string, more: Partial<Page> = {}): Page => (
 const snapshotAt = (url: string, title: string): PageSnapshot => ({
   url,
   title,
-  content: { kind: 'text', text: `${title} text`, truncated: false },
+  content: { kind: 'text', source: 'html', text: `${title} text`, truncated: false },
 })
 
 const SHOT = 'c2NyZWVuc2hvdA=='
@@ -93,15 +93,18 @@ function openChat() {
   let page = pageAt('https://a.example/', 'A')
   let shot: Pick<Page, 'screenshot' | 'screenshotFailed'> = { screenshot: SHOT }
   const reads: { screenshot: boolean }[] = []
+  const pdfLimits: number[] = []
   const store = createChatStore(client)
-  store.open(async (options) => {
-    reads.push(options)
-    return options.screenshot ? { ...page, ...shot } : page
+  store.open(async ({ screenshot, maxPdfBytes }) => {
+    reads.push({ screenshot })
+    pdfLimits.push(maxPdfBytes)
+    return screenshot ? { ...page, ...shot } : page
   })
   return {
     client,
     store,
     reads,
+    pdfLimits,
     showPage: (next: Page) => {
       page = next
     },
@@ -323,6 +326,55 @@ test('a question whose request stays 1MiB below the body limit goes with its HTM
   expect(client.asked[0]!.input.page.content).toEqual({ kind: 'html', html })
 })
 
+const MARGIN = 1024 * 1024
+
+test('a PDF may take what the body limit leaves after the question, the history and 1MiB', async () => {
+  const { client, store, pdfLimits } = openChat()
+  const answer = 'x'.repeat(10_000_000)
+
+  store.ask('First?')
+  await answerWith(client, answer)
+  store.ask('Second?')
+  await settled()
+
+  const [first, second] = pdfLimits
+  expect(first).toBeLessThanOrEqual(MAX_ASK_BODY_BYTES - MARGIN)
+  expect(first).toBeGreaterThan(MAX_ASK_BODY_BYTES - MARGIN - 1024)
+  expect(second).toBeLessThanOrEqual(MAX_ASK_BODY_BYTES - MARGIN - answer.length)
+  expect(second).toBeGreaterThan(MAX_ASK_BODY_BYTES - MARGIN - answer.length - 1024)
+})
+
+const pdfOf = (bytes: number) => new File([new Uint8Array(bytes)], 'big.pdf')
+
+test('a question whose PDF would take the request past the body limit goes without the PDF, as too large to read', async () => {
+  const { client, store, showPage } = openChat()
+  showPage(
+    pageAt('https://big.example/a.pdf', 'Big', {
+      content: { kind: 'pdf', pdf: pdfOf(MAX_ASK_BODY_BYTES - 512 * 1024) },
+    }),
+  )
+
+  store.ask('What is this?')
+  await settled()
+
+  expect(client.asked[0]!.input.page).toEqual({
+    url: 'https://big.example/a.pdf',
+    title: 'Big',
+    content: { kind: 'unreadable', reason: 'too-large' },
+  })
+})
+
+test('a question whose PDF keeps the request 1MiB below the body limit goes with the PDF', async () => {
+  const { client, store, showPage } = openChat()
+  const pdf = pdfOf(MAX_ASK_BODY_BYTES - MARGIN - 1024)
+  showPage(pageAt('https://big.example/a.pdf', 'Big', { content: { kind: 'pdf', pdf } }))
+
+  store.ask('What is this?')
+  await settled()
+
+  expect(client.asked[0]!.input.page.content).toEqual({ kind: 'pdf', pdf })
+})
+
 async function noticeFor(page: PageSnapshot, omitted?: SnapshotEvent['omitted']) {
   const { client, store } = openChat()
   store.ask('What is this?')
@@ -348,13 +400,19 @@ test('a page that could not be read gives a notice with the reason', async () =>
   )
   expect(await unreadable('timeout')).toBe('ページを読めませんでした（3 秒以内に応えませんでした）')
   expect(await unreadable('too-large')).toBe('ページを読めませんでした（大きすぎます）')
+  expect(await unreadable('fetch-failed')).toBe(
+    'ページを読めませんでした（PDF を取得できませんでした）',
+  )
   expect(await unreadable('unparsable')).toBe(
     'ページを読めませんでした（本文を取り出せませんでした）',
   )
 })
 
 test('a cut text or selection, and earlier pages or questions left out, join the notice in that order', async () => {
-  const cut = { ...readable, content: { kind: 'text', text: 'A', truncated: true } } as const
+  const cut = {
+    ...readable,
+    content: { kind: 'text', source: 'html', text: 'A', truncated: true },
+  } as const
 
   expect(await noticeFor(cut)).toBe('本文を切り詰めました')
   expect(

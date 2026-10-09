@@ -14,6 +14,9 @@ afterEach(() => {
 
 const settled = () => Bun.sleep(0)
 
+/** PDF を読む上限の bytes。HTML のページでは使わない。 */
+const PDF_LIMIT = 1024
+
 // side panel は window 1 に載る。
 async function watchWindow(devicePixelRatio = 2) {
   fake = new FakeChrome(1, [
@@ -38,7 +41,7 @@ const imageOf = (screenshot: string | undefined): FakeImage =>
 test('a screenshot is taken of the window of the side panel before reading the page waits on anything', async () => {
   const watch = await watchWindow()
 
-  const reading = readCurrentPage(watch, { screenshot: true })
+  const reading = readCurrentPage(watch, { screenshot: true, maxPdfBytes: PDF_LIMIT })
   const capturedAtOnce = [...fake.captures]
   await reading
 
@@ -48,7 +51,7 @@ test('a screenshot is taken of the window of the side panel before reading the p
 test('the screenshot shrinks to the CSS pixels of the side panel and goes as JPEG at quality 0.8 in base64, with the page read as it is', async () => {
   const watch = await watchWindow(2)
 
-  const page = await readCurrentPage(watch, { screenshot: true })
+  const page = await readCurrentPage(watch, { screenshot: true, maxPdfBytes: PDF_LIMIT })
 
   expect(imageOf(page.screenshot)).toEqual({
     type: 'image/jpeg',
@@ -66,7 +69,7 @@ test('the screenshot shrinks to the CSS pixels of the side panel and goes as JPE
 test('no screenshot is taken unless asked for', async () => {
   const watch = await watchWindow()
 
-  const page = await readCurrentPage(watch, { screenshot: false })
+  const page = await readCurrentPage(watch, { screenshot: false, maxPdfBytes: PDF_LIMIT })
 
   expect(fake.captures).toEqual([])
   expect(page).toEqual({
@@ -80,7 +83,7 @@ test('a screenshot that cannot be taken gives its reason and leaves the text of 
   const watch = await watchWindow()
   fake.screenshots.set(10, { error: 'Cannot access contents of the page' })
 
-  const page = await readCurrentPage(watch, { screenshot: true })
+  const page = await readCurrentPage(watch, { screenshot: true, maxPdfBytes: PDF_LIMIT })
 
   expect(page).toEqual({
     url: 'https://coast.example/tide-pools',
@@ -94,7 +97,7 @@ test('a page that cannot be read but can be taken a screenshot of carries both',
   const watch = await watchWindow()
   fake.readings.set(10, { error: 'Frame was removed' })
 
-  const page = await readCurrentPage(watch, { screenshot: true })
+  const page = await readCurrentPage(watch, { screenshot: true, maxPdfBytes: PDF_LIMIT })
 
   expect(page.content).toEqual({
     kind: 'unreadable',
@@ -109,7 +112,7 @@ test('a screenshot that does not come within 3 seconds is given up', async () =>
   fake.screenshots.set(10, 'hang')
   const setTimeoutSpy = spyOn(globalThis, 'setTimeout')
 
-  const reading = readCurrentPage(watch, { screenshot: true })
+  const reading = readCurrentPage(watch, { screenshot: true, maxPdfBytes: PDF_LIMIT })
   const limit = setTimeoutSpy.mock.calls.find(([, ms]) => ms === 3000)
   setTimeoutSpy.mockRestore()
   limit?.[0]()

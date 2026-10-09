@@ -9,9 +9,9 @@ export const MAX_ASK_BODY_BYTES = 50 * 1024 * 1024
 export const UnreadableSchema = z.object({
   kind: z.literal('unreadable'),
   reason: z
-    .enum(['restricted', 'timeout', 'too-large', 'unparsable'])
+    .enum(['restricted', 'timeout', 'too-large', 'fetch-failed', 'unparsable'])
     .describe(
-      'restricted: the browser refused to run a script there; timeout: no reply in 3 seconds; too-large: the request would exceed the body limit; unparsable: the Backend could not turn the HTML into text',
+      'restricted: the browser refused to run a script there; timeout: no reply in 3 seconds; too-large: the request would exceed the body limit; fetch-failed: the side panel could not fetch the PDF; unparsable: the Backend could not turn the HTML or the PDF into text',
     ),
   detail: z.string().optional(),
 })
@@ -41,6 +41,10 @@ export const PageSchema = z.object({
         .string()
         .describe('getHTML of the document element of the top frame, with its shadow roots'),
     }),
+    z.object({
+      kind: z.literal('pdf'),
+      pdf: z.file().describe('the bytes fetched from the URL of a Browser Tab that shows a PDF'),
+    }),
     UnreadableSchema,
   ]),
   ...screenshot,
@@ -55,7 +59,10 @@ export const PageSnapshotSchema = z.object({
   ...screenshot,
   content: z
     .discriminatedUnion('kind', [
-      CutTextSchema.extend({ kind: z.literal('text') }),
+      CutTextSchema.extend({
+        kind: z.literal('text'),
+        source: z.enum(['html', 'pdf']).describe('what the text was taken from'),
+      }),
       z.object({
         kind: z.literal('same'),
         turn: z
@@ -127,7 +134,7 @@ export const contract = {
   ask: meta
     .meta({
       description:
-        'Answer a question about the Current Page: turn the HTML of the page into its text, send that Page Snapshot first, then stream the answer and close once it is done',
+        'Answer a question about the Current Page: turn the HTML or the PDF of the page into its text, send that Page Snapshot first, then stream the answer and close once it is done',
     })
     .errors(askErrors)
     .input(AskInputSchema)

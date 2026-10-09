@@ -21,8 +21,15 @@ const migrations = [
   ...new Bun.Glob('packages/*/migrations/*/meta/_journal.json').scanSync({ cwd: repo }),
 ].map((journal) => dirname(dirname(journal)))
 
-// Backend は --asset の folder を basename で引く（apps/web/dist は dist）。
-const assets = [...migrations, 'apps/web/dist']
+// bun の isolated linker では pdfjs-dist を packages/chat からしか解けない。
+const cMaps = join(
+  dirname(Bun.resolveSync('pdfjs-dist/package.json', join(repo, 'packages/chat'))),
+  'cmaps',
+)
+// Backend は --asset の folder を basename で引く（apps/web/dist は dist、pdfjs-dist/cmaps は cmaps）。
+const assets = [...migrations, 'apps/web/dist', cMaps]
+// compile した binary の Worker は build の entrypoint に要る。main.ts の隣に置くと、main.ts の import.meta.url から同じ相対 path で引ける。
+const backendEntrypoints = ['apps/backend/src/main.ts', 'apps/backend/src/pdf-worker.ts']
 
 mkdirSync(binaries, { recursive: true })
 await $`cargo build --release -p monica-ptyd`.cwd(repo)
@@ -30,7 +37,7 @@ copyFileSync(join(repo, 'target/release/monica-ptyd'), binary('monica-ptyd'))
 await $`bun run --cwd apps/web build`.cwd(repo)
 // Chrome Extension は Backend に同梱せず、install-app が .app の Contents/Resources/extension に写す。
 await $`bun run --cwd apps/extension build`.cwd(repo)
-await $`bun build ${compile} ${assets.flatMap((dir) => ['--asset', dir])} apps/backend/src/main.ts --outfile ${binary('monica-backend')}`.cwd(
+await $`bun build ${compile} ${assets.flatMap((dir) => ['--asset', dir])} ${backendEntrypoints} --outfile ${binary('monica-backend')}`.cwd(
   repo,
 )
 await $`bun build ${compile} apps/cli/src/main.ts --outfile ${binary('monica')}`.cwd(repo)

@@ -10,7 +10,7 @@ const MAX_TITLE_CHARS = 500
 const PAGE_LIMIT = `${MAX_PAGE_CHARS.toLocaleString('en')} characters`
 
 function document(
-  { text, truncated }: { text: string; truncated: boolean },
+  { text, truncated, source }: { text: string; truncated: boolean; source?: 'html' | 'pdf' },
   title: string | undefined,
   url: string | undefined,
 ): Block {
@@ -20,6 +20,8 @@ function document(
     ...(title && { title: cut(title, MAX_TITLE_CHARS).text }),
     context: [
       `URL: ${url ?? 'unknown'}`,
+      // PDF の本文は見出しや段落の構造を持たない。
+      ...(source === 'pdf' ? ['Text extracted from a PDF, without its layout.'] : []),
       ...(truncated ? [`Only the first ${PAGE_LIMIT} of it.`] : []),
     ].join('\n'),
   }
@@ -34,7 +36,8 @@ const UNREADABLE: Record<Unreadable['reason'], string> = {
   restricted: 'the browser does not let extensions read this page',
   timeout: 'the page did not respond within 3 seconds',
   'too-large': 'the page was too large to send',
-  unparsable: 'its HTML could not be turned into text',
+  'fetch-failed': 'its PDF could not be fetched',
+  unparsable: 'its HTML or PDF could not be turned into text',
 }
 
 const hasText = (page: PageSnapshot) => page.content?.kind === 'text' && page.content.text !== ''

@@ -1,5 +1,6 @@
 import type { Page, PageSnapshot, Turn } from '../contract.ts'
 import { pageText } from './extract.ts'
+import { bundledPdfReader, type PdfReader, pdfText } from './pdf.ts'
 
 /** 本文と選択範囲の上限。字は JS の文字列の length で数える。 */
 export const MAX_PAGE_CHARS = 100_000
@@ -12,15 +13,25 @@ export function cut(text: string, max: number): { text: string; truncated: boole
   return { text: text.slice(0, end), truncated: true }
 }
 
+export type ReadOptions = { pdf?: PdfReader; signal?: AbortSignal }
+
 async function contentOf(
   content: Page['content'],
   url: string | undefined,
+  { pdf, signal }: ReadOptions,
 ): Promise<NonNullable<PageSnapshot['content']>> {
   if (content.kind === 'unreadable') return content
   try {
-    const { text, truncated } = cut(await pageText(content.html, url), MAX_PAGE_CHARS)
-    return { kind: 'text', text, truncated }
+    const read =
+      content.kind === 'html'
+        ? await pageText(content.html, url)
+        : await pdfText(content.pdf, pdf ?? bundledPdfReader(), {
+            maxChars: MAX_PAGE_CHARS,
+            signal,
+          })
+    return { kind: 'text', source: content.kind, ...cut(read, MAX_PAGE_CHARS) }
   } catch (error) {
+    if (signal?.aborted) throw error
     // 本文が無くても質問には答える。
     return { kind: 'unreadable', reason: 'unparsable', detail: (error as Error).message }
   }
@@ -42,12 +53,16 @@ function sameTurn(url: string | undefined, text: string, history: readonly Turn[
 }
 
 /**
- * side panel が送った HTML を本文にした Page Snapshot。
+ * side panel が送った HTML か PDF を本文にした Page Snapshot。
  * 送られた履歴に URL も本文も同じページがあれば、本文の代わりにその turn を指す。
  */
-export async function snapshotOf(page: Page, history: readonly Turn[]): Promise<PageSnapshot> {
+export async function snapshotOf(
+  page: Page,
+  history: readonly Turn[],
+  options: ReadOptions = {},
+): Promise<PageSnapshot> {
   const { url, title, selection, content, screenshot, screenshotFailed } = page
-  const read = await contentOf(content, url)
+  const read = await contentOf(content, url, options)
   const turn = read.kind === 'text' ? sameTurn(url, read.text, history) : undefined
   return {
     ...(url !== undefined && { url }),

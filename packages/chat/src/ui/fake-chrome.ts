@@ -15,8 +15,14 @@ function event<F>(listeners: Listeners<F>) {
   }
 }
 
-/** Browser Tab で executeScript を呼んだ時に起きること。hang は返らない（view-source: など）。 */
-type Reading = { html: string; selection: string } | { error: string } | 'hang'
+/**
+ * Browser Tab で executeScript を呼んだ時に起きること。hang は返らない（view-source: など）。
+ * 省いた contentType は text/html、html と selection は空になる。
+ */
+type Reading =
+  | { contentType?: string; html?: string; selection?: string }
+  | { error: string }
+  | 'hang'
 
 /** Browser Tab の表示領域を captureVisibleTab で撮った時に起きること。大きさは撮った画像の px。 */
 type Capture = { width: number; height: number } | { error: string } | 'hang'
@@ -89,7 +95,13 @@ export class FakeChrome {
       if (reading === undefined) throw new Error(`no reading for tab ${injection.target.tabId}`)
       if (reading === 'hang') return new Promise<never>(() => {})
       if ('error' in reading) throw new Error(reading.error)
-      return [{ frameId: 0, documentId: 'document-0', result: reading }]
+      return [
+        {
+          frameId: 0,
+          documentId: 'document-0',
+          result: { contentType: 'text/html', html: '', selection: '', ...reading },
+        },
+      ]
     }
     const captureVisibleTab = async (...args: unknown[]) => {
       this.captures.push(args)

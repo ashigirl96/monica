@@ -12,6 +12,7 @@ import {
 
 import { type Claude, claudeOptions } from './claude.ts'
 import type { AskInput, ChatEvent, SnapshotEvent } from './contract.ts'
+import { bundledPdfReader } from './page/pdf.ts'
 import { askContent } from './page/prompt.ts'
 import { snapshotOf } from './page/snapshot.ts'
 import { singleTurn, userMessage } from './prompt.ts'
@@ -47,9 +48,17 @@ export function internals(chatAgent: ChatAgent): Internals {
 type Started<T> = { started: T; claude: Claude | undefined }
 type Spare = Started<Promise<WarmQuery>> & { timer: ReturnType<typeof setTimeout> }
 
-export function createChatAgent(deps: { home: string; claudePath?: string }): ChatAgent {
+export function createChatAgent(deps: {
+  home: string
+  claudePath?: string
+  /** PDF を本文にする Worker の module。compile した Backend は、build の entrypoint に足した自分の隣のものを渡す。 */
+  pdfWorker?: URL
+  /** pdf.js の cMap の folder。compile した Backend は、--asset で同梱したものを渡す。 */
+  cMaps?: string
+}): ChatAgent {
   const cwd = join(deps.home, 'chat')
   mkdirSync(cwd, { recursive: true, mode: 0o700 })
+  const pdf = bundledPdfReader({ worker: deps.pdfWorker, cMaps: deps.cMaps })
   // 答えを閉じてから claude が抜けるまでもメモリを食うので、spawn した child の exit で外す。
   const claudes = new Set<Claude>()
   let spare: Spare | undefined
@@ -174,7 +183,7 @@ export function createChatAgent(deps: { home: string; claudePath?: string }): Ch
     prepare,
     async ask({ question, page, history }, signal) {
       // 本文への変換は数百 ms で、spare から答えれば claude を並べて起こす得は小さいので、変換を先に済ませる。
-      const snapshot = await snapshotOf(page, history)
+      const snapshot = await snapshotOf(page, history, { pdf, signal })
       const { content, omitted } = askContent(question, snapshot, history)
       // contract の snapshot の page は screenshot を持たないので、oRPC の output の検証が落とす。
       const event: SnapshotEvent = { type: 'snapshot', page: snapshot, omitted }
