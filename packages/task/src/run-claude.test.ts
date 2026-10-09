@@ -1,5 +1,6 @@
-import { afterEach, expect, mock, test } from 'bun:test'
-import { mkdirSync, writeFileSync } from 'node:fs'
+import { afterAll, afterEach, expect, mock, test } from 'bun:test'
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 
 import { startFakePtyd } from '@monica/workbench/testing'
@@ -11,6 +12,11 @@ afterEach(() => {
   mock.restore()
   cleanUp()
 })
+
+// macOS は新しく書いた実行 file を初めて exec するたびに検査を挟むので、引数を出す偽の claude は file で 1 つにする。
+const argvBin = mkdtempSync(join(tmpdir(), 'monica-argv-'))
+writeFileSync(join(argvBin, 'claude'), `#!/bin/sh\nprintf '%s\\0' "$@"\n`, { mode: 0o755 })
+afterAll(() => rmSync(argvBin, { recursive: true, force: true }))
 
 const ref = 'acme/app#12'
 const blocker = 'acme/lib#3'
@@ -71,11 +77,8 @@ async function typedInto(fixture: Fixture, terminalSessionId: string) {
 async function argvTypedInto(fixture: Fixture, terminalSessionId: string): Promise<string[]> {
   const write = (await typedInto(fixture, terminalSessionId)).find((op) => op.op === 'write')
   if (write?.op !== 'write') throw new Error('nothing was typed')
-  const bin = join(fixture.home, 'argv')
-  mkdirSync(bin, { recursive: true })
-  writeFileSync(join(bin, 'claude'), `#!/bin/sh\nprintf '%s\\0' "$@"\n`, { mode: 0o755 })
   const shell = Bun.spawnSync(['/bin/sh', '-c', write.data.replace(/\r$/, '')], {
-    env: { PATH: bin },
+    env: { PATH: argvBin },
   })
   return shell.stdout.toString().split('\0').slice(0, -1)
 }

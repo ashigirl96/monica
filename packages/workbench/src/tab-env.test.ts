@@ -1,4 +1,4 @@
-import { afterEach, expect, test } from 'bun:test'
+import { afterAll, afterEach, expect, test } from 'bun:test'
 import {
   chmodSync,
   mkdirSync,
@@ -113,11 +113,10 @@ async function claudeThroughWrapper(
   return run([join(home, 'bin/claude'), ...args], { PATH: path, ...env })
 }
 
-function realClaude(): string {
-  const dir = scratchDir()
-  writeExecutable(join(dir, 'claude'), '#!/bin/sh\nprintf "%s\\n" "$@"\n')
-  return dir
-}
+// macOS は新しく書いた実行 file を初めて exec するたびに検査を挟むので、本物の claude の代わりは file で 1 つにする。
+const realClaudeDir = mkdtempSync(join(tmpdir(), 'monica-claude-'))
+writeExecutable(join(realClaudeDir, 'claude'), '#!/bin/sh\nprintf "%s\\n" "$@"\n')
+afterAll(() => rmSync(realClaudeDir, { recursive: true, force: true }))
 
 const inTab = { MONICA_TERMINAL_SESSION_ID: 'ts-a' }
 
@@ -139,11 +138,10 @@ test.each([
   ['a claude outside any Tab gets none', {}, ['--print', 'hi'], false],
 ])('the claude wrapper runs the next claude on PATH: %s', async (_name, env, args, hooked) => {
   const home = await startedHome()
-  const real = realClaude()
 
   const result = await claudeThroughWrapper(
     home,
-    `${join(home, 'bin')}:${real}:/usr/bin:/bin`,
+    `${join(home, 'bin')}:${realClaudeDir}:/usr/bin:/bin`,
     env,
     args,
   )
@@ -158,7 +156,6 @@ test.each([
 
 test('the claude wrapper reaches the real claude past another wrapper that hands back to the first claude on PATH', async () => {
   const home = await startedHome()
-  const real = realClaude()
   const other = scratchDir()
   writeExecutable(
     join(other, 'claude'),
@@ -174,7 +171,7 @@ test('the claude wrapper reaches the real claude past another wrapper that hands
 
   const result = await claudeThroughWrapper(
     home,
-    `${join(home, 'bin')}:${other}:${real}:/usr/bin:/bin`,
+    `${join(home, 'bin')}:${other}:${realClaudeDir}:/usr/bin:/bin`,
     { MONICA_TERMINAL_SESSION_ID: 'ts-a' },
   )
 
