@@ -1,17 +1,13 @@
 ---
-name: release-app
-description: "`bun run install-app` で入れた release の Monica を動かして確かめる。通知センター・バナー・通知のクリックのように .app の中でしか動かないものを、受け入れ条件として実機で確かめるときに使う。"
+name: release-notifications
+description: 通知センター・バナー・Dock の数・通知のクリックを、release の Monica で実機で確かめる。.app の中でしか動かない通知の受け入れ条件を確かめるときに使う。
 ---
 
 release の Shell は .app の中でだけ UNUserNotificationCenter を使い、dev は別の経路で通知を出す（`docs/packages/notifications.md`）。そのため、通知センターとバナーとクリックは release でしか確かめられない。release の Monica はユーザーが毎日使っている app なので、入れ替える前に了承を取る。
 
 ## 入れる
 
-1. `bun run build` を Bash の `run_in_background` で走らせる。出力は scratchpad の file に向ける。起きている Monica には触れない。
-2. ユーザーの了承を得てから `bun run install-app` を走らせる。install-app は Monica を終了させて入れ替えるが、起動はしない（`docs/packages/dev-loop.md` の「release build と install」）。Tab の shell と claude は ptyd が持つので切れない。
-3. `open /Applications/Monica.app` で起こす。`~/.monica/backend.json` の pid が新しくなり、その port の `/health` が答えたら起きている。
-
-Monica が終了している間、Monica の Tab で会話を読んでいるユーザーには返事が見えない。終了と起動はひと続きで行い、その間に質問しない。
+ユーザーの了承を得てから、`install-app` skill の手順で入れ直す。
 
 ## 待ちを作る
 
