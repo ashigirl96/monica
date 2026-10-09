@@ -43,6 +43,7 @@ const {
   createRunspaceAtom,
   createTerminalTabAtom,
   deadTabsAtom,
+  handingOverRunspaceIdsAtom,
   lastTabClosedAtom,
   moveActiveRunspaceAtom,
   moveTabToRunspaceAtom,
@@ -413,6 +414,30 @@ test('the last Tab of an owned Runspace, closed, reaches the slot only once the 
 
   expect(listedWhenCalled).toHaveLength(1)
   expect((await listedWhenCalled[0])!.map((s) => s.id)).not.toContain(tab.terminalSessionId)
+})
+
+test('an owned Runspace whose last Tab closed is handing over to the slot from the moment it shows no Tabs until the slot is called', async () => {
+  const backend = bench()
+  const { client, store, ptyd, settled } = backend
+  const runspaceId = ownedRunspace(backend)
+  const tab = await client.tab.open({ runspaceId, ...size })
+  await settled(tab.terminalSessionId)
+  await store.set(reloadAtom)
+  const handingOverWhenCalled: boolean[] = []
+  store.set(
+    lastTabClosedAtom,
+    () => (id: string) =>
+      void handingOverWhenCalled.push(store.get(handingOverRunspaceIdsAtom).has(id)),
+  )
+
+  const closing = store.set(closeTerminalTabAtom, tab.id)
+  await until(store, layoutAtom, (layout) => layout?.runspaces[0]?.tabs.length === 0)
+  expect(store.get(handingOverRunspaceIdsAtom).has(runspaceId)).toBe(true)
+  ptyd.exit(tab.terminalSessionId, null)
+  await closing
+
+  expect(handingOverWhenCalled).toEqual([true])
+  expect(store.get(handingOverRunspaceIdsAtom).has(runspaceId)).toBe(false)
 })
 
 test('a Tab closed while others stay, the last Tab moved out, and the last Tab of a Runspace no one owns hand nothing to the slot', async () => {

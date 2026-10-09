@@ -10,6 +10,7 @@ import {
   closeTerminalTabAtom,
   createTerminalTabAtom,
   deadTabsAtom,
+  handingOverRunspaceIdsAtom,
   startNewShellForTabAtom,
   tabExitedAtom,
   updateTabCwdAtom,
@@ -84,11 +85,24 @@ function NewShellButton({ onClick, children }: { onClick: () => void; children: 
   )
 }
 
+// Task の中身は task を知らない workbench の外から slot ではめる（ADR-0005）。
+export type EmptyBenchContent = (runspaceId: string) => ReactNode
+
 // 所有されていない Runspace は常に Tab を持つので、ここに来るのは Tab の無い Bench だけ。
-function EmptyRunspaceOverlay({ cwd }: { cwd: string }) {
+function EmptyRunspaceOverlay({
+  runspaceId,
+  cwd,
+  emptyBenchContent,
+}: {
+  runspaceId: string
+  cwd: string
+  emptyBenchContent?: EmptyBenchContent
+}) {
   const createTab = useSetAtom(createTerminalTabAtom)
+  const handingOver = useAtomValue(handingOverRunspaceIdsAtom).has(runspaceId)
   return (
     <Overlay>
+      {!handingOver && emptyBenchContent?.(runspaceId)}
       <NewShellButton onClick={() => void createTab()}>New shell in {baseName(cwd)}</NewShellButton>
     </Overlay>
   )
@@ -191,7 +205,11 @@ function TerminalPane({
   )
 }
 
-export default function WorkbenchContent() {
+export default function WorkbenchContent({
+  emptyBenchContent,
+}: {
+  emptyBenchContent?: EmptyBenchContent
+}) {
   useImageDrop()
   const layout = useAtomValue(layoutAtom)
   const activeRunspace = useAtomValue(activeRunspaceAtom)
@@ -223,7 +241,13 @@ export default function WorkbenchContent() {
             active={tab.id === activeTabId}
           />
         ))}
-      {activeRunspace?.tabs.length === 0 && <EmptyRunspaceOverlay cwd={activeRunspace.cwd} />}
+      {activeRunspace?.tabs.length === 0 && (
+        <EmptyRunspaceOverlay
+          runspaceId={activeRunspace.id}
+          cwd={activeRunspace.cwd}
+          emptyBenchContent={emptyBenchContent}
+        />
+      )}
       <JumpOverlay />
     </div>
   )

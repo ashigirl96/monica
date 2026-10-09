@@ -19,6 +19,7 @@
     "@orpc/server": "catalog:",
     "drizzle-orm": "catalog:",
     "drizzle-zod": "catalog:",
+    "jotai": "catalog:",
     "react": "catalog:",
     "zod": "catalog:"
   },

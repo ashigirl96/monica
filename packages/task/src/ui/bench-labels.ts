@@ -7,8 +7,10 @@ import { benchLabel } from './bench-label.ts'
 
 export type TaskClient = ContractRouterClient<typeof contract>
 
-export function useBenchLabels(client: TaskClient | null): BenchLabelOf {
-  const [benches, setBenches] = useState<ReadonlyMap<string, BenchItem>>(new Map())
+export type Benches = ReadonlyMap<string, BenchItem>
+
+export function useBenches(client: TaskClient | null): Benches {
+  const [benches, setBenches] = useState<Benches>(new Map())
 
   // Backend が立ち直ると endpoint ごと替わり、前の購読は届かなくなるので、client ごとに張り直す。
   // DB は同じなので、新しい一覧が届くまで前のラベルを出しておく。
@@ -40,6 +42,10 @@ export function useBenchLabels(client: TaskClient | null): BenchLabelOf {
     return () => controller.abort()
   }, [client])
 
+  return benches
+}
+
+export function useBenchLabels(benches: Benches): BenchLabelOf {
   return useCallback(
     (runspaceId: string) => {
       const bench = benches.get(runspaceId)
