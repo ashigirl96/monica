@@ -39,7 +39,6 @@ const {
   shownRunspaceIdsAtom,
 } = await import('./navigation.ts')
 const {
-  closeTabFromJumpModeAtom,
   closeTerminalTabAtom,
   createRunspaceAtom,
   createTerminalTabAtom,
@@ -60,8 +59,8 @@ const {
   workbenchClientAtom,
 } = await import('./store.ts')
 const { terminalSessionStatusAtom } = await import('./terminal-sessions.ts')
-const { jumpHintsActiveAtom, leaveJumpModeOnSwitch, pendingCloseTabIdAtom } =
-  await import('./jump-hints.ts')
+const { jumpModeActiveAtom, keymap, leaveJumpModeOnSwitch, pendingCloseTabIdAtom } =
+  await import('./keys.ts')
 const { getTabConnection, openTabConnection } = await import('./terminal-connections.ts')
 
 const size = { rows: 24, cols: 80 }
@@ -103,6 +102,15 @@ function pinnedAndListed(store: Store) {
     pinned: sidebar.pinned.map((r) => r.id),
     listed: outside?.sections.flatMap((s) => s.rows.map((r) => r.id)) ?? [],
   }
+}
+
+function press(store: Store, key: string, { ctrl = false, repeat = false } = {}) {
+  const facts = { key, code: '', meta: false, ctrl, alt: false, shift: false, repeat }
+  return keymap.press(store, { ...facts, editable: true }).done
+}
+
+function enterJumpMode(store: Store) {
+  return press(store, 't', { ctrl: true })
 }
 
 function lastTabClosedCalls(store: Store): string[] {
@@ -173,13 +181,13 @@ test('d in jump mode closes the active Tab and ends its Terminal Session', async
   const b = await client.tab.open({ runspaceId, ...size })
   await store.set(reloadAtom)
   store.set(activateTerminalTabAtom, b.id)
-  store.set(jumpHintsActiveAtom, true)
+  await enterJumpMode(store)
 
-  await store.set(closeTabFromJumpModeAtom)
+  await press(store, 'd')
 
   expect((await client.layout.get()).runspaces[0]!.tabs.map((t) => t.id)).toEqual([a.id])
   await ptyd.received((op) => op.op === 'terminate' && op.session_id === b.terminalSessionId)
-  expect(store.get(jumpHintsActiveAtom)).toBe(false)
+  expect(store.get(jumpModeActiveAtom)).toBe(false)
 })
 
 test('d in jump mode on a Tab with a live Agent Session asks for d again, and closes it on the second d', async () => {
@@ -189,15 +197,15 @@ test('d in jump mode on a Tab with a live Agent Session asks for d again, and cl
   const claude = await client.tab.open({ runspaceId, ...size })
   await runAgentIn(backend, claude.terminalSessionId)
   store.set(activateTerminalTabAtom, claude.id)
-  store.set(jumpHintsActiveAtom, true)
+  await enterJumpMode(store)
 
-  await store.set(closeTabFromJumpModeAtom)
+  await press(store, 'd')
 
   expect((await client.layout.get()).runspaces[0]!.tabs.map((t) => t.id)).toEqual([a.id, claude.id])
   expect(store.get(pendingCloseTabIdAtom)).toBe(claude.id)
-  expect(store.get(jumpHintsActiveAtom)).toBe(true)
+  expect(store.get(jumpModeActiveAtom)).toBe(true)
 
-  await store.set(closeTabFromJumpModeAtom)
+  await press(store, 'd')
 
   expect((await client.layout.get()).runspaces[0]!.tabs.map((t) => t.id)).toEqual([a.id])
   expect(store.get(pendingCloseTabIdAtom)).toBeNull()
@@ -208,12 +216,46 @@ test('leaving jump mode forgets the first d, so the next d asks again', async ()
   const { client, store } = backend
   const { tab } = await client.runspace.create(size)
   await runAgentIn(backend, tab.terminalSessionId)
-  store.set(jumpHintsActiveAtom, true)
-  await store.set(closeTabFromJumpModeAtom)
+  await enterJumpMode(store)
+  await press(store, 'd')
 
-  store.set(jumpHintsActiveAtom, false)
-  store.set(jumpHintsActiveAtom, true)
-  await store.set(closeTabFromJumpModeAtom)
+  await press(store, 'Escape')
+  await enterJumpMode(store)
+  await press(store, 'd')
+
+  expect((await client.layout.get()).runspaces[0]!.tabs.map((t) => t.id)).toEqual([tab.id])
+  expect(store.get(pendingCloseTabIdAtom)).toBe(tab.id)
+})
+
+test('while a Tab waits for the second d, any other key leaves jump mode doing nothing else', async () => {
+  const backend = bench()
+  const { client, store } = backend
+  const { tab } = await client.runspace.create(size)
+  await runAgentIn(backend, tab.terminalSessionId)
+
+  const left: boolean[] = []
+  for (const key of ['c', '1', 'Escape']) {
+    await enterJumpMode(store)
+    await press(store, 'd')
+    await press(store, 'Shift')
+    expect(store.get(pendingCloseTabIdAtom)).toBe(tab.id)
+    await press(store, key)
+    left.push(store.get(jumpModeActiveAtom))
+  }
+
+  expect(left).toEqual([false, false, false])
+  expect((await client.layout.get()).runspaces[0]!.tabs.map((t) => t.id)).toEqual([tab.id])
+})
+
+test('a d held down repeats without counting as the second d', async () => {
+  const backend = bench()
+  const { client, store } = backend
+  const { tab } = await client.runspace.create(size)
+  await runAgentIn(backend, tab.terminalSessionId)
+  await enterJumpMode(store)
+  await press(store, 'd')
+
+  await press(store, 'd', { repeat: true })
 
   expect((await client.layout.get()).runspaces[0]!.tabs.map((t) => t.id)).toEqual([tab.id])
   expect(store.get(pendingCloseTabIdAtom)).toBe(tab.id)
@@ -229,9 +271,9 @@ test('d in jump mode asks for d again on a Tab whose Agent Session the webview h
     payload: { session_id: 's-1', cwd: '/work', hook_event_name: 'SessionStart' },
   })
   store.set(activateTerminalTabAtom, claude.id)
-  store.set(jumpHintsActiveAtom, true)
+  await enterJumpMode(store)
 
-  await store.set(closeTabFromJumpModeAtom)
+  await press(store, 'd')
 
   expect((await client.layout.get()).runspaces[0]!.tabs.map((t) => t.id)).toEqual([a.id, claude.id])
   expect(store.get(pendingCloseTabIdAtom)).toBe(claude.id)
@@ -243,10 +285,10 @@ test('a d whose check for an Agent Session is still on its way closes nothing on
   const b = await client.tab.open({ runspaceId, ...size })
   await store.set(reloadAtom)
   store.set(activateTerminalTabAtom, b.id)
-  store.set(jumpHintsActiveAtom, true)
+  await enterJumpMode(store)
 
-  const pressed = store.set(closeTabFromJumpModeAtom)
-  store.set(jumpHintsActiveAtom, false)
+  const pressed = press(store, 'd')
+  void press(store, 'Escape')
   await pressed
 
   expect((await client.layout.get()).runspaces[0]!.tabs.map((t) => t.id)).toEqual([a.id, b.id])
@@ -260,16 +302,16 @@ test('a second d after the Tab it asked about has closed on its own leaves jump 
   await settled(claude.terminalSessionId)
   await runAgentIn(backend, claude.terminalSessionId)
   store.set(activateTerminalTabAtom, claude.id)
-  store.set(jumpHintsActiveAtom, true)
-  await store.set(closeTabFromJumpModeAtom)
+  await enterJumpMode(store)
+  await press(store, 'd')
   ptyd.exit(claude.terminalSessionId, 0)
   await store.set(tabExitedAtom, claude.id, claude.terminalSessionId, 0)
   expect(store.get(activeTerminalTabAtom)?.id).toBe(next.id)
 
-  await store.set(closeTabFromJumpModeAtom)
+  await press(store, 'd')
 
   expect((await client.layout.get()).runspaces[0]!.tabs.map((t) => t.id)).toEqual([next.id])
-  expect(store.get(jumpHintsActiveAtom)).toBe(false)
+  expect(store.get(jumpModeActiveAtom)).toBe(false)
 })
 
 test('jump mode is left once the Tab shown changes, and stays while the layout read again leaves it in front', async () => {
@@ -277,14 +319,14 @@ test('jump mode is left once the Tab shown changes, and stays while the layout r
   const { runspaceId, tab } = await client.runspace.create(size)
   const other = await client.tab.open({ runspaceId, ...size })
   await store.set(reloadAtom)
-  store.set(jumpHintsActiveAtom, true)
+  await enterJumpMode(store)
 
   await store.set(reloadAtom)
-  const afterReload = store.get(jumpHintsActiveAtom)
+  const afterReload = store.get(jumpModeActiveAtom)
   store.set(showTerminalSessionAtom, other.terminalSessionId)
 
   expect(store.get(activeTerminalTabAtom)?.id).not.toBe(tab.id)
-  expect([afterReload, store.get(jumpHintsActiveAtom)]).toEqual([true, false])
+  expect([afterReload, store.get(jumpModeActiveAtom)]).toEqual([true, false])
 })
 
 test('d in jump mode on a pinned Tab leaves jump mode and the Tab', async () => {
@@ -292,12 +334,12 @@ test('d in jump mode on a pinned Tab leaves jump mode and the Tab', async () => 
   const { tab } = await client.runspace.create(size)
   await client.tab.pin({ id: tab.id })
   await store.set(reloadAtom)
-  store.set(jumpHintsActiveAtom, true)
+  await enterJumpMode(store)
 
-  await store.set(closeTabFromJumpModeAtom)
+  await press(store, 'd')
 
   expect((await client.layout.get()).runspaces[0]!.tabs.map((t) => t.id)).toEqual([tab.id])
-  expect(store.get(jumpHintsActiveAtom)).toBe(false)
+  expect(store.get(jumpModeActiveAtom)).toBe(false)
   expect(ptyd.receivedAll((op) => op.op === 'terminate')).toEqual([])
   expect(toasts).toEqual([])
 })

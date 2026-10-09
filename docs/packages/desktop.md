@@ -1,7 +1,8 @@
 # desktop（apps/desktop）
 
-- `src/` は app の枠だけを持つ。shortcut、Backend client の provider、Shell からの `backend-endpoint` event による再接続、Backend 不在の表示、toast。domain の画面は `@monica/<d>/ui` から読む。Workbench の画面（sidebar・Tab の帯・端末の並び）は `@monica/workbench/ui` の `Workbench` が持ち、`client.workbench` を props で受けて、endpoint が替わるたびに `workbench.changes` を購読し直す。
-- ⌥ のキー、Ctrl+T（jump モード）と Ctrl+Tab、jump hint が出ている間のキーは xterm に渡さず（`buildKeyEventHandler`）、shortcut だけが拾う。shell の Ctrl+T（transpose）は効かない。shortcut の binding が `false` を返して素通しした ⌥ のキーも、端末には届かない。
+- `src/` は app の枠だけを持つ。Backend client の provider、Shell からの `backend-endpoint` event による再接続、Backend 不在の表示、toast。domain の画面は `@monica/<d>/ui` から読む。Workbench の画面（sidebar・Tab の帯・端末の並び）は `@monica/workbench/ui` の `Workbench` が持ち、`client.workbench` を props で受けて、endpoint が替わるたびに `workbench.changes` を購読し直す。キーの割り当てと Jump Mode も `Workbench` が持ち（`docs/packages/workbench-ui-state.md`）、`src/` は keydown と pointerdown の listener を張らない。
+- 端末にフォーカスがあるときのキーは、xterm の handler（`buildKeyEventHandler`）が先に見る。Workbench の binding の表（`packages/workbench/src/ui/keys.ts`）で入力欄の中でも取るキーと、Jump Mode の間のキーは xterm に渡さず、window の keydown で Workbench が拾う。表に無くても、⌥ のキーは全部 xterm に渡さない。shell の Ctrl+T（transpose）は効かない。binding が `false` を返して素通しした ⌥ のキーも、端末には届かない。
+- ⌘= / ⌘- の UI の zoom は入力欄の外でだけ取るので、端末にフォーカスがあるときは xterm の handler が端末の zoom にする。端末の zoom と下の ⌘A の全選択は端末の振る舞いなので、表に載せず xterm の handler に置く。
 - ⌘ と 1 文字のキーの組み合わせも xterm に渡さず、ブラウザの copy と paste に任せる。kitty の flag を立てた app には、xterm が ⌘ を super として送り（⌘V なら `CSI 118;9u`）、イベントを cancel するので、copy と paste が起きなくなるため。xterm が legacy の encode で持っていた ⌘A の全選択は、webview が `selectAll` を呼ぶ。⌘Enter や ⌘Backspace のように legacy でもバイト列を送っていたキーは、xterm に任せる。
 - kitty keyboard protocol は xterm に任せる（`vtExtensions.kittyKeyboard`）。flag の stack、`CSI ?u` への返答、キーの encode はどれも xterm が行い、webview の parser は kitty の CSI に触らない。
   - ptyd は Tab に `TERM_PROGRAM=WezTerm` を渡す。claude はこれを見て起動時に kitty の flag を push し、Shift+Enter を改行として受け取る。flag が立っている間、claude は Ctrl+V を `CSI 118;5u` の形でしか受け取らない。flag は app ごとに立つので、shell の Tab と claude を抜けた後では、Shift+Enter は `\r`、Ctrl+V は `\x16` のまま送られる。

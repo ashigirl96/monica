@@ -5,7 +5,7 @@ import { type MouseEvent, type RefObject, useLayoutEffect, useRef, useState } fr
 import { AgentDotMark, AgentTallyMark } from './agent-dot-mark.tsx'
 import { AGENT_DOT_STYLE, agentTallyLabel, UNREAD_LABEL_STYLE } from './agent-dot.ts'
 import { JumpHint } from './jump-hint.tsx'
-import { jumpHintTargetsAtom } from './jump-hints.ts'
+import { jumpHintTargetsAtom } from './keys.ts'
 import { metaHeldAtom } from './meta-hold.ts'
 import { activateRunspaceAtom, pickTileAtom } from './navigation.ts'
 import {

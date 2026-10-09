@@ -10,7 +10,7 @@ import { useEffect, useLayoutEffect, useRef } from 'react'
 import { fromBase64, encoder, toBase64 } from './base64.ts'
 import { EventCleanupManager } from './event-cleanup.ts'
 import { pasteFilePaths } from './file-paste.ts'
-import { jumpHintsActiveAtom } from './jump-hints.ts'
+import { keymap } from './keys.ts'
 import { terminalFocusRequestAtom } from './navigation.ts'
 import { openInEditorAtom, resolveEditorPathsAtom } from './store.ts'
 import { attachTapSelection } from './tap-selection.ts'
@@ -236,7 +236,7 @@ export function useTerminal(
 
     term.attachCustomKeyEventHandler(
       buildKeyEventHandler(
-        () => store.get(jumpHintsActiveAtom),
+        (e) => keymap.takesFromTerminal(store, e),
         (delta: 1 | -1) => store.set(zoomTerminalAtom, delta),
         () => term.selectAll(),
       ),
