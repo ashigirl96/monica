@@ -27,6 +27,11 @@ function document(
   }
 }
 
+const image = (data: string): Block => ({
+  type: 'image',
+  source: { type: 'base64', media_type: 'image/jpeg', data },
+})
+
 const UNREADABLE: Record<Unreadable['reason'], string> = {
   restricted: 'the browser does not let extensions read this page',
   timeout: 'the page did not respond within 3 seconds',
@@ -64,8 +69,24 @@ function selectionNote({ selection }: PageSnapshot): string[] {
   ]
 }
 
+function screenshotNote({ screenshot, screenshotFailed }: PageSnapshot): string[] {
+  if (screenshotFailed) {
+    return [
+      `A screenshot of the page was asked for but could not be taken: ${screenshotFailed.reason}.`,
+    ]
+  }
+  if (screenshot === undefined) return []
+  return [
+    'The user attached a screenshot of the visible part of the page, taken when the question was sent; it is the image above.',
+  ]
+}
+
 function leftOutNote(page: PageSnapshot): string[] {
-  const parts = [...(hasText(page) ? ['text'] : []), ...(page.selection ? ['selection'] : [])]
+  const parts = [
+    ...(hasText(page) ? ['text'] : []),
+    ...(page.screenshot === undefined ? [] : ['screenshot']),
+    ...(page.selection ? ['selection'] : []),
+  ]
   return [
     `The ${parts.join(' and ')} of the page ${parts.length > 1 ? 'are' : 'is'} left out to keep this message within its length limit.`,
   ]
@@ -76,7 +97,9 @@ function heading(n: number, question: string, page: PageSnapshot, pageLeftOut: b
     `Question ${n}, asked on this page:`,
     `URL: ${page.url ?? 'unknown'}`,
     `Title: ${page.title ?? 'unknown'}`,
-    ...(pageLeftOut ? leftOutNote(page) : [...contentNote(page), ...selectionNote(page)]),
+    ...(pageLeftOut
+      ? leftOutNote(page)
+      : [...contentNote(page), ...screenshotNote(page), ...selectionNote(page)]),
     '',
     `<question>\n${question}\n</question>`,
   ].join('\n')
@@ -89,10 +112,11 @@ function turnBlocks(
   page: PageSnapshot,
   pageLeftOut: boolean,
 ): Block[] {
-  const { content, selection, title, url } = page
+  const { content, selection, screenshot, title, url } = page
   if (pageLeftOut) return [{ type: 'text', text: heading(n, question, page, true) }]
   return [
     ...(content?.kind === 'text' && content.text !== '' ? [document(content, title, url)] : []),
+    ...(screenshot === undefined ? [] : [image(screenshot)]),
     ...(selection ? [document(selection, title ? `Selection: ${title}` : 'Selection', url)] : []),
     { type: 'text', text: heading(n, question, page, false) },
   ]
@@ -105,9 +129,15 @@ const answerBlock = (n: number, answer: string): Block => ({
 
 /** 1 回に送る前の問答・前のページ・今の Page Snapshot の字の和の上限。URL・title・見出しの文は数えない。 */
 export const MAX_ASK_CHARS = 200_000
+/** スクリーンショット 1 枚を数える字数。CSS px の 1280×800 の JPEG が約 1,300 token になる。 */
+const SCREENSHOT_CHARS = 1_500
 
-function pageChars({ content, selection }: PageSnapshot): number {
-  return (content?.kind === 'text' ? content.text.length : 0) + (selection?.text.length ?? 0)
+function pageChars({ content, selection, screenshot }: PageSnapshot): number {
+  return (
+    (content?.kind === 'text' ? content.text.length : 0) +
+    (selection?.text.length ?? 0) +
+    (screenshot === undefined ? 0 : SCREENSHOT_CHARS)
+  )
 }
 
 // 古い turn のページから 1 つずつ落とし、それでも超えたら古い turn の問答を落とす。

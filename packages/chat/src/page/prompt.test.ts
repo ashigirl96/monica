@@ -83,7 +83,10 @@ test('earlier turns come oldest first with their documents, question and answer,
 
 // 前の部分が prompt cache に乗るように、何も落とさなければ並びは前の質問の並びをそのまま頭に持つ。
 test('when nothing is left out, the blocks of question n are the head of the blocks of question n+1', () => {
-  const first = page('Anemones live there.', { selection: { text: 'Anemones', truncated: false } })
+  const first = page('Anemones live there.', {
+    selection: { text: 'Anemones', truncated: false },
+    screenshot: SHOT,
+  })
   const second: PageSnapshot = { ...first, content: { kind: 'same', turn: 0 } }
   const third = page('', {
     url: 'chrome://version',
@@ -126,6 +129,31 @@ test('over 200,000 characters, the pages of the oldest turns go first, and their
   expect(dataOf(content)).toEqual(['b', 'c', 'd'])
   expect(texts(content)[0]).toContain('The text of the page is left out')
   expect(texts(content)[0]).toContain('Question text 1?')
+})
+
+// 質問 2 字、前の turn の質問 16 字と答え 9 字、前のページ 100,000 字と今のページ n 字に、スクリーンショットが 2 枚。
+const omittedWithTwoScreenshots = (n: number) =>
+  askContent('Q?', page(chars(n, 'c'), { screenshot: SHOT }), [
+    turn(1, page(chars(100_000, 'a'), { screenshot: 'b25l' })),
+  ]).omitted
+
+test('a screenshot counts as 1,500 characters', () => {
+  expect(omittedWithTwoScreenshots(96_973)).toEqual({ pages: 0, turns: 0 })
+  expect(omittedWithTwoScreenshots(96_974)).toEqual({ pages: 1, turns: 0 })
+})
+
+test('leaving out an earlier page leaves out its text and screenshot together, and its heading says so', () => {
+  const history = [
+    turn(1, page(chars(80_000, 'a'), { screenshot: 'b25l' })),
+    turn(2, page(chars(80_000, 'b'), { screenshot: 'dHdv' })),
+    turn(3, page(chars(80_000, 'c'))),
+  ]
+
+  const { content, omitted } = askContent('Q?', page(chars(30_000, 'd')), history)
+
+  expect(omitted).toEqual({ pages: 1, turns: 0 })
+  expect(content.filter((block) => block.type === 'image')).toEqual([image('dHdv')])
+  expect(texts(content)[0]).toContain('The text and screenshot of the page are left out')
 })
 
 test('the page that the current page is the same as stays, and the current page stays', () => {
@@ -231,6 +259,88 @@ test('a page the same as an earlier one has no document of its text, and its hea
     expect.objectContaining({ data: 'kelp' }),
   ])
   expect(texts(content).at(-1)).toContain('the same text as on the page of question 1')
+})
+
+const SHOT = 'c2NyZWVuc2hvdA=='
+const image = (data = SHOT) =>
+  ({
+    type: 'image',
+    source: { type: 'base64', media_type: 'image/jpeg', data },
+  }) as const
+
+test('a screenshot goes as an image right after the document of its page, and the heading says so', () => {
+  const shot = page('Anemones live there.', {
+    selection: { text: 'Anemones', truncated: false },
+    screenshot: SHOT,
+  })
+
+  const { content } = askContent('What is on the screen?', shot, [])
+
+  expect(content.map(({ type }) => type)).toEqual(['document', 'image', 'document', 'text'])
+  expect(content[1]).toEqual(image())
+  expect(texts(content).at(-1)).toContain('screenshot of the visible part of the page')
+})
+
+test('the screenshot of an earlier turn goes again next to the document of its page', () => {
+  const history = [
+    turn(1, page('Page one.', { url: 'https://one.example/', screenshot: 'b25l' })),
+    turn(2, page('Page two.', { url: 'https://two.example/' })),
+  ]
+
+  const { content } = askContent('Q?', page('Page three.', { screenshot: SHOT }), history)
+
+  expect(content.map(({ type }) => type)).toEqual([
+    'document',
+    'image',
+    'text',
+    'text',
+    'document',
+    'text',
+    'text',
+    'document',
+    'image',
+    'text',
+  ])
+  expect(content[1]).toEqual(image('b25l'))
+  expect(content[8]).toEqual(image())
+})
+
+// 同じ URL と本文でも、スクロールで表示領域が変わる。
+test('a page the same as an earlier one still sends its own screenshot', () => {
+  const history = [turn(1, page('Anemones live there.', { screenshot: 'b25l' }))]
+  const same = page('', { content: { kind: 'same', turn: 0 }, screenshot: SHOT })
+
+  const { content } = askContent('And now?', same, history)
+
+  // 前の turn の document・image・見出し・答えの後に、今の turn の image と見出しが続く。
+  expect(content.slice(4).map(({ type }) => type)).toEqual(['image', 'text'])
+  expect(content[4]).toEqual(image())
+})
+
+test('a page that could not be read but was taken a screenshot of sends the image with the reason it could not be read', () => {
+  const unreadable = page('', {
+    content: { kind: 'unreadable', reason: 'timeout' },
+    screenshot: SHOT,
+  })
+
+  const { content } = askContent('Q?', unreadable, [])
+
+  expect(content.map(({ type }) => type)).toEqual(['image', 'text'])
+  expect(texts(content)[0]).toContain('did not respond within 3 seconds')
+  expect(texts(content)[0]).toContain('screenshot of the visible part of the page')
+})
+
+test('a page whose screenshot could not be taken still sends its text, and the heading gives the reason', () => {
+  const failed = page('Anemones live there.', {
+    screenshotFailed: { reason: 'Cannot access contents of the page' },
+  })
+
+  const { content } = askContent('Q?', failed, [])
+
+  expect(content.map(({ type }) => type)).toEqual(['document', 'text'])
+  expect(texts(content)[0]).toContain(
+    'A screenshot of the page was asked for but could not be taken: Cannot access contents of the page.',
+  )
 })
 
 test('the selection goes as a document of its own after the text, titled as a selection of the page', () => {

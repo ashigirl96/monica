@@ -61,7 +61,7 @@ export async function snapshotOf(
   history: readonly Turn[],
   options: ReadOptions = {},
 ): Promise<PageSnapshot> {
-  const { url, title, selection, content } = page
+  const { url, title, selection, content, screenshot, screenshotFailed } = page
   const read = await contentOf(content, url, options)
   const turn = read.kind === 'text' ? sameTurn(url, read.text, history) : undefined
   return {
@@ -69,5 +69,7 @@ export async function snapshotOf(
     ...(title !== undefined && { title }),
     ...(selection && { selection: cut(selection, MAX_PAGE_CHARS) }),
     content: turn === undefined ? read : { kind: 'same', turn },
+    ...(screenshot !== undefined && { screenshot }),
+    ...(screenshotFailed && { screenshotFailed }),
   }
 }
