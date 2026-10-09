@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, expect, test } from 'bun:test'
+import { afterEach, beforeEach, expect, spyOn, test } from 'bun:test'
 
 import { createStore, type Store } from 'jotai'
 
@@ -80,9 +80,27 @@ async function saveFrom(
   const store = workbenchStore(client, benchLabelOf)
   const stop = persistUiState(store)
   await store.set(reloadAtom)
-  const written = new Promise<void>((resolve) => (onWrite = resolve))
-  change(store)
-  await written
+  const debounced: (() => void)[] = []
+  const realSetTimeout = globalThis.setTimeout
+  const timers = spyOn(globalThis, 'setTimeout').mockImplementation(((
+    callback: () => void,
+    ms?: number,
+  ) => {
+    if (ms !== 500) return realSetTimeout(callback, ms)
+    debounced.push(callback)
+    return realSetTimeout(() => {}, 0)
+  }) as typeof setTimeout)
+  let written = false
+  onWrite = () => (written = true)
+  try {
+    change(store)
+  } finally {
+    timers.mockRestore()
+  }
+  expect(debounced).not.toHaveLength(0)
+  expect(written).toBe(false)
+  debounced.at(-1)!()
+  expect(written).toBe(true)
   stop()
 }
 

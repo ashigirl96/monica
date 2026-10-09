@@ -30,14 +30,42 @@ export function stderrLines() {
   return () => spy.mock.calls.map((args) => args.join(' '))
 }
 
+type FakePtyd = ReturnType<typeof startFakePtyd>
+
+/**
+ * ptyd を止め、Backend の繋ぎ直しの 1 回目が失敗して backoff の 200ms に入ったところで新しい fake を起こす。
+ * backoff は待たずに進める。`prepare` は Backend が新しい fake に繋ぐ前に呼ぶ。
+ */
+export function restartPtyd(
+  home: string,
+  ptyd: FakePtyd,
+  prepare: (revived: FakePtyd) => void = () => {},
+): Promise<FakePtyd> {
+  const { promise, resolve } = Promise.withResolvers<FakePtyd>()
+  const realSleep = Bun.sleep
+  const sleep = spyOn(Bun, 'sleep').mockImplementation((ms) => {
+    if (ms !== 200) return realSleep(ms)
+    sleep.mockRestore()
+    const revived = startFakePtyd(home)
+    onCleanup(() => revived.stop())
+    prepare(revived)
+    resolve(revived)
+    return Promise.resolve()
+  })
+  onCleanup(() => sleep.mockRestore())
+  ptyd.stop()
+  return promise
+}
+
 export function setup({
   notify = () => {},
   nameAgentSession = () => null,
   unread = () => {},
-}: Partial<NotificationDeps & { unread: Unread }> = {}) {
-  const home = tempHome(onCleanup)
+  register = onCleanup,
+}: Partial<NotificationDeps & { unread: Unread; register: (cleanup: () => void) => void }> = {}) {
+  const home = tempHome(register)
   const ptyd = startFakePtyd(home)
-  onCleanup(() => ptyd.stop())
+  register(() => ptyd.stop())
 
   const sqlite = new Database(':memory:')
   sqlite.run('PRAGMA foreign_keys = ON')
@@ -53,7 +81,7 @@ export function setup({
       nameAgentSession,
       unread,
     })
-    onCleanup(() => workbenchLedger.stop())
+    register(() => workbenchLedger.stop())
     const client = createRouterClient(router, { context: { db, workbenchLedger } })
     return { workbenchLedger, client }
   }

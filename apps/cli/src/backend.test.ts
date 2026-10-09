@@ -1,4 +1,4 @@
-import { afterEach, expect, test } from 'bun:test'
+import { afterEach, expect, spyOn, test } from 'bun:test'
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -72,11 +72,19 @@ test('a procedure that fails in the Backend prints one CODE: message line on std
 test('while the Backend refuses connections the CLI rereads backend.json and reaches the restarted one', async () => {
   const home = monicaHome()
   writeEndpoint(home, { port: refusedPort(), pid: process.pid })
-  setTimeout(() => serveBackend(home), 300)
+  const sleep = Bun.sleep
+  const retries: unknown[] = []
+  const spy = spyOn(Bun, 'sleep').mockImplementation(async (ms) => {
+    if (ms !== 200) return sleep(ms)
+    retries.push(ms)
+    if (retries.length === 1) serveBackend(home)
+  })
+  cleanups.push(() => spy.mockRestore())
 
   const result = await monica(list, () => connect(home))
 
   expect(result).toEqual({ code: 0, stdout: 'No live Terminal Sessions\n', stderr: '' })
+  expect(retries).toEqual([200])
 })
 
 test('no backend.json, or one whose pid is dead, means no Backend', async () => {

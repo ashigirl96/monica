@@ -3,10 +3,9 @@ import { afterEach, expect, setSystemTime, test } from 'bun:test'
 import { eq } from 'drizzle-orm'
 
 import type { WorkbenchChange } from './contract.ts'
-import { startFakePtyd } from './fake-ptyd.ts'
 import { shouldRespawn } from './pin.ts'
 import { runspace, tab as tabTable, terminalSession } from './schema.ts'
-import { cleanUp, onCleanup, setup } from './testing.ts'
+import { cleanUp, onCleanup, restartPtyd, setup } from './testing.ts'
 
 afterEach(cleanUp)
 
@@ -187,10 +186,7 @@ test('a pinned Tab whose shell ptyd lost is bound to a new shell after the recon
   await client.tab.pin({ id: tab.id })
   letShellsLive()
 
-  ptyd.stop()
-  await Bun.sleep(50)
-  const revived = startFakePtyd(home)
-  onCleanup(() => revived.stop())
+  const revived = await restartPtyd(home, ptyd)
 
   const created = await revived.received((op) => op.op === 'create')
   const respawned = (await client.layout.get()).runspaces[0]?.tabs[0]

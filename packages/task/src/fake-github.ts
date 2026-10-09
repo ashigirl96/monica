@@ -30,6 +30,7 @@ export function startFakeGitHub() {
   const failing = new Set<string>()
   const failingBranches = new Set<string>()
   const requests: { repo: string; numbers: number[]; branches: string[] }[] = []
+  const waiters: { count: number; resolve: () => void }[] = []
   let held: Promise<void> | null = null
   let loggedIn = true
 
@@ -128,6 +129,10 @@ export function startFakeGitHub() {
         query,
       )
       requests.push({ repo, numbers, branches: branchAliases.map((a) => a.branch) })
+      for (const waiter of waiters.filter((w) => requests.length >= w.count)) {
+        waiters.splice(waiters.indexOf(waiter), 1)
+        waiter.resolve()
+      }
       await held
       if (failing.has(caseless(repo))) return new Response('Server Error', { status: 502 })
       const nameWithOwner = repos.get(caseless(repo))
@@ -193,6 +198,11 @@ export function startFakeGitHub() {
   return {
     client,
     requests,
+    /** `requests` が count 件に届いたら resolve する。記録は `hold()` を待つ前なので、止めている間も resolve する。 */
+    received(count: number): Promise<void> {
+      if (requests.length >= count) return Promise.resolve()
+      return new Promise((resolve) => waiters.push({ count, resolve }))
+    },
     issue(ref: string, issue: FakeIssue) {
       repos.set(caseless(parseRef(ref).repo), parseRef(ref).repo)
       const id = issues.get(caseless(ref))?.id ?? `I_${issues.size + 1}`

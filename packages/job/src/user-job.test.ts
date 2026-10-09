@@ -1,4 +1,4 @@
-import { afterEach, expect, mock, spyOn, test } from 'bun:test'
+import { afterEach, expect, mock, setSystemTime, spyOn, test } from 'bun:test'
 import { existsSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
 import { homedir, tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -215,6 +215,21 @@ test('a Job still running at its timeout is timed out, its process group getting
     cwd,
     timeout: '30m',
   })
+  const realSleep = Bun.sleep
+  let loops = 0
+  const looped: { count: number; resolve: () => void }[] = []
+  spyOn(Bun, 'sleep').mockImplementation(async (ms) => {
+    if (ms === 50) {
+      loops++
+      for (const waiter of looped.filter((w) => loops >= w.count)) waiter.resolve()
+    }
+    return realSleep(ms)
+  })
+  const graceLoops = (more: number) => {
+    const { promise, resolve } = Promise.withResolvers<void>()
+    looped.push({ count: loops + more, resolve })
+    return promise
+  }
   const realSetTimeout = globalThis.setTimeout
   let fireTimeout: (() => void) | undefined
   spyOn(globalThis, 'setTimeout').mockImplementation(((callback: () => void, ms?: number) => {
@@ -231,11 +246,18 @@ test('a Job still running at its timeout is timed out, its process group getting
       fireTimeout !== undefined,
   )
   const stubborn = Number(readFileSync(join(cwd, 'stubborn'), 'utf8'))
+  const termAt = Date.now()
+  setSystemTime(termAt)
+  cleanups.push(() => setSystemTime())
   fireTimeout!()
+  await until(() => existsSync(join(cwd, 'cleaned')))
+  setSystemTime(termAt + 1_999)
+  await graceLoops(2)
+  expect(isAlive(stubborn)).toBe(true)
+  setSystemTime(termAt + 2_000)
   const shown = await ended(client, 'dreaming')
 
   expect(shown.executions[0]).toMatchObject({ result: 'timed_out', error: 'timed out after 1800s' })
-  expect(existsSync(join(cwd, 'cleaned'))).toBe(true)
   await until(() => !isAlive(stubborn))
 })
 
