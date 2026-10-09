@@ -474,6 +474,29 @@ test('a question whose history would take the request past the body limit goes w
   expect(page).toEqual(pageAt('https://c.example/', 'C'))
 })
 
+test('a question whose earlier questions and answers alone would take the request past the body limit goes without its own page, and with the oldest of them marked as left out', async () => {
+  const { client, store } = openChat()
+  const long = 'x'.repeat(MAX_ASK_BODY_BYTES / 2)
+
+  store.ask('First?')
+  await answerWith(client, long)
+  store.ask('Second?')
+  await answerWith(client, long)
+  store.ask('Third?')
+  await settled()
+
+  const { page, history } = latest(client).input
+  expect(history.map(({ question, answer }) => ({ question, answer }))).toEqual([
+    { question: '（大きすぎて送れなかった）', answer: '（大きすぎて送れなかった）' },
+    { question: 'Second?', answer: long },
+  ])
+  expect(page).toEqual({
+    url: 'https://a.example/',
+    title: 'A',
+    content: { kind: 'unreadable', reason: 'too-large' },
+  })
+})
+
 test('a PDF may take the room of the pages of earlier questions, which then go as too large to read', async () => {
   const { client, store, showPage, pdfLimits } = openChat()
   const pdf = pdfOf(MAX_ASK_BODY_BYTES - MARGIN - 1024)

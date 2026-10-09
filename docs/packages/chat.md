@@ -122,7 +122,7 @@ claude の `system`（`init`）を受けたら、stderr に 1 行出す。tools 
   - 選択範囲は top frame の `getSelection().toString()`。activeElement が textarea か、`type` が `text`・`search`・`url`・`tel` の input なら、その `selectionStart`・`selectionEnd` で読む。別の場所を選んだ後も古い値が残るので、focus のある欄だけを読む。それ以外の input（`password` など）に focus があれば読まない。空なら `selection` を送らない。
 - `executeScript` が reject したら `restricted` にし、`detail` に error の message を入れる。
 - 送る時に見出しが出していた Current Page の URL と title（`CurrentPageWatch.shown()`）を、読んだページと並べて `ChatStore` に返す。読み終える前に止めた質問の履歴に入れる（下の「失敗」の「再試行と履歴」）。
-- 送る前に、input を `JSON.stringify` した UTF-8 の bytes に、PDF の bytes と 1MiB（oRPC の包みの分）を足して `MAX_ASK_BODY_BYTES` と比べる。File は `JSON.stringify` で `{}` になるので、PDF の大きさは `size` で足す。超えたら、古い turn のページから本文・選択範囲・スクリーンショットを外し、本文は `too-large` にする（`chat-store.ts`）。長い Chat では履歴だけで上限を超えうるためで、Backend が字数の上限で落とすのと同じく Current Page より先に古いページを外す。turn は落とさない。`same` が turn の番号で前のページを指すため。前のページを全部外しても超えたら、Current Page の `html`・`pdf`・`selection` を外して `too-large` にし、前のページは収まる分だけ外す。side panel が外した前のページは `omitted` に数えない。
+- 送る前に、input を `JSON.stringify` した UTF-8 の bytes に、PDF の bytes と 1MiB（oRPC の包みの分）を足して `MAX_ASK_BODY_BYTES` と比べる。File は `JSON.stringify` で `{}` になるので、PDF の大きさは `size` で足す。超えたら、古い turn のページから本文・選択範囲・スクリーンショットを外し、本文は `too-large` にする（`chat-store.ts`）。長い Chat では履歴だけで上限を超えうるためで、Backend が字数の上限で落とすのと同じく Current Page より先に古いページを外す。turn は落とさない。`same` が turn の番号で前のページを指すため。前のページを全部外しても超えたら、Current Page の `html`・`pdf`・`selection` を外して `too-large` にし、前のページは収まる分だけ外す。それでも超えたら、前のページを全部外し、古い turn の質問と答えを「（大きすぎて送れなかった）」に置き換える。Current Page の raw の HTML は本文より何倍も大きいので、前の問答より先に外す。side panel が外した前のページと問答は `omitted` に数えない。
 
 #### PDF の取り方
 

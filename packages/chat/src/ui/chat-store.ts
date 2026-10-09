@@ -40,8 +40,9 @@ const BODY_MARGIN_BYTES = 1024 * 1024
 // File は JSON.stringify で {} になり、multipart の別の part で送られる。
 const jsonBytes = (value: unknown) => new TextEncoder().encode(JSON.stringify(value)).byteLength
 
-// Backend は答えの文字をそのまま prompt にするので、印も文字のまま claude に渡る。
+// Backend は質問と答えの文字をそのまま prompt にするので、印も文字のまま claude に渡る。
 const STOPPED_MARK = '（ユーザーが途中で止めた）'
+const LEFT_OUT_MARK = '（大きすぎて送れなかった）'
 
 const TOO_LARGE: Unreadable = { kind: 'unreadable', reason: 'too-large' }
 
@@ -65,14 +66,33 @@ function pdfBudget(question: string, history: readonly Turn[]): number {
   return MAX_ASK_BODY_BYTES - BODY_MARGIN_BYTES - jsonBytes({ question, history: bare })
 }
 
-// turn は落とさない。same が turn の番号で前のページを指すため。
-function leaveOutEarlierPages(input: AskInput): AskInput | undefined {
+const withoutPage = (turn: Turn): Turn | undefined => {
+  const page = withoutBody(turn.page)
+  return page && { ...turn, page }
+}
+
+const withoutWords = (turn: Turn): Turn => ({
+  ...turn,
+  question: LEFT_OUT_MARK,
+  answer: LEFT_OUT_MARK,
+})
+
+/**
+ * 上限に収まるまで古い turn から shrink し、収まった input を返す。全部 shrink しても超えれば undefined。
+ * turn は落とさない。same が turn の番号で前のページを指すため。
+ */
+function leaveOutEarlier(
+  input: AskInput,
+  shrink: (turn: Turn) => Turn | undefined,
+): AskInput | undefined {
   let over = bodyBytes(input) + BODY_MARGIN_BYTES - MAX_ASK_BODY_BYTES
   const history = input.history.map((turn) => {
-    const page = over > 0 ? withoutBody(turn.page) : undefined
-    if (!page) return turn
-    over -= jsonBytes(turn.page) - jsonBytes(page)
-    return { ...turn, page }
+    const shrunk = over > 0 ? shrink(turn) : undefined
+    if (!shrunk) return turn
+    const saved = jsonBytes(turn) - jsonBytes(shrunk)
+    if (saved <= 0) return turn
+    over -= saved
+    return shrunk
   })
   return over <= 0 ? { ...input, history } : undefined
 }
@@ -80,6 +100,7 @@ function leaveOutEarlierPages(input: AskInput): AskInput | undefined {
 /**
  * body の上限を超える input は、Backend が字数の上限で落とすのと同じく、古い turn のページから外していく。
  * 前のページを全部外しても超えるなら、Current Page の HTML・PDF・選択範囲を外し、大きすぎて読めなかったことにする。
+ * それでも超えるなら、古い turn の質問と答えを印に置き換える。
  * ユーザーが添えると決めた Current Page のスクリーンショットは残す。
  */
 function withinBodyLimit(input: AskInput): AskInput {
@@ -91,8 +112,12 @@ function withinBodyLimit(input: AskInput): AskInput {
     ...(screenshot !== undefined && { screenshot }),
     ...(screenshotFailed && { screenshotFailed }),
   }
+  const bare = { ...input, page, history: input.history.map((turn) => withoutPage(turn) ?? turn) }
   return (
-    leaveOutEarlierPages(input) ?? leaveOutEarlierPages({ ...input, page }) ?? { ...input, page }
+    leaveOutEarlier(input, withoutPage) ??
+    leaveOutEarlier({ ...input, page }, withoutPage) ??
+    leaveOutEarlier(bare, withoutWords) ??
+    bare
   )
 }
 
