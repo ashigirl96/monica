@@ -1,8 +1,9 @@
 import { ORPCError } from '@orpc/client'
 
 import type { Note } from '../../contract.ts'
+import type { RemovalScreen } from '../routes.ts'
 
-export type RemovableKind = Extract<Note['kind'], 'essay' | 'repo_note'>
+export type RemovableKind = NonNullable<RemovalScreen>['kind']
 
 type RemovalDeps = {
   flush: () => Promise<void>
@@ -29,7 +30,7 @@ type Screen = {
 
 /**
  * Note の削除と取り消し。削除した Note を取り消せるのは削除した画面にいる間だけなので、
- * stack は画面が持ち、画面と一緒に捨てる。
+ * 別の画面に着いたら作り直して stack を捨てる。
  */
 export class Removals {
   #kind: RemovableKind
@@ -39,6 +40,10 @@ export class Removals {
   constructor(kind: RemovableKind, deps: RemovalDeps) {
     this.#kind = kind
     this.#deps = deps
+  }
+
+  get kind(): RemovableKind {
+    return this.#kind
   }
 
   /** 消せたら true。未保存の編集が残る間は消さない（⌥Z で戻せるのが server に届いた本文までになる）。 */

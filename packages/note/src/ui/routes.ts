@@ -72,6 +72,33 @@ export function openNoteIdOfPath(pathname: string): string | null {
   return null
 }
 
+/** 削除を取り消せる画面（`GLOSSARY.md` の Note）。null は取り消しの無い画面。 */
+export type RemovalScreen = { kind: 'essay' } | { kind: 'repo_note'; repo: string } | null
+
+/** route が着いた画面。中継の route（`/notes/:id` と `/repos`）は行き先へ replace するだけなので、前の画面のまま。 */
+export function removalScreenOf(route: Route, previous: RemovalScreen): RemovalScreen {
+  switch (route.page) {
+    case 'essays':
+    case 'essay':
+      return { kind: 'essay' }
+    case 'repo':
+      return { kind: 'repo_note', repo: route.repo }
+    case 'note':
+    case 'repos':
+      return previous
+    case 'today':
+    case 'daily':
+    case 'not-found':
+      return null
+  }
+}
+
+export function sameRemovalScreen(a: RemovalScreen, b: RemovalScreen): boolean {
+  if (a === null || b === null) return a === b
+  if (a.kind === 'repo_note' && b.kind === 'repo_note') return sameRepo(a.repo, b.repo)
+  return a.kind === b.kind
+}
+
 // 開いたまま日付の境目を越えても、次に開いた時の今日を指すよう、開くたびに now から導く。
 export function todayPath(now: Date): string {
   return dailyPath(logicalDate(now))

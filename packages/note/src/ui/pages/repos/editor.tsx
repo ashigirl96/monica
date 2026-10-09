@@ -49,7 +49,6 @@ export function RepoEditor({ repo, noteId }: { repo: string; noteId: string | nu
   const [titleFocusId, setTitleFocusId] = useState<string | null>(null)
   const contentRef = useRef<unknown>(null)
   const noteRef = useRef<Note | null>(null)
-  // Repo を切り替えると画面ごと作り直すので、取り消せるのはこの Repo で消した Note だけになる。
   const removals = useRemovals('repo_note')
 
   const scratchQuery = useScratchQuery(repo)

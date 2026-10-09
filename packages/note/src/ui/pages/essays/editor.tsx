@@ -15,10 +15,10 @@ import { useEssaysCache, useEssaysQuery, useNoteQuery, useSeedNote } from '../..
 import { isNotFound } from '../../notes/removals.ts'
 import { SaveStatus } from '../../notes/save-status.tsx'
 import { noteLabel } from '../../notes/summary.ts'
+import { useRemovals } from '../../notes/use-removals.ts'
 import { navigate } from '../../router.ts'
 import { ESSAYS_PATH, essayPath } from '../../routes.ts'
 import { setOpenEssayStatus } from './actions.ts'
-import { useEssayRemovals } from './removals.tsx'
 import { EssaysSidebar } from './sidebar.tsx'
 import { dropEssay, otherEssayTab, patchEssay, splitEssaysByStatus } from './support.ts'
 
@@ -51,7 +51,7 @@ export function EssayEditorPage({ id }: { id: string }) {
   const [tab, setTab] = useState<EssayStatus>('writing')
   const autosave = useAutosaveContext()
   const { schedule, flush, setBase, hasUnsaved } = autosave
-  const removals = useEssayRemovals()
+  const removals = useRemovals('essay')
   const { data: essays = null } = useEssaysQuery()
   const { patchEssays, invalidateEssays } = useEssaysCache()
   const seedNote = useSeedNote()

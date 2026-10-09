@@ -146,6 +146,8 @@ Backend を本物の ptyd に繋いで起こす。Shell の役（親として生
 
    `eval` の式は頁の global で評価され、2 回目の `const` の宣言で失敗する。式は `(() => { … })()` で包む。失敗に気付かずにキーを送ると、思った所と違う Note に効く。
 
+   `open` は頁を読み直し、手元のメモリにしかない状態（取り消しの stack、autosave の予約、`window` に控えた値）を捨てる。開いた後の移動は、画面の link とキー（⌃1〜3、Note Mention）か、`history.pushState(null, '', '<path>'); dispatchEvent(new PopStateEvent('popstate'))` の eval で行う。
+
    Backend に届かないときは、Vite が proxy の接続を応答なしで切り（release の口と同じく、画面には network error に見える）、`web.log` に `http proxy error` が出る。
 
 5. 確かめる Note は、ブラウザの口に RPCLink を向けた script で入れる。router は `{ note }` の下にあり、GET 以外の request には `Sec-Fetch-Site: same-origin` か、`Sec-Fetch-Site: none` と `Sec-Fetch-Mode: cors` の組（Chrome Extension の fetch が付けるもの）が要る。script を `packages/note/` の下に置くと `@orpc/*` と `./src/contract.ts` を解決できるので、終わったら消す。
@@ -157,7 +159,7 @@ Backend を本物の ptyd に繋いで起こす。Shell の役（親として生
    const daily = await root.note.daily.open({ date: '2026-10-06' })
    ```
 
-6. headless の Chromium では、キーの ⌘C / ⌘V が copy と paste にならず、agent-browser の click と mouse には修飾キーが載らない。どちらも event を合成して DOM に送る。ProseMirror は `ClipboardEvent` の `clipboardData` だけを読み書きするので、clipboard の plugin は本物の経路を通る。copy の DataTransfer を `window` に控え、移るときは画面の link で移る（`open` は頁を読み直して控えを消す）。
+6. headless の Chromium では、キーの ⌘C / ⌘V が copy と paste にならず、agent-browser の click と mouse には修飾キーが載らない。どちらも event を合成して DOM に送る。ProseMirror は `ClipboardEvent` の `clipboardData` だけを読み書きするので、clipboard の plugin は本物の経路を通る。copy の DataTransfer は `window` に控える。
 
    ```bash
    agent-browser --session monica-s2 eval "(() => { const dt = new DataTransfer(); document.querySelector('.ProseMirror').dispatchEvent(new ClipboardEvent('copy', { clipboardData: dt, bubbles: true, cancelable: true })); window.__copied = Object.fromEntries(dt.types.map((t) => [t, dt.getData(t)])) })()"

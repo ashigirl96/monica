@@ -7,9 +7,9 @@ import { useDocumentTitle } from '../../document-title.ts'
 import { altOnly } from '../../keys.ts'
 import { slashDate } from '../../notes/dates.ts'
 import { useEssaysCache, useEssaysQuery } from '../../notes/queries.ts'
+import { useRemovals } from '../../notes/use-removals.ts'
 import { navigate, spaLinkClick } from '../../router.ts'
 import { ESSAYS_PATH, essayPath } from '../../routes.ts'
-import { useEssayRemovals } from './removals.tsx'
 import { dropEssay, nextEssayStatus, patchEssay } from './support.ts'
 
 import '../../notes/notes.css'
@@ -69,7 +69,7 @@ type Menu = { x: number; y: number; target: EssaySummary }
 /** /essays: Essay のカードの一覧。右クリックで status の切り替えと削除。 */
 export function EssaysListPage() {
   const client = useNoteClient()
-  const removals = useEssayRemovals()
+  const removals = useRemovals('essay')
   const { data: essays = null, error: listQueryError } = useEssaysQuery()
   const listError = listQueryError === null ? null : listQueryError.message
   const { patchEssays, invalidateEssays } = useEssaysCache()
