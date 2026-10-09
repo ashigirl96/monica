@@ -1,4 +1,6 @@
 import { afterEach, expect, mock, test } from 'bun:test'
+import { mkdirSync, writeFileSync } from 'node:fs'
+import { dirname, join } from 'node:path'
 
 import { task } from './schema.ts'
 import { cleanUp, failure, setup } from './testing.ts'
@@ -18,12 +20,12 @@ function withRepo() {
   return fixture
 }
 
-test('a ready-for-agent Issue gets a tackle button', async () => {
+test('an untracked ready-for-agent Issue gets a tackle button for a new Run', async () => {
   const { github, client } = withRepo()
   github.issue(ref, { title: 'Ship it', labels: ['ready-for-agent'] })
 
   expect(await client.runButtons({ refs: [ref] })).toEqual({
-    buttons: [{ ref, button: { kind: 'tackle' } }],
+    buttons: [{ ref, button: { kind: 'tackle', run: 'new' } }],
   })
 })
 
@@ -41,7 +43,7 @@ test('an Issue with an open Blocker gets no button, and one whose Blockers are a
   expect(await client.runButtons({ refs: [ref, 'acme/app#13'] })).toEqual({
     buttons: [
       { ref, button: null },
-      { ref: 'acme/app#13', button: { kind: 'tackle' } },
+      { ref: 'acme/app#13', button: { kind: 'tackle', run: 'new' } },
     ],
   })
 })
@@ -88,7 +90,7 @@ test('an Issue GitHub does not return, one of a failing repo and a malformed ref
     await client.runButtons({ refs: [ref, 'acme/app#99', 'acme/lib#3', 'not a ref'] }),
   ).toEqual({
     buttons: [
-      { ref, button: { kind: 'tackle' } },
+      { ref, button: { kind: 'tackle', run: 'new' } },
       { ref: 'acme/app#99', button: null },
       { ref: 'acme/lib#3', button: null },
       { ref: 'not a ref', button: null },
@@ -153,6 +155,66 @@ test('running from a button fails without tracking when GitHub cannot be read', 
 
   expect(error.code).toBe('BAD_GATEWAY')
   expect(fixture.db.select().from(task).all()).toEqual([])
+})
+
+async function claudeStarted(fixture: Fixture, terminalSessionId: string) {
+  const transcript = join(fixture.home, 'transcripts', 's-1.jsonl')
+  mkdirSync(dirname(transcript), { recursive: true })
+  writeFileSync(transcript, '{}\n')
+  const fields = {
+    cwd: join(fixture.home, 'worktrees/acme/app/issue-12'),
+    transcript_path: transcript,
+  }
+  await fixture.hook(terminalSessionId, 's-1', 'SessionStart', { source: 'startup', ...fields })
+  return async () =>
+    fixture.hook(terminalSessionId, 's-1', 'SessionEnd', {
+      reason: 'prompt_input_exit',
+      ...fields,
+    })
+}
+
+async function liveRun(fixture: Fixture) {
+  fixture.github.issue(ref, { title: 'Ship it', labels: ['ready-for-agent'] })
+  fixture.taskLedger.start()
+  const started = await fixture.client.runFromButton({ ref })
+  return claudeStarted(fixture, started.terminalSessionId)
+}
+
+test('an Issue whose Task has a live Run gets a running button, and running from it is refused', async () => {
+  const fixture = withRepo()
+  await liveRun(fixture)
+
+  expect(await fixture.client.runButtons({ refs: [ref] })).toEqual({
+    buttons: [{ ref, button: { kind: 'tackle', run: 'running' } }],
+  })
+  expect((await failure(fixture.client.runFromButton({ ref }))).code).toBe('CONFLICT')
+})
+
+test('an Issue whose Task has an ended Run gets a resume button, and running from it resumes claude sending no prompt', async () => {
+  const fixture = withRepo()
+  const end = await liveRun(fixture)
+  await end()
+
+  expect(await fixture.client.runButtons({ refs: [ref] })).toEqual({
+    buttons: [{ ref, button: { kind: 'tackle', run: 'resume' } }],
+  })
+  const output = await fixture.client.runFromButton({ ref })
+  expect(output.resumed).toBe('s-1')
+  expect((await typedInto(fixture, output.terminalSessionId)).at(-1)).toMatchObject({
+    data: "claude --resume 's-1'\r",
+  })
+})
+
+test('a Task whose Bench was closed and reopened gets a button for a new Run, not a resume', async () => {
+  const fixture = withRepo()
+  const end = await liveRun(fixture)
+  await end()
+  await fixture.client.close({ ref, force: true })
+  await fixture.client.reopen({ ref })
+
+  expect(await fixture.client.runButtons({ refs: [ref] })).toEqual({
+    buttons: [{ ref, button: { kind: 'tackle', run: 'new' } }],
+  })
 })
 
 test('no Issue gets a button while gh is logged out', async () => {

@@ -109,7 +109,14 @@ export const PromptKindSchema = z
   .enum(['tackle'])
   .describe('what the Run is started with; tackle leaves the prompt out for /tackle')
 
-export const RunButtonSchema = z.object({ kind: PromptKindSchema })
+export const RunButtonSchema = z.object({
+  kind: PromptKindSchema,
+  run: z
+    .enum(['new', 'resume', 'running'])
+    .describe(
+      'new starts a Run, resume resumes the ended one sending no prompt, running is a live Run and cannot be pressed',
+    ),
+})
 
 export const RunButtonsOutputSchema = z.object({
   buttons: z.array(

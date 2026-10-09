@@ -1,3 +1,5 @@
+import type { RunButton } from '@monica/task/contract'
+
 import type { RunButtonRequest, RunButtonsReply, RunFromButtonReply } from './run-button-relay.ts'
 
 // repo の画面すべてに注入され、GitHub は画面を client 側で移るので、一覧かは走査のたびに URL で見る。
@@ -5,6 +7,8 @@ const ISSUES_LIST = /^\/([^/]+)\/([^/]+)\/issues\/?$/
 const TITLE_LINK = 'a[data-testid="issue-listitem-title-link"]'
 
 const buttons = new WeakMap<HTMLAnchorElement, HTMLElement>()
+
+const LABELS: Record<RunButton['run'], string> = { new: 'Run', resume: '再開', running: '実行中' }
 
 function listedRepo(): string | null {
   const [, owner, name] = ISSUES_LIST.exec(location.pathname) ?? []
@@ -46,20 +50,21 @@ async function scan() {
     if (!button) continue
     for (const link of asked.get(ref) ?? []) {
       if (link.dataset.monicaRef !== ref || !link.isConnected) continue
-      const runButton = runButtonFor(ref)
+      const runButton = runButtonFor(ref, button.run)
       buttons.set(link, runButton)
       link.after(runButton)
     }
   }
 }
 
-function runButtonFor(ref: string): HTMLElement {
+function runButtonFor(ref: string, run: RunButton['run']): HTMLElement {
   const wrapper = document.createElement('span')
   wrapper.style.cssText = 'display:inline-flex;align-items:center;gap:6px;margin-left:8px'
   const button = document.createElement('button')
   button.type = 'button'
   button.className = 'btn btn-sm'
-  button.textContent = 'Run'
+  button.textContent = LABELS[run]
+  button.disabled = run === 'running'
   button.dataset.monicaRunButton = ref
   const reason = document.createElement('span')
   reason.style.cssText = 'color:var(--fgColor-danger, #d1242f);font-size:12px'
@@ -70,12 +75,12 @@ function runButtonFor(ref: string): HTMLElement {
     // GitHub のページの script が .click() で押した run は通さない。
     if (!event.isTrusted || button.disabled) return
     button.disabled = true
-    button.textContent = '実行中'
+    button.textContent = LABELS.running
     reason.textContent = ''
     const reply = await send<RunFromButtonReply>({ type: 'monica.runFromButton', ref })
     if (reply?.ran) return
     button.disabled = false
-    button.textContent = 'Run'
+    button.textContent = LABELS[run]
     reason.textContent = reply ? reply.reason : 'the monica desktop is not running'
   })
   wrapper.append(button, reason)

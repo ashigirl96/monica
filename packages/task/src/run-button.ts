@@ -2,18 +2,25 @@ import type { Db } from '@monica/workbench/server'
 import { ORPCError, type ORPCErrorConstructorMap } from '@orpc/server'
 
 import type { BenchDeps } from './bench.ts'
-import type { PromptKind, RunButtonsOutput, RunOutput, runFromButtonErrors } from './contract.ts'
+import type {
+  PromptKind,
+  RunButton,
+  RunButtonsOutput,
+  RunOutput,
+  runFromButtonErrors,
+} from './contract.ts'
 import { isIssue } from './copy.ts'
 import { BATCH, type GitHubIssue, oneLine, queryIssues } from './github.ts'
 import { taskIfTracked } from './open-task.ts'
 import { formatRef, type IssueRef, parseRef } from './ref.ts'
-import { runTask } from './run-claude.ts'
+import { resumableRunOf, runTask } from './run-claude.ts'
+import { runAgentSessionsByTask } from './run.ts'
 import { byRepo, type SyncDeps } from './sync.ts'
 
 const READ_TIMEOUT_MS = 10_000
 
 /** ボタンを決める材料。Issue は GitHub の今の答えで、Task は track 済みのときだけある。 */
-type Seen = { issue: GitHubIssue; task: { closed: boolean } | null }
+type Seen = { issue: GitHubIssue; task: { closed: boolean; run: RunButton['run'] } | null }
 
 type Refusal =
   | { code: 'BLOCKED'; message: string; blockers: string[] }
@@ -71,8 +78,12 @@ export async function runButtons(deps: SyncDeps, refs: string[]): Promise<RunBut
     buttons: asked.map(({ ref, parsed }) => {
       const issue = parsed && issues.get(key(parsed))
       if (!issue) return { ref, button: null }
-      const verdict = verdictOf(seenOf(deps.db, parsed, issue))
-      return { ref, button: 'kind' in verdict ? { kind: verdict.kind } : null }
+      const seen = seenOf(deps.db, parsed, issue)
+      const verdict = verdictOf(seen)
+      return {
+        ref,
+        button: 'kind' in verdict ? { kind: verdict.kind, run: seen.task?.run ?? 'new' } : null,
+      }
     }),
   }
 }
@@ -93,7 +104,8 @@ export async function runFromButton(
     }
     throw new ORPCError('NOT_FOUND', { message: `GitHub did not return ${formatRef(parsed)}` })
   }
-  const verdict = verdictOf(seenOf(deps.db, parsed, issue))
+  const seen = seenOf(deps.db, parsed, issue)
+  const verdict = verdictOf(seen)
   if ('refusal' in verdict) {
     const { refusal } = verdict
     if (refusal.code === 'BLOCKED') {
@@ -101,14 +113,27 @@ export async function runFromButton(
     }
     throw errors.NO_RUN_BUTTON({ message: refusal.message })
   }
-  return runTask(deps, { ref, prompt: promptOf(verdict.kind, issue) }, errors)
+  // resume する claude は前の会話の途中か後なので、どの種類の prompt も送り直さない（ADR-0024）。
+  const prompt = seen.task?.run === 'resume' ? undefined : promptOf(verdict.kind, issue)
+  return runTask(deps, { ref, prompt }, errors)
 }
 
 const reason = (error: unknown) => oneLine(error instanceof Error ? error.message : String(error))
 
 function seenOf(db: Db, ref: IssueRef, issue: GitHubIssue): Seen {
   const tracked = taskIfTracked(db, isIssue(ref))
-  return { issue, task: tracked ? { closed: tracked.task.closedAt !== null } : null }
+  if (!tracked) return { issue, task: null }
+  return { issue, task: { closed: tracked.task.closedAt !== null, run: runOf(db, tracked) } }
+}
+
+// run と同じ規則で決める。live な Run は CONFLICT で断られ、resume の候補は今の Bench の後に始まった Run だけ。
+function runOf(
+  db: Db,
+  { issue: { id }, bench }: NonNullable<ReturnType<typeof taskIfTracked>>,
+): RunButton['run'] {
+  if (!bench) return 'new'
+  if (runAgentSessionsByTask(db, [id])(id).length > 0) return 'running'
+  return resumableRunOf(db, id, bench) ? 'resume' : 'new'
 }
 
 function parsedOrNull(ref: string): IssueRef | null {

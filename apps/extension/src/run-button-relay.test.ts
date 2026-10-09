@@ -25,7 +25,7 @@ function fakeBackend() {
         return {
           buttons: input.refs.map((ref) => ({
             ref,
-            button: ref.endsWith('#12') ? { kind: 'tackle' as const } : null,
+            button: ref.endsWith('#12') ? { kind: 'tackle' as const, run: 'new' as const } : null,
           })),
         }
       }),
@@ -93,7 +93,7 @@ test('the relay asks the native host and tells the buttons the Backend gives for
 
   expect(reply).toEqual({
     buttons: [
-      { ref: 'acme/app#12', button: { kind: 'tackle' } },
+      { ref: 'acme/app#12', button: { kind: 'tackle', run: 'new' } },
       { ref: 'acme/app#13', button: null },
     ],
   })

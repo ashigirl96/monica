@@ -80,8 +80,8 @@ function refuseLiveRuns(db: Db, forIssue: Issue) {
 }
 
 // Bench より前の Run は reopen の前の挑戦で、Agent Session Transcript の無い Agent Session（claude は最初の prompt まで書かない）は --resume が会話を見つけられないので、どちらも候補にしない。
-function resumeOf(db: Db, forIssue: Issue, row: Bench): Launch | null {
-  const last = db
+export function resumableRunOf(db: Db, taskIssueId: number, row: Pick<Bench, 'createdAt'>) {
+  return db
     .select({
       agentSessionId: agentSession.sessionId,
       cwd: agentSession.cwd,
@@ -89,10 +89,14 @@ function resumeOf(db: Db, forIssue: Issue, row: Bench): Launch | null {
     })
     .from(run)
     .innerJoin(agentSession, eq(agentSession.sessionId, run.agentSessionId))
-    .where(and(eq(run.taskIssueId, forIssue.id), gte(run.startedAt, row.createdAt)))
+    .where(and(eq(run.taskIssueId, taskIssueId), gte(run.startedAt, row.createdAt)))
     .orderBy(desc(agentSession.lastEventAt), desc(run.id))
     .all()
     .find(({ transcriptPath }) => transcriptPath === null || existsSync(transcriptPath))
+}
+
+function resumeOf(db: Db, forIssue: Issue, row: Bench): Launch | null {
+  const last = resumableRunOf(db, forIssue.id, row)
   if (!last) return null
   return {
     ref: formatRef(forIssue),
