@@ -208,8 +208,7 @@ test('a Job still running at its timeout is timed out, its process group getting
     schedule: '0 3 * * *',
     command: [
       `sh -c 'trap "sleep 0.3; touch cleaned; exit 0" TERM; touch trapping; while :; do sleep 0.05; done' &`,
-      `sh -c 'trap "" TERM; exec sleep 30' &`,
-      'echo $! > stubborn',
+      `sh -c 'trap "" TERM; echo $$ > stubborn; exec sleep 30' &`,
       'sleep 30',
     ].join('\n'),
     cwd,
@@ -243,6 +242,7 @@ test('a Job still running at its timeout is timed out, its process group getting
     () =>
       existsSync(join(cwd, 'trapping')) &&
       existsSync(join(cwd, 'stubborn')) &&
+      readFileSync(join(cwd, 'stubborn'), 'utf8') !== '' &&
       fireTimeout !== undefined,
   )
   const stubborn = Number(readFileSync(join(cwd, 'stubborn'), 'utf8'))
