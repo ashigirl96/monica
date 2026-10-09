@@ -130,7 +130,7 @@ export function create<D>Ledger(deps: { db: Db; home: string; ... }): <D>Ledger;
 - 依存の向きの下流（workbench）が上流（task）の値を要るときは、上流の server が関数を出し、Backend の組み立てが下流の deps に渡す。workbench の通知の呼び名は、task の `nameAgentSession` をこの形で受ける。
 - **event は「変わった」の合図**で、購読側は payload を信じず DB を読み直す。bun:sqlite の transaction は同期なので、tx の中で publish しても購読側が動くのは commit 後の microtask になる。rollback されても読み直すだけで害が無いので、commit 後に publish する仕組みは作らない。
 - workbench の router を in-process client（`createRouterClient`）で呼ぶ形は採らない。oRPC の呼び出しは async で、drizzle の bun:sqlite の transaction に async 関数を渡すと throw しても rollback されないため（ADR-0009）。
-- transaction に async 関数を渡さない。lint の `monica/sync-transaction` が、関数式と、同じ file で定義した async 関数を名前で渡す形を止める。
+- transaction に async 関数を渡さない。lint の `monica/sync-transaction` が、関数式と、同じ file で定義した async 関数を名前で渡す形を止める。transaction を開いて最後の引数を中で呼ぶ task の `writeOpenTask` と `writeClosedTask` も同じく見る（`scripts/oxlint/sync-transaction.test.ts`）。
 
 ## テスト
 

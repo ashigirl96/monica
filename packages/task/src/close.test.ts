@@ -9,6 +9,7 @@ import { insertBench } from './bench.ts'
 import type { TaskChange } from './contract.ts'
 import { commit, type Files, git } from './fake-ghq.ts'
 import { bench, issue } from './schema.ts'
+import { SYNC_BEFORE_COMMAND_TIMEOUT_MS } from './sync.ts'
 import { cleanUp, failure, setup } from './testing.ts'
 
 afterEach(() => {
@@ -566,6 +567,46 @@ test('close returns before ptyd answers the Terminate of the Bench, and the Task
 
   expect(output).toMatchObject({ ref })
   expect(await terminatedAfterClose(fixture, 1)).toEqual([fixture.claudeTab])
+})
+
+// 止めた sync に後から来た同じ Task の sync は、合流して自分の timeout まで待つ。その timeout を手で起こし、写しで進ませる。
+async function giveUpJoinedSync(
+  timers: ReturnType<typeof spyOn<typeof globalThis, 'setTimeout'>>,
+  nth: number,
+) {
+  const joined = () => timers.mock.calls.filter(([, ms]) => ms === SYNC_BEFORE_COMMAND_TIMEOUT_MS)
+  await until(() => joined().length > nth)
+  joined()[nth]![0]()
+}
+
+test('a reopen that reaches its transaction while close is under way is refused, so close returns its Task closed', async () => {
+  const fixture = await tracked()
+  const { client, github } = fixture
+  await client.close({ ref })
+  const sent = github.requests.length
+  const releaseSync = github.hold()
+  const late = failure(client.reopen({ ref }))
+  await until(() => github.requests.length > sent)
+  const timers = spyOn(globalThis, 'setTimeout')
+  const reopened = client.reopen({ ref })
+  await giveUpJoinedSync(timers, 0)
+  await reopened
+  const running = client.run({ ref })
+  await giveUpJoinedSync(timers, 1)
+  await running
+  const pause = pauseBranchDeletion(fixture)
+  const closing = client.close({ ref })
+  await giveUpJoinedSync(timers, 2)
+  await until(() => existsSync(pause.started))
+
+  releaseSync()
+  const error = await late
+  writeFileSync(pause.release, '')
+
+  expect(error.code).toBe('CONFLICT')
+  expect(error.message).toBe(`${ref} is being closed`)
+  expect(await closing).toMatchObject({ ref, removedWorktree: fixture.cwd })
+  expect((await client.list({ closed: true })).tasks).toMatchObject([{ ref }])
 })
 
 test('reopen opens a closed Task with no Bench, and the next run makes the worktree and the Bench anew on a new branch issue-n', async () => {

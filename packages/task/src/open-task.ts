@@ -15,7 +15,7 @@ export function taskIfTracked(db: Pick<Db, 'select'>, where: SQL | undefined) {
     .get()
 }
 
-type FoundTask = NonNullable<ReturnType<typeof taskIfTracked>>
+export type FoundTask = NonNullable<ReturnType<typeof taskIfTracked>>
 
 export function findTrackedTask(db: Pick<Db, 'select'>, where: SQL | undefined, asked: string) {
   const found = taskIfTracked(db, where)
@@ -33,6 +33,13 @@ export function refuseClosed(found: FoundTask): FoundTask {
     throw new ORPCError('BAD_REQUEST', {
       message: `${ref} is closed, so run \`monica task reopen ${ref}\``,
     })
+  }
+  return found
+}
+
+export function refuseOpen(found: FoundTask): FoundTask {
+  if (!found.task.closedAt) {
+    throw new ORPCError('BAD_REQUEST', { message: `${formatRef(found.issue)} is open` })
   }
   return found
 }
