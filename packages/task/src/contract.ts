@@ -106,9 +106,9 @@ export const runErrors = {
 }
 
 export const PromptKindSchema = z
-  .enum(['tackle', 'triage', 'wayfinder'])
+  .enum(['tackle', 'implement-spec', 'triage', 'wayfinder'])
   .describe(
-    'what the Run is started with; tackle leaves the prompt out for /tackle, triage sends /triage #<n>, and wayfinder sends /wayfinder <n> for a map or /wayfinder <map> <n> for an Issue under one',
+    'what the Run is started with; tackle leaves the prompt out for /tackle, implement-spec sends /implement-spec #<n> for an Issue with open sub-issues, triage sends /triage #<n>, and wayfinder sends /wayfinder <n> for a map or /wayfinder <map> <n> for an Issue under one',
   )
 
 export const RunButtonSchema = z.object({

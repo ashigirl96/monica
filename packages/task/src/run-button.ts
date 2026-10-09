@@ -20,7 +20,11 @@ import { byRepo, type SyncDeps } from './sync.ts'
 const READ_TIMEOUT_MS = 10_000
 
 /** ボタンを決める材料。Issue は GitHub の今の答えで、Task は track 済みのときだけある。 */
-type Seen = { issue: GitHubIssue; task: { closed: boolean; run: RunButton['run'] } | null }
+type Seen = {
+  issue: GitHubIssue
+  task: { closed: boolean; run: RunButton['run'] } | null
+  parentRunning: boolean
+}
 
 type Refusal =
   | { code: 'BLOCKED'; message: string; blockers: string[] }
@@ -64,7 +68,19 @@ const rules: ((seen: Seen) => Verdict | undefined)[] = [
       ? { kind: 'wayfinder' }
       : noButton(`${formatRef(issue)} is a wayfinder Issue with no map above it`)
   },
-  ({ issue }) => (issue.labels.includes('ready-for-agent') ? { kind: 'tackle' } : undefined),
+  ({ issue, parentRunning }) => {
+    if (!issue.labels.includes('ready-for-agent')) return undefined
+    // spec の Run が子を実装している最中なので、子を別に run すると同じ実装が 2 つ走る。
+    if (parentRunning && issue.parent) {
+      return noButton(
+        `${formatRef(issue)} is under ${formatRef(issue.parent)}, which has a live Run`,
+      )
+    }
+    if (issue.subIssues.total === 0) return { kind: 'tackle' }
+    return issue.subIssues.open > 0
+      ? { kind: 'implement-spec' }
+      : noButton(`${formatRef(issue)} is a spec whose sub-issues are all closed`)
+  },
   ({ issue }) =>
     issue.labels.includes('needs-triage') || !issue.labels.some(isStateLabel)
       ? { kind: 'triage' }
@@ -84,6 +100,8 @@ function promptOf(kind: PromptKind, issue: GitHubIssue): string | undefined {
   switch (kind) {
     case 'tackle':
       return undefined
+    case 'implement-spec':
+      return `/implement-spec #${issue.number}`
     case 'triage':
       return `/triage #${issue.number}`
     case 'wayfinder':
@@ -147,9 +165,20 @@ const reason = (error: unknown) => oneLine(error instanceof Error ? error.messag
 
 function seenOf(db: Db, ref: IssueRef, issue: GitHubIssue): Seen {
   const tracked = taskIfTracked(db, isIssue(ref))
-  if (!tracked) return { issue, task: null }
-  return { issue, task: { closed: tracked.task.closedAt !== null, run: runOf(db, tracked) } }
+  return {
+    issue,
+    task: tracked ? { closed: tracked.task.closedAt !== null, run: runOf(db, tracked) } : null,
+    parentRunning: issue.parent !== null && parentHasLiveRun(db, issue.parent),
+  }
 }
+
+function parentHasLiveRun(db: Db, parent: IssueRef): boolean {
+  const tracked = taskIfTracked(db, isIssue(parent))
+  return tracked ? hasLiveRun(db, tracked.issue.id) : false
+}
+
+const hasLiveRun = (db: Db, taskIssueId: number) =>
+  runAgentSessionsByTask(db, [taskIssueId])(taskIssueId).length > 0
 
 // run と同じ規則で決める。live な Run は CONFLICT で断られ、resume の候補は今の Bench の後に始まった Run だけ。
 function runOf(
@@ -157,7 +186,7 @@ function runOf(
   { issue: { id }, bench }: NonNullable<ReturnType<typeof taskIfTracked>>,
 ): RunButton['run'] {
   if (!bench) return 'new'
-  if (runAgentSessionsByTask(db, [id])(id).length > 0) return 'running'
+  if (hasLiveRun(db, id)) return 'running'
   return resumableRunOf(db, id, bench) ? 'resume' : 'new'
 }
 

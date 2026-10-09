@@ -52,6 +52,18 @@ export function startFakeGitHub() {
     }
   }
 
+  // 子は parent から逆引きするので、親と子の対応が食い違わない。
+  function subIssuesOf(parentRef: string) {
+    const parent = find(parentRef)
+    const children = [...issues.values()].filter(
+      (child) => child.parent !== undefined && find(child.parent) === parent,
+    )
+    return {
+      total: children.length,
+      completed: children.filter((child) => child.state === 'closed').length,
+    }
+  }
+
   function pullRequestNode({
     ref,
     title,
@@ -139,6 +151,7 @@ export function startFakeGitHub() {
           ...node(found.ref),
           labels: { nodes: (found.labels ?? []).map((name) => ({ name })) },
           parent: found.parent ? node(found.parent) : null,
+          subIssuesSummary: subIssuesOf(found.ref),
           blockedBy: { nodes: (found.blockedBy ?? []).map(node) },
           closedByPullRequestsReferences: {
             nodes: (found.closingPullRequests ?? [])

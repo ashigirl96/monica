@@ -174,6 +174,33 @@ test('running from a wayfinder map button types claude with /wayfinder and the m
   })
 })
 
+test('running from the button of a ready-for-agent Issue with an open sub-issue types claude with /implement-spec and the Issue number', async () => {
+  const fixture = withRepo()
+  fixture.github.issue(ref, { title: 'Spec it', labels: ['ready-for-agent'] })
+  fixture.github.issue('acme/app#13', { title: 'Done part', state: 'closed', parent: ref })
+  fixture.github.issue('acme/app#14', { title: 'Next part', parent: ref })
+
+  expect(await fixture.client.runButtons({ refs: [ref] })).toEqual({
+    buttons: [{ ref, button: { kind: 'implement-spec', run: 'new' } }],
+  })
+  const output = await fixture.client.runFromButton({ ref })
+
+  expect((await typedInto(fixture, output.terminalSessionId)).at(-1)).toMatchObject({
+    data: "claude '/implement-spec #12'\r",
+  })
+})
+
+test('a ready-for-agent Issue whose sub-issues are all closed gets no button, and running it is refused', async () => {
+  const fixture = withRepo()
+  fixture.github.issue(ref, { title: 'Spec it', labels: ['ready-for-agent'] })
+  fixture.github.issue('acme/app#13', { title: 'Done part', state: 'closed', parent: ref })
+
+  expect(await fixture.client.runButtons({ refs: [ref] })).toEqual({
+    buttons: [{ ref, button: null }],
+  })
+  expect((await failure(fixture.client.runFromButton({ ref }))).code).toBe('NO_RUN_BUTTON')
+})
+
 test.each([
   ['wayfinder:grilling'],
   ['wayfinder:prototype'],
@@ -310,6 +337,35 @@ test('a Task whose Bench was closed and reopened gets a button for a new Run, no
 
   expect(await fixture.client.runButtons({ refs: [ref] })).toEqual({
     buttons: [{ ref, button: { kind: 'tackle', run: 'new' } }],
+  })
+})
+
+test('a sub-issue of a spec gets a tackle button of its own, and none while the spec has a live Run', async () => {
+  const fixture = withRepo()
+  const child = 'acme/app#13'
+  fixture.github.issue(child, { title: 'Part', labels: ['ready-for-agent'], parent: ref })
+
+  await liveRun(fixture)
+
+  expect(await fixture.client.runButtons({ refs: [ref, child] })).toEqual({
+    buttons: [
+      { ref, button: { kind: 'implement-spec', run: 'running' } },
+      { ref: child, button: null },
+    ],
+  })
+  expect((await failure(fixture.client.runFromButton({ ref: child }))).code).toBe('NO_RUN_BUTTON')
+})
+
+test('a sub-issue of a spec whose Run has ended gets a tackle button', async () => {
+  const fixture = withRepo()
+  const child = 'acme/app#13'
+  fixture.github.issue(child, { title: 'Part', labels: ['ready-for-agent'], parent: ref })
+
+  const end = await liveRun(fixture)
+  await end()
+
+  expect(await fixture.client.runButtons({ refs: [child] })).toEqual({
+    buttons: [{ ref: child, button: { kind: 'tackle', run: 'new' } }],
   })
 })
 

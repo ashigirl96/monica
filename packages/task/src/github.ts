@@ -52,6 +52,7 @@ export type GitHubPullRequest = IssueRef &
 export type GitHubIssue = LinkedIssue & {
   labels: string[]
   parent: LinkedIssue | null
+  subIssues: { open: number; total: number }
   blockers: LinkedIssue[]
   closingPullRequests: GitHubPullRequest[] | null
   branchPullRequests: GitHubPullRequest[] | null
@@ -98,6 +99,7 @@ const IssueNode = z.object({
   state: State,
   labels: z.object({ nodes: z.array(z.object({ name: z.string() }).nullable()) }),
   parent: LinkedNode.nullable(),
+  subIssuesSummary: z.object({ total: z.number(), completed: z.number() }),
   blockedBy: z.object({ nodes: z.array(LinkedNode.nullable()) }),
   closedByPullRequestsReferences: PullRequests,
 })
@@ -149,6 +151,10 @@ export async function queryIssues(
       state: parsed.state,
       labels: parsed.labels.nodes.flatMap((label) => (label ? [label.name] : [])),
       parent: parsed.parent && linked(parsed.parent),
+      subIssues: {
+        open: parsed.subIssuesSummary.total - parsed.subIssuesSummary.completed,
+        total: parsed.subIssuesSummary.total,
+      },
       blockers: parsed.blockedBy.nodes.flatMap((blocker) => (blocker ? [linked(blocker)] : [])),
       closingPullRequests: pullRequestsOf(parsed.closedByPullRequestsReferences),
       // worktree の Bench が無ければ、head が一致する branch も無い。
@@ -208,6 +214,7 @@ fragment Copied on Issue {
   id number title state
   labels(first: 100) { nodes { name } }
   parent { ...Linked }
+  subIssuesSummary { total completed }
   blockedBy(first: 50) { nodes { ...Linked } }
   closedByPullRequestsReferences(first: 10, includeClosedPrs: true) { nodes { ...CopiedPullRequest } }
 }
