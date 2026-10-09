@@ -1,21 +1,24 @@
-import { afterAll, afterEach, expect, test } from 'bun:test'
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { afterEach, expect, test } from 'bun:test'
+import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+
+import { writeFakeExecutable } from '@monica/workbench/testing'
 
 import { ghAuthToken } from './github.ts'
 
 const path = process.env.PATH
-// macOS は新しく書いた実行 file を初めて exec するたびに検査を挟むので、偽の gh は 1 つの file を書き直して使い回す。
-const dir = mkdtempSync(join(tmpdir(), 'monica-gh-'))
+const dirs: string[] = []
 
 afterEach(() => {
   process.env.PATH = path
+  for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true })
 })
-afterAll(() => rmSync(dir, { recursive: true, force: true }))
 
 function fakeGh(script: string) {
-  writeFileSync(join(dir, 'gh'), `#!/bin/sh\n${script}\n`, { mode: 0o755 })
+  const dir = mkdtempSync(join(tmpdir(), 'monica-gh-'))
+  dirs.push(dir)
+  writeFakeExecutable(join(dir, 'gh'), script)
   process.env.PATH = `${dir}:${path}`
 }
 
