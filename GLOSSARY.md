@@ -34,7 +34,7 @@ Task の上で動いた Agent Session 1 回分の対応。Bench の Tab にい�
 _Avoid_: TaskRun, Main Run, primary run, side run
 
 **Bench**:
-Task が 1 つ所有する Runspace。最初に開いた時か、Bench の無い Task に Attach した時に作られ、cwd（worktree か Repo の checkout か）はその後変えない。Workbench で最後の Tab を閉じると Task を close する。close の guard で止まったときと、Tab を外へ移したときは、Tab が無くても残る。Task を close すると壊れ（close を呼んだ Tab と、強制でない close の間にその Task の Run になった Tab だけは普通の Runspace に残る）、reopen すると作り直す。Workbench（画面）とは別物。
+Task が 1 つ所有する Runspace。最初に開いた時か、Bench の無い Task に Attach した時に作られ、cwd（worktree か Repo の checkout か）はその後変えない。Workbench で最後の Tab を閉じると Task を close する。close の guard で止まったときと、Tab を外へ移したときは、Tab が無くても残る。guard で止まった Bench は、Workbench で止めた理由と、2 度押して強制で close する「Close anyway」を出す。Task を close すると壊れ（close を呼んだ Tab と、強制でない close の間にその Task の Run になった Tab だけは普通の Runspace に残る）、reopen すると作り直す。Workbench（画面）とは別物。
 _Avoid_: task runspace, bench runspace
 
 **Attach**:

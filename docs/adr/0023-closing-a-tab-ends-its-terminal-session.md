@@ -15,7 +15,7 @@ status: accepted
 
 ## Consequences
 
-- Close Tab の経路は、shell の終了（Ctrl-D、`exit`）と Ctrl+T → d の 2 つ。× と、Tab のメニューの Close と Terminate は持たない。
+- Close Tab の経路は、shell の終了（Ctrl-D、`exit`）と Ctrl+T → d の 2 つ。× と、Tab のメニューの Close と Terminate は持たない。guard で止まった Bench を強制で close するボタンは Tab ではなく Task を閉じるもので、ここには数えない（ADR-0036）。
   - Ctrl+T → d は、live な Agent Session がある Tab ではもう一度 d を求める。d は c（新しい Tab）の隣のキーで、打ち損じで claude を消さないため。
   - pin された Tab は今までどおり閉じられない（ADR-0014）。
 - `tab.close` は Tab の行を消し、その Terminal Session の Terminate を transaction の後に予約する（ADR-0015 の `removeRunspace` と同じ形）。webview が先に終了を頼む形にしないのは、呼び手を 1 つ忘れるだけで Tab の無い Terminal Session ができるため。`terminalSession.terminate` は持たない。
