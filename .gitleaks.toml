@@ -1,0 +1,7 @@
+[extend]
+useDefault = true
+
+# 拡張の manifest の key は ID を固定する RSA の公開鍵（ADR-0029）で、generic-api-key に誤って当たる。
+[[allowlists]]
+description = "RSA public keys in SubjectPublicKeyInfo DER base64"
+regexes = ['''^MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEA''']
