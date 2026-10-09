@@ -16,7 +16,7 @@ export type RunButtonsReply = RunButtonsOutput | null
 export type PressReply = { accepted: true } | { accepted: false; reason: string }
 
 type Client = ContractRouterClient<{
-  task: Pick<typeof taskContract, 'runButtons' | 'runFromButton' | 'reopen'>
+  task: Pick<typeof taskContract, 'runButtons' | 'runFromButton' | 'reopenFromButton'>
 }>
 
 /** 自分宛てでない message には undefined を返し、他の listener に任せる。 */
@@ -32,7 +32,7 @@ export function relayRunButton(
     case 'monica.runFromButton':
       return press(() => client.task.runFromButton({ ref: message.ref }))
     case 'monica.reopenFromButton':
-      return press(() => client.task.reopen({ ref: message.ref }))
+      return press(() => client.task.reopenFromButton({ ref: message.ref }))
   }
 }
 

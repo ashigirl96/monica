@@ -20,7 +20,7 @@ function fakeBackend() {
   const os = implement({
     runButtons: contract.runButtons,
     runFromButton: contract.runFromButton,
-    reopen: contract.reopen,
+    reopenFromButton: contract.reopenFromButton,
   })
   const handler = new RPCHandler({
     task: os.router({
@@ -56,10 +56,10 @@ function fakeBackend() {
           resumed: null,
         }
       }),
-      reopen: os.reopen.handler(({ input }) => {
-        calls.push({ path: 'reopen', input })
+      reopenFromButton: os.reopenFromButton.handler(({ input }) => {
+        calls.push({ path: 'reopenFromButton', input })
         if (input.ref.endsWith('#13')) {
-          throw new ORPCError('BAD_REQUEST', { message: `${input.ref} is already open` })
+          throw new ORPCError('BAD_REQUEST', { message: `${input.ref} is not a closed Task` })
         }
         return { ref: input.ref, title: 'Ship it', warnings: [] }
       }),
@@ -153,10 +153,10 @@ test('the relay reopens the ref alone and tells whether the Backend reopened it 
   ).toEqual({ accepted: true })
   expect(
     await relayRunButton(HOST, { type: 'monica.reopenFromButton', ref: 'acme/app#13' }),
-  ).toEqual({ accepted: false, reason: 'acme/app#13 is already open' })
+  ).toEqual({ accepted: false, reason: 'acme/app#13 is not a closed Task' })
   expect(backend.calls).toEqual([
-    { path: 'reopen', input: { ref: 'acme/app#12' } },
-    { path: 'reopen', input: { ref: 'acme/app#13' } },
+    { path: 'reopenFromButton', input: { ref: 'acme/app#12' } },
+    { path: 'reopenFromButton', input: { ref: 'acme/app#13' } },
   ])
 })
 

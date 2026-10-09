@@ -128,10 +128,37 @@ test('a closed Task gets a reopen button, running from it is refused, and once r
     `${ref} is a closed Task; reopen it to run it`,
   ])
 
-  await client.reopen({ ref })
+  await client.reopenFromButton({ ref })
   expect(await client.runButtons({ refs: [ref] })).toEqual({
     buttons: [{ ref, button: { kind: 'tackle', run: 'new' }, reason: null }],
   })
+})
+
+test('reopening from a button reads the Issue anew and refuses a Task whose Issue was closed since, leaving it closed', async () => {
+  const { github, client } = withRepo()
+  github.issue(ref, { title: 'Ship it', labels: ['ready-for-agent'] })
+  await client.track({ ref })
+  await client.close({ ref })
+  github.issue(ref, { title: 'Ship it', state: 'closed', labels: ['ready-for-agent'] })
+
+  const refusal = await failure(client.reopenFromButton({ ref }))
+  expect([refusal.code, refusal.message]).toEqual([
+    'PRECONDITION_FAILED',
+    `${ref} is a closed Issue`,
+  ])
+  expect((await client.list({ closed: true })).tasks.map((t) => t.ref)).toEqual([ref])
+})
+
+test('reopening from a button refuses an open Task', async () => {
+  const { github, client } = withRepo()
+  github.issue(ref, { title: 'Ship it', labels: ['ready-for-agent'] })
+  await client.track({ ref })
+
+  const refusal = await failure(client.reopenFromButton({ ref }))
+  expect([refusal.code, refusal.message]).toEqual([
+    'PRECONDITION_FAILED',
+    `${ref} is not a closed Task`,
+  ])
 })
 
 test('a closed Task of a closed Issue gets no reopen button', async () => {

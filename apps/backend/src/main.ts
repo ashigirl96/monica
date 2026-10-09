@@ -119,7 +119,7 @@ const extensionHandler = new RPCHandler(
     task: {
       runButtons: taskRouter.runButtons,
       runFromButton: taskRouter.runFromButton,
-      reopen: taskRouter.reopen,
+      reopenFromButton: taskRouter.reopenFromButton,
     },
   }),
 )

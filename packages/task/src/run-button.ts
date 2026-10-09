@@ -2,7 +2,15 @@ import type { Db } from '@monica/workbench/server'
 import { ORPCError, type ORPCErrorConstructorMap } from '@orpc/server'
 
 import type { BenchDeps } from './bench.ts'
-import type { PromptKind, RunButton, RunButtonsOutput, RunOutput, runErrors } from './contract.ts'
+import { reopenTask } from './close.ts'
+import type {
+  PromptKind,
+  ReopenOutput,
+  RunButton,
+  RunButtonsOutput,
+  RunOutput,
+  runErrors,
+} from './contract.ts'
 import { isLinkedIssue } from './copy.ts'
 import { type GitHubIssue, type LinkedIssue, oneLine } from './github.ts'
 import { taskIfTracked } from './open-task.ts'
@@ -146,17 +154,7 @@ export async function runFromButton(
   ref: string,
   errors: ORPCErrorConstructorMap<typeof runErrors>,
 ): Promise<RunOutput> {
-  const parsed = parseRef(ref)
-  const { issues, failures } = await readIssues(deps, [parsed])
-  const issue = issues.get(key(parsed))
-  if (!issue) {
-    if (failures.length > 0) {
-      throw new ORPCError('BAD_GATEWAY', {
-        message: `could not read ${formatRef(parsed)} from GitHub: ${failures.join('; ')}`,
-      })
-    }
-    throw new ORPCError('NOT_FOUND', { message: `GitHub did not return ${formatRef(parsed)}` })
-  }
+  const issue = await readIssue(deps, ref)
   const seen = seenOf(deps.db, issue)
   const verdict = verdictOf(seen)
   switch (verdict.type) {
@@ -176,6 +174,35 @@ export async function runFromButton(
       if (spec && hasLiveRun(tx, spec)) throw refused(underRunningSpec(issue, spec))
     },
   })
+}
+
+export async function reopenFromButton(
+  deps: SyncDeps & Pick<BenchDeps, 'reservations'>,
+  ref: string,
+): Promise<ReopenOutput> {
+  const issue = await readIssue(deps, ref)
+  const verdict = verdictOf(seenOf(deps.db, issue))
+  switch (verdict.type) {
+    case 'reopen':
+      return reopenTask(deps, { ref })
+    case 'button':
+      throw refused(`${formatRef(issue)} is not a closed Task`)
+    default:
+      throw refused(verdict.message)
+  }
+}
+
+async function readIssue(deps: SyncDeps, ref: string): Promise<GitHubIssue> {
+  const parsed = parseRef(ref)
+  const { issues, failures } = await readIssues(deps, [parsed])
+  const issue = issues.get(key(parsed))
+  if (issue) return issue
+  if (failures.length > 0) {
+    throw new ORPCError('BAD_GATEWAY', {
+      message: `could not read ${formatRef(parsed)} from GitHub: ${failures.join('; ')}`,
+    })
+  }
+  throw new ORPCError('NOT_FOUND', { message: `GitHub did not return ${formatRef(parsed)}` })
 }
 
 const refused = (message: string) => new ORPCError('PRECONDITION_FAILED', { message })

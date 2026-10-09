@@ -277,6 +277,13 @@ export const contract = {
     .errors(runErrors)
     .input(z.object({ ref }))
     .output(RunOutputSchema),
+  reopenFromButton: meta
+    .meta({
+      description:
+        'Reopen the closed Task of an Issue whose Run Button is a reopen one now, reading the Issue from GitHub anew, or refuse with PRECONDITION_FAILED and the reason when it is not',
+    })
+    .input(z.object({ ref }))
+    .output(ReopenOutputSchema),
   current: meta
     .meta({ description: 'Show the Task of the Tab this runs in', cli: true })
     .input(z.object({ terminalSessionId: z.string().optional() }))
