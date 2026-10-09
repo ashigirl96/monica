@@ -18,6 +18,7 @@ type Block =
       title?: string
       context: string
     }
+  | { type: 'image'; source: { type: 'base64'; media_type: 'image/jpeg'; data: string } }
 
 type Record =
   | { pid: number; kind: 'start'; argv: string[]; env: { [key: string]: string }; cwd: string }
@@ -142,6 +143,37 @@ test('claude reads the text of the page as a document, apart from the question',
     },
     { type: 'text', text: expect.stringContaining('What is 1+1?') },
   ])
+})
+
+const SCREENSHOT = 'c2NyZWVuc2hvdA=='
+
+test('claude sees the screenshot as an image next to the document of its page, and the snapshot does not send it back', async () => {
+  const { client, records } = startChat()
+
+  const [snapshot] = await Array.fromAsync(
+    await client.ask({ ...QUESTION, page: { ...QUESTION.page, screenshot: SCREENSHOT } }),
+  )
+
+  expect(userContent(records()).map(({ type }) => type)).toEqual(['document', 'image', 'text'])
+  expect(userContent(records())[1]).toEqual({
+    type: 'image',
+    source: { type: 'base64', media_type: 'image/jpeg', data: SCREENSHOT },
+  })
+  expect(snapshot).toMatchObject({ type: 'snapshot', page: { title: 'Math' } })
+  expect(snapshot).not.toHaveProperty('page.screenshot')
+})
+
+test('a screenshot that could not be taken leaves the text of the page to claude, and the snapshot keeps the reason', async () => {
+  const { client, records } = startChat()
+  const screenshotFailed = { reason: 'Cannot access contents of the page' }
+
+  const [snapshot] = await Array.fromAsync(
+    await client.ask({ ...QUESTION, page: { ...QUESTION.page, screenshotFailed } }),
+  )
+
+  expect(snapshot).toMatchObject({ type: 'snapshot', page: { screenshotFailed } })
+  expect(userContent(records()).map(({ type }) => type)).toEqual(['document', 'text'])
+  expect(userText(records())).toContain('could not be taken: Cannot access contents of the page')
 })
 
 test('a page whose HTML could not be turned into text is still answered, after a snapshot that says so', async () => {

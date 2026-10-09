@@ -4,6 +4,8 @@ export type CurrentPage = { url?: string; title?: string }
 export type CurrentPageWatch = {
   /** side panel の window の Current Page の Browser Tab を、event を待たずに取り直す。 */
   read: () => Promise<chrome.tabs.Tab | undefined>
+  /** side panel を載せた window の id。最初の tabs.query が返るまでは undefined。 */
+  windowId: () => number | undefined
   stop: () => void
 }
 
@@ -53,6 +55,7 @@ export function watchCurrentPage(onChange: (page: CurrentPage) => void): Current
       )
       return tab
     },
+    windowId: () => windowId,
     stop() {
       stopped = true
       chrome.tabs.onActivated.removeListener(onActivated)

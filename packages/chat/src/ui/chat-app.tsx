@@ -1,3 +1,4 @@
+import { Camera } from 'lucide-react'
 import { Fragment, useEffect, useState, useSyncExternalStore } from 'react'
 
 import { Answer } from './answer.tsx'
@@ -10,7 +11,7 @@ import { InputMessage } from './fluid/input-message.tsx'
 import { useIcons } from './fluid/lib/icon-context.tsx'
 import { ThinkingIndicator } from './fluid/thinking-indicator.tsx'
 import { PageHeader } from './page-header.tsx'
-import { readPage } from './read-page.ts'
+import { readCurrentPage } from './read-current-page.ts'
 
 function Faint({ children }: { children: string }) {
   return <p className="text-[13px] leading-5 text-muted-foreground">{children}</p>
@@ -64,8 +65,28 @@ function Reply({ entry, onRetry }: { entry: ChatEntry; onRetry: (() => void) | u
   )
 }
 
+function ScreenshotToggle({ store, pressed }: { store: ChatStore; pressed: boolean }) {
+  return (
+    <Button
+      type="button"
+      variant="ghost"
+      size="icon-sm"
+      active={pressed}
+      aria-pressed={pressed}
+      aria-label="スクリーンショットを添える"
+      title="スクリーンショットを添える"
+      className={pressed ? 'text-foreground' : undefined}
+      // 押した後の Enter が、このボタンを押し直さずに質問を送るよう、focus を入力欄に残す。
+      onMouseDown={(event) => event.preventDefault()}
+      onClick={store.toggleScreenshot}
+    >
+      <Camera />
+    </Button>
+  )
+}
+
 function ChatBody({ store }: { store: ChatStore }) {
-  const { entries, answering, unreachable, retryable } = useSyncExternalStore(
+  const { entries, answering, withScreenshot, unreachable, retryable } = useSyncExternalStore(
     store.subscribe,
     store.snapshot,
   )
@@ -82,6 +103,14 @@ function ChatBody({ store }: { store: ChatStore }) {
         {entries.map((entry) => (
           <Fragment key={entry.id}>
             <div className="flex flex-col items-end gap-1">
+              {entry.screenshot !== undefined && (
+                // manifest の CSP の img-src は 'self' と data: だけを通すので、data: の URL で描く。
+                <img
+                  src={`data:image/jpeg;base64,${entry.screenshot}`}
+                  alt="添えたスクリーンショット"
+                  className="max-w-[160px] rounded-md border border-border"
+                />
+              )}
               <ChatMessage from="user" className="max-w-[85%]">
                 {entry.question}
               </ChatMessage>
@@ -112,6 +141,7 @@ function ChatBody({ store }: { store: ChatStore }) {
           }}
           status={answering ? 'streaming' : 'idle'}
           onStop={store.stop}
+          leftSlot={<ScreenshotToggle store={store} pressed={withScreenshot} />}
           history={entries.map(({ question }) => question)}
           placeholder="このページについて質問"
           sendLabel="送る"
@@ -130,7 +160,7 @@ export function ChatApp({ client }: { client: ChatClient }) {
   useEffect(() => {
     const watch = watchCurrentPage(setPage)
     // 質問を送った時に、その時の Browser Tab を読む。side panel を開いているだけでは読まない。
-    const close = store.open(async () => readPage(await watch.read()), window)
+    const close = store.open((options) => readCurrentPage(watch, options), window)
     return () => {
       close()
       store.startNewChat()

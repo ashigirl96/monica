@@ -10,7 +10,7 @@ ask       { question, page: Page, history: { question, answer, page: PageSnapsho
 ```
 
 - `prepare` は spare（下の「spare」）を起こし、その initialize を待たずに返る。spare が既にあるか、claude を 4 つ持っていれば何もしない。Chrome Extension は Backend の不在の確かめにもこれを呼ぶので、速く返す。
-- `ask` は 1 回の質問への応答の stream（`docs/packages.md` の contract の規約 7）。`ChatEvent` は `type` の判別 union で、最初に `{ type: 'snapshot', page: PageSnapshot, omitted: { pages, turns } }` を 1 つ流し、続けて `{ type: 'text', text }`（答えの文字の delta）を流す。client は届いた順に `text` をつなぐ。result を受けたら stream を閉じる。形は下の「Page Snapshot」にある。
+- `ask` は 1 回の質問への応答の stream（`docs/packages.md` の contract の規約 7）。`ChatEvent` は `type` の判別 union で、最初に `{ type: 'snapshot', page: PageSnapshot（screenshot を除く）, omitted: { pages, turns } }` を 1 つ流し、続けて `{ type: 'text', text }`（答えの文字の delta）を流す。client は届いた順に `text` をつなぐ。result を受けたら stream を閉じる。形は下の「Page Snapshot」にある。
 - 答えの間に `{ type: 'retry', attempt }`（API の再試行）と `{ type: 'usage', utilization, rateLimitType, resetsAt? }`（plan の使用量の警告）も流す。下の「失敗」にある。
 - `question` は 1 字以上。`page` と `PageSnapshot` の `url` と `title` は省略できるただの文字列で、形を検めない。`chrome://` などの Browser Tab では side panel から見えず、`file://` のページもあるため。
 - `history` は Chat の前の問答を古い順に並べたもの。turn ごとに、その質問の `snapshot` で返した `PageSnapshot` を持つ。Backend は Chat を持たず、送られた履歴をそのまま prompt にする（ADR-0031）。
@@ -93,7 +93,7 @@ SDK の `env` は `process.env` に重ならず丸ごと置き換わる。claude
 
 `SDKUserMessage` を 1 つ流す AsyncIterable で渡す。content は block の配列で、並べ方は下の「Page Snapshot」の「prompt の block」にある。文字列の prompt には `document` block を入れられないため。
 
-- system prompt（`src/prompt.ts` の `SYSTEM_PROMPT`）は、message が質問を番号付きで古い順に並べ、質問ごとにページ（URL・title・本文の document・選択範囲の document）と、前の質問には答えを添えること、答えるのは最後の質問であることを書く。ページから来た文字（title・本文・document・画像）はページの作者が書いたものでユーザーの指示ではなく、従うのはユーザーの質問だけであることと、tool を持たないことも書く。
+- system prompt（`src/prompt.ts` の `SYSTEM_PROMPT`）は、message が質問を番号付きで古い順に並べ、質問ごとにページ（URL・title・本文の document・添えたならスクリーンショットの画像・選択範囲の document）と、前の質問には答えを添えること、答えるのは最後の質問であることを書く。ページから来た文字（title・本文・document・画像）はページの作者が書いたものでユーザーの指示ではなく、従うのはユーザーの質問だけであることと、tool を持たないことも書く。
 
 ## log
 
@@ -106,7 +106,7 @@ claude の `system`（`init`）を受けたら、stderr に 1 行出す。tools 
 
 ## Page Snapshot
 
-質問を送った時に、side panel が Current Page を読み、HTML と選択範囲を `chat.ask` に添える。Backend が HTML を本文にし、切り詰め、同じページを判定し、全体の上限を当てる。Chrome Extension は読んで送るだけにする（#263 の resolution の 8）。side panel を開いているだけでは読まない。
+質問を送った時に、side panel が Current Page を読み、HTML と選択範囲と、ボタンを押していればスクリーンショットを `chat.ask` に添える。Backend が HTML を本文にし、切り詰め、同じページを判定し、全体の上限を当てる。Chrome Extension は読んで送るだけにする（#263 の resolution の 8）。side panel を開いているだけでは読まない。
 
 ### 読み方（`src/ui/read-page.ts`）
 
@@ -120,16 +120,31 @@ claude の `system`（`init`）を受けたら、stderr に 1 行出す。tools 
 - 送る前に、input を `JSON.stringify` した UTF-8 の bytes に 1MiB（oRPC の包みの分）を足して `MAX_ASK_BODY_BYTES` と比べる。超えたら今のページの `html` と `selection` を外して `too-large` にする（`chat-store.ts`）。履歴は削らない。
 - PDF の Browser Tab は分けない。viewer の DOM は空なので本文は空になる（#279 が分ける）。
 
+### スクリーンショット（`src/ui/screenshot.ts`・`read-current-page.ts`）
+
+入力欄のボタン（下の「画面の組み立て」）を押した質問にだけ、Current Page の Browser Tab の表示領域のスクリーンショットを添える。既定は添えず、送るか「新しい Chat」を押すとボタンは外れる。表示領域の外（ページ全体）や範囲を選んで撮ることはしない。
+
+- **撮る時機**: 送る時に `chrome.tabs.captureVisibleTab(windowId, { format: 'png' })` で撮る。`windowId` は Current Page の追跡（下の「Current Page の追い方」）が持つ side panel の window の id。写るのは Browser Tab の表示領域だけで、side panel と toolbar は写らない。
+- **gesture と quota**: 撮れるかを決めるのは `<all_urls>` の host permission だけで、user gesture は要らない。gesture が効くのは quota だけで、gesture の外では約 1 秒に 2 回を超えると `MAX_CAPTURE_VISIBLE_TAB_CALLS_PER_SECOND` の error になり、gesture から 4.8 秒以内は何回でも通った（Chromium の `tabs_api.cc` の `ShouldSkipQuotaLimiting()` が `user_gesture()` を見る）。そこで送る操作（送るボタンの click と Enter の keydown）の handler の中で、最初の `await` より前に呼ぶ。`ChatStore.ask` が await を挟まずに `readPage({ screenshot })` を呼び、`readCurrentPage` が Browser Tab を取り直す前に撮り始め、`executeScript` と並べて待つ。`executeScript` の 3 秒を待ってから撮ると gesture の窓を食う。
+- **打ち切り**: 撮るのにも 3 秒の timeout を付け、超えたら撮れなかったことにする。
+- **大きさと形式**: PNG で撮り、side panel の `createImageBitmap` と `OffscreenCanvas` で、撮った画像の px を side panel の `devicePixelRatio` で割った大きさ（`shrunkSize`、小さくするだけで拡大しない）に縮め、1 度だけ JPEG（quality 0.8）にする。JPEG の劣化を 2 度かけない。ページの zoom が 100% でないときは CSS px とずれるが、model に渡す大きさとしては困らない。1280×800 で約 1,300 token。contract には `data:` の頭を外した base64 で載せる。
+- **撮れないとき**: 撮れなくても質問は送れる。`screenshot` を外し、`screenshotFailed: { reason }` に error の message（打ち切りは `the Browser Tab did not answer within 3 seconds`）を入れ、読めた本文はそのまま送る。PDF の Browser Tab のように、本文は読めても撮れない場面で本文まで捨てないため。本文を読めずに撮れたとき（`executeScript` の timeout など）は、読めなかったこととスクリーンショットの両方を送る。ユーザーが添えると決めたものを落とさない。`chrome://` などは `captureVisibleTab` も `executeScript` も同じく失敗するので、たいていは「ページを読めませんでした」と並ぶ。
+- **送り返さない**: Backend は `snapshot` の `page` にスクリーンショットを入れない。contract の `snapshot` の `page` は `PageSnapshot` から `screenshot` を除いた型で、oRPC の output の検証が落とす。数百 KB の文字列を往復させないため。side panel が、自分の撮ったものを履歴の turn の `page` に足す。
+- **持ち続ける**: 履歴に残る間は、どのスクリーンショットも次の質問から毎回送り直し、どれを落とすかは Backend の全体の上限に任せる。再試行（#281）は失敗した質問の input をそのまま送り直し、撮り直さないので、side panel は送ったスクリーンショットを、答えが返るか履歴から外れるまで持つ。
+- **縮小**: 質問の吹き出しの上に、送ったものを幅 160px までで出す。manifest の CSP の `img-src 'self' data:` の下で描けるよう、`data:image/jpeg;base64,…` の URL にする。押しても何もしない。
+- **Retina と PDF**: 撮った画像の px は Browser Tab の `innerWidth` × DPR で、縮めると `innerWidth` に戻る（`--force-device-scale-factor=2` で真似た。本物の Retina の画面ではまだ確かめていない）。PDF の Browser Tab も撮れ、viewer の toolbar ごと写る（下の「ui」の「実機で確かめたこと」）。
+
 ### 形（`src/contract.ts`）
 
 ```
-Page          { url?, title?, selection?: string, content: { kind: 'html', html } | Unreadable }
-PageSnapshot  { url?, title?, selection?: { text, truncated }, content?: { kind: 'text', text, truncated } | { kind: 'same', turn } | Unreadable }
+Page          { url?, title?, selection?: string, content: { kind: 'html', html } | Unreadable, screenshot?: string, screenshotFailed?: { reason } }
+PageSnapshot  { url?, title?, selection?: { text, truncated }, content?: { kind: 'text', text, truncated } | { kind: 'same', turn } | Unreadable, screenshot?: string, screenshotFailed?: { reason } }
 Unreadable    { kind: 'unreadable', reason: 'restricted' | 'timeout' | 'too-large' | 'unparsable', detail? }
-snapshot      { type: 'snapshot', page: PageSnapshot, omitted: { pages, turns } }
+snapshot      { type: 'snapshot', page: PageSnapshot から screenshot を除いたもの, omitted: { pages, turns } }
 ```
 
-- `snapshot` の `page` と `history` の各 turn の `page` は同じ型で、side panel は届いたものをそのまま履歴に入れる。`snapshot` の届かなかった答えの turn は、`content` の無い `{ url, title }` になる。
+- `screenshot` は JPEG の base64（`data:` の頭を外した文字列、zod の `base64()`）。GLOSSARY の Page Snapshot はスクリーンショットを含むので、turn の直下ではなく `page` の中に置く。`image` block の `source.data` にそのまま入り、縮小の `data:` の URL もそこから作れる。
+- `snapshot` の `page` に、side panel が送ったスクリーンショットを足したものが `history` の各 turn の `page` になる。`snapshot` の届かなかった答えの turn は、`content` の無い `{ url, title }` に送ったスクリーンショットを足したものになる。
 - `same` の `turn` は、その request の `history` の添字。失敗した質問は履歴に入らず、Backend が落とす古い turn も side panel の配列は変えないので、一度返した添字は後の request でも同じ turn を指す。
 - `omitted` は、今回渡さなかった古いページと問答の数。問答ごと落とした turn のページは `turns` にだけ数える。
 
@@ -149,25 +164,26 @@ snapshot      { type: 'snapshot', page: PageSnapshot, omitted: { pages, turns } 
 ### 同じページ
 
 - 1 回の request の中で、送られた `history` を新しい方から探し、`content` が `text` の turn のうち、URL が `#` から後ろを除いて一致し、切った後の本文が一致する最初の turn を `same` で指す。本文が一致していれば、hash だけ違う URL は同じページとみなす。
-- `same` のときも選択範囲は添える。同じページだったことは side panel に知らせない。
+- `same` のときも選択範囲とスクリーンショットは添える。同じ URL と本文でも、スクロールで表示領域が変わるため。同じページだったことは side panel に知らせない。
 
 ### 全体の上限
 
-- 前の問答、前のページの本文と選択範囲、今の質問と Page Snapshot の字の和を 20 万字（`MAX_ASK_CHARS`）に収める。URL、title、Backend が足す見出しの文は数えない。
-- 超えたら、古い turn のページ（本文と選択範囲）から 1 つずつ落とす。それでも超えたら、古い turn の問答を 1 つずつ落とす。
+- 前の問答、前のページの本文と選択範囲とスクリーンショット、今の質問と Page Snapshot の字の和を 20 万字（`MAX_ASK_CHARS`）に収める。スクリーンショットは 1 枚を 1,500 字と数える。URL、title、Backend が足す見出しの文は数えない。
+- 超えたら、古い turn のページ（本文と選択範囲とスクリーンショット）から 1 つずつ落とす。1 ページを `document` と `image` の組で渡す形を崩さないよう、同じ質問のページの本文とスクリーンショットはまとめて落とす。それでも超えたら、古い turn の問答を 1 つずつ落とす。落としたスクリーンショットは `omitted.pages` に数え、別の知らせは足さない。
 - 今の質問と Page Snapshot は落とさない。今のページが `same` で指す turn も、ページと問答のどちらも落とさない。今のページの本文がそこにしか無いため。今の分だけで 20 万字を超えても、そのまま送る。
 
 ### prompt の block（`src/page/prompt.ts`）
 
-- turn ごとに、本文の `document`、選択範囲の `document`、見出しと質問の `text`、答えの `text` の順に並べ、古い turn から並べる。今の turn は答えの手前で終える。何も落とさなければ、n 問目の並びが n+1 問目の並びの頭とそのまま一致する。
+- turn ごとに、本文の `document`、スクリーンショットの `image`、選択範囲の `document`、見出しと質問の `text`、答えの `text` の順に並べ、古い turn から並べる。今の turn は答えの手前で終える。何も落とさなければ、n 問目の並びが n+1 問目の並びの頭とそのまま一致する。
+- スクリーンショットの `image` は `{ type: 'image', source: { type: 'base64', media_type: 'image/jpeg', data } }`。本文の `document` の隣に置き、本文が無い（読めなかった・同じページ・空）ときはそのページの block の先頭に来る。
 - 本文の `document` は `{ type: 'document', source: { type: 'text', media_type: 'text/plain', data }, title, context }`。`title` は page の title の先頭 500 字で、無ければ省く。`context` は `URL: <url>` で、切り詰めたときは「先頭の 100,000 字だけ」の行を足す。API は `title` を 1〜500 字、`context` を 1 字以上とする。
 - 選択範囲の `document` は `title` を `Selection: <page の title>`（title が無ければ `Selection`）にする。選択範囲もページの作者が書いた文字なので、質問の `text` に混ぜない。
-- 見出しには「Question n」（`history` の添字 + 1）、URL、title（無ければ `unknown`）、本文を省いたこと（同じページ・上限で落とした）・切り詰めたこと・本文が空だったこと・読めなかった理由を書く。答えは `document` に入れない。
+- 見出しには「Question n」（`history` の添字 + 1）、URL、title（無ければ `unknown`）、本文を省いたこと（同じページ・上限で落とした）・切り詰めたこと・本文が空だったこと・読めなかった理由と、スクリーンショットを添えたこと、または撮れなかったことと `screenshotFailed` の理由を書く。答えは `document` に入れない。
 - 問答を落としたら、先頭に落とした数を 1 行の `text` で置く。
 
 ### 知らせ（`src/ui/notice.ts`）
 
-`snapshot` から、質問の吹き出しの下に淡い 1 行を作る。読めなかった・切り詰めた・渡していない、の順に「。」でつなぐ。答えの場所に出す失敗とは分ける。
+`snapshot` から、質問の吹き出しの下に淡い 1 行を作る。読めなかった・撮れなかった・切り詰めた・渡していない、の順に「。」でつなぐ。答えの場所に出す失敗とは分ける。
 
 | `reason` | 決める側 | 当てる場面 | 文言 |
 |---|---|---|---|
@@ -176,6 +192,7 @@ snapshot      { type: 'snapshot', page: PageSnapshot, omitted: { pages, turns } 
 | `too-large` | side panel | 送る前の大きさの確かめで外した | ページを読めませんでした（大きすぎます） |
 | `unparsable` | Backend | 本文への変換が例外を投げた | ページを読めませんでした（本文を取り出せませんでした） |
 
+- `snapshot` の `page` に `screenshotFailed` があれば「スクリーンショットを撮れませんでした」。理由は出さない。
 - 本文か選択範囲を切り詰めたら「本文を切り詰めました」「選択範囲を切り詰めました」（両方なら「本文と選択範囲を切り詰めました」）。
 - `omitted` の和が 1 以上なら「古いページや問答 n 件を渡していません」。
 
@@ -184,6 +201,8 @@ snapshot      { type: 'snapshot', page: PageSnapshot, omitted: { pages, turns } 
 - context menu から選択範囲を渡す経路、iframe の中の本文と選択（`allFrames`）。
 - 本物のクリックで side panel の入力欄に focus を移した後も、ページの選択範囲が `selection` に入るか（CDP の操作でだけ確かめた）。
 - 入れ子の深い DOM での変換の時間。div を 256・512・1000 段入れ子にしたページで、defuddle は 0.33 秒・1.1 秒・4.4 秒かかった（3000 段で 79 秒）。main thread で走るので、その間 Backend は他の request に応えない。
+- 本物の Retina の画面での `captureVisibleTab` の倍率（下の「実機で確かめたこと」は `--force-device-scale-factor=2` で真似た）。
+- side panel そのものから送ったときの quota。送るボタンで 2 回と Enter で 1 回を 1 秒の間に続けて撮れるか、Enter の keydown が quota を外す user gesture になるか。side panel の page を Browser Tab で開く確かめ方では、その Browser Tab が裏に回り、操作の間が 5〜10 秒空いた。
 
 ## 失敗
 
@@ -246,12 +265,12 @@ side panel は `ORPCError`（`@orpc/client`）の `code` で分け、`data` は 
 
 ### 再試行と履歴（`src/ui/chat-store.ts`）
 
-- 再試行のボタンは、最後の質問の失敗にだけ出す。押すと、その質問で送った `chat.ask` の input をそのまま送り直し、ページは読み直さない。失敗した質問は最後の質問なので、その `history` は送った時から変わらず、Page Snapshot の中身（HTML など）も同じ物を送れる。
+- 再試行のボタンは、最後の質問の失敗にだけ出す。押すと、その質問で送った `chat.ask` の input をそのまま送り直し、ページは読み直さず、スクリーンショットも撮り直さない。失敗した質問は最後の質問なので、その `history` は送った時から変わらず、Page Snapshot の中身（HTML とスクリーンショット）も同じ物を送れる。
 - side panel は送った input を、答えが返るか、次の質問で履歴から外れるまで持つ。
 - oRPC の `ClientRetryPlugin` は使わない。event iterator の途中の error で handler を最初から呼び直すので、途中まで流した値が client で重なる（research の §3）。side panel が自分で送り直す自動の再試行もしない。
 - 失敗した質問は、再試行して答えが返るまで、後の質問の `history` に入れない。再試行せずに次の質問を送ったら、失敗した質問を履歴から外し、画面には残す。Backend が `snapshot` を返した後に失敗した場合も、その Page Snapshot を `history` に入れない。
 - 止めた質問は、途中までの答えの後に空行を挟んで「（ユーザーが途中で止めた）」を付けて履歴に入れる。答えが空なら印だけにする。「続けて」と訊いたときの材料になる。Backend は答えの文字をそのまま prompt にするので、印も文字のまま claude に渡る。
-- `snapshot` が届く前に止めた質問は、送ったページの URL と title だけで履歴に入れる。Backend が本文にしたものが side panel に無いため。ページを読み終える前に止めたら、URL も title も無い。
+- `snapshot` が届く前に止めた質問は、送ったページの URL と title（と添えたスクリーンショット）だけで履歴に入れる。Backend が本文にしたものが side panel に無いため。ページを読み終える前に止めたら、URL も title も無い。
 - 止めた質問には再試行を付けない。履歴に入り、「続けて」で続きを訊けるため。
 
 ### 止めるボタン
@@ -294,7 +313,7 @@ side panel は `ORPCError`（`@orpc/client`）の `code` で分け、`data` は 
 
 - `src/chat.test.ts` が `createRouterClient(router, { context: { chatAgent } })` を通して確かめる。DB は使わない。本文への変換の失敗は、`defuddle/node` の `Defuddle` を `spyOn` で reject させて作る。
 - 途中の失敗が RPCLink の client に `ORPCError` の `code` と `data` で届くことは、`apps/backend/src/browser-listener.test.ts` がブラウザの口に繋いで確かめる。
-- 本文への変換は `src/page/snapshot.test.ts` が `src/page/fixtures/` の HTML（`getHTML` が書き出す、document element の中身の形）で、同じページと全体の上限と block の並びは `src/page/prompt.test.ts` が `PageSnapshot` を直に組んで確かめる。どちらも claude を起こさない。
+- 本文への変換は `src/page/snapshot.test.ts` が `src/page/fixtures/` の HTML（`getHTML` が書き出す、document element の中身の形）で、同じページと全体の上限と block の並び（スクリーンショットの `image` の置き場所と 1,500 字の数え方を含む）は `src/page/prompt.test.ts` が `PageSnapshot` を直に組んで確かめる。どちらも claude を起こさない。
 - claude は `src/fake-claude.ts` の偽の claude に差し替える。テストは拡張子の無い `/bin/sh` の wrapper を一時 directory に書いて `claudePath` に渡す。wrapper は `@monica/chat/testing` の `writeFakeClaude(dir, recordPath, scenario?)` が書き、Backend のテスト（`apps/backend/src/main.test.ts` と `browser-listener.test.ts`）も使う。wrapper は `exec "<process.execPath>" "<fake-claude.ts の path>" "<記録の file>" <場面> "$@"` の 1 行。SDK は path が `.js`・`.mjs`・`.ts`・`.tsx`・`.jsx` で終わると `bun` か `node` を名前で起こすが、claude の env には `PATH` が無い。拡張子の無い path は直に起こす。wrapper の `/bin/sh` は env に `PWD`・`SHLVL`・`_` を足す。
 - 偽の claude は次のように話す。
   - stdin の `control_request` に `control_response`（`subtype: success`、`response: {}`）を返す。
@@ -362,6 +381,8 @@ SDK 0.3.293 と同梱の claude 2.1.293 で、dev の Backend を `env -i`（`HO
 - 上端の見出し（`page-header.tsx`）は Current Page の title と host を出し、右端に「新しい Chat」を置く。host の行の `title` 属性に URL を持つ。host の無い URL（`file:` など）は URL をそのまま出し、URL も title も見えない Browser Tab は「読めないページ」と出す。favicon は出さない。外の画像は CSP の `img-src` で止まり、`_favicon` には `favicon` の権限が要るため。
 - 答えは use-stick-to-bottom（`chat-scroll.tsx`）で下端に張り付き、上へスクロールすると外れて「↓ 最新へ」を出す。
 - 最初の `text` が届くまで ThinkingIndicator を出す。答えている間は送らず、送るボタンは止めるボタンになる。入力欄には打てる。
+- InputMessage の `leftSlot` に、スクリーンショットを添えるボタン（lucide の `Camera`、名前は「スクリーンショットを添える」）を置く。押している間は `aria-pressed` と Button の `active` の色で示す。mousedown の既定の動作を止めて focus を入力欄に残し、押した後の Enter がこのボタンを押し直さずに質問を送るようにする。
+- 送ったスクリーンショットの縮小は、質問の吹き出しの上に右寄せで出す（上の「スクリーンショット」）。
 - 失敗は答えの場所に、途中までの答えの後に赤い 1 行と、CLI の原文の詳しい行（等幅の淡い字）と「再試行」のボタンで出す。止めた答えには「止めました」、再試行を待つ間の 1 行と使用量の警告は淡い字で出す。文言は上の「失敗」にある。
 - 帯「monica の desktop が起動していません」は、入力欄の上に `destructive` の色で出す。
 - 読めなかった・切り詰めた・渡していないことの知らせ（上の「Page Snapshot」の「知らせ」）は、質問の吹き出しの下に右寄せの淡い 1 行で出し、答えの場所の失敗とは分ける。
@@ -372,9 +393,12 @@ React に依らない `createChatStore(client)` が Chat を持ち、`ChatApp` �
 
 - Chat は side panel の document の memory にだけあり、window ごとに 1 つ。「新しい Chat」を押すか side panel を閉じると終わり、どこにも残さない。Backend が居なくなっても終わらない（ADR-0030・0031）。
 - `open(readPage, focus)` は side panel を開いた時に `ChatApp` の effect が 1 回呼び、`chat.prepare` を呼んで spare を起こさせる。届かなければ帯を出す（上の「失敗」の「Backend の不在の帯」）。`focus` は `ChatApp` が渡す `window` で、帯の間はその `focus` の event でも確かめ直す。返す関数で確かめ直しを止める。dev の StrictMode で 2 回呼ばれても、Backend が spare を 1 つに保つので害は無い。
-- `ask` は、送る時に `readPage` で Current Page を読み直して `page` に入れ、答え終えた問答を古い順に `history` に入れて `chat.ask` を呼ぶ。送った input は、答えが返るか次の質問を送るまで持ち、`retry` が送り直す。`stop` は stream を abort し、止めた印を付けて履歴に入れる。`ChatApp` が渡す `readPage` は、Browser Tab を取り直して `read-page.ts` で読む（上の「Page Snapshot」）。答えている間は送らずに false を返す。答えの途中で Current Page が替わっても、delta はその質問の答えに足す。
-- 届いた `snapshot` の `page` を、その問答の turn の `page` として履歴に入れ、`snapshot` から作った知らせを質問の entry の `notice` に入れる。
-- `startNewChat` は流れている stream を `signal` で abort し、問答と履歴を空にする。abort の後に届いた delta は描かない。Backend は abort でその claude を止める。
+- `ask` は、送る時に `readPage({ screenshot })` で Current Page を読み直して `page` に入れ、答え終えた問答を古い順に `history` に入れて `chat.ask` を呼ぶ。`readPage` は await を挟まずに呼び、送る操作の user gesture の中で撮り始める。`ChatApp` が渡す `readPage` は `read-current-page.ts` の `readCurrentPage` で、撮り始めてから Browser Tab を取り直して `read-page.ts` で読む（上の「Page Snapshot」）。答えている間は送らずに false を返し、スクリーンショットのボタンも外さない。答えの途中で Current Page が替わっても、delta はその質問の答えに足す。
+- 送った input は、答えが返るか次の質問を送るまで持ち、`retry` が `readPage` を呼ばずにそのまま送り直す。`stop` は stream を abort し、止めた印を付けて履歴に入れる（上の「失敗」の「再試行と履歴」）。
+- `snapshot()` の `withScreenshot` がボタンの状態で、`toggleScreenshot` が切り替える。`ask` が送ったら外す。
+- 送ったスクリーンショットは、読み終えた時に質問の entry の `screenshot` に入れて縮小を出す。
+- 届いた `snapshot` の `page` に送ったスクリーンショットを足して、その問答の turn の `page` として履歴に入れ、`snapshot` から作った知らせを質問の entry の `notice` に入れる。
+- `startNewChat` は流れている stream を `signal` で abort し、問答と履歴を空にし、スクリーンショットのボタンを外す。abort の後に届いた delta は描かない。Backend は abort でその claude を止める。
 - client の型 `ChatClient` は、side panel が呼ぶ `prepare` と `ask` だけの形。ブラウザの口への oRPC の client の `chat` がそのまま入り、テストは偽の client を渡す。
 
 ### Current Page の追い方（`current-page.ts`）
@@ -383,6 +407,7 @@ React に依らない `createChatStore(client)` が Chat を持ち、`ChatApp` �
 - `tabs.onActivated` はその window の event だけを見る。`tabs.onUpdated` は Current Page の Browser Tab の event だけを見て、tab の url と title が前に出したものと違えば出し直す。pushState と hash の変更も url の変化として届く。chrome:// へ移ったときは url も title も無い event だけが届くので、変化の中身ではなく tab の値で比べる。
 - 権限は `tabs` も `webNavigation` も足さない。`<all_urls>` の host permission で http・https・file のページの url と title が見える。
 - `read()` は送る時に `tabs.query({ active: true, windowId })` で Browser Tab を取り直して返す。見出しの追跡が event を取りこぼしても、読んで送るページを違えない。
+- `windowId()` は side panel を載せた window の id を返し、`captureVisibleTab` に渡す。最初の `tabs.query` が返る前は undefined で、そのときは `windowId` を省いて呼ぶ（side panel からは同じ画像になる）。
 - 止めると listener を外し、読み途中の結果も捨てる。
 
 ### markdown
@@ -396,7 +421,8 @@ React に依らない `createChatStore(client)` が Chat を持ち、`ChatApp` �
 - DOM の環境は入れない（`docs/packages/note-ui.md` の「テスト」と同じ）。
 - `current-page.test.ts` は `fake-chrome.ts` の偽の `chrome.tabs` で確かめる。偽物は `globalThis.chrome` に置いてテストの後に外し、`query` の `active`・`windowId`・`currentWindow` を本物と同じく絞る。chrome:// へ移ったときの url も title も無い `onUpdated` も出せる。
 - `read-page.test.ts` は同じ偽物の `chrome.scripting.executeScript` で確かめる。偽物は注入された関数を走らせず、`readings` に置いた結果を返すか、reject するか、返らない。渡された injection は `injections` に残る。注入する関数そのもの（shadow root と選択範囲）は DOM が要るので、実機で確かめる。3 秒の打ち切りは `setTimeout` を `spyOn` して callback を手で呼ぶ。
-- `chat-store.test.ts` は偽の client で確かめる。偽の答えの stream は `signal` に応えず、test が流した delta をそのまま渡すので、abort の後に届いた delta を描かないことを確かめられる。
+- `read-current-page.test.ts` は同じ偽物の `chrome.tabs.captureVisibleTab` と、偽の `createImageBitmap`・`OffscreenCanvas`・`devicePixelRatio` で、撮る時機・大きさと形式・撮れないとき・読めずに撮れたときを確かめる。偽の `captureVisibleTab` は `screenshots` に置いた大きさの偽の PNG を返すか、reject するか、返らない。呼ばれた引数は `captures` に残る。偽の canvas は画像を描かず、書き出した形式と quality と大きさを JSON にした Blob を返す。本物の縮小は bun test に canvas が無いので実機で確かめ、大きさの計算（`shrunkSize`）は `screenshot.test.ts` が純関数として確かめる。
+- `chat-store.test.ts` は偽の client で確かめる。偽の答えの stream は `signal` に応えず、test が流した delta をそのまま渡すので、abort の後に届いた delta を描かないことを確かめられる。偽の `readPage` は渡された `{ screenshot }` を記録し、`ask` が返る前に呼ばれたかと、再試行が読み直さないことを見られる。
   - 偽の client は、Backend の宣言した error を `@orpc/client` の `ORPCError`（`defined: true`、contract の `askErrors` の status と message）で、届かないことを `TypeError` で投げ分ける。ui の entry は server を import できないので、router を in-process で呼べないため。
   - 失敗の文言は store の entry の `failure` で確かめる。時刻の期待値は local の `Date` から作り、時刻帯に依らせない。
   - 帯の 5 秒おきの確かめ直しは `setInterval` を `spyOn` で捕まえて callback を手で呼び、focus は `open` に渡した `EventTarget` に `focus` の event を出す。
@@ -412,3 +438,9 @@ Brave 1.97 で確かめた。
   - script で `attachShadow({ mode: 'closed' })` した要素の中の文字は、body の `html` に `<template shadowrootmode="closed">` で入り、本文に残った。page の script で選んだ 1 文は、side panel の入力欄に打った後も `selection` に入った。
   - `chrome://version` は `restricted`（`detail` は `Cannot access a chrome:// URL`）になり、知らせが出て答えも返った。
   - `view-source:` は、Enter から約 3.3 秒後に `timeout` の body を送った。`view-source:` は CDP の `Page.navigate` では開けず、新しい Browser Tab としてなら開けた。
+- スクリーンショット（同じ確かめ方。side panel の page の Browser Tab は裏に回り、Current Page の Browser Tab が表にある）:
+  - 本文に無い `QX-4821` を canvas にだけ描いたページで、ボタンを押して「画面に見えるコードは？」と送ると、haiku の答えが `QX-4821` を含んだ。JPEG の `image` block を CLI がそのまま API へ送り、model が中身を読めた。body の `page.screenshot` は JPEG で、headless（DPR 1）で 756×475（ページの `innerWidth`×`innerHeight`）、26,112 byte。吹き出しの上に縮小が出て、送った後の `aria-pressed` は false。
+  - 続けてボタンを押さずに訊くと、body の `page` に `screenshot` が無く、`history[0].page.screenshot` が 1 問目に送ったものと同じ文字列だった。
+  - `--force-device-scale-factor=2` で起こした Brave では、撮った PNG が 2400×1850（`innerWidth` 1200 の 2 倍）、縮めた JPEG が 1200×925 だった。
+  - Backend を止めて `chrome://version` で送ると、body の `page.content` が `restricted`（`Cannot access a chrome:// URL`）、`page.screenshotFailed.reason` が `The 'activeTab' permission is not in effect because this extension has not been in invoked.` だった。
+  - PDF の Browser Tab（Brave の PDF viewer）は撮れた。viewer の toolbar と縮小の列ごと写る。本文は viewer の DOM の HTML になる（#279 が分ける）。

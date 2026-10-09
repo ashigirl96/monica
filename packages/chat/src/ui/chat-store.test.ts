@@ -108,22 +108,28 @@ const snapshotAt = (url: string, title: string): PageSnapshot => ({
   content: { kind: 'text', text: `${title} text`, truncated: false },
 })
 
+const SHOT = 'c2NyZWVuc2hvdA=='
+
 function openChat(client = new FakeClient()) {
   let page = pageAt('https://a.example/', 'A')
-  let reads = 0
+  let shot: Pick<Page, 'screenshot' | 'screenshotFailed'> = { screenshot: SHOT }
+  const reads: { screenshot: boolean }[] = []
   const focus = new EventTarget()
   const store = createChatStore(client)
-  store.open(async () => {
-    reads++
-    return page
+  store.open(async (options) => {
+    reads.push(options)
+    return options.screenshot ? { ...page, ...shot } : page
   }, focus)
   return {
     client,
     store,
     focus,
-    reads: () => reads,
+    reads,
     showPage: (next: Page) => {
       page = next
+    },
+    failScreenshots: (reason: string) => {
+      shot = { screenshotFailed: { reason } }
     },
   }
 }
@@ -183,6 +189,118 @@ test('history holds the answered questions oldest first, each with the Page Snap
     'answered',
     'waiting',
   ])
+})
+
+// 撮るのは送る操作の user gesture の中でなければ quota にかかるので、ask が返る前に読み始める。
+test('only a question sent with the screenshot button pressed reads the page with a screenshot, starting before ask returns, and sending lifts the button', async () => {
+  const { client, store, reads } = openChat()
+
+  store.toggleScreenshot()
+  const pressed = store.snapshot().withScreenshot
+  store.ask('First?')
+  const readsWhenAsked = [...reads]
+  await answerWith(client, 'One.')
+  store.ask('Second?')
+  await settled()
+
+  expect(pressed).toBe(true)
+  expect(readsWhenAsked).toEqual([{ screenshot: true }])
+  expect(reads).toEqual([{ screenshot: true }, { screenshot: false }])
+  expect(store.snapshot().withScreenshot).toBe(false)
+  expect(client.asked.map(({ input }) => input.page.screenshot)).toEqual([SHOT, undefined])
+})
+
+test('pressing the screenshot button again lifts it', () => {
+  const { store } = openChat()
+
+  store.toggleScreenshot()
+  store.toggleScreenshot()
+
+  expect(store.snapshot().withScreenshot).toBe(false)
+})
+
+test('a question refused while an answer is coming keeps the screenshot button pressed', async () => {
+  const { store, reads } = openChat()
+  store.ask('First?')
+  await settled()
+
+  store.toggleScreenshot()
+  store.ask('Second?')
+
+  expect(reads).toEqual([{ screenshot: false }])
+  expect(store.snapshot().withScreenshot).toBe(true)
+})
+
+test('the screenshot sent shows on the question and goes into history with the Page Snapshot that the Backend sent back, to go again with each later question', async () => {
+  const { client, store, showPage } = openChat()
+
+  store.toggleScreenshot()
+  store.ask('First?')
+  await answerWith(client, 'One.')
+  showPage(pageAt('https://b.example/', 'B'))
+  store.ask('Second?')
+  await answerWith(client, 'Two.')
+  store.ask('Third?')
+  await settled()
+
+  expect(store.snapshot().entries.map(({ screenshot }) => screenshot)).toEqual([
+    SHOT,
+    undefined,
+    undefined,
+  ])
+  expect(client.asked.at(-1)!.input.history).toEqual([
+    {
+      question: 'First?',
+      page: { ...snapshotAt('https://a.example/', 'A'), screenshot: SHOT },
+      answer: 'One.',
+    },
+    { question: 'Second?', page: snapshotAt('https://b.example/', 'B'), answer: 'Two.' },
+  ])
+})
+
+test('a new Chat lifts the screenshot button', () => {
+  const { store } = openChat()
+
+  store.toggleScreenshot()
+  store.startNewChat()
+
+  expect(store.snapshot().withScreenshot).toBe(false)
+})
+
+test('a question whose request would pass the body limit still goes with its screenshot', async () => {
+  const { client, store, showPage } = openChat()
+  const html = 'x'.repeat(MAX_ASK_BODY_BYTES - 512 * 1024)
+  showPage(pageAt('https://big.example/', 'Big', { content: { kind: 'html', html } }))
+
+  store.toggleScreenshot()
+  store.ask('What is this?')
+  await settled()
+
+  expect(client.asked[0]!.input.page).toEqual({
+    url: 'https://big.example/',
+    title: 'Big',
+    content: { kind: 'unreadable', reason: 'too-large' },
+    screenshot: SHOT,
+  })
+})
+
+test('an answer that came without a Page Snapshot keeps its screenshot in history with the URL and title of its page', async () => {
+  const { client, store } = openChat()
+
+  store.toggleScreenshot()
+  store.ask('First?')
+  await settled()
+  client.asked[0]!.answer.text('One.')
+  client.asked[0]!.answer.end()
+  await settled()
+  store.ask('Second?')
+  await settled()
+
+  expect(client.asked[1]!.input.history[0]!.page).toEqual({
+    url: 'https://a.example/',
+    title: 'A',
+    screenshot: SHOT,
+  })
 })
 
 test('an answer that came without a Page Snapshot keeps only the URL and title of its page in history', async () => {
@@ -280,6 +398,26 @@ test('a cut text or selection, and earlier pages or questions left out, join the
   )
 })
 
+test('a screenshot that could not be taken joins the notice after the page that could not be read', async () => {
+  const failed = { reason: 'Cannot access contents of the page' }
+
+  expect(await noticeFor({ ...readable, screenshotFailed: failed })).toBe(
+    'スクリーンショットを撮れませんでした',
+  )
+  expect(
+    await noticeFor(
+      {
+        ...readable,
+        content: { kind: 'unreadable', reason: 'restricted' },
+        screenshotFailed: failed,
+      },
+      { pages: 1, turns: 0 },
+    ),
+  ).toBe(
+    'ページを読めませんでした（このページは Chrome Extension から読めません）。スクリーンショットを撮れませんでした。古いページや問答 1 件を渡していません',
+  )
+})
+
 test('a question sent while an answer is coming is not sent', async () => {
   const { client, store } = openChat()
 
@@ -315,6 +453,7 @@ test('a new Chat aborts the answer coming, empties the Chat and ignores the delt
   expect(store.snapshot()).toEqual({
     entries: [],
     answering: false,
+    withScreenshot: false,
     unreachable: false,
     retryable: undefined,
   })
@@ -615,14 +754,14 @@ test('only the last question that failed can be retried, and retrying sends its 
   sent.answer.snapshot(snapshotAt('https://a.example/', 'A'))
   sent.answer.fail(failed('claude exited'))
   await settled()
-  const readsBefore = reads()
+  const readsBefore = reads.length
   showPage(pageAt('https://b.example/', 'B'))
 
   expect(store.snapshot().retryable).toBe(1)
   expect(store.retry()).toBe(true)
   await settled()
 
-  expect(reads()).toBe(readsBefore)
+  expect(reads).toHaveLength(readsBefore)
   expect(latest(client).input).toBe(sent.input)
   expect(store.snapshot().entries[1]).toEqual({
     id: 1,
@@ -631,6 +770,25 @@ test('only the last question that failed can be retried, and retrying sends its 
     status: 'waiting',
   })
   expect(store.snapshot().retryable).toBeUndefined()
+})
+
+test('retrying a question sent with a screenshot sends that screenshot again without taking another, and the answer keeps it in the history', async () => {
+  const { client, store, reads } = openChat()
+  store.toggleScreenshot()
+  store.ask('What is shown?')
+  await settled()
+  client.asked[0]!.answer.fail(failed('claude exited'))
+  await settled()
+
+  store.retry()
+  await answerWith(client, 'A chart.')
+  store.ask('And?')
+  await settled()
+
+  expect(reads).toEqual([{ screenshot: true }, { screenshot: false }])
+  expect(client.asked[1]!.input.page.screenshot).toBe(SHOT)
+  expect(store.snapshot().entries[0]).toMatchObject({ status: 'answered', screenshot: SHOT })
+  expect(latest(client).input.history[0]!.page.screenshot).toBe(SHOT)
 })
 
 test('a retried question that is answered joins the history', async () => {
@@ -694,6 +852,7 @@ test('stopping aborts the stream, draws nothing that arrives later, and marks th
   expect(store.snapshot()).toEqual({
     entries: [{ id: 0, question: 'What is this?', answer: 'It is ', status: 'stopped' }],
     answering: false,
+    withScreenshot: false,
     unreachable: false,
     retryable: undefined,
   })
