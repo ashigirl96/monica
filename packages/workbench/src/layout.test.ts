@@ -249,6 +249,34 @@ test('tab.respawn refuses a Tab whose Terminal Session is still live', async () 
   expect((await client.layout.get()).runspaces[0]?.tabs).toEqual([tab])
 })
 
+test('a write that makes several layout changes still signals the layout once', async () => {
+  const { ptyd, workbenchLedger, client, settled } = setup()
+  const { runspaceId, tab } = await client.runspace.create(size)
+  const split = await client.tab.open({ runspaceId, ...size })
+  await settled(tab.terminalSessionId)
+  ptyd.exit(tab.terminalSessionId, 0)
+  await ptyd.received((op) => op.op === 'reap' && op.session_id === tab.terminalSessionId)
+  let signals = 0
+  workbenchLedger.events.subscribe('change', (change) => {
+    if (change.type === 'layout') signals++
+  })
+  async function signalsOf(call: () => Promise<unknown>) {
+    const before = signals
+    await call()
+    return signals - before
+  }
+
+  expect({
+    'tab.pin that splits the Tab into a new Runspace': await signalsOf(() =>
+      client.tab.pin({ id: split.id }),
+    ),
+    'tab.respawn': await signalsOf(() => client.tab.respawn({ id: tab.id, ...size })),
+  }).toEqual({
+    'tab.pin that splits the Tab into a new Runspace': 1,
+    'tab.respawn': 1,
+  })
+})
+
 test('every write to the layout streams a layout signal on changes', async () => {
   const { ptyd, client } = setup()
   const subscription = new AbortController()

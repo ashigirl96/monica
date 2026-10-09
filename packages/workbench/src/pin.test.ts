@@ -2,6 +2,7 @@ import { afterEach, expect, setSystemTime, test } from 'bun:test'
 
 import { eq } from 'drizzle-orm'
 
+import type { WorkbenchChange } from './contract.ts'
 import { startFakePtyd } from './fake-ptyd.ts'
 import { shouldRespawn } from './pin.ts'
 import { runspace, tab as tabTable, terminalSession } from './schema.ts'
@@ -163,6 +164,21 @@ test("when a pinned Tab's shell exits, the Backend binds the Tab to a new shell 
     rows: 24,
     cols: 80,
   })
+})
+
+test('binding a pinned Tab to a new shell signals the layout, so the webview attaches to it', async () => {
+  const { ptyd, workbenchLedger, client, settled } = setup()
+  const { tab } = await client.runspace.create(size)
+  await client.tab.pin({ id: tab.id })
+  await settled(tab.terminalSessionId)
+  letShellsLive()
+  const changes: WorkbenchChange[] = []
+  workbenchLedger.events.subscribe('change', (change) => changes.push(change))
+
+  ptyd.exit(tab.terminalSessionId, 0)
+
+  await ptyd.received((op) => op.op === 'create' && op.session_id !== tab.terminalSessionId)
+  expect(changes.filter((change) => change.type === 'layout')).toEqual([{ type: 'layout' }])
 })
 
 test('a pinned Tab whose shell ptyd lost is bound to a new shell after the reconcile', async () => {

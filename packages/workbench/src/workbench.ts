@@ -5,10 +5,10 @@ import type { BunSQLiteDatabase } from 'drizzle-orm/bun-sqlite'
 
 import { type AgentSessions, createAgentSessions } from './agent-session.ts'
 import type { WorkbenchChange } from './contract.ts'
-import { createRunspace, moveTab, openTab, removeRunspace } from './layout.ts'
+import { createLayoutWrites, type LayoutWrites } from './layout.ts'
 import { openDaemon, type PtydClient } from './ptyd.ts'
 import { writeTabFiles } from './tab-env.ts'
-import { createTerminalSessions, type Size, type TerminalSessions } from './terminal-session.ts'
+import { createTerminalSessions, type Size } from './terminal-session.ts'
 import { followUnread } from './unread.ts'
 
 export type Db = BunSQLiteDatabase
@@ -39,7 +39,7 @@ export type NotificationDeps = {
 export type Unread = (terminalSessionIds: string[]) => void
 
 type Internals = {
-  terminalSessions: TerminalSessions
+  layoutWrites: LayoutWrites
   agentSessions: AgentSessions
 }
 
@@ -52,8 +52,8 @@ function internals(workbenchLedger: WorkbenchLedger): Internals {
   return found
 }
 
-export function terminalSessionsOf(workbenchLedger: WorkbenchLedger): TerminalSessions {
-  return internals(workbenchLedger).terminalSessions
+export function layoutWritesOf(workbenchLedger: WorkbenchLedger): LayoutWrites {
+  return internals(workbenchLedger).layoutWrites
 }
 
 export function agentSessionsOf(workbenchLedger: WorkbenchLedger): AgentSessions {
@@ -86,6 +86,7 @@ export function createWorkbenchLedger(
     ready,
     stopping: () => stopping,
   })
+  const layoutWrites = createLayoutWrites({ publish, terminalSessions })
 
   function onExit(id: string, exitCode: number | null) {
     if (exitsDuringReconcile) {
@@ -171,25 +172,14 @@ export function createWorkbenchLedger(
       stopFollowingUnread?.()
       client?.close()
     },
-    createRunspace(tx, { cwd }) {
-      const id = createRunspace(tx, { cwd, owned: true })
-      publish({ type: 'layout' })
-      return id
-    },
+    createRunspace: (tx, { cwd }) => layoutWrites.createOwnedRunspace(tx, { cwd }),
     openTab(tx, input) {
-      const opened = openTab(tx, terminalSessions, input)
-      publish({ type: 'layout' })
+      const opened = layoutWrites.openTab(tx, input)
       return { tabId: opened.id, terminalSessionId: opened.terminalSessionId }
     },
-    moveTab(tx, tabId, runspaceId) {
-      moveTab(tx, { id: tabId, runspaceId })
-      publish({ type: 'layout' })
-    },
-    removeRunspace(tx, id, options) {
-      removeRunspace(tx, terminalSessions, id, options)
-      publish({ type: 'layout' })
-    },
+    moveTab: (tx, tabId, runspaceId) => layoutWrites.moveTab(tx, { id: tabId, runspaceId }),
+    removeRunspace: (tx, id, options) => layoutWrites.removeOwnedRunspace(tx, id, options),
   }
-  internalsOf.set(workbenchLedger, { terminalSessions, agentSessions })
+  internalsOf.set(workbenchLedger, { layoutWrites, agentSessions })
   return workbenchLedger
 }

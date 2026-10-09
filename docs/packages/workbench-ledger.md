@@ -48,20 +48,30 @@ createWorkbenchLedger(deps: {
 - `ptydPath` は spawn する ptyd の場所（ADR-0011）。`notify` と `nameAgentSession` は通知のための口、`unread` は未読の Agent Session が居る Terminal Session の集合を渡し、Dock の数と通知の取り下げに使わせる口（`docs/packages/notifications.md`）。
 - `start()` は Tab のファイルを書き（`docs/packages/tab-env-and-shim.md`）、未読の集合を `unread` に渡し始め（`docs/packages/notifications.md` の「未読の集合」）、ptyd に繋いで（無ければ spawn、版違いは入れ替え）reconcile する（ADR-0011）。`events` は workbench の変更の合図で、`changes` と同じ判別 union を流す。
 
+### 合図
+
+`events`（`changes`）の合図は、行を書いた関数が自分で出す。
+
+- 合図は行を書いた関数が出し、publish のための id や真偽を戻り値で呼び手に返さない。呼び手が commit の後に出す形だと、呼び手を 1 つ忘れるだけで task の Run の誕生と Dock の数と webview の読み直しが黙って壊れるため。
+- 呼び手の transaction を受け取る関数は、その transaction の中で出す。bun:sqlite の transaction は同期なので、購読側は commit の後の行を読む。rollback された transaction の中で出た合図も、購読側が読み直すだけで害は無い（`docs/packages.md` の「domain をまたぐ規則」）。
+- Runspace と Tab の行（Layout）を書くのは `packages/workbench/src/layout.ts` の `createLayoutWrites` の method で、どれも第 1 引数に transaction を取り、その中で `{ type: "layout" }` を 1 回の呼び出しにつき 1 つ出す。中で Runspace を作って Tab を移す `tab.pin` も 1 つにする。workbench の router の handler と、下の「他の domain が呼ぶ書き込み」の 4 つは、どちらもこの method を通る。Tab を消したら Terminal Session を終わらせる予約（ADR-0023）も method が持ち、呼び手は `TerminalSessions` を渡さない。
+- Tab に新しい Terminal Session を結び直す `rebind`（`tab.respawn` と pin の張り直し）は Terminal Session の module にあり、自分の transaction の中で `{ type: "layout" }` を出す。張り直しは結び直した Tab の数だけ出る。
+- Agent Session の行の合図は「Agent Session の終了と未観測」にある、この規則の Agent Session の場合。
+
 ### 他の domain が呼ぶ書き込み
 
-`WorkbenchLedger` に出ている書き込みは `createRunspace` / `removeRunspace` / `moveTab` / `openTab` の 4 つで、どれも第 1 引数に transaction を取る同期の method（`docs/packages.md` の「server entry の形」）。
+`WorkbenchLedger` に出ている書き込みは `createRunspace` / `removeRunspace` / `moveTab` / `openTab` の 4 つで、どれも第 1 引数に transaction を取る同期の method（`docs/packages.md` の「server entry の形」）。どれも layout の module の method に委ね、その transaction の中で `{ type: "layout" }` を 1 つ出す（「合図」）。
 
-- `createRunspace(tx, { cwd })` は Tab の無い所有された Runspace を作る。
+- `createRunspace(tx, { cwd })` は Tab の無い所有された Runspace を末尾に作る。
 - `removeRunspace(tx, id, { spare? })` はそれを消し、中の Tab の Terminal Session を transaction の後に終わらせる。`spare`（Terminal Session の配列）の Tab が中にあれば、Runspace を消さずに所有を解いてそれらの Tab だけを残し（pin されていれば pin のまま）、ほかの Tab の Terminal Session を終わらせる（ADR-0012）。ptyd の Terminate は冪等で、終わった session に送っても失敗しない。
-- `openTab(tx, { runspaceId, cwd?, size?, input? }) → { tabId, terminalSessionId }` は、`starting` の Terminal Session の行と Tab を書き、shell を自分で埋め、`{ type: "layout" }` を publish する。Create は transaction の後に workbench が送り、通ったら `input` を Write する。`size` を省けば 24×80 で起こし、表示されていない Tab の shell は attach の resize で追いつく。ptyd は attach していない接続からの Write も通すので、webview が Tab を表示していなくても打てる。Create をまだ送っていない行は reconcile で lost にならないので、呼び手は reconcile を待たない（ADR-0015）。
-- `moveTab(tx, tabId, runspaceId)` は Tab を Runspace の末尾へ移し（`tab.move` と同じ規則）、`{ type: "layout" }` を publish する。
+- `openTab(tx, { runspaceId, cwd?, size?, input? }) → { tabId, terminalSessionId }` は、`starting` の Terminal Session の行と Tab を書き、shell を自分で埋める。Create は transaction の後に workbench が送り、通ったら `input` を Write する。`size` を省けば 24×80 で起こし、表示されていない Tab の shell は attach の resize で追いつく。ptyd は attach していない接続からの Write も通すので、webview が Tab を表示していなくても打てる。Create をまだ送っていない行は reconcile で lost にならないので、呼び手は reconcile を待たない（ADR-0015）。
+- `moveTab(tx, tabId, runspaceId)` は Tab を Runspace の末尾へ移す（`tab.move` と同じ規則）。
 
-Terminal Session の行の状態機械、Create をまだ送っていない集合、transaction の後の Create・Write・Terminate、張り直し（`tab.respawn` と pin）は `packages/workbench/src/terminal-session.ts` に集め、workbench の router の handler も同じ経路を通す。
+Terminal Session の行の状態機械、Create をまだ送っていない集合、transaction の後の Create・Write・Terminate、張り直し（`tab.respawn` と pin）は `packages/workbench/src/terminal-session.ts` に集め、layout の module が使う。
 
 ## Runspace と Tab
 
-所有されていない Runspace は常に Tab を 1 つ以上持ち、Backend がそれを守る（`GLOSSARY.md` の Runspace）。所有された Runspace（Bench）は Tab が 0 でも残り、Workbench の操作では消えない。`runspace.remove` は `CONFLICT` で断り、GUI に remove は無い。消すのは作った側の `removeRunspace`（Task の close、slice 5）だけ（ADR-0012）。webview で Bench の最後の Tab を閉じたときも、workbench は消さず、slot で task に Task の close を頼むだけ（下の項目）。
+所有されていない Runspace は常に Tab を 1 つ以上持ち、Backend がそれを守る（`GLOSSARY.md` の Runspace）。所有された Runspace（Bench）は Tab が 0 でも残り、Workbench の操作では消えない。`runspace.remove` は `CONFLICT` で断り、GUI に remove は無い。消すのは作った側の `removeRunspace`（Task の close、slice 5）だけ（ADR-0012）。layout の module は Runspace を消す入口を 2 つ持ち、ユーザーが消す入口（`runspace.remove`）は所有された Runspace と pin された Tab を含む Runspace を断り、所有者が消す入口（`removeRunspace`）は断らない。webview で Bench の最後の Tab を閉じたときも、workbench は消さず、slot で task に Task の close を頼むだけ（下の項目）。
 
 - `sort_order` は、Runspace と Tab を足す・移す・消すたびに、同じ transaction の中で兄弟を 0..n-1 に振り直す。`runspace.create` と `tab.open` の `index` を省けば末尾に足す。webview は active の次を渡し（旧 Monica どおり）、CLI と Task は省く。
 - Tab の title は Workbench Ledger に持たない。OSC 0/2 の title は webview の memory にだけ持ち、再 attach のときは Terminal Session Transcript の replay に含まれる OSC で戻る。表示は旧 Monica どおり title、無ければ cwd の末尾。title はよくある zsh の theme なら command のたびに変わり、Workbench Ledger に書くとそのたびに `changes` と `layout.get` が往復するため。
@@ -129,8 +139,8 @@ ADR-0008 の「Backend 起動時」と ADR-0011 の reconcile の規則のうち
 - Agent Session の居場所（`terminal_session_id`）は、受け付けた hook の Terminal Session に合わせる。resume の SessionStart を取りこぼした agent が前の Tab に結ばれたままだと、前の Tab が閉じたときに生きている agent を終了にしてしまうため。1 つの Terminal Session に live な Agent Session が 1 つであることは、`agent_session` の部分 unique index（`state <> 'ended'`）が守る。cwd も受け付けた hook の値に合わせる。
 - Terminal Session の行が終わるとき（ptyd の Exit、reconcile の lost / exited）、同じ transaction で、その Terminal Session の終了でない Agent Session を終了（terminal_exited）にする。
 - 生きている Terminal Session の動作中の Agent Session を未観測にするのは、Backend の起動直後の reconcile だけ。ptyd に繋ぎ直したときの reconcile では動作中のままにする。その間も Backend は居て hook を受けていたため。
-- Agent Session の行を書く処理（hook の適用、`markSeen`、Terminal Session の終わりでの終了、reconcile）は `packages/workbench/src/agent-session.ts` の `createAgentSessions` に集め、書いた行ごとに自分で `{ type: "agentSession", sessionId }` を publish する。router の handler、Exit の記録、ptyd に繋いだ後の処理は出さない。書き込みが id を返して呼び手が commit の後に出す形だと、呼び手を 1 つ忘れるだけで task の Run の誕生と Dock の数が黙って壊れるため。
-- 呼び手の transaction を受ける処理（Terminal Session の終わりでの終了と reconcile）は、その transaction の中で publish する。hook の適用は自分で開く transaction の中で、`markSeen` は UPDATE の直後に出す。購読側は microtask か DB の読み直しで動くので、commit の後の行を読む（`docs/packages.md` の「domain をまたぐ規則」）。
+- Agent Session の行を書く処理（hook の適用、`markSeen`、Terminal Session の終わりでの終了、reconcile）は `packages/workbench/src/agent-session.ts` の `createAgentSessions` に集め、書いた行ごとに自分で `{ type: "agentSession", sessionId }` を publish する（「合図」の規則）。router の handler、Exit の記録、ptyd に繋いだ後の処理は出さない。
+- 呼び手の transaction を受ける処理（Terminal Session の終わりでの終了と reconcile）は、その transaction の中で publish する。hook の適用は自分で開く transaction の中で、`markSeen` は UPDATE の直後に出す。
 - reconcile が終了や未観測にした Agent Session も、`reconciled` の前に 1 つずつ `{ type: "agentSession", sessionId }` で知らせる。`agentSession` の合図だけを読む購読側（task の Run）にも、ptyd に繋ぎ直したときの終了が届くようにするため。
 
 ## 未読

@@ -6,26 +6,11 @@ import { eq, getTableColumns, inArray, isNotNull, or } from 'drizzle-orm'
 import { listAgentSessions } from './agent-session.ts'
 import { contract } from './contract.ts'
 import { openInEditor, resolveEditorPaths } from './editor.ts'
-import {
-  asTab,
-  closeTab,
-  createRunspace,
-  moveRunspace,
-  moveTab,
-  openTab,
-  pinTab,
-  readLayout,
-  refuseRemoving,
-  removeRunspace,
-  respawnTab,
-  setTabCwd,
-  unpinTab,
-  writeLayout,
-} from './layout.ts'
+import { asTab, readLayout } from './layout.ts'
 import { repoOf } from './repo.ts'
 import { tab, terminalSession } from './schema.ts'
 import { LIVE } from './terminal-session.ts'
-import { agentSessionsOf, terminalSessionsOf, type WorkbenchContext } from './workbench.ts'
+import { agentSessionsOf, layoutWritesOf, type WorkbenchContext } from './workbench.ts'
 
 export { migrations } from '../migrations/index.ts'
 export { inheritableEnv } from './ptyd.ts'
@@ -49,33 +34,30 @@ export const router = os.router({
     get: os.layout.get.handler(({ context }) => readLayout(context.db)),
   },
   runspace: {
-    create: os.runspace.create.handler(({ context, input }) => {
-      const cwd = input.cwd ?? homedir()
-      const opened = writeLayout(context, (tx) =>
-        openTab(tx, terminalSessionsOf(context.workbenchLedger), {
-          runspaceId: createRunspace(tx, { cwd, index: input.index }),
-          cwd,
-          size: { rows: input.rows, cols: input.cols },
+    create: os.runspace.create.handler(({ context: { db, workbenchLedger }, input }) => {
+      const { index, rows, cols } = input
+      const opened = db.transaction((tx) =>
+        layoutWritesOf(workbenchLedger).openRunspace(tx, {
+          cwd: input.cwd ?? homedir(),
+          index,
+          size: { rows, cols },
         }),
       )
       return { runspaceId: opened.runspaceId, tab: asTab(opened) }
     }),
-    remove: os.runspace.remove.handler(({ context, input }) => {
-      writeLayout(context, (tx) => {
-        refuseRemoving(tx, input.id)
-        removeRunspace(tx, terminalSessionsOf(context.workbenchLedger), input.id)
-      })
+    remove: os.runspace.remove.handler(({ context: { db, workbenchLedger }, input }) => {
+      db.transaction((tx) => layoutWritesOf(workbenchLedger).removeRunspace(tx, input.id))
     }),
-    move: os.runspace.move.handler(({ context, input }) => {
-      writeLayout(context, (tx) => moveRunspace(tx, input))
+    move: os.runspace.move.handler(({ context: { db, workbenchLedger }, input }) => {
+      db.transaction((tx) => layoutWritesOf(workbenchLedger).moveRunspace(tx, input))
     }),
   },
   tab: {
-    open: os.tab.open.handler(({ context, input }) => {
+    open: os.tab.open.handler(({ context: { db, workbenchLedger }, input }) => {
       const { runspaceId, cwd, index, rows, cols } = input
       return asTab(
-        writeLayout(context, (tx) =>
-          openTab(tx, terminalSessionsOf(context.workbenchLedger), {
+        db.transaction((tx) =>
+          layoutWritesOf(workbenchLedger).openTab(tx, {
             runspaceId,
             cwd,
             index,
@@ -84,30 +66,26 @@ export const router = os.router({
         ),
       )
     }),
-    respawn: os.tab.respawn.handler(({ context, input }) =>
-      asTab(
-        respawnTab(context, terminalSessionsOf(context.workbenchLedger), input.id, {
-          rows: input.rows,
-          cols: input.cols,
-        }),
-      ),
+    respawn: os.tab.respawn.handler(({ context: { db, workbenchLedger }, input }) => {
+      const { id, rows, cols } = input
+      return asTab(
+        db.transaction((tx) => layoutWritesOf(workbenchLedger).respawnTab(tx, id, { rows, cols })),
+      )
+    }),
+    close: os.tab.close.handler(({ context: { db, workbenchLedger }, input }) =>
+      db.transaction((tx) => layoutWritesOf(workbenchLedger).closeTab(tx, input.id)),
     ),
-    close: os.tab.close.handler(({ context, input }) =>
-      writeLayout(context, (tx) =>
-        closeTab(tx, terminalSessionsOf(context.workbenchLedger), input.id),
-      ),
-    ),
-    move: os.tab.move.handler(({ context, input }) => {
-      writeLayout(context, (tx) => moveTab(tx, input))
+    move: os.tab.move.handler(({ context: { db, workbenchLedger }, input }) => {
+      db.transaction((tx) => layoutWritesOf(workbenchLedger).moveTab(tx, input))
     }),
-    setCwd: os.tab.setCwd.handler(({ context, input }) => {
-      writeLayout(context, (tx) => setTabCwd(tx, input))
+    setCwd: os.tab.setCwd.handler(({ context: { db, workbenchLedger }, input }) => {
+      db.transaction((tx) => layoutWritesOf(workbenchLedger).setTabCwd(tx, input))
     }),
-    pin: os.tab.pin.handler(({ context, input }) => {
-      writeLayout(context, (tx) => pinTab(tx, input.id))
+    pin: os.tab.pin.handler(({ context: { db, workbenchLedger }, input }) => {
+      db.transaction((tx) => layoutWritesOf(workbenchLedger).pinTab(tx, input.id))
     }),
-    unpin: os.tab.unpin.handler(({ context, input }) => {
-      writeLayout(context, (tx) => unpinTab(tx, input.id))
+    unpin: os.tab.unpin.handler(({ context: { db, workbenchLedger }, input }) => {
+      db.transaction((tx) => layoutWritesOf(workbenchLedger).unpinTab(tx, input.id))
     }),
   },
   agentSession: {
