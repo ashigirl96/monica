@@ -81,6 +81,11 @@ async function argvTypedInto(fixture: Fixture, terminalSessionId: string): Promi
   return shell.stdout.toString().split('\0').slice(0, -1)
 }
 
+async function allTabs({ workbenchClient }: Fixture) {
+  const { runspaces } = await workbenchClient.layout.get()
+  return runspaces.flatMap((runspace) => runspace.tabs.map((tab) => tab.id))
+}
+
 function runsOf({ db }: Fixture) {
   return db.select({ agentSessionId: run.agentSessionId }).from(run).orderBy(run.id).all()
 }
@@ -269,11 +274,35 @@ test('a resume neither syncs the Task nor holds it at the Blocker gate', async (
   fixture.github.issue(blocker, { title: 'Upstream fix' })
   fixture.github.issue(ref, { title: 'Ship it', blockedBy: [blocker] })
   await fixture.client.sync({ ref })
-  fixture.github.logOut()
+  const requested = fixture.github.requests.length
 
   const output = await fixture.client.run({ ref })
 
-  expect(output).toMatchObject({ resumed: 's-1', warnings: [] })
+  expect(output).toMatchObject({ resumed: 's-1' })
+  expect(fixture.github.requests).toHaveLength(requested)
+})
+
+test('run refuses, opening no Tab, when a Run to resume ends in its Bench while it syncs for a new Run', async () => {
+  const fixture = await tracked()
+  await endedRun(fixture, { conversed: false })
+  const tabs = await allTabs(fixture)
+
+  const release = fixture.github.hold()
+  const before = fixture.github.requests.length
+  const running = failure(fixture.client.run({ ref }))
+  await fixture.github.received(before + 1)
+  const other = fixture.openTab(fixture.db.select().from(bench).get()!.runspaceId)
+  const fields = { transcript_path: transcriptOf(fixture, 's-2') }
+  await fixture.hook(other, 's-2', 'SessionStart', fields)
+  await fixture.hook(other, 's-2', 'SessionEnd', fields)
+  release()
+
+  const error = await running
+  expect([error.code, error.message]).toEqual([
+    'PRECONDITION_FAILED',
+    `${ref} changed while its Run was being started; run it again`,
+  ])
+  expect((await allTabs(fixture)).filter((tab) => !tabs.includes(tab))).toHaveLength(1)
 })
 
 test("a resume whose claude's cwd is gone starts in the Bench's cwd", async () => {
@@ -359,6 +388,92 @@ test('run refuses a Task whose Issue has an open Blocker, naming it, before it o
   expect(error.message).toContain(blocker)
   expect(await fixture.client.bench.list()).toEqual([])
   expect(fixture.ptyd.sessionRequests()).toEqual([])
+})
+
+test('run refuses a new Run of a Task whose Issue is closed', async () => {
+  const fixture = await tracked({ origin: false })
+  fixture.github.issue(ref, { title: 'Ship it', state: 'closed' })
+
+  const error = await failure(fixture.client.run({ ref }))
+
+  expect(error.code).toBe('PRECONDITION_FAILED')
+  expect(error.message).toBe(`${ref} is a closed Issue; pass --force to start a Run anyway`)
+  expect(await fixture.client.bench.list()).toEqual([])
+})
+
+const spec = 'acme/app#7'
+
+function subIssueOfSpec() {
+  const fixture = untracked()
+  fixture.github.issue(spec, { title: 'Spec it', labels: ['ready-for-agent'] })
+  fixture.github.issue(ref, { title: 'Ship it', parent: spec })
+  return fixture
+}
+
+async function specRunning(fixture: Fixture) {
+  const started = await fixture.client.run({ ref: spec })
+  await fixture.hook(started.terminalSessionId, 's-spec', 'SessionStart', { source: 'startup' })
+}
+
+const subIssueRuns = {
+  'a new Run': async (fixture: Fixture) => {
+    fixture.taskLedger.start()
+  },
+  'a resume': async (fixture: Fixture) => {
+    await fixture.client.track({ ref })
+    await endedRun(fixture)
+  },
+}
+
+test.each(Object.entries(subIssueRuns))(
+  'run refuses a sub-issue, for %s, while its spec has a live Run',
+  async (_, before) => {
+    const fixture = subIssueOfSpec()
+    await before(fixture)
+    await specRunning(fixture)
+    const tabs = await allTabs(fixture)
+
+    const error = await failure(fixture.client.run({ ref }))
+
+    expect(error.code).toBe('PRECONDITION_FAILED')
+    expect(error.message).toBe(
+      `${ref} is under ${spec}, a spec with a live Run; pass --force to run it anyway`,
+    )
+    expect(await allTabs(fixture)).toEqual(tabs)
+  },
+)
+
+test('run --force starts a new Run of a Task whose Issue is closed', async () => {
+  const fixture = await tracked()
+  fixture.github.issue(ref, { title: 'Ship it', state: 'closed' })
+
+  const output = await fixture.client.run({ ref, force: true })
+
+  expect((await typedInto(fixture, output.terminalSessionId)).at(-1)).toMatchObject({
+    data: "claude '/tackle'\r",
+  })
+})
+
+test('run --force resumes a sub-issue while its spec has a live Run', async () => {
+  const fixture = subIssueOfSpec()
+  await subIssueRuns['a resume'](fixture)
+  await specRunning(fixture)
+
+  const output = await fixture.client.run({ ref, force: true })
+
+  expect(output.resumed).toBe('s-1')
+})
+
+test('run --force still refuses a Task with a live Run', async () => {
+  const fixture = await tracked()
+  fixture.taskLedger.start()
+  const { terminalSessionId } = await fixture.client.run({ ref })
+  await fixture.hook(terminalSessionId, 's-1', 'SessionStart', { source: 'startup' })
+
+  const error = await failure(fixture.client.run({ ref, force: true }))
+
+  expect(error.code).toBe('CONFLICT')
+  expect(await benchTabs(fixture)).toHaveLength(1)
 })
 
 test('run --force starts a new Run past the open Blockers', async () => {

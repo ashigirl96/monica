@@ -1,119 +1,20 @@
 import type { Db } from '@monica/workbench/server'
-import { ORPCError, type ORPCErrorConstructorMap } from '@orpc/server'
+import { ORPCError } from '@orpc/server'
 
 import type { BenchDeps } from './bench.ts'
 import { reopenTask } from './close.ts'
-import type {
-  PromptKind,
-  ReopenOutput,
-  RunButton,
-  RunButtonsOutput,
-  RunOutput,
-  runErrors,
-} from './contract.ts'
+import type { PromptKind, ReopenOutput, RunButtonsOutput, RunOutput } from './contract.ts'
 import { isLinkedIssue } from './copy.ts'
-import { type GitHubIssue, type LinkedIssue, oneLine } from './github.ts'
+import { type GitHubIssue, oneLine } from './github.ts'
 import { taskIfTracked } from './open-task.ts'
 import { formatRef, type IssueRef, parseRef } from './ref.ts'
-import { resumableRunOf, runTask } from './run-claude.ts'
-import { runAgentSessionsByTask } from './run.ts'
+import { refusalOf, type RunErrors, runPlanned } from './run-claude.ts'
+import { isMap, labelVerdict, planRun, type RunPlan } from './run-plan.ts'
 import { queryByRepo, type SyncDeps } from './sync.ts'
 
 const READ_TIMEOUT_MS = 10_000
 
-/** ボタンを決める材料。Issue は GitHub の今の答えで、Task は track 済みのときだけある。 */
-type Seen = {
-  issue: GitHubIssue
-  task: { ref: string; closed: boolean; run: ButtonRun } | null
-  /** 親が spec で live な Run を持つとき、その親。 */
-  runningSpec: IssueRef | null
-}
-
-type ButtonRun = Exclude<RunButton['run'], 'reopen'>
-
-type Verdict =
-  | { type: 'button'; kind: PromptKind }
-  | { type: 'reopen'; message: string; taskRef: string }
-  | { type: 'blocked'; message: string; blockers: string[] }
-  | { type: 'none'; message: string }
-
-const button = (kind: PromptKind): Verdict => ({ type: 'button', kind })
-
-const noButton = (message: string): Verdict => ({ type: 'none', message })
-
-const STATE_LABELS = ['needs-triage', 'ready-for-agent', 'ready-for-human', 'needs-info', 'wontfix']
-
-const isWayfinderLabel = (label: string) => label.startsWith('wayfinder:')
-
-const isStateLabel = (label: string) => STATE_LABELS.includes(label) || isWayfinderLabel(label)
-
-type Labelled = Pick<GitHubIssue, 'labels' | 'subIssues'>
-
-const isMap = (issue: Labelled) => issue.labels.includes('wayfinder:map')
-
-const isSpec = (issue: Labelled) =>
-  issue.labels.includes('ready-for-agent') && !isMap(issue) && issue.subIssues.open > 0
-
-const underRunningSpec = (issue: IssueRef, spec: IssueRef) =>
-  `${formatRef(issue)} is under ${formatRef(spec)}, a spec with a live Run`
-
-// 上から順に当て、最初に決まった答えを使う。種類やボタンを出さない条件は、行を足して増やす。
-const rules: ((seen: Seen) => Verdict | undefined)[] = [
-  ({ issue }) =>
-    issue.state === 'closed' ? noButton(`${formatRef(issue)} is a closed Issue`) : undefined,
-  ({ issue, task }) =>
-    task?.closed
-      ? {
-          type: 'reopen',
-          message: `${formatRef(issue)} is a closed Task; reopen it to run it`,
-          taskRef: task.ref,
-        }
-      : undefined,
-  ({ issue }) => {
-    const blockers = issue.blockers.filter((b) => b.state === 'open').map(formatRef)
-    if (blockers.length === 0) return undefined
-    return {
-      type: 'blocked',
-      message: `${formatRef(issue)} is blocked by ${blockers.join(', ')}`,
-      blockers,
-    }
-  },
-  // spec の Run が子を実装している最中なので、子を別に run すると同じ子に 2 つの Run が走る。
-  ({ issue, runningSpec }) =>
-    runningSpec ? noButton(underRunningSpec(issue, runningSpec)) : undefined,
-  ({ issue }) => (isMap(issue) ? button('wayfinder') : undefined),
-  ({ issue }) => {
-    if (!issue.labels.some(isWayfinderLabel)) return undefined
-    if (!issue.parent)
-      return noButton(`${formatRef(issue)} is a wayfinder Issue with no map above it`)
-    return isMap(issue.parent)
-      ? button('wayfinder')
-      : noButton(
-          `${formatRef(issue)} is a wayfinder Issue under ${formatRef(issue.parent)}, which is not a wayfinder:map`,
-        )
-  },
-  ({ issue }) => {
-    if (!issue.labels.includes('ready-for-agent')) return undefined
-    if (issue.subIssues.total === 0) return button('tackle')
-    return issue.subIssues.open > 0
-      ? button('implement-spec')
-      : noButton(`${formatRef(issue)} is a spec whose sub-issues are all closed`)
-  },
-  ({ issue }) =>
-    issue.labels.includes('needs-triage') || !issue.labels.some(isStateLabel)
-      ? button('triage')
-      : undefined,
-]
-
-function verdictOf(seen: Seen): Verdict {
-  for (const rule of rules) {
-    const verdict = rule(seen)
-    if (verdict) return verdict
-  }
-  return noButton(`${formatRef(seen.issue)} has no label that picks a prompt`)
-}
-
-// tackle は prompt を渡さず、run の既定（新しい Run なら /tackle、resume なら何も送らない）に任せる。
+// tackle は prompt を渡さず、run の既定（新しい Run なら /tackle）に任せる。
 function promptOf(kind: PromptKind, issue: GitHubIssue): string | undefined {
   switch (kind) {
     case 'tackle':
@@ -129,6 +30,33 @@ function promptOf(kind: PromptKind, issue: GitHubIssue): string | undefined {
   }
 }
 
+function planOf(db: Db, issue: GitHubIssue) {
+  const tracked = taskIfTracked(db, isLinkedIssue(issue))
+  return { tracked, plan: planRun(db, tracked, issue, { byLabels: true }) }
+}
+
+// resume と running のボタンはラベルの規則より先に決まるので、ラベルが prompt を選ばない Issue にも出る。
+function buttonOf(
+  plan: RunPlan,
+  issue: GitHubIssue,
+): Pick<RunButtonsOutput['buttons'][number], 'button' | 'reason'> {
+  switch (plan.type) {
+    case 'reopen':
+      return { button: { run: 'reopen' }, reason: null }
+    case 'refused':
+      return { button: null, reason: plan.message }
+    case 'new':
+      return { button: { ...(plan.kind && { kind: plan.kind }), run: 'new' }, reason: null }
+    default: {
+      const verdict = labelVerdict(issue)
+      return {
+        button: { ...('kind' in verdict && { kind: verdict.kind }), run: plan.type },
+        reason: null,
+      }
+    }
+  }
+}
+
 export async function runButtons(deps: SyncDeps, refs: string[]): Promise<RunButtonsOutput> {
   const asked = refs.map((ref) => ({ ref, parsed: parsedOrNull(ref) }))
   const { issues } = await readIssues(
@@ -139,16 +67,7 @@ export async function runButtons(deps: SyncDeps, refs: string[]): Promise<RunBut
     buttons: asked.map(({ ref, parsed }) => {
       const issue = parsed && issues.get(key(parsed))
       if (!issue) return { ref, button: null, reason: null }
-      const seen = seenOf(deps.db, issue)
-      const verdict = verdictOf(seen)
-      switch (verdict.type) {
-        case 'button':
-          return { ref, button: { kind: verdict.kind, run: seen.task?.run ?? 'new' }, reason: null }
-        case 'reopen':
-          return { ref, button: { run: 'reopen' as const }, reason: null }
-        default:
-          return { ref, button: null, reason: verdict.message }
-      }
+      return { ref, ...buttonOf(planOf(deps.db, issue).plan, issue) }
     }),
   }
 }
@@ -156,28 +75,21 @@ export async function runButtons(deps: SyncDeps, refs: string[]): Promise<RunBut
 export async function runFromButton(
   deps: SyncDeps & BenchDeps,
   ref: string,
-  errors: ORPCErrorConstructorMap<typeof runErrors>,
+  errors: RunErrors,
 ): Promise<RunOutput> {
   const issue = await readIssue(deps, ref)
-  const seen = seenOf(deps.db, issue)
-  const verdict = verdictOf(seen)
-  switch (verdict.type) {
-    case 'blocked':
-      throw errors.BLOCKED({ message: verdict.message, data: { blockers: verdict.blockers } })
-    case 'reopen':
-    case 'none':
-      throw refused(verdict.message)
+  const { plan } = planOf(deps.db, issue)
+  switch (plan.type) {
+    // resume する claude は前の会話の途中か後なので、どの種類の prompt も送り直さない（ADR-0024）。
+    case 'resume':
+      return runPlanned(deps, { facts: issue, nodeId: issue.nodeId, plan }, errors)
+    case 'new': {
+      const prompt = plan.kind && promptOf(plan.kind, issue)
+      return runPlanned(deps, { facts: issue, nodeId: issue.nodeId, plan, prompt }, errors)
+    }
+    default:
+      throw refusalOf(plan, errors)
   }
-  // resume する claude は前の会話の途中か後なので、どの種類の prompt も送り直さない（ADR-0024）。
-  const prompt = seen.task?.run === 'resume' ? undefined : promptOf(verdict.kind, issue)
-  const spec = issue.parent && isSpec(issue.parent) ? issue.parent : null
-  return runTask(deps, { ref, prompt }, errors, {
-    nodeId: issue.nodeId,
-    // GitHub と Bench の準備を待つ間に spec の Run が起動しうるので、Tab を開く transaction の中で見直す。
-    recheck(tx) {
-      if (spec && hasLiveRun(tx, spec)) throw refused(underRunningSpec(issue, spec))
-    },
-  })
 }
 
 export async function reopenFromButton(
@@ -185,25 +97,21 @@ export async function reopenFromButton(
   ref: string,
 ): Promise<ReopenOutput> {
   const issue = await readIssue(deps, ref)
-  const verdict = verdictOf(seenOf(deps.db, issue))
-  switch (verdict.type) {
-    // Task Ledger の写しは次の sync まで repo の改名前の名前を持つので、頼まれた ref でなく node ID で引き当てた Task の ref で reopen する。
-    case 'reopen':
-      return reopenTask(
-        deps,
-        { ref: verdict.taskRef },
-        {
-          // reopen の sync が判定の後に closed になった Issue を写すので、写しで見直す。
-          recheck({ issue: copied }) {
-            if (copied.state === 'closed') throw refused(`${formatRef(copied)} is a closed Issue`)
-          },
+  const { tracked, plan } = planOf(deps.db, issue)
+  // Task Ledger の写しは次の sync まで repo の改名前の名前を持つので、頼まれた ref でなく node ID で引き当てた Task の ref で reopen する。
+  if (plan.type === 'reopen' && tracked) {
+    return reopenTask(
+      deps,
+      { ref: formatRef(tracked.issue) },
+      {
+        // reopen の sync が判定の後に closed になった Issue を写すので、写しで見直す。
+        recheck({ issue: copied }) {
+          if (copied.state === 'closed') throw refused(`${formatRef(copied)} is a closed Issue`)
         },
-      )
-    case 'button':
-      throw refused(`${formatRef(issue)} is not a closed Task`)
-    default:
-      throw refused(verdict.message)
+      },
+    )
   }
+  throw refused(plan.type === 'refused' ? plan.message : `${formatRef(issue)} is not a closed Task`)
 }
 
 async function readIssue(deps: SyncDeps, ref: string): Promise<GitHubIssue> {
@@ -220,40 +128,6 @@ async function readIssue(deps: SyncDeps, ref: string): Promise<GitHubIssue> {
 }
 
 const refused = (message: string) => new ORPCError('PRECONDITION_FAILED', { message })
-
-function seenOf(db: Db, issue: GitHubIssue): Seen {
-  const tracked = taskIfTracked(db, isLinkedIssue(issue))
-  const { parent } = issue
-  return {
-    issue,
-    task: tracked
-      ? {
-          ref: formatRef(tracked.issue),
-          closed: tracked.task.closedAt !== null,
-          run: runOf(db, tracked),
-        }
-      : null,
-    runningSpec: parent && isSpec(parent) && hasLiveRun(db, parent) ? parent : null,
-  }
-}
-
-function hasLiveRun(db: Pick<Db, 'select'>, linked: LinkedIssue): boolean {
-  const tracked = taskIfTracked(db, isLinkedIssue(linked))
-  return tracked !== undefined && liveRunCount(db, tracked.issue.id) > 0
-}
-
-const liveRunCount = (db: Pick<Db, 'select'>, taskIssueId: number) =>
-  runAgentSessionsByTask(db, [taskIssueId])(taskIssueId).length
-
-// run と同じ規則で決める。live な Run は CONFLICT で断られ、resume の候補は今の Bench の後に始まった Run だけ。
-function runOf(
-  db: Db,
-  { issue: { id }, bench }: NonNullable<ReturnType<typeof taskIfTracked>>,
-): ButtonRun {
-  if (!bench) return 'new'
-  if (liveRunCount(db, id) > 0) return 'running'
-  return resumableRunOf(db, id, bench) ? 'resume' : 'new'
-}
 
 function parsedOrNull(ref: string): IssueRef | null {
   try {

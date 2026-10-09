@@ -1,17 +1,25 @@
 import { existsSync } from 'node:fs'
 
-import { agentSession } from '@monica/workbench/schema'
-import type { Db, Tx } from '@monica/workbench/server'
 import { ORPCError, type ORPCErrorConstructorMap } from '@orpc/server'
-import { and, desc, eq, gte } from 'drizzle-orm'
+import { eq } from 'drizzle-orm'
 
-import { type Bench, type BenchDeps, type Issue, prepareBench, refuseInPlace } from './bench.ts'
+import { type Bench, type BenchDeps, prepareBench, refuseInPlace } from './bench.ts'
 import type { RunOutput, runErrors } from './contract.ts'
-import { isIssue, isLinkedIssue, openBlockersOf } from './copy.ts'
-import { findOpenTask, taskIfTracked, refuseClosed } from './open-task.ts'
+import { isIssue, isLinkedIssue } from './copy.ts'
+import { type FoundTask, findOpenTask, refuseClosed, taskIfTracked } from './open-task.ts'
 import { formatRef, type IssueRef, parseRef } from './ref.ts'
-import { runAgentSessionsByTask } from './run.ts'
-import { issue, run } from './schema.ts'
+import {
+  copyFacts,
+  type IssueFacts,
+  type Launchable,
+  planFromLedger,
+  planNewRun,
+  replan,
+  type Refusal,
+  type Resumable,
+  type RunPlan,
+} from './run-plan.ts'
+import { issue } from './schema.ts'
 import { type SyncDeps, syncOrUseCopy, trackIssue } from './sync.ts'
 
 type Launch = {
@@ -24,23 +32,81 @@ type Launch = {
   resumed: string | null
 }
 
+export type RunErrors = ORPCErrorConstructorMap<typeof runErrors>
+
+type Request = { prompt?: string; inPlace?: boolean; force?: boolean }
+
+type Planned = {
+  found: FoundTask
+  tracked: boolean
+  facts: IssueFacts
+  plan: RunPlan
+  warnings: string[]
+}
+
 export async function runTask(
   deps: SyncDeps & BenchDeps,
-  input: { ref: string; prompt?: string; inPlace?: boolean; force?: boolean },
-  errors: ORPCErrorConstructorMap<typeof runErrors>,
-  { recheck, nodeId }: { recheck?: (tx: Tx) => void; nodeId?: string } = {},
+  input: Request & { ref: string },
+  errors: RunErrors,
 ): Promise<RunOutput> {
-  const asked = parseRef(input.ref)
   refuseUnsendable(input.prompt)
-  const { found, tracked } = await findOrTrack(deps, asked, nodeId)
-  if (found.bench) {
-    refuseInPlace(found.bench, input.inPlace, formatRef(found.issue))
-    refuseLiveRuns(deps.db, found.issue)
-  }
+  const { found, tracked } = await findOrTrack(deps, parseRef(input.ref))
+  if (found.bench) refuseInPlace(found.bench, input.inPlace, formatRef(found.issue))
+  const facts = copyFacts(deps.db, found.issue.id)
+  const fromLedger = planFromLedger(deps.db, found, facts, input)
+  const refuse = (refusal: Refusal) => refusalOf(refusal, errors, { hintForce: true })
+  if (fromLedger)
+    return start(deps, { found, tracked, facts, plan: fromLedger, warnings: [] }, input, refuse)
+  const synced = await syncForNewRun(deps, found)
+  const syncedFacts = copyFacts(deps.db, synced.found.issue.id)
+  const plan = planNewRun(syncedFacts, input)
+  return start(deps, { ...synced, tracked, facts: syncedFacts, plan }, input, refuse)
+}
+
+export async function runPlanned(
+  deps: SyncDeps & BenchDeps,
+  {
+    facts,
+    nodeId,
+    plan,
+    prompt,
+  }: { facts: IssueFacts; nodeId: string; plan: Launchable; prompt?: string },
+  errors: RunErrors,
+): Promise<RunOutput> {
+  const { found, tracked } = await findOrTrack(deps, facts, nodeId)
+  const refuse = (refusal: Refusal) => refusalOf(refusal, errors)
+  const launching =
+    plan.type === 'resume'
+      ? { found, tracked, facts, plan, warnings: [] }
+      : { ...(await syncForNewRun(deps, found)), tracked, facts, plan }
+  return start(deps, launching, { prompt }, refuse)
+}
+
+async function start(
+  deps: SyncDeps & BenchDeps,
+  { found, tracked, facts, plan, warnings }: Planned,
+  request: Request,
+  refuse: (refusal: Refusal) => Error,
+): Promise<RunOutput> {
+  if (plan.type !== 'new' && plan.type !== 'resume') throw refuse(plan)
   const launch =
-    (found.bench && resumeOf(deps.db, found.issue, found.bench)) ??
-    (await newRun(deps, found.issue, input, errors))
-  const opened = openClaudeTab(deps, launch, input.prompt, recheck)
+    plan.type === 'resume'
+      ? resumeOf(found, plan.resumable)
+      : await newRun(deps, found, request.inPlace, warnings)
+  const opened = deps.reservations.writeOpenTask(
+    launch.bench.taskIssueId,
+    launch.ref,
+    (tx, current) => {
+      // GitHub と Bench の準備を待つ間に、この Task か spec の Run が起動しうる。
+      const changed = replan(tx, current, facts, plan, request)
+      if (changed) throw refuse(changed)
+      return deps.workbenchLedger.openTab(tx, {
+        runspaceId: launch.bench.runspaceId,
+        cwd: launch.tabCwd,
+        input: `${claudeCommand(launch, request.prompt)}\r`,
+      })
+    },
+  )
   return {
     ref: launch.ref,
     title: launch.title,
@@ -51,6 +117,28 @@ export async function runTask(
     warnings: launch.warnings,
     ...opened,
     resumed: launch.resumed,
+  }
+}
+
+export function refusalOf(
+  refusal: Refusal,
+  errors: RunErrors,
+  { hintForce = false }: { hintForce?: boolean } = {},
+): Error {
+  switch (refusal.type) {
+    case 'running':
+      return new ORPCError('CONFLICT', { message: refusal.message })
+    case 'reopen':
+      return new ORPCError('PRECONDITION_FAILED', { message: refusal.message })
+    case 'refused': {
+      const message =
+        hintForce && refusal.forceHint
+          ? `${refusal.message}; ${refusal.forceHint}`
+          : refusal.message
+      return refusal.blockers
+        ? errors.BLOCKED({ message, data: { blockers: refusal.blockers } })
+        : new ORPCError('PRECONDITION_FAILED', { message })
+    }
   }
 }
 
@@ -66,36 +154,8 @@ async function findOrTrack(deps: SyncDeps, asked: IssueRef, nodeId?: string) {
   return { found: findOpenTask(deps.db, isIssue(parseRef(ref)), ref), tracked: !alreadyTracked }
 }
 
-function refuseLiveRuns(db: Db, forIssue: Issue) {
-  const live = runAgentSessionsByTask(db, [forIssue.id])(forIssue.id)
-  if (live.length === 0) return
-  const states = live.map(
-    (r) => `${r.sessionId} ${r.state === 'waiting' ? `waiting:${r.waitReason}` : r.state}`,
-  )
-  throw new ORPCError('CONFLICT', {
-    message: `${formatRef(forIssue)} has ${live.length === 1 ? 'a live Run' : 'live Runs'} (${states.join(', ')}); to add an agent alongside, open a Tab in its Bench and run claude there`,
-  })
-}
-
-// Bench より前の Run は reopen の前の挑戦で、Agent Session Transcript の無い Agent Session（claude は最初の prompt まで書かない）は --resume が会話を見つけられないので、どちらも候補にしない。
-export function resumableRunOf(db: Db, taskIssueId: number, since: Pick<Bench, 'createdAt'>) {
-  return db
-    .select({
-      agentSessionId: agentSession.sessionId,
-      cwd: agentSession.cwd,
-      transcriptPath: agentSession.transcriptPath,
-    })
-    .from(run)
-    .innerJoin(agentSession, eq(agentSession.sessionId, run.agentSessionId))
-    .where(and(eq(run.taskIssueId, taskIssueId), gte(run.startedAt, since.createdAt)))
-    .orderBy(desc(agentSession.lastEventAt), desc(run.id))
-    .all()
-    .find(({ transcriptPath }) => transcriptPath === null || existsSync(transcriptPath))
-}
-
-function resumeOf(db: Db, forIssue: Issue, row: Bench): Launch | null {
-  const last = resumableRunOf(db, forIssue.id, row)
-  if (!last) return null
+function resumeOf({ issue: forIssue, bench: row }: FoundTask, last: Resumable): Launch {
+  if (!row) throw new Error(`${formatRef(forIssue)} has a Run to resume but no Bench`)
   return {
     ref: formatRef(forIssue),
     title: forIssue.title,
@@ -107,51 +167,29 @@ function resumeOf(db: Db, forIssue: Issue, row: Bench): Launch | null {
   }
 }
 
+async function syncForNewRun(deps: SyncDeps, found: FoundTask) {
+  const warnings = await syncOrUseCopy(deps, found.issue)
+  // sync は repo の改名を写すので、名前でなく行の id で引き直す。
+  const synced = findOpenTask(deps.db, eq(issue.id, found.issue.id), formatRef(found.issue))
+  return { found: synced, warnings }
+}
+
 async function newRun(
   deps: SyncDeps & BenchDeps,
-  forIssue: Issue,
-  { inPlace, force }: { inPlace?: boolean; force?: boolean },
-  errors: ORPCErrorConstructorMap<typeof runErrors>,
+  synced: FoundTask,
+  inPlace: boolean | undefined,
+  warnings: string[],
 ): Promise<Launch> {
-  const syncWarnings = await syncOrUseCopy(deps, forIssue)
-  // sync は repo の改名を写すので、名前でなく行の id で引き直す。
-  const synced = findOpenTask(deps.db, eq(issue.id, forIssue.id), formatRef(forIssue))
-  const ref = formatRef(synced.issue)
-  if (!force) {
-    const blockers = openBlockersOf(deps.db, [synced.issue.id]).map(formatRef)
-    if (blockers.length > 0) {
-      throw errors.BLOCKED({
-        message: `${ref} is blocked by ${blockers.join(', ')}; pass --force to start a Run anyway`,
-        data: { blockers },
-      })
-    }
-  }
   const prepared = await prepareBench(deps, synced, inPlace)
   return {
-    ref,
+    ref: formatRef(synced.issue),
     title: synced.issue.title,
     bench: prepared.bench,
     benchCreated: prepared.created,
-    warnings: [...syncWarnings, ...prepared.warnings],
+    warnings: [...warnings, ...prepared.warnings],
     tabCwd: prepared.bench.cwd,
     resumed: null,
   }
-}
-
-function openClaudeTab(
-  deps: BenchDeps,
-  launch: Launch,
-  prompt: string | undefined,
-  recheck: ((tx: Tx) => void) | undefined,
-) {
-  return deps.reservations.writeOpenTask(launch.bench.taskIssueId, launch.ref, (tx) => {
-    recheck?.(tx)
-    return deps.workbenchLedger.openTab(tx, {
-      runspaceId: launch.bench.runspaceId,
-      cwd: launch.tabCwd,
-      input: `${claudeCommand(launch, prompt)}\r`,
-    })
-  })
 }
 
 const DEFAULT_PROMPT = '/tackle'

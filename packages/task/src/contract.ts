@@ -113,7 +113,9 @@ export const PromptKindSchema = z
 
 export const RunButtonSchema = z.union([
   z.object({
-    kind: PromptKindSchema,
+    kind: PromptKindSchema.optional().describe(
+      'absent on a resume or running button of an Issue whose labels pick no prompt',
+    ),
     run: z
       .enum(['new', 'resume', 'running'])
       .describe(
