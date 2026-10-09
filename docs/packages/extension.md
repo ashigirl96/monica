@@ -6,6 +6,7 @@
 
 - manifest は `apps/extension/vite.config.ts` の `defineManifest((env) => …)` に手で書く。permission も手で足す。CRXJS 3.0.0 の `permissions` の型は任意の string を通すので、typo は型で止まらない（ADR-0029）。
 - `name` と `key` は `env.mode` で選ぶ。`production` は `Monica` と release の key、それ以外は `Monica (dev)` と dev の key。普段の Brave に dev を並べて読み込んでも、`brave://extensions` で見分けられる。key を出力の dir と同じ mode で選ぶので、dev の出力に release の key は入らない。
+- icon は desktop の `apps/desktop/src-tauri/icons/128x128@2x.png` を `sips -z` で 16・32・48・128 に縮めた `public/icons/<size>.png` で、`icons` と `action.default_icon` に同じものを渡す。release と dev は同じ icon で、`name` で見分ける。
 - `version` は `0.1.0` に固定する。unpacked でしか配らず、版を上げる運用を持たない。
 - side panel は global にする。manifest の `side_panel.default_path` に `src/sidepanel/index.html` を書き、service worker（`src/background.ts`）が `chrome.sidePanel.setPanelBehavior({ openPanelOnActionClick: true })` を呼ぶ。toolbar の action を押すと、その window の side panel が開閉する。
 - permission は `sidePanel`・`scripting`・`nativeMessaging`。`nativeMessaging` は、Backend の token の口の port と chat の token を Native Messaging の host から引く（下の「side panel」、ADR-0034）。unpacked で読み込むので、足しても警告は出ず、reload で無効にもならない。`scripting` は、質問を送った時に Current Page の top frame で `chrome.scripting.executeScript` を走らせ、HTML と選択範囲を読む（`docs/packages/chat.md` の「Page Snapshot」）。`activeTab`・`tabs`・`webNavigation` は足さない。`<all_urls>` の host permission で、どの Browser Tab にも注入できる。build の manifest は `web_accessible_resources` を持たない（CRXJS は dev の出力にだけ足す）。
