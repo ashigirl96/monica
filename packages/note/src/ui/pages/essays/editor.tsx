@@ -163,7 +163,7 @@ export function EssayEditorPage({ id }: { id: string }) {
   )
 
   // 開いた本文を出し続けると、書いた分の保存が NOT_FOUND で再試行され続ける。
-  const goneId = note !== null && isNotFound(noteQuery.error) ? id : null
+  const goneId = note?.kind === 'essay' && isNotFound(noteQuery.error) ? id : null
   useEffect(() => {
     if (goneId === null) return
     removals.removedElsewhere(goneId, { editor: { noteRef }, leave: () => leaveEssay(goneId) })

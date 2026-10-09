@@ -110,6 +110,8 @@ export class SaveQueue {
   }
 
   schedule = (id: string, draft: NoteDraft, label: string): void => {
+    // 消した後に打てるのは、外で戻された Note を開き直したときだけなので、その編集は再試行する。
+    this.#discarded.delete(id)
     this.#pending.set(id, draft)
     this.#editMarks.set(id, this.editMark(id) + 1)
     this.#labels.set(id, label)

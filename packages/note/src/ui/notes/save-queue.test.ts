@@ -133,7 +133,36 @@ test('any other failure keeps the edit and retries it every five seconds until i
   expect(queue.conflicts()).toEqual([])
 })
 
-test('saves go one after another: a flush waits for the one before it and saves on the version it returned', async () => {
+test('a save on its way to a discarded Note is not retried when it fails', async () => {
+  const { queue, answers, clock } = setup()
+  const sending = Promise.withResolvers<{ updatedAt: Date }>()
+  answers.push(() => sending.promise)
+
+  queue.schedule('note-1', draft('a'), 'Untitled')
+  const flushed = queue.flush()
+  await Bun.sleep(0)
+  expect(queue.hasUnsaved('note-1')).toBe(true)
+  queue.discard('note-1')
+  sending.reject(new ORPCError('NOT_FOUND', { message: 'gone' }))
+  await flushed
+
+  expect(queue.hasUnsaved('note-1')).toBe(false)
+  expect(clock.live()).toEqual([])
+})
+
+test('an edit made after the Note was discarded is retried when it fails, since the Note was opened again', async () => {
+  const { queue, answers, clock } = setup()
+  answers.push(() => Promise.reject(new TypeError('Failed to fetch')))
+
+  queue.discard('note-1')
+  queue.schedule('note-1', draft('a'), 'Untitled')
+  await queue.flush()
+
+  expect(queue.hasUnsaved('note-1')).toBe(true)
+  expect(clock.live().map((t) => t.ms)).toEqual([5000])
+})
+
+test('saves go one after another:a flush waits for the one before it and saves on the version it returned', async () => {
   const { queue, calls, answers } = setup()
   let release = noop
   answers.push(
