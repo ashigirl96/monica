@@ -12,6 +12,7 @@ import { readBody, UnreadableBody, UnreadableNotice } from '../../notes/note-bod
 import { useServerDoc } from '../../notes/note-sync.ts'
 import { NotesShell } from '../../notes/notes-shell.tsx'
 import { useEssaysCache, useEssaysQuery, useNoteQuery, useSeedNote } from '../../notes/queries.ts'
+import { isNotFound } from '../../notes/removals.ts'
 import { SaveStatus } from '../../notes/save-status.tsx'
 import { noteLabel } from '../../notes/summary.ts'
 import { navigate } from '../../router.ts'
@@ -138,23 +139,35 @@ export function EssayEditorPage({ id }: { id: string }) {
     }
   }, [client, flush, seedNote, invalidateEssays])
 
+  const leaveEssay = useCallback(
+    (targetId: string) => {
+      // 表示中のタブにあった Essay はタブの次へ送って書く流れを切らない。タブの外の Essay は
+      // 送り先が画面に見えていないので一覧へ帰す
+      const next = cycleIds.includes(targetId) ? cycleSelect(cycleIds, targetId, 1) : undefined
+      navigate(next !== undefined && next !== targetId ? essayPath(next) : ESSAYS_PATH, {
+        replace: true,
+      })
+    },
+    [cycleIds],
+  )
+
   const deleteEssay = useCallback(
     async (targetId: string) => {
       const removed = await removals.remove(targetId, {
         editor: { noteRef, reschedule: scheduleSave },
-        leave: () => {
-          // 表示中のタブにあった Essay はタブの次へ送って書く流れを切らない。タブの外の Essay は
-          // 送り先が画面に見えていないので一覧へ帰す
-          const next = cycleIds.includes(targetId) ? cycleSelect(cycleIds, targetId, 1) : undefined
-          navigate(next !== undefined && next !== targetId ? essayPath(next) : ESSAYS_PATH, {
-            replace: true,
-          })
-        },
+        leave: () => leaveEssay(targetId),
       })
       if (removed) patchEssays((list) => dropEssay(list, targetId))
     },
-    [removals, scheduleSave, cycleIds, patchEssays],
+    [removals, scheduleSave, leaveEssay, patchEssays],
   )
+
+  // 開いた本文を出し続けると、書いた分の保存が NOT_FOUND で再試行され続ける。
+  const goneId = note !== null && isNotFound(noteQuery.error) ? id : null
+  useEffect(() => {
+    if (goneId === null) return
+    removals.removedElsewhere(goneId, { editor: { noteRef }, leave: () => leaveEssay(goneId) })
+  }, [goneId, removals, leaveEssay])
 
   const undoDelete = useCallback(async () => {
     const restored = await removals.undo()

@@ -1,5 +1,4 @@
 import { FuzzyPickerModal } from '@monica/ui'
-import { ORPCError } from '@orpc/client'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 
 import { displayName, type Note, sameRepo } from '../../../contract.ts'
@@ -26,6 +25,7 @@ import {
   useScratchQuery,
   useSeedNote,
 } from '../../notes/queries.ts'
+import { isNotFound } from '../../notes/removals.ts'
 import { SaveStatus } from '../../notes/save-status.tsx'
 import { useRemovals } from '../../notes/use-removals.ts'
 import { navigate } from '../../router.ts'
@@ -42,7 +42,7 @@ export function RepoEditor({ repo, noteId }: { repo: string; noteId: string | nu
   const [pickerOpen, setPickerOpen] = useState(false)
 
   const autosave = useAutosaveContext()
-  const { schedule, flush, discard } = autosave
+  const { schedule, flush } = autosave
   const editorHandleRef = useRef<BlockEditorHandle | null>(null)
   const titleRef = useRef<HTMLInputElement>(null)
   // ⌥N で作った Repo Note は、本文ではなく title から書き始める。
@@ -94,13 +94,15 @@ export function RepoEditor({ repo, noteId }: { repo: string; noteId: string | nu
   const loadError = note === null ? openQuery.error : null
   const read = note === null ? null : readBody(note.content)
 
-  // 別のタブで消された Repo Note は、このタブで消したときと同じく、保存の予約を捨てて Scratch へ移る。
+  // 開いた本文を出し続けると、書いた分の保存が NOT_FOUND で再試行され続ける。
   const goneId = note !== null && isNotFound(noteQuery.error) ? noteId : null
   useEffect(() => {
     if (goneId === null) return
-    discard(goneId)
-    navigate(repoPath(repo), { replace: true })
-  }, [goneId, discard, repo])
+    removals.removedElsewhere(goneId, {
+      editor: { noteRef },
+      leave: () => navigate(repoPath(repo), { replace: true }),
+    })
+  }, [goneId, removals, repo])
 
   const isScratch = note?.kind === 'scratch'
 
@@ -329,8 +331,4 @@ export function RepoEditor({ repo, noteId }: { repo: string; noteId: string | nu
       )}
     </NotesShell>
   )
-}
-
-function isNotFound(error: Error | null): boolean {
-  return error instanceof ORPCError && error.code === 'NOT_FOUND'
 }
