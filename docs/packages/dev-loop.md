@@ -43,12 +43,12 @@
 
 ## 検査と CI
 
-- 検査は `bun run check` に集める。何を流すかの正本は `package.json` の `check:ts` と `check:rust` で、CI の job も同じ script を呼ぶ。CI の ts job は、ほかに actionlint で workflow を検査する（`check` には無い）。agent は `bun run check:brief`（引数で `check:ts` なども渡せる）で流す。通れば要約だけ、落ちれば Ledger の log 行・`(pass)` の行・空行を除いた末尾 200 行を出し、どちらも全文の log の path を最後の行に出して、検査の終了コードで抜ける。パイプで出力を絞ると、終了コードがパイプの末尾のものになるため。`check:ts` は最後に apps/desktop と apps/web の `vite build` を流す（`docs/packages.md` の「entry」の bundle の検査）。
+- 検査は `bun run check` に集める。何を流すかの正本は `package.json` の `check:ts` と `check:rust` で、CI の job も同じ script を呼ぶ。CI の ts job は、ほかに actionlint で workflow を検査する（`check` には無い）。CI の secrets job は gitleaks で全履歴の secret を探す（`check` には無い）。設定は `.gitleaks.toml` で、既定の rule に、拡張の manifest の公開鍵を除く allowlist を足している。agent は `bun run check:brief`（引数で `check:ts` なども渡せる）で流す。通れば要約だけ、落ちれば Ledger の log 行・`(pass)` の行・空行を除いた末尾 200 行を出し、どちらも全文の log の path を最後の行に出して、検査の終了コードで抜ける。パイプで出力を絞ると、終了コードがパイプの末尾のものになるため。`check:ts` は最後に apps/desktop と apps/web の `vite build` を流す（`docs/packages.md` の「entry」の bundle の検査）。
 - `check:ts` のテストは `scripts/test.ts` が流す。`bun test` に空の TMPDIR を渡し、テストが通っても、終わった後にそこに何か残っていれば名前と中身を出して落ちる。Bun の `rmSync({ recursive: true, force: true })` は、走査の途中で子が他の process に消されると例外を出さずに止まる。そのため、テストが起こした process の終了を待たずに home を消すと、テストは通ったまま home が tmpdir に残り、`dev:list` に死んだ行として溜まる。テストが起こした process は、終了を待ってから home を消す（`apps/backend/src/main.test.ts`）。
 - 独自の lint rule は `scripts/oxlint/monica.js` にあり、`.oxlintrc.json` の `jsPlugins` が読む。
 - oxlint は型を見る rule も流す。on にしているのは `.oxlintrc.json` の `options.typeAware` で、型は `oxlint-tsgolint` が読む。
 - Rust の検査は macOS の runner で流す。Tauri の crate が macOS の system library を要るため。
-- Rust の検査は、Rust に関わる file が変わったときだけ走らせる（対象は `ci.yml` の `changes` job の filter）。private repo では macOS の runner の 1 分が 10 分に数えられ、crate は旧 Monica から rename しただけで骨格の後はほとんど変わらないため。GitHub Actions には job 単位の paths filter が無いので、判定は ubuntu の小さな job で行う。
+- Rust の検査は、Rust に関わる file が変わったときだけ走らせる（対象は `ci.yml` の `changes` job の filter）。macOS の runner は ubuntu より待ちが長く遅いうえに、crate は旧 Monica から rename しただけで骨格の後はほとんど変わらないため。GitHub Actions には job 単位の paths filter が無いので、判定は ubuntu の小さな job で行う。
 - テストが誤りを捕まえるかを code に変異を入れて確かめるときは、変異の前に `cp` で控えを取り、控えから戻す。`git checkout -- <file>` は HEAD の内容に戻すので、まだコミットしていない変更ごと消える。
 - Rust のテストが誤りを捕まえるかを、code に変異を入れて確かめたら、戻したファイルを `touch` してから次のテストを流す。cargo は mtime で作り直しを決めるので、`cp` で取った控えを `mv` で戻すと mtime が古くなり、変異入りの binary のまま走る。
 - 整形だけの commit は、SHA を `.git-blame-ignore-revs` に書いて blame から外す。repo は squash merge なので、SHA は merge の後の main のものを後続の PR で足す。GitHub の blame はこのファイルを自動で読み、手元の git は `git config blame.ignoreRevsFile .git-blame-ignore-revs` を 1 回打つと読む。
