@@ -9,6 +9,7 @@
   "dependencies": {
     "@fontsource-variable/inter": "catalog:",
     "@monica/chat": "workspace:*",
+    "@monica/task": "workspace:*",
     "@orpc/client": "catalog:",
     "@orpc/contract": "catalog:",
     "react": "catalog:",
@@ -16,6 +17,7 @@
   },
   "devDependencies": {
     "@crxjs/vite-plugin": "catalog:",
+    "@orpc/server": "catalog:",
     "@tailwindcss/vite": "catalog:",
     "@types/chrome": "catalog:",
     "@types/react": "catalog:",

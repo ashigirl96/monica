@@ -27,7 +27,7 @@ const limitName = (rateLimitType: string) => LIMIT_NAMES[rateLimitType] ?? 'plan
 
 /**
  * Chromium の fetch は、Backend の居ない port でも、stream の途中で Backend が落ちても TypeError を投げる。
- * Native Messaging の host が Backend を引けないときと、起き直した Backend が古い chat の token を 401 で断ったときも同じに数える。
+ * Native Messaging の host が Backend を引けないときと、起き直した Backend が古い Chrome Extension の token を 401 で断ったときも同じに数える。
  */
 export function isUnreachable(error: unknown): boolean {
   return (

@@ -105,6 +105,30 @@ export const runErrors = {
   },
 }
 
+export const PromptKindSchema = z
+  .enum(['tackle', 'implement-spec', 'triage', 'wayfinder'])
+  .describe(
+    'what the Run is started with; tackle leaves the prompt out for /tackle, implement-spec sends /implement-spec #<n> for an Issue with open sub-issues, triage sends /triage #<n>, and wayfinder sends /wayfinder <n> for a map or /wayfinder <map> <n> for an Issue under one',
+  )
+
+export const RunButtonSchema = z.object({
+  kind: PromptKindSchema,
+  run: z
+    .enum(['new', 'resume', 'running'])
+    .describe(
+      'new starts a Run, resume resumes the ended one sending no prompt, running is a live Run and cannot be pressed',
+    ),
+})
+
+export const RunButtonsOutputSchema = z.object({
+  buttons: z.array(
+    z.object({
+      ref: z.string().describe('the ref as asked'),
+      button: RunButtonSchema.nullable().describe('null when the Issue gets no Run button'),
+    }),
+  ),
+})
+
 export const CurrentOutputSchema = z.object({
   ref: z.string(),
   title: z.string(),
@@ -165,6 +189,9 @@ export type TrackOutput = z.infer<typeof TrackOutputSchema>
 export type SyncOutput = z.infer<typeof SyncOutputSchema>
 export type ListOutput = z.infer<typeof ListOutputSchema>
 export type RunOutput = z.infer<typeof RunOutputSchema>
+export type PromptKind = z.infer<typeof PromptKindSchema>
+export type RunButton = z.infer<typeof RunButtonSchema>
+export type RunButtonsOutput = z.infer<typeof RunButtonsOutputSchema>
 export type CurrentOutput = z.infer<typeof CurrentOutputSchema>
 export type AttachOutput = z.infer<typeof AttachOutputSchema>
 export type CloseRefusal = z.infer<typeof CloseRefusalSchema>
@@ -219,6 +246,21 @@ export const contract = {
           .describe('start a new Run even when the Issue has open Blockers'),
       }),
     )
+    .output(RunOutputSchema),
+  runButtons: meta
+    .meta({
+      description:
+        'Tell for each Issue whether it gets a Run button and with what prompt, reading the Issues from GitHub without tracking them',
+    })
+    .input(z.object({ refs: z.array(z.string()).max(100) }))
+    .output(RunButtonsOutputSchema),
+  runFromButton: meta
+    .meta({
+      description:
+        'Run the Task of an Issue with the prompt its Run button has now, reading the Issue from GitHub anew, or refuse with PRECONDITION_FAILED and the reason when it gets no Run button',
+    })
+    .errors(runErrors)
+    .input(z.object({ ref }))
     .output(RunOutputSchema),
   current: meta
     .meta({ description: 'Show the Task of the Tab this runs in', cli: true })

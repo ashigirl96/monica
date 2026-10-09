@@ -48,14 +48,16 @@ export type LinkedIssue = IssueRef & { nodeId: string } & Pick<
 export type GitHubPullRequest = IssueRef &
   Pick<typeof pullRequest.$inferSelect, 'title' | 'state' | 'isDraft' | 'headRef' | 'headOid'>
 
+type Labelled = { labels: string[]; subIssues: { open: number; total: number } }
+
 /** PR の並びが null なら GitHub が答えなかったので、前の対応を残す。 */
-export type GitHubIssue = LinkedIssue & {
-  labels: string[]
-  parent: LinkedIssue | null
-  blockers: LinkedIssue[]
-  closingPullRequests: GitHubPullRequest[] | null
-  branchPullRequests: GitHubPullRequest[] | null
-}
+export type GitHubIssue = LinkedIssue &
+  Labelled & {
+    parent: (LinkedIssue & Labelled) | null
+    blockers: LinkedIssue[]
+    closingPullRequests: GitHubPullRequest[] | null
+    branchPullRequests: GitHubPullRequest[] | null
+  }
 
 export type AskedIssue = { number: number; benchBranch: string | null }
 
@@ -91,13 +93,13 @@ const PullRequestNode = z.object({
 
 const PullRequests = z.object({ nodes: z.array(PullRequestNode.nullable()) }).nullish()
 
-const IssueNode = z.object({
-  id: z.string(),
-  number: z.number(),
-  title: z.string(),
-  state: State,
+const LabelledNode = LinkedNode.extend({
   labels: z.object({ nodes: z.array(z.object({ name: z.string() }).nullable()) }),
-  parent: LinkedNode.nullable(),
+  subIssuesSummary: z.object({ total: z.number(), completed: z.number() }),
+})
+
+const IssueNode = LabelledNode.extend({
+  parent: LabelledNode.nullable(),
   blockedBy: z.object({ nodes: z.array(LinkedNode.nullable()) }),
   closedByPullRequestsReferences: PullRequests,
 })
@@ -142,13 +144,13 @@ export async function queryIssues(
     }
     const parsed = IssueNode.parse(node)
     issues.push({
+      ...labelled(parsed),
       nodeId: parsed.id,
       repo: repository.nameWithOwner,
       number: parsed.number,
       title: parsed.title,
       state: parsed.state,
-      labels: parsed.labels.nodes.flatMap((label) => (label ? [label.name] : [])),
-      parent: parsed.parent && linked(parsed.parent),
+      parent: parsed.parent && labelled(parsed.parent),
       blockers: parsed.blockedBy.nodes.flatMap((blocker) => (blocker ? [linked(blocker)] : [])),
       closingPullRequests: pullRequestsOf(parsed.closedByPullRequestsReferences),
       // worktree の Bench が無ければ、head が一致する branch も無い。
@@ -188,6 +190,15 @@ function linked(node: z.infer<typeof LinkedNode>): LinkedIssue {
   }
 }
 
+function labelled(node: z.infer<typeof LabelledNode>): LinkedIssue & Labelled {
+  const { total, completed } = node.subIssuesSummary
+  return {
+    ...linked(node),
+    labels: node.labels.nodes.flatMap((label) => (label ? [label.name] : [])),
+    subIssues: { open: total - completed, total },
+  }
+}
+
 // GitHub は blockedBy を 50 件までしか張らせないので、1 ページで全部が返る。
 function issuesQuery(asked: AskedIssue[]): string {
   const aliases = asked.flatMap(({ number: n, benchBranch }) => [
@@ -205,13 +216,17 @@ ${aliases.join('\n')}
   }
 }
 fragment Copied on Issue {
-  id number title state
-  labels(first: 100) { nodes { name } }
-  parent { ...Linked }
+  ...Labelled
+  parent { ...Labelled }
   blockedBy(first: 50) { nodes { ...Linked } }
   closedByPullRequestsReferences(first: 10, includeClosedPrs: true) { nodes { ...CopiedPullRequest } }
 }
 fragment Linked on Issue { id number title state repository { nameWithOwner } }
+fragment Labelled on Issue {
+  ...Linked
+  labels(first: 100) { nodes { name } }
+  subIssuesSummary { total completed }
+}
 fragment CopiedPullRequest on PullRequest {
   number title state isDraft headRefName headRefOid repository { nameWithOwner }
 }

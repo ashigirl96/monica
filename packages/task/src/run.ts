@@ -62,7 +62,7 @@ export function refOfRunTask(db: Db, agentSessionId: string): string | null {
   return found ? formatRef(found) : null
 }
 
-export function runAgentSessionsByTask(db: Db, taskIssueIds: number[]) {
+export function runAgentSessionsByTask(db: Pick<Db, 'select'>, taskIssueIds: number[]) {
   const rows = db
     .select({
       taskIssueId: run.taskIssueId,

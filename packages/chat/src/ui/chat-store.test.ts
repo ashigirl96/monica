@@ -734,10 +734,13 @@ test('a question the Backend did not take shows that the desktop was not reached
   expect(store.snapshot()).toMatchObject({ answering: false, unreachable: true, retryable: 0 })
 })
 
-// Native Messaging の host が Backend を引けないときと、起き直した Backend が古い chat の token を bearer の 401 で断ったとき。
+// Native Messaging の host が Backend を引けないときと、起き直した Backend が古い Chrome Extension の token を bearer の 401 で断ったとき。
 test.each([
   ['the native host finds no Backend', new BackendUnreachable('the monica desktop is not running')],
-  ['the Backend refuses a stale chat token', new ORPCError('UNAUTHORIZED', { status: 401 })],
+  [
+    'the Backend refuses a stale Chrome Extension token',
+    new ORPCError('UNAUTHORIZED', { status: 401 }),
+  ],
 ])(
   'a question sent when %s shows that the desktop was not reached, and puts up the banner',
   async (_, error) => {
@@ -779,7 +782,7 @@ test('a claude that is not logged in tells how to log in', async () => {
   })
 })
 
-test('a claude without a login has been reached, though the Backend refused with 401 as for a stale chat token', async () => {
+test('a claude without a login has been reached, though the Backend refused with 401 as for a stale Chrome Extension token', async () => {
   const { store, entry } = await refusedWith(declared('NOT_AUTHENTICATED'))
 
   expect(entry.failure?.line).toStartWith('Claude Code に login していません')

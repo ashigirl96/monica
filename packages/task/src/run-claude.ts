@@ -1,13 +1,13 @@
 import { existsSync } from 'node:fs'
 
 import { agentSession } from '@monica/workbench/schema'
-import type { Db } from '@monica/workbench/server'
+import type { Db, Tx } from '@monica/workbench/server'
 import { ORPCError, type ORPCErrorConstructorMap } from '@orpc/server'
 import { and, desc, eq, gte } from 'drizzle-orm'
 
 import { type Bench, type BenchDeps, type Issue, prepareBench, refuseInPlace } from './bench.ts'
 import type { RunOutput, runErrors } from './contract.ts'
-import { isIssue, openBlockersOf } from './copy.ts'
+import { isIssue, isLinkedIssue, openBlockersOf } from './copy.ts'
 import { findOpenTask, taskIfTracked, refuseClosed } from './open-task.ts'
 import { formatRef, type IssueRef, parseRef } from './ref.ts'
 import { runAgentSessionsByTask } from './run.ts'
@@ -28,10 +28,11 @@ export async function runTask(
   deps: SyncDeps & BenchDeps,
   input: { ref: string; prompt?: string; inPlace?: boolean; force?: boolean },
   errors: ORPCErrorConstructorMap<typeof runErrors>,
+  { recheck, nodeId }: { recheck?: (tx: Tx) => void; nodeId?: string } = {},
 ): Promise<RunOutput> {
   const asked = parseRef(input.ref)
   refuseUnsendable(input.prompt)
-  const { found, tracked } = await findOrTrack(deps, asked)
+  const { found, tracked } = await findOrTrack(deps, asked, nodeId)
   if (found.bench) {
     refuseInPlace(found.bench, input.inPlace, formatRef(found.issue))
     refuseLiveRuns(deps.db, found.issue)
@@ -39,7 +40,7 @@ export async function runTask(
   const launch =
     (found.bench && resumeOf(deps.db, found.issue, found.bench)) ??
     (await newRun(deps, found.issue, input, errors))
-  const opened = openClaudeTab(deps, launch, input.prompt)
+  const opened = openClaudeTab(deps, launch, input.prompt, recheck)
   return {
     ref: launch.ref,
     title: launch.title,
@@ -54,8 +55,12 @@ export async function runTask(
 }
 
 // track は GitHub の今の名前で Task を書くので、改名前の名前で頼まれても track の返す ref で引き直す。
-async function findOrTrack(deps: SyncDeps, asked: IssueRef) {
-  const found = taskIfTracked(deps.db, isIssue(asked))
+// 呼び手が GitHub から node ID を引いてあれば、名前と番号が別の issue に移っていても取り違えない。
+async function findOrTrack(deps: SyncDeps, asked: IssueRef, nodeId?: string) {
+  const found = taskIfTracked(
+    deps.db,
+    nodeId ? isLinkedIssue({ ...asked, nodeId }) : isIssue(asked),
+  )
   if (found) return { found: refuseClosed(found), tracked: false }
   const { ref, alreadyTracked } = await trackIssue(deps, formatRef(asked))
   return { found: findOpenTask(deps.db, isIssue(parseRef(ref)), ref), tracked: !alreadyTracked }
@@ -73,8 +78,8 @@ function refuseLiveRuns(db: Db, forIssue: Issue) {
 }
 
 // Bench より前の Run は reopen の前の挑戦で、Agent Session Transcript の無い Agent Session（claude は最初の prompt まで書かない）は --resume が会話を見つけられないので、どちらも候補にしない。
-function resumeOf(db: Db, forIssue: Issue, row: Bench): Launch | null {
-  const last = db
+export function resumableRunOf(db: Db, taskIssueId: number, since: Pick<Bench, 'createdAt'>) {
+  return db
     .select({
       agentSessionId: agentSession.sessionId,
       cwd: agentSession.cwd,
@@ -82,10 +87,14 @@ function resumeOf(db: Db, forIssue: Issue, row: Bench): Launch | null {
     })
     .from(run)
     .innerJoin(agentSession, eq(agentSession.sessionId, run.agentSessionId))
-    .where(and(eq(run.taskIssueId, forIssue.id), gte(run.startedAt, row.createdAt)))
+    .where(and(eq(run.taskIssueId, taskIssueId), gte(run.startedAt, since.createdAt)))
     .orderBy(desc(agentSession.lastEventAt), desc(run.id))
     .all()
     .find(({ transcriptPath }) => transcriptPath === null || existsSync(transcriptPath))
+}
+
+function resumeOf(db: Db, forIssue: Issue, row: Bench): Launch | null {
+  const last = resumableRunOf(db, forIssue.id, row)
   if (!last) return null
   return {
     ref: formatRef(forIssue),
@@ -129,14 +138,20 @@ async function newRun(
   }
 }
 
-function openClaudeTab(deps: BenchDeps, launch: Launch, prompt: string | undefined) {
-  return deps.reservations.writeOpenTask(launch.bench.taskIssueId, launch.ref, (tx) =>
-    deps.workbenchLedger.openTab(tx, {
+function openClaudeTab(
+  deps: BenchDeps,
+  launch: Launch,
+  prompt: string | undefined,
+  recheck: ((tx: Tx) => void) | undefined,
+) {
+  return deps.reservations.writeOpenTask(launch.bench.taskIssueId, launch.ref, (tx) => {
+    recheck?.(tx)
+    return deps.workbenchLedger.openTab(tx, {
       runspaceId: launch.bench.runspaceId,
       cwd: launch.tabCwd,
       input: `${claudeCommand(launch, prompt)}\r`,
-    }),
-  )
+    })
+  })
 }
 
 const DEFAULT_PROMPT = '/tackle'

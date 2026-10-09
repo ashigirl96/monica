@@ -112,16 +112,21 @@ const handler = new RPCHandler(
     .$context<typeof context>()
     .router({ workbench: workbenchRouter, task: taskRouter, job: jobRouter, chat: chatRouter }),
 )
-// Chrome Extension に渡す token は chat の router だけを持つ handler に通すので、path の書き方で workbench に届くことは無い。
-const chatHandler = new RPCHandler(os.$context<typeof context>().router({ chat: chatRouter }))
+// Chrome Extension に渡す token は chat と prompt を受け取らない task の 2 つだけを持つ handler に通すので、path の書き方で workbench や task.run に届くことは無い（ADR-0035）。
+const extensionHandler = new RPCHandler(
+  os.$context<typeof context>().router({
+    chat: chatRouter,
+    task: { runButtons: taskRouter.runButtons, runFromButton: taskRouter.runFromButton },
+  }),
+)
 
 const origins = ['tauri://localhost', 'http://tauri.localhost']
 // dev の webview は vite から読まれ、vite の port は home ごとに変わる。
 if (process.env.MONICA_DEV_URL) origins.push(new URL(process.env.MONICA_DEV_URL).origin)
 
 const token = crypto.randomUUID()
-// Native Messaging の host が Chrome Extension に渡す。side panel で script が動いても shell に打鍵する workbench.openTab に届かせない（ADR-0034）。
-const chatToken = crypto.randomUUID()
+// Native Messaging の host が Chrome Extension に渡す。Chrome Extension で script が動いても shell に打鍵する workbench.openTab に届かせない（ADR-0034）。
+const extensionToken = crypto.randomUUID()
 const startedAt = new Date().toISOString()
 type TokenEnv = { Variables: { handler: typeof handler } }
 const app = new Hono<TokenEnv>()
@@ -132,7 +137,7 @@ app.use(
   bearerAuth<TokenEnv>({
     async verifyToken(presented, c) {
       if (await timingSafeEqual(token, presented)) c.set('handler', handler)
-      else if (await timingSafeEqual(chatToken, presented)) c.set('handler', chatHandler)
+      else if (await timingSafeEqual(extensionToken, presented)) c.set('handler', extensionHandler)
       else return false
       return true
     },
@@ -141,7 +146,7 @@ app.use(
 app.use('/rpc/*', async (c, next) => {
   const { matched, response } = await c.var.handler.handle(c.req.raw, { prefix: '/rpc', context })
   if (matched) return c.newResponse(response.body, response)
-  if (c.var.handler === chatHandler) return c.text('Unauthorized', 401)
+  if (c.var.handler === extensionHandler) return c.text('Unauthorized', 401)
   return next()
 })
 const server = Bun.serve({
@@ -172,7 +177,7 @@ const endpointPath = join(home, 'backend.json')
 const endpointTmp = `${endpointPath}.${process.pid}.tmp`
 writeFileSync(
   endpointTmp,
-  `${JSON.stringify({ port: server.port, token, chatToken, pid: process.pid, startedAt })}\n`,
+  `${JSON.stringify({ port: server.port, token, extensionToken, pid: process.pid, startedAt })}\n`,
   { mode: 0o600 },
 )
 renameSync(endpointTmp, endpointPath)

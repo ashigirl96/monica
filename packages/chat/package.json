@@ -6,6 +6,7 @@
     "./contract": "./src/contract.ts",
     "./server": "./src/server.ts",
     "./ui": "./src/ui/index.ts",
+    "./native-host": "./src/ui/native-host.ts",
     "./testing": "./src/testing.ts",
     "./html-worker": "./src/html-worker.ts",
     "./pdf-worker": "./src/pdf-worker.ts"

@@ -16,7 +16,7 @@
   - zsh の script は CI で走らせず、手元で zpty から TAB を押して確かめる。起こす zsh の `ZDOTDIR` の `.zshrc` に、`bindkey -e`（`EDITOR` が vi 系だと vi の keymap で起きる）と `stty rows 50 cols 200`（pty の大きさが 0 のままだと候補の一覧を出さない）を置く。
 - hook の受け口は `monica workbench hook claude`（`@monica/workbench/cli` の手書き command）。仕様は `docs/packages/tab-env-and-shim.md`。
 - Native Messaging の host（`src/native-host.ts`、ADR-0034）: 第 1 引数が `chrome-extension://` で始まると、手書き command と trpc-cli より前に振り分けて host として振る舞う。Chromium は host を manifest の `path` で起こし、第 1 引数に呼んだ Chrome Extension の origin を渡す。manifest の `path` は引数を持てないので、flag ではなく origin で見分ける。
-  - stdin から 1 通（4 byte の little-endian の長さと UTF-8 の JSON）を読み、中身は見ずに、home（`MONICA_HOME`、無ければ `~/.monica`）の `backend.json` を `src/backend.ts` の `liveEndpoint` で読んで、`{ port, token: <chatToken> }` を同じ枠で 1 通書いて exit 0 する。全権の token は返さない。`backend.json` が無い、pid が死んでいる、`chatToken` が無い（この版より前の Backend）ときは `{ error: 'not-running' }` を返す。
+  - stdin から 1 通（4 byte の little-endian の長さと UTF-8 の JSON）を読み、中身は見ずに、home（`MONICA_HOME`、無ければ `~/.monica`）の `backend.json` を `src/backend.ts` の `liveEndpoint` で読んで、`{ port, token: <extensionToken> }` を同じ枠で 1 通書いて exit 0 する。全権の token は返さない。`backend.json` が無い、pid が死んでいる、`extensionToken` が無い（この版より前の Backend）ときは `{ error: 'not-running' }` を返す。
   - `sendNativeMessage` は応答を受けてから stdin を閉じるので、EOF を待たずに 1 通だけ読む。Chromium は応答の後、host が 2 秒で抜けなければ SIGKILL する。
   - どの origin でも同じ答えを返す。起こせる Chrome Extension は manifest の `allowed_origins` で browser が絞る。
   - release の manifest は Shell が、dev の manifest は `bun run extension` が書く（`docs/packages/dev-loop.md`）。
