@@ -11,7 +11,7 @@ notes の ui は旧 Monica の `web/` と `shared/` を移して作る。
 - 振る舞いを変えずに移す slice でも、セキュリティ（スクリプトの実行など）と本文の消失につながる不具合は直し、PR に書く。それ以外の旧 Monica の振る舞いはそのまま移し、直すなら別の issue にする。
 - 旧 Monica の画面の判断（保存・競合・取り直し・開き直し）は hook の中にあり、DOM を入れない bun test では守れない。移すときは判断を React に依らない module か純関数に出し、hook はそれを React の状態と event につなぐだけにする（`notes/save-queue.ts`、`notes/note-sync.ts` の `noteToOpen` と `reloadLatest`）。旧 Monica の hook には、画面を移る・取り直す間に本文を失う経路が残っていた。
 - 旧 Monica は change stream で cache を取り直していたが、monica が取り直すのは focus のときだけ（ADR-0018）。移すときは、旧 Monica の画面が change stream で新しくしていた表示（一覧の preview や title）を数え、手元の cache に写す（`notes/summary.ts` の `withSavedPreview`）。
-- 種類ごとの画面を足すときは、Note に紐づく手元の状態（autosave の予約と基準版、draft の本文と title、本文の cache、一覧の cache）を数え、Note を消す経路と開き直す経路のそれぞれで、捨てるか重ねるかを決める（`notes/removals.ts` の `Removals`、`notes/note-sync.ts` の `noteToOpen`）。種類ごとの route は別の種類の id でも開くので、削除のように戻しにくい操作は、開いている Note の種類を確かめてから行う。
+- 種類ごとの画面を足すときは、Note に紐づく手元の状態（autosave の予約と基準版、draft の本文と title、本文の cache、一覧の cache）を数え、Note を消す経路と開き直す経路のそれぞれで、捨てるか重ねるかを決める。消す経路では、その時点で送信中の保存が後から返す失敗と CONFLICT も数える（`notes/removals.ts` の `Removals`、`notes/note-sync.ts` の `noteToOpen`）。種類ごとの route は別の種類の id でも開くので、削除のように戻しにくい操作は、開いている Note の種類を確かめてから行う。
 - oxlint の React の規則も旧 Monica より厳しい。render 中の `Date` は effect か `useState` の初期化に移し、自分を呼ぶ `useCallback` は名前付きの関数式にする。latch に要る render 中の ref の書き換えと、effect の中での採用は、理由を付けて止める（`notes/note-sync.ts`）。
 
 ## エディタ
@@ -95,6 +95,7 @@ notes の ui は旧 Monica の `web/` と `shared/` を移して作る。
 - TanStack Query だけを入れ、`@orpc/tanstack-query` は入れない。queryFn が oRPC の client を呼ぶ。query key は旧 Monica のまま（`query.ts` の `queryKeys`）。
 - staleTime は 0 で、retry はしない。外の更新は focus のたびに取り直す（ADR-0018）。`focusManager` は visibilitychange に加えて focus と blur を見る。desktop やエディタからブラウザに戻っても窓は見えたままなので、visibilitychange だけでは取り直さないため。
 - Daily の画面は focus のたびに `daily.open`（get-or-create）を呼び直す。
+- focus で取り直す query は互いに順不同で返る。ある query の答えを別の query の答えで解く画面（開いている Note の `NOT_FOUND` を一覧の並びで解く移り先など）は、どちらが先に返っても同じ結果になるよう、前の答えを控えて使う。
 - repo の中にデータ取得のやり方が 2 つある。desktop の webview は jotai か useState と domain ごとの変更の stream、notes の画面は TanStack Query と focus での取り直し。
 
 ### route
