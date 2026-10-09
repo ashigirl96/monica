@@ -76,6 +76,6 @@ function RepoChooser() {
 
 export function ReposPage({ repo, noteId }: { repo: string | null; noteId: string | null }) {
   if (repo === null) return <RepoChooser />
-  // Repo を切り替えると、取り消しの stack も含めて editor の状態を作り直す
+  // 取り消しの stack は route を描き分けるより上で持つので、作り直しても残る。
   return <RepoEditor key={repo} repo={repo} noteId={noteId} />
 }
