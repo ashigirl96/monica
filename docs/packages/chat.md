@@ -121,12 +121,14 @@ claude の `system`（`init`）を受けたら、stderr に 1 行出す。tools 
   - shadow root は `document.documentElement` から要素を順に辿り、`chrome.dom.openOrClosedShadowRoot` で closed のものまで、見つけた root の中にも潜って集める。`html` は `document.documentElement.getHTML({ shadowRoots })` で、shadow root は `<template shadowrootmode>` として書き出される。
   - 選択範囲は top frame の `getSelection().toString()`。activeElement が textarea か、`type` が `text`・`search`・`url`・`tel` の input なら、その `selectionStart`・`selectionEnd` で読む。別の場所を選んだ後も古い値が残るので、focus のある欄だけを読む。それ以外の input（`password` など）に focus があれば読まない。空なら `selection` を送らない。
 - `executeScript` が reject したら `restricted` にし、`detail` に error の message を入れる。
+- 送る時に見出しが出していた Current Page の URL と title（`CurrentPageWatch.shown()`）を、読んだページと並べて `ChatStore` に返す。読み終える前に止めた質問の履歴に入れる（下の「失敗」の「再試行と履歴」）。
 - 送る前に、input を `JSON.stringify` した UTF-8 の bytes に、PDF の bytes と 1MiB（oRPC の包みの分）を足して `MAX_ASK_BODY_BYTES` と比べる。File は `JSON.stringify` で `{}` になるので、PDF の大きさは `size` で足す。超えたら今のページの `html`・`pdf`・`selection` を外して `too-large` にする（`chat-store.ts`）。履歴は削らない。
 
 #### PDF の取り方
 
 - `fetch(tab.url, { credentials: 'include' })` で Browser Tab の URL を取り直す。`<all_urls>` の host permission の host へは CORS を受けずに取れる。cookie を付けるのは、ログインが要る PDF も取れる見込みがあるため（下の「確かめていないこと」）。
-- 30 秒で返らなければ `AbortController` で打ち切り、`fetch-failed`（detail `no response within 30 seconds`）にする。body を読み終えるまでを 30 秒に含める。
+- 30 秒で返らなければ打ち切り、fetch を abort して `fetch-failed`（detail `no response within 30 seconds`）にする。body を読み終えるまでを 30 秒に含める。fetch が abort に応えなくても、その終わりを待たない。
+- 止めるボタンか「新しい Chat」で質問を止めたら、fetch を abort し、その終わりを待たずに読むのをやめる（`ChatStore` が `readPage` に渡す `signal`）。止めた後も PDF を読み続けて memory と帯域を使わないため。
 - status が ok でなければ `fetch-failed`（detail `HTTP <status>`）。先頭が `%PDF-` でない応答も `fetch-failed`（detail `the response is not a PDF`）にする。ログインが要る PDF は、ログインのページの HTML が 200 で返りうる。
 - body は上限まで読んでやめる。上限は、body の上限から、PDF を除いた input（`question` と `history`）を `JSON.stringify` した UTF-8 の bytes と 1MiB を引いた値で、`chat-store.ts` が `readPage` に渡す。`Content-Length` が上限を超えていれば body を読まずに cancel し、読んでいる途中で超えても cancel して、どちらも bytes を送らずに `too-large` にする。50MB を超える PDF は、履歴を含めた body が上限に収まらない PDF として読む。上限に収まった bytes は、送る前の大きさの確かめ（上）でもう一度、page の `url` と `title` を含めて比べる。
 - PDF の選択範囲は送らない。viewer の frame には注入できず、top frame の `getSelection()` は viewer の中の選択を返さない。
@@ -231,7 +233,7 @@ snapshot      { type: 'snapshot', page: PageSnapshot から screenshot を除い
 - ログインが要る PDF を side panel の fetch で取れるか。取れなければ、`fetch-failed`（ログインのページの HTML や ok でない status が返ったとき）か `unparsable`（`%PDF-` で始まるが pdf.js が開けないとき）に落ちる。headless の Brave 1.97 で、side panel の page の fetch に、PDF の host の cookie が付いたことだけは見た。
 - 大きな PDF を Worker で読む間に Backend の event loop が止まらないか（確かめたのは小さな PDF だけ）。
 - 本物の Retina の画面での `captureVisibleTab` の倍率（下の「実機で確かめたこと」は `--force-device-scale-factor=2` で真似た）。
-- side panel そのものから送ったときの quota。送るボタンで 2 回と Enter で 1 回を 1 秒の間に続けて撮れるか、Enter の keydown が quota を外す user gesture になるか。side panel の page を Browser Tab で開く確かめ方では、その Browser Tab が裏に回り、操作の間が 5〜10 秒空いた。
+- Enter の keydown が quota を外す user gesture になるか。side panel で式を評価して送る確かめ方では、gesture は評価の userGesture から来るので、本物の Enter の gesture は確かめられない。
 
 ## 失敗
 
@@ -273,8 +275,8 @@ side panel は `ORPCError`（`@orpc/client`）の `code` で分け、`data` は 
 
 | 場面 | side panel が見るもの | 答えの場所に出す 1 行 | 詳しい行 |
 |---|---|---|---|
-| Backend に届かない | 途中の答えの無い `TypeError` | 「monica の desktop に届きませんでした」。入力欄の上に帯も出す | なし |
-| 答えの途中で届かなくなった | 途中の答えの後の `TypeError` | 途中までの答えを残し「答えが途中で切れました」。帯も出す | なし |
+| Backend に届かない | `chat.ask` の応答が届く前の `TypeError` | 「monica の desktop に届きませんでした」。入力欄の上に帯も出す | なし |
+| 答えの途中で届かなくなった | `chat.ask` の応答が届いた後の `TypeError`（`snapshot`・`retry`・`text` の後） | 途中までの答えを残し「答えが途中で切れました」。帯も出す | なし |
 | Claude Code の login が無い | `NOT_AUTHENTICATED` | 「Claude Code に login していません。terminal で claude を起こし、/login してください」 | なし |
 | plan の上限 | `USAGE_LIMIT` | 「plan の 5 時間の上限に達しました。10:00 に戻ります」 | なし |
 | 同時の claude の上限 | `CHAT_BUSY` | 「ほかの Chat が答えています」 | なし |
@@ -287,7 +289,7 @@ side panel は `ORPCError`（`@orpc/client`）の `code` で分け、`data` は 
 | 止めた | 止めるボタン | 途中までの答えの後に淡く「止めました」 | なし |
 | 使用量の警告 | `usage` | 答えの下に淡く「plan の 5 時間の枠を 91% 使いました（10:00 に戻ります）」 | なし |
 
-- `AGENT_FAILED` の 1 行目は、画面の途中の答え → その質問で受けた `retry` → それ以外、の順に選ぶ。code だけでは「途中で切れた」「API に繋がらない」「起きない」を分けられないが、side panel はその質問で受けた event を知っているため。`TypeError` も、画面に途中の答えがあれば「答えが途中で切れました」にする。
+- `AGENT_FAILED` の 1 行目は、画面の途中の答え → その質問で受けた `retry` → それ以外、の順に選ぶ。code だけでは「途中で切れた」「API に繋がらない」「起きない」を分けられないが、side panel はその質問で受けた event を知っているため。`TypeError` は、`chat.ask` の応答が届いた後なら、途中の答えが無くても「答えが途中で切れました」にする。Backend には届いていたため。
 - 時刻は side panel が動く Mac の時刻帯で、今日なら `10:00`、別の日なら `10月12日 16:27` と書く。使用率は四捨五入した % にする。`usage` に `resetsAt` が無ければ「（…に戻ります）」を省く。
 - `rateLimitType` の呼び名は `five_hour` を「5 時間の」、`seven_day` を「週の」、`seven_day_opus` を「Opus の週の」、`seven_day_sonnet` を「Sonnet の週の」にし、ほかは呼び名を付けない（「plan の上限に達しました」）。知らない値でも文が壊れないようにするため。
 - toast は使わない。toast は server の英語の message をそのまま出す形（`packages/ui/src/toast.ts`）で、失敗はその質問の答えの場所に出すため。
@@ -299,7 +301,7 @@ side panel は `ORPCError`（`@orpc/client`）の `code` で分け、`data` は 
 - oRPC の `ClientRetryPlugin` は使わない。event iterator の途中の error で handler を最初から呼び直すので、途中まで流した値が client で重なる（research の §3）。side panel が自分で送り直す自動の再試行もしない。
 - 失敗した質問は、再試行して答えが返るまで、後の質問の `history` に入れない。再試行せずに次の質問を送ったら、失敗した質問を履歴から外し、画面には残す。Backend が `snapshot` を返した後に失敗した場合も、その Page Snapshot を `history` に入れない。
 - 止めた質問は、途中までの答えの後に空行を挟んで「（ユーザーが途中で止めた）」を付けて履歴に入れる。答えが空なら印だけにする。「続けて」と訊いたときの材料になる。Backend は答えの文字をそのまま prompt にするので、印も文字のまま claude に渡る。
-- `snapshot` が届く前に止めた質問は、送ったページの URL と title（と添えたスクリーンショット）だけで履歴に入れる。Backend が本文にしたものが side panel に無いため。ページを読み終える前に止めたら、URL も title も無い。
+- `snapshot` が届く前に止めた質問は、送ったページの URL と title（と添えたスクリーンショット）だけで履歴に入れる。Backend が本文にしたものが side panel に無いため。ページを読み終える前に止めたら、送った時に見出しが出していた Current Page の URL と title で入れる。
 - 止めた質問には再試行を付けない。履歴に入り、「続けて」で続きを訊けるため。
 
 ### 止めるボタン
@@ -307,6 +309,7 @@ side panel は `ORPCError`（`@orpc/client`）の `code` で分け、`data` は 
 - 答えの間（送ってから stream が閉じるまで。最初の text の前と、再試行を待つ間も含む）、InputMessage の送るボタンを止めるボタン（label は「止める」）にする。入力欄に文字があっても止めるボタンにし、Enter では送らない。queue を消したので、答えの間に送れる先が無いため。
 - 押すと side panel は `chat.ask` の stream を abort し、Backend は handler の `signal` の abort で子の claude を SIGKILL する（上の「claude の持ち方」）。side panel は押した後に届いた event を描かず、答えに「止めました」を淡く添える。`AbortController` だけでは、子が 2〜3 秒 delta を出し続けて残る。
 - 答えの途中で「新しい Chat」を押したときも、同じく stream を abort する。
+- ページを読んでいる間（PDF の fetch の最中）に押したときも、その fetch を abort する（上の「PDF の取り方」）。
 
 ### Backend の不在の帯（`src/ui/reach.ts`）
 
@@ -328,10 +331,11 @@ side panel は `ORPCError`（`@orpc/client`）の `code` で分け、`data` は 
   - Backend を起こした後に再試行を押すと、同じ質問の答えが返った。plan の使用率が 96% のときで、答えの下に「plan の 5 時間の枠を 96% 使いました（9:40 に戻ります）」が出た（本物の `allowed_warning`）。
   - 答えが流れ始めてから止めるを押すと「止めました」が出て、3 秒後も答えは増えず、Backend を親に持つ claude は無かった。
   - 答えが流れ始めてから Backend の stdin を閉じると、途中までの答えと「答えが途中で切れました」、再試行のボタン、帯が出た。stream の途中で Backend が居なくなっても `TypeError` になる。
+- side panel の target で、Backend の居ない口への `fetch` は `TypeError: Failed to fetch` で reject した（headless の Brave の side panel そのもので `extension-panel.ts eval` で評価した）。
+- 再試行は、スクリーンショットも PDF も取り直さない。headless の Brave の side panel で、Backend を止めて PDF の Browser Tab でスクリーンショットを添えて送り、Backend を起こして再試行すると、送り直した body は multipart の boundary を除いて最初の body と同じで、PDF の URL への fetch も起きなかった。
 
 ### 確かめていないこと
 
-- side panel の target で、Backend の居ない口への `fetch` が reject した error の constructor の名前と message。`extension-panel.ts eval` が worktree の guard に止められた。上の Browser Tab の page では、文言から `TypeError` だと分かった。
 - 帯が出ている間に、ページを click してから side panel を click すると、side panel の window が `focus` を受けて 5 秒を待たずに帯が消えるか。
 - 期限切れの OAuth token の 401 で、CLI が token を更新して答えるか（CLI のコードには更新して再試行する分岐がある）。
 - 本物の plan の上限の 429。research は header を真似た 429 で確かめた。
@@ -426,7 +430,7 @@ React に依らない `createChatStore(client)` が Chat を持ち、`ChatApp` �
 
 - Chat は side panel の document の memory にだけあり、window ごとに 1 つ。「新しい Chat」を押すか side panel を閉じると終わり、どこにも残さない。Backend が居なくなっても終わらない（ADR-0030・0031）。
 - `open(readPage, focus)` は side panel を開いた時に `ChatApp` の effect が 1 回呼び、`chat.prepare` を呼んで spare を起こさせる。届かなければ帯を出す（上の「失敗」の「Backend の不在の帯」）。`focus` は `ChatApp` が渡す `window` で、帯の間はその `focus` の event でも確かめ直す。返す関数で確かめ直しを止める。dev の StrictMode で 2 回呼ばれても、Backend が spare を 1 つに保つので害は無い。
-- `ask` は、送る時に `readPage({ screenshot, maxPdfBytes })` で Current Page を読み直して `page` に入れ、答え終えた問答を古い順に `history` に入れて `chat.ask` を呼ぶ。`readPage` は await を挟まずに呼び、送る操作の user gesture の中で撮り始める。`ChatApp` が渡す `readPage` は `read-current-page.ts` の `readCurrentPage` で、撮り始めてから Browser Tab を取り直して `read-page.ts` で読む（上の「Page Snapshot」）。`maxPdfBytes` は PDF を読む上限（上の「PDF の取り方」）で、今のページのスクリーンショットは読むのと並べて撮るので数えず、送る前の大きさの確かめが数える。答えている間は送らずに false を返し、スクリーンショットのボタンも外さない。答えの途中で Current Page が替わっても、delta はその質問の答えに足す。
+- `ask` は、送る時に `readPage({ screenshot, maxPdfBytes, signal })` で Current Page を読み直して `page` に入れ、答え終えた問答を古い順に `history` に入れて `chat.ask` を呼ぶ。`readPage` は await を挟まずに呼び、送る操作の user gesture の中で撮り始める。`ChatApp` が渡す `readPage` は `read-current-page.ts` の `readCurrentPage` で、撮り始めてから Browser Tab を取り直して `read-page.ts` で読む（上の「Page Snapshot」）。`maxPdfBytes` は PDF を読む上限（上の「PDF の取り方」）で、今のページのスクリーンショットは読むのと並べて撮るので数えず、送る前の大きさの確かめが数える。答えている間は送らずに false を返し、スクリーンショットのボタンも外さない。答えの途中で Current Page が替わっても、delta はその質問の答えに足す。
 - 送った input は、答えが返るか次の質問を送るまで持ち、`retry` が `readPage` を呼ばずにそのまま送り直す。`stop` は stream を abort し、止めた印を付けて履歴に入れる（上の「失敗」の「再試行と履歴」）。
 - `snapshot()` の `withScreenshot` がボタンの状態で、`toggleScreenshot` が切り替える。`ask` が送ったら外す。
 - 送ったスクリーンショットは、読み終えた時に質問の entry の `screenshot` に入れて縮小を出す。
@@ -440,6 +444,7 @@ React に依らない `createChatStore(client)` が Chat を持ち、`ChatApp` �
 - `tabs.onActivated` はその window の event だけを見る。`tabs.onUpdated` は Current Page の Browser Tab の event だけを見て、tab の url と title が前に出したものと違えば出し直す。pushState と hash の変更も url の変化として届く。chrome:// へ移ったときは url も title も無い event だけが届くので、変化の中身ではなく tab の値で比べる。
 - 権限は `tabs` も `webNavigation` も足さない。`<all_urls>` の host permission で http・https・file のページの url と title が見える。
 - `read()` は送る時に `tabs.query({ active: true, windowId })` で Browser Tab を取り直して返す。見出しの追跡が event を取りこぼしても、読んで送るページを違えない。
+- `shown()` は見出しに出している Current Page の URL と title を返す。送る時に `readCurrentPage` が読むのと並べて `ChatStore` に渡す。
 - `windowId()` は side panel を載せた window の id を返し、`captureVisibleTab` に渡す。最初の `tabs.query` が返る前は undefined で、そのときは `windowId` を省いて呼ぶ（side panel からは同じ画像になる）。
 - 止めると listener を外し、読み途中の結果も捨てる。
 
@@ -453,9 +458,9 @@ React に依らない `createChatStore(client)` が Chat を持ち、`ChatApp` �
 
 - DOM の環境は入れない（`docs/packages/note-ui.md` の「テスト」と同じ）。
 - `current-page.test.ts` は `fake-chrome.ts` の偽の `chrome.tabs` で確かめる。偽物は `globalThis.chrome` に置いてテストの後に外し、`query` の `active`・`windowId`・`currentWindow` を本物と同じく絞る。chrome:// へ移ったときの url も title も無い `onUpdated` も出せる。
-- `read-page.test.ts` は同じ偽物の `chrome.scripting.executeScript` で確かめる。偽物は注入された関数を走らせず、`readings` に置いた結果を返すか、reject するか、返らない。省いた `contentType` は `text/html` になる。渡された injection は `injections` に残る。注入する関数そのもの（shadow root と選択範囲）は DOM が要るので、実機で確かめる。3 秒と 30 秒の打ち切りは `setTimeout` を `spyOn` して callback を手で呼ぶ。PDF の fetch は `fetch` を `spyOn` した偽物で、本物と同じく `signal` の abort で reject させ、読まれた chunk の数を数える body を返す。
-- `read-current-page.test.ts` は同じ偽物の `chrome.tabs.captureVisibleTab` と、偽の `createImageBitmap`・`OffscreenCanvas`・`devicePixelRatio` で、撮る時機・大きさと形式・撮れないとき・読めずに撮れたときを確かめる。偽の `captureVisibleTab` は `screenshots` に置いた大きさの偽の PNG を返すか、reject するか、返らない。呼ばれた引数は `captures` に残る。偽の canvas は画像を描かず、書き出した形式と quality と大きさを JSON にした Blob を返す。本物の縮小は bun test に canvas が無いので実機で確かめ、大きさの計算（`shrunkSize`）は `screenshot.test.ts` が純関数として確かめる。
-- `chat-store.test.ts` は偽の client で確かめる。偽の答えの stream は `signal` に応えず、test が流した delta をそのまま渡すので、abort の後に届いた delta を描かないことを確かめられる。偽の `readPage` は渡された `{ screenshot }` と PDF の上限を記録し、`ask` が返る前に呼ばれたかと、再試行が読み直さないことを見られる。
+- `read-page.test.ts` は同じ偽物の `chrome.scripting.executeScript` で確かめる。偽物は注入された関数を走らせず、`readings` に置いた結果を返すか、reject するか、返らない。省いた `contentType` は `text/html` になる。渡された injection は `injections` に残る。注入する関数そのもの（shadow root と選択範囲）は DOM が要るので、実機で確かめる。3 秒と 30 秒の打ち切りは `setTimeout` を `spyOn` して callback を手で呼ぶ。PDF の fetch は `fetch` を `spyOn` した偽物で、読まれた chunk の数を数える body を返す。打ち切りと止める操作は、`signal` にも応えずに返らない偽物で確かめる（`CODING_STANDARDS.md` の「テスト」）。`signal` で reject する偽物では、fetch の終わりを待つ実装でも通る。
+- `read-current-page.test.ts` は同じ偽物の `chrome.tabs.captureVisibleTab` と、偽の `createImageBitmap`・`OffscreenCanvas`・`devicePixelRatio` で、撮る時機・大きさと形式・撮れないとき・読めずに撮れたときを確かめる。偽の `captureVisibleTab` は `screenshots` に置いた大きさの偽の PNG を返すか、reject するか、返らない。呼ばれた引数は `captures` に残る。偽の canvas は画像を描かず、書き出した形式と quality と大きさを JSON にした Blob を返す。本物の縮小は bun test に canvas が無いので実機で確かめ、大きさの計算（`shrunkSize`）は `screenshot.test.ts` が純関数として確かめる。撮るのの 3 秒の打ち切りは、`executeScript` の 3 秒の timer と混ざらないよう、`screenshot.test.ts` が `takeScreenshot` を直に呼んで確かめる。
+- `chat-store.test.ts` は偽の client で確かめる。偽の答えの stream は `signal` に応えず、test が流した delta をそのまま渡すので、abort の後に届いた delta を描かないことを確かめられる。偽の `readPage` は渡された `{ screenshot }` と PDF の上限と `signal` を記録し、`ask` が返る前に呼ばれたかと、再試行が読み直さないことと、止めたら読むのをやめさせたかを見られる。読み終えない `page` も返せる。
   - 偽の client は、Backend の宣言した error を `@orpc/client` の `ORPCError`（`defined: true`、contract の `askErrors` の status と message）で、届かないことを `TypeError` で投げ分ける。ui の entry は server を import できないので、router を in-process で呼べないため。
   - 失敗の文言は store の entry の `failure` で確かめる。時刻の期待値は local の `Date` から作り、時刻帯に依らせない。
   - 帯の 5 秒おきの確かめ直しは `setInterval` を `spyOn` で捕まえて callback を手で呼び、focus は `open` に渡した `EventTarget` に `focus` の event を出す。
@@ -482,3 +487,4 @@ Brave 1.97 で確かめた。
   - `--force-device-scale-factor=2` で起こした Brave では、撮った PNG が 2400×1850（`innerWidth` 1200 の 2 倍）、縮めた JPEG が 1200×925 だった。
   - Backend を止めて `chrome://version` で送ると、body の `page.content` が `restricted`（`Cannot access a chrome:// URL`）、`page.screenshotFailed.reason` が `The 'activeTab' permission is not in effect because this extension has not been in invoked.` だった。
   - PDF の Browser Tab（Brave の PDF viewer）は撮れた。viewer の toolbar と縮小の列ごと写る。
+- スクリーンショットの quota（headless の Brave の side panel そのもので、`extension-panel.ts eval` で送った）: Backend を止めた状態で、ボタンを押して送る式を 0.3 秒おきに 3 回評価すると、680ms の間に 3 回とも撮れ、どの body にも JPEG があり `screenshotFailed` は無かった。Backend が答えている間は、2 回目の click が送るボタンではなく止めるボタンを押す（上の「失敗」の「止めるボタン」）ので、続けて送る確かめは Backend を止めて、送った質問がすぐ失敗する状態で行う。

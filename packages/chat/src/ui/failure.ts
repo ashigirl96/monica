@@ -5,8 +5,11 @@ import { askErrors, type UsageEvent } from '../contract.ts'
 /** 答えの場所に出す失敗。line は 1 行目、detail は CLI の原文などを出す詳しい行。 */
 export type Failure = { line: string; detail?: string }
 
-/** その質問で受けたもの。code だけでは「途中で切れた」「API に繋がらない」「起きない」を分けられないため。 */
-export type Seen = { answer: string; retried: boolean }
+/**
+ * その質問で受けたもの。code だけでは「途中で切れた」「API に繋がらない」「起きない」を分けられないため。
+ * reached は chat.ask の応答が届いたこと。
+ */
+export type Seen = { answer: string; retried: boolean; reached: boolean }
 
 const CUT_OFF = '答えが途中で切れました'
 const NO_ANSWER = 'claude が答えを返せませんでした'
@@ -24,6 +27,10 @@ const limitName = (rateLimitType: string) => LIMIT_NAMES[rateLimitType] ?? 'plan
 /** Chromium の fetch は、Backend の居ない port でも、stream の途中で Backend が落ちても TypeError を投げる。 */
 export function isUnreachable(error: unknown): boolean {
   return error instanceof TypeError
+}
+
+export function messageOf(error: unknown): string {
+  return error instanceof Error ? error.message : String(error)
 }
 
 /** resetsAt（unix 秒）を side panel が動く Mac の時刻で、今日なら時刻だけ、別の日なら日付も付けて書く。 */
@@ -50,9 +57,9 @@ export function usageLine({ utilization, rateLimitType, resetsAt }: UsageEvent, 
 export function failureOf(error: unknown, seen: Seen, now: Date): Failure {
   if (!(error instanceof ORPCError)) {
     if (isUnreachable(error)) {
-      return { line: seen.answer ? CUT_OFF : 'monica の desktop に届きませんでした' }
+      return { line: seen.reached ? CUT_OFF : 'monica の desktop に届きませんでした' }
     }
-    return { line: NO_ANSWER, detail: error instanceof Error ? error.message : String(error) }
+    return { line: NO_ANSWER, detail: messageOf(error) }
   }
   switch (error.code) {
     case 'NOT_AUTHENTICATED':

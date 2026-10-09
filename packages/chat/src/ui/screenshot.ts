@@ -1,4 +1,6 @@
 import type { Page } from '../contract.ts'
+import { messageOf } from './failure.ts'
+import { within } from './within.ts'
 
 type Size = { width: number; height: number }
 
@@ -17,18 +19,6 @@ export function shrunkSize({ width, height }: Size, ratio: number): Size {
 // executeScript と同じく、返らない場面に備える。
 const CAPTURE_TIMEOUT_MS = 3000
 const JPEG_QUALITY = 0.8
-
-async function within<T>(promise: Promise<T>): Promise<T | 'timeout'> {
-  let timer: ReturnType<typeof setTimeout> | undefined
-  const timeout = new Promise<'timeout'>((resolve) => {
-    timer = setTimeout(() => resolve('timeout'), CAPTURE_TIMEOUT_MS)
-  })
-  try {
-    return await Promise.race([promise, timeout])
-  } finally {
-    clearTimeout(timer)
-  }
-}
 
 async function shrunkJpeg(png: string): Promise<string> {
   const bitmap = await createImageBitmap(await (await fetch(png)).blob())
@@ -55,12 +45,13 @@ export async function takeScreenshot(
       windowId === undefined
         ? chrome.tabs.captureVisibleTab({ format: 'png' })
         : chrome.tabs.captureVisibleTab(windowId, { format: 'png' }),
+      CAPTURE_TIMEOUT_MS,
     )
     if (png === 'timeout') {
       return { screenshotFailed: { reason: 'the Browser Tab did not answer within 3 seconds' } }
     }
     return { screenshot: await shrunkJpeg(png) }
   } catch (error) {
-    return { screenshotFailed: { reason: (error as Error).message } }
+    return { screenshotFailed: { reason: messageOf(error) } }
   }
 }
