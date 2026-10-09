@@ -2,7 +2,7 @@ import { implement } from '@orpc/server'
 
 import { contract } from './contract.ts'
 import type { Db } from './db.ts'
-import { IMPORT_TIMEOUT_MS, importImage, uploadImage } from './image.ts'
+import { importImage, uploadImage } from './image.ts'
 import { readLinkMetadata } from './link-metadata.ts'
 import { internals, type NoteLedger } from './note.ts'
 import {
@@ -60,7 +60,7 @@ export const router = os.router({
       uploadImage(internals(context.noteLedger).dir, input.file),
     ),
     import: os.image.import.handler(({ context, input }) =>
-      importImage(internals(context.noteLedger), input.url, IMPORT_TIMEOUT_MS),
+      importImage(internals(context.noteLedger), input.url),
     ),
   },
   noteMention: {

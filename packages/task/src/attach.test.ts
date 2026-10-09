@@ -19,7 +19,6 @@ const ref = 'acme/app#12'
 
 function started() {
   const fixture = setup()
-  fixture.ghq.origin('acme/app', {})
   fixture.taskLedger.start()
   return fixture
 }
@@ -174,7 +173,7 @@ test('attach brings back a Tab whose claude is already a Run of the Task without
 
 test("attach opens the Bench of a Task that has none in place on the Repo's checkout, ready and without a setup or a clone", async () => {
   const fixture = await trackedWithoutBench()
-  fixture.ghq.clone('acme/app')
+  mkdirSync(fixture.ghq.checkout('acme/app'), { recursive: true })
   const setupScript = join(fixture.ghq.checkout('acme/app'), '.monica/setup.sh')
   mkdirSync(join(setupScript, '..'))
   writeFileSync(setupScript, '#!/bin/sh\ntouch .setup-ran\n', { mode: 0o755 })

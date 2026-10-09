@@ -6,11 +6,23 @@ import { join } from 'node:path'
 // ptyd の socket の path は 104 byte が上限なので、名前は短くする。
 const dir = mkdtempSync(join(tmpdir(), 'monica-t-'))
 // bunfig.toml の [test] は parallel を黙って無視するので、引数で渡す。
-const test = Bun.spawn([process.execPath, 'test', '--pass-with-no-tests', '--parallel=8'], {
-  env: { ...process.env, TMPDIR: dir },
-  stdout: 'inherit',
-  stderr: 'inherit',
-})
+// timings の file は check では読むだけにし、書き換えるのは `bun run test:timings` が渡す `--update-timings` のときだけにする。
+const timings = join(import.meta.dir, 'test-timings.json')
+const test = Bun.spawn(
+  [
+    process.execPath,
+    'test',
+    '--pass-with-no-tests',
+    '--parallel=8',
+    `--timings=${timings}`,
+    ...process.argv.slice(2),
+  ],
+  {
+    env: { ...process.env, TMPDIR: dir },
+    stdout: 'inherit',
+    stderr: 'inherit',
+  },
+)
 const code = await test.exited
 
 const leftovers = readdirSync(dir).map((name) => {

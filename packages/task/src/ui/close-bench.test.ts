@@ -1,5 +1,5 @@
-import { afterEach, expect, mock, test } from 'bun:test'
-import { existsSync, writeFileSync } from 'node:fs'
+import { afterEach, expect, mock, spyOn, test } from 'bun:test'
+import { mkdirSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 
 // toast は画面の外にあるので、出した文言だけを記録する。
@@ -19,6 +19,7 @@ const { cleanUp, setup } = await import('../testing.ts')
 const { closeTaskOfBench } = await import('./close-bench.ts')
 
 afterEach(() => {
+  mock.restore()
   cleanUp()
   toasts.length = 0
 })
@@ -28,12 +29,8 @@ const ref = 'acme/app#12'
 type Fixture = Awaited<ReturnType<typeof tracked>>
 
 // Run は Bench の Tab の claude から購読で生まれるので、track の前に start する。
-async function tracked(setupScript?: string) {
+async function tracked() {
   const fixture = setup()
-  fixture.ghq.origin(
-    'acme/app',
-    setupScript ? { '.monica/setup.sh': { content: setupScript, mode: 0o755 } } : {},
-  )
   fixture.taskLedger.start()
   fixture.github.issue(ref, { title: 'Ship it' })
   await fixture.client.track({ ref })
@@ -45,18 +42,16 @@ async function benchOf({ client }: Pick<Fixture, 'client'>) {
   return bench!
 }
 
-async function until(done: () => boolean, ms: number) {
-  for (let i = 0; i < ms / 25; i++) {
-    if (done()) return
-    await Bun.sleep(25)
-  }
-  throw new Error('timed out waiting')
+// in-place の Bench は checkout が在れば git を呼ばない。
+function runInPlace({ client, ghq }: Pick<Fixture, 'client' | 'ghq'>) {
+  mkdirSync(ghq.checkout('acme/app'), { recursive: true })
+  return client.run({ ref, inPlace: true })
 }
 
 test('the Task of a Bench no guard stops is closed, with a toast that it closed and one per warning', async () => {
   const fixture = await tracked()
   const { client, github } = fixture
-  await client.run({ ref })
+  await runInPlace(fixture)
   const { runspaceId } = await benchOf(fixture)
   github.fail('acme/app')
 
@@ -75,6 +70,7 @@ test('the Task of a Bench no guard stops is closed, with a toast that it closed 
 
 test('a refused close leaves the Bench and tells why on one line, in the words of the CLI', async () => {
   const fixture = await tracked()
+  fixture.ghq.origin('acme/app')
   const { client, cwd } = fixture
   const { terminalSessionId } = await client.run({ ref })
   await fixture.hook(terminalSessionId, 's-1', 'SessionStart', { source: 'startup' })
@@ -93,28 +89,32 @@ test('a refused close leaves the Bench and tells why on one line, in the words o
 })
 
 test('a Bench still preparing is not closed', async () => {
-  const fixture = await tracked(
-    '#!/bin/sh\ntouch .started\nwhile [ ! -e .release ]; do sleep 0.02; done\n',
-  )
-  const { client, cwd } = fixture
-  const running = client.run({ ref })
-  // checkout した setup.sh の初回の exec は負荷の下で macOS の検査に数秒待たされるので、テストの timeout より先に切れる長さで待つ。
-  await until(() => existsSync(join(cwd, '.started')), 15_000)
+  const fixture = await tracked()
+  const { client, ghq } = fixture
+  const asked = Promise.withResolvers<void>()
+  const cloned = Promise.withResolvers<void>()
+  spyOn(ghq.client, 'get').mockImplementation(() => {
+    asked.resolve()
+    return cloned.promise
+  })
+  const running = client.run({ ref, inPlace: true })
+  await asked.promise
   const { runspaceId, setupState } = await benchOf(fixture)
   expect(setupState).toBe('preparing')
 
   await closeTaskOfBench(client, runspaceId)
 
   expect(toasts).toEqual([])
-  writeFileSync(join(cwd, '.release'), '')
+  mkdirSync(ghq.checkout('acme/app'), { recursive: true })
+  cloned.resolve()
   await running
   expect(await client.bench.list()).toMatchObject([{ runspaceId, setupState: 'ready' }])
-}, 20_000)
+})
 
 test('a second call while the close runs, or after the Bench is gone, closes nothing more', async () => {
   const fixture = await tracked()
   const { client } = fixture
-  await client.run({ ref })
+  await runInPlace(fixture)
   const { runspaceId } = await benchOf(fixture)
 
   await Promise.all([closeTaskOfBench(client, runspaceId), closeTaskOfBench(client, runspaceId)])

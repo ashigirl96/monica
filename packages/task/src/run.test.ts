@@ -16,7 +16,6 @@ const ref = 'acme/app#12'
 
 function started() {
   const fixture = setup()
-  fixture.ghq.origin('acme/app', {})
   fixture.taskLedger.start()
   return fixture
 }
@@ -94,7 +93,6 @@ test('a Run of one Task stays with it when its claude moves into the Bench of an
 
 test('start makes Runs of the live Agent Sessions already in a Bench, but not of the ended ones', async () => {
   const fixture = setup()
-  fixture.ghq.origin('acme/app', {})
   const runspaceId = await fixture.openBench(ref)
   const live = await fixture.openTab(runspaceId)
   const gone = await fixture.openTab(runspaceId)
@@ -164,7 +162,6 @@ test("task.changes signals the Task when its Run is made and whenever the Run's 
 
 test('start signals the Tasks whose Runs it makes', async () => {
   const fixture = setup()
-  fixture.ghq.origin('acme/app', {})
   const inBench = await fixture.openTab(await fixture.openBench(ref))
   await fixture.hook(inBench, 's-1', 'SessionStart', { source: 'startup' })
   const changes: unknown[] = []
