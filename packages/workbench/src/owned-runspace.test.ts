@@ -1,5 +1,6 @@
 import { afterEach, expect, test } from 'bun:test'
 
+import type { WorkbenchChange } from './contract.ts'
 import { cleanUp, setup } from './testing.ts'
 
 afterEach(cleanUp)
@@ -23,6 +24,16 @@ test('createRunspace makes an owned Runspace with no Tab at the end, and runspac
     { id: plain.runspaceId, cwd: '/work', sortOrder: 0, owned: false, tabs: [plain.tab] },
     { id: owned, cwd: '/work/bench', sortOrder: 1, owned: true, tabs: [] },
   ])
+})
+
+test('createRunspace signals the layout once, so the webview reads a Bench another domain made', () => {
+  const { db, workbenchLedger } = setup()
+  const changes: WorkbenchChange[] = []
+  workbenchLedger.events.subscribe('change', (change) => changes.push(change))
+
+  db.transaction((tx) => workbenchLedger.createRunspace(tx, { cwd: '/work/bench' }))
+
+  expect(changes).toEqual([{ type: 'layout' }])
 })
 
 test('an owned Runspace stays when its last Tab closes, and tab.close names it as left with no Tabs', async () => {
