@@ -78,7 +78,7 @@ export function syncTask(deps: SyncDeps, ref: IssueRef, timeoutMs: number): Prom
   })
 }
 
-const SYNC_BEFORE_COMMAND_TIMEOUT_MS = 5_000
+export const SYNC_BEFORE_COMMAND_TIMEOUT_MS = 5_000
 
 // GitHub に届かなくても止めず、手元の写しで続けたことを警告に残す。
 export async function syncOrUseCopy(

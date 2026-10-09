@@ -3,10 +3,10 @@ import type { Db } from '@monica/workbench/server'
 import { ORPCError, type ORPCErrorConstructorMap } from '@orpc/server'
 import { and, eq, ne, type SQL } from 'drizzle-orm'
 
-import { type Bench, type BenchDeps, type Issue, refuseClosing } from './bench.ts'
+import type { Bench, BenchDeps, Issue } from './bench.ts'
 import type { CloseOutput, CloseRefusal, closeErrors, ReopenOutput } from './contract.ts'
 import { isIssue } from './copy.ts'
-import { findTrackedTask } from './open-task.ts'
+import { findTrackedTask, refuseOpen } from './open-task.ts'
 import { messageOf } from './prepare.ts'
 import { formatRef, parseRef } from './ref.ts'
 import { describeRefusal } from './refusal.ts'
@@ -22,12 +22,9 @@ export async function closeTask(
 ): Promise<CloseOutput> {
   const asked = parseRef(input.ref)
   const tracked = openTaskToClose(deps.db, isIssue(asked), formatRef(asked))
-  reserveForClose(deps, tracked.issue.id, formatRef(tracked.issue))
-  try {
-    return await closeReserved(deps, tracked.issue, input, errors)
-  } finally {
-    deps.closing.delete(tracked.issue.id)
-  }
+  return deps.reservations.whileClosing(tracked.issue.id, formatRef(tracked.issue), () =>
+    closeReserved(deps, tracked.issue, input, errors),
+  )
 }
 
 // 予約の間は準備も Tab も Bench に入らないので、Bench の行は git を待つ間も変わらない。
@@ -113,19 +110,20 @@ function tabIn(db: Pick<Db, 'select'>, runspaceId: string, terminalSessionId: st
 }
 
 export async function reopenTask(
-  deps: SyncDeps & Pick<BenchDeps, 'closing'>,
+  deps: SyncDeps & Pick<BenchDeps, 'reservations'>,
   input: { ref: string },
 ): Promise<ReopenOutput> {
   const asked = parseRef(input.ref)
-  const tracked = closedTask(deps.db, isIssue(asked), formatRef(asked))
+  const tracked = refuseOpen(findTrackedTask(deps.db, isIssue(asked), formatRef(asked)))
   const warnings = await syncOrUseCopy(deps, tracked.issue)
-  const reopened = deps.db.transaction((tx) => {
-    const found = closedTask(tx, eq(issue.id, tracked.issue.id), formatRef(tracked.issue))
-    // close は閉じた結果を返すまで予約を持つ。
-    refuseClosing(deps, found.issue.id, formatRef(found.issue))
-    tx.update(task).set({ closedAt: null }).where(eq(task.issueId, found.issue.id)).run()
-    return found.issue
-  })
+  const reopened = deps.reservations.writeClosedTask(
+    tracked.issue.id,
+    formatRef(tracked.issue),
+    (tx, found) => {
+      tx.update(task).set({ closedAt: null }).where(eq(task.issueId, found.issue.id)).run()
+      return found.issue
+    },
+  )
   const ref = formatRef(reopened)
   deps.publish({ type: 'task', ref })
   return { ref, title: reopened.title, warnings }
@@ -169,25 +167,6 @@ function mergedBranchHeads(db: Db, taskIssueId: number): string[] {
     )
     .all()
     .map((row) => row.headOid)
-}
-
-// 準備は worktree と Bench の行を書き続けるので、走っている間は片付けない。
-function reserveForClose(deps: BenchDeps, taskIssueId: number, ref: string) {
-  refuseClosing(deps, taskIssueId, ref)
-  if (deps.preparations.has(taskIssueId)) {
-    throw new ORPCError('CONFLICT', {
-      message: `the Bench of ${ref} is being prepared; close it once the setup ends, or times out after 600s`,
-    })
-  }
-  deps.closing.add(taskIssueId)
-}
-
-function closedTask(db: Pick<Db, 'select'>, where: SQL | undefined, asked: string) {
-  const found = findTrackedTask(db, where, asked)
-  if (!found.task.closedAt) {
-    throw new ORPCError('BAD_REQUEST', { message: `${formatRef(found.issue)} is open` })
-  }
-  return found
 }
 
 // close を頼んだ agent の Run は、close の後も呼び手の Tab に残るので止めない。

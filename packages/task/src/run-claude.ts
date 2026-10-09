@@ -5,14 +5,7 @@ import type { Db } from '@monica/workbench/server'
 import { ORPCError, type ORPCErrorConstructorMap } from '@orpc/server'
 import { and, desc, eq, gte } from 'drizzle-orm'
 
-import {
-  type Bench,
-  type BenchDeps,
-  type Issue,
-  prepareBench,
-  refuseClosing,
-  refuseInPlace,
-} from './bench.ts'
+import { type Bench, type BenchDeps, type Issue, prepareBench, refuseInPlace } from './bench.ts'
 import type { RunOutput, runErrors } from './contract.ts'
 import { isIssue, openBlockersOf } from './copy.ts'
 import { findOpenTask, taskIfTracked, refuseClosed } from './open-task.ts'
@@ -137,16 +130,13 @@ async function newRun(
 }
 
 function openClaudeTab(deps: BenchDeps, launch: Launch, prompt: string | undefined) {
-  const { db, workbenchLedger } = deps
-  return db.transaction((tx) => {
-    findOpenTask(tx, eq(issue.id, launch.bench.taskIssueId), launch.ref)
-    refuseClosing(deps, launch.bench.taskIssueId, launch.ref)
-    return workbenchLedger.openTab(tx, {
+  return deps.reservations.writeOpenTask(launch.bench.taskIssueId, launch.ref, (tx) =>
+    deps.workbenchLedger.openTab(tx, {
       runspaceId: launch.bench.runspaceId,
       cwd: launch.tabCwd,
       input: `${claudeCommand(launch, prompt)}\r`,
-    })
-  })
+    }),
+  )
 }
 
 const DEFAULT_PROMPT = '/tackle'
