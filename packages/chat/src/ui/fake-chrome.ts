@@ -27,6 +27,9 @@ type Reading =
 /** Browser Tab の表示領域を captureVisibleTab で撮った時に起きること。大きさは撮った画像の px。 */
 type Capture = { width: number; height: number } | { error: string } | 'hang'
 
+/** sendNativeMessage に host が返すもの。error は Chromium が reject する message（host が無い、host が落ちた）。 */
+type NativeReply = { reply: unknown } | { error: string }
+
 /** 偽の canvas が書き出す画像の中身。本物の画像の代わりに、書き出した形式と大きさを JSON で持つ。 */
 export type FakeImage = { type: string; quality?: number; width: number; height: number }
 
@@ -58,9 +61,11 @@ class FakeOffscreenCanvas {
 }
 
 /**
- * bun test に無い chrome.tabs と chrome.scripting と、スクリーンショットを縮める createImageBitmap・OffscreenCanvas・devicePixelRatio を、
- * side panel が触る分だけ globals に置く。side panel は windowId の window に載る。
+ * bun test に無い chrome.tabs と chrome.scripting と chrome.runtime.sendNativeMessage と、
+ * スクリーンショットを縮める createImageBitmap・OffscreenCanvas・devicePixelRatio を、side panel が触る分だけ globals に置く。
+ * side panel は windowId の window に載る。
  * executeScript は注入された関数を走らせず、readings に置いた結果を返す。captureVisibleTab は screenshots に置いた大きさの偽の PNG を返す。
+ * sendNativeMessage は nativeHost に置いた返事を返し、置いていなければ host の manifest が無いときと同じく reject する。
  */
 export class FakeChrome {
   readonly tabs: FakeTab[] = []
@@ -71,6 +76,8 @@ export class FakeChrome {
   readonly screenshots = new Map<number, Capture>()
   readonly captures: unknown[][] = []
   devicePixelRatio = 1
+  nativeHost: NativeReply | undefined
+  readonly nativeMessages: { host: string; message: unknown }[] = []
   readonly windowId: number
 
   constructor(windowId: number, tabs: Omit<FakeTab, 'active'>[]) {
@@ -113,8 +120,16 @@ export class FakeChrome {
       if ('error' in capture) throw new Error(capture.error)
       return fakeImageUrl({ type: 'image/png', ...capture })
     }
+    const sendNativeMessage = async (host: string, message: unknown) => {
+      this.nativeMessages.push({ host, message })
+      const native = this.nativeHost
+      if (!native) throw new Error('Specified native messaging host not found.')
+      if ('error' in native) throw new Error(native.error)
+      return native.reply
+    }
     Object.assign(globalThis, {
       chrome: {
+        runtime: { sendNativeMessage },
         tabs: {
           query,
           get,

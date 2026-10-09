@@ -16,7 +16,7 @@ status: accepted
 ## Consequences
 
 - `~/.claude.json` と managed policy は、`settingSources: []` でも読まれる。切るには `CLAUDE_CONFIG_DIR` を移すしかなく、そうすると keychain の login の service 名が変わって ADR-0032 の login が読めなくなるので、切らない。
-- tool を足すときは、足す理由と、token の無いブラウザの口から起こしてよい理由（ADR-0028、ADR-0017 の「shell や command に届く procedure を載せない」）を ADR に書く。後の機能（Note への取り込み、Task の track）で書き込む tool を足すときも同じ。
+- tool を足すときは、足す理由と、token の無いブラウザの口から起こしてよい理由（ADR-0028、ADR-0017 の「shell や command に届く procedure を載せない」）を ADR に書く。ADR-0034 で Chat は token の口に移ったが、chat の token は Chrome Extension の side panel に渡るので、同じ理由が要る。後の機能（Note への取り込み、Task の track）で書き込む tool を足すときも同じ。
 - cwd を `$MONICA_HOME` にしないのは、そこに `backend.json`（token の口の token）と `monica.db` があるため。tool は cwd を作業の場所として扱うので、tool を足したときにこれらが作業の場所に入らないよう、空の directory にしておく。
 - tool を持たなくても、回答の markdown の外の画像を side panel が読み込むと、URL に埋めた会話の中身が外へ出る。この経路は「model に渡すページの情報」で決める。
 - env を通す key だけで組むのは、Backend の env に何が入るかを Monica が決められないため。Monica を terminal や Tab の agent から `open` で起こすと、その shell の env が Shell を経て Backend まで届く。dev の Shell は Backend の env を消さずに起こす（#268）。その env には、親の claude が自分の env に書いた `~/.claude/settings.json` の `env` が入っているので、`settingSources: []` にしても user の settings が届く。effort の option より強い `CLAUDE_CODE_EFFORT_LEVEL` や、`haiku` の解決先を変える `ANTHROPIC_DEFAULT_HAIKU_MODEL` もある。落とす key を並べる形にすると、Claude Code が版ごとに足す env を追いかけ続けることになる（#270）。

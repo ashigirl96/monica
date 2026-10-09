@@ -1,6 +1,6 @@
 # Chat の agent と画面
 
-`packages/chat` の contract と `ChatAgent` と ui。Chrome Extension の side panel の Chat の質問に、Backend が起こす claude が答える。決定の理由は ADR-0028・0029・0030・0031・0032・0033 にある。画面は末尾の「ui」にある。
+`packages/chat` の contract と `ChatAgent` と ui。Chrome Extension の side panel の Chat の質問に、Backend が起こす claude が答える。決定の理由は ADR-0028・0029・0030・0031・0032・0033・0034 にある。画面は末尾の「ui」にある。
 
 ## contract（root は `chat`）
 
@@ -15,9 +15,9 @@ ask       { question, page: Page, history: { question, answer, page: PageSnapsho
 - `question` は 1 字以上。`page` と `PageSnapshot` の `url` と `title` は省略できるただの文字列で、形を検めない。`chrome://` などの Browser Tab では side panel から見えず、`file://` のページもあるため。
 - `history` は Chat の前の問答を古い順に並べたもの。turn ごとに、その質問の `snapshot` で返した `PageSnapshot` を持つ。Backend は Chat を持たず、送られた履歴をそのまま prompt にする（ADR-0031）。
 - `.errors()` で宣言するのは `CHAT_BUSY`・`NOT_AUTHENTICATED`・`USAGE_LIMIT`・`AGENT_FAILED`。`CHAT_BUSY`（status 429）は、claude を 4 つ持っているときの `ask` に、iterator を返す前に投げる。ほかの 3 つは下の「失敗」にある。
-- `MAX_ASK_BODY_BYTES`（50MB）は、ブラウザの口が受ける body の上限。ブラウザの口の 2 つの `Bun.serve` に `maxRequestBodySize` で渡し、超えた body には 413 が返る。side panel は送る前に大きさを見て、超える分を「読めなかった」にするので、413 は他のブラウザ拡張からしか届かない。
+- `MAX_ASK_BODY_BYTES`（50MB）は、token の口が受ける body の上限。token の口の `Bun.serve` に `maxRequestBodySize` で渡し、超えた body には 413 が返る（`docs/packages/backend.md` の「token の口の 2 つの token」）。side panel は送る前に大きさを見て、超える分を「読めなかった」にするので、413 は side panel からは届かない。
 - PDF の bytes は `page.content` の `pdf`（`z.file()`）に入れる。RPCLink は input のどこにある `Blob` も multipart の別の part で送るので、base64 で膨らませない（note の画像の upload と同じ形）。
-- router は CLI に出さず、ブラウザの口にだけ `{ note, chat }` で載せる。token の口には載せない。change stream は持たない（ADR-0028・0031）。
+- router は CLI に出さず、token の口に `{ workbench, task, job, chat }` で載せる。Chrome Extension は Native Messaging の host から受け取った chat の token で呼び、その token は chat の procedure だけを開く（下の「Backend の探し方」、ADR-0034）。ブラウザの口には載せない。change stream は持たない（ADR-0031）。
 
 ## createChatAgent
 
@@ -260,7 +260,7 @@ code は上から順に当てる。
 - typed error は、それまで流した `snapshot`・`text`・`retry`・`usage` の後に投げる（`docs/packages.md` の contract の規約 7）。
 - `chat.ask` の handler（`src/server.ts`）は、`ChatAgent` が投げた `ChatFailure` を宣言した error にし、ほかの想定外の error も `AGENT_FAILED` に包む。iterator を返す前（Page Snapshot の変換や claude の起動）に投げた error も同じに包む。素の `Error` は `INTERNAL_SERVER_ERROR`「Internal server error」になり、理由が消えるため。
 - 自分で SIGKILL した claude の error は失敗にしない（上の「claude の持ち方」）。stream の abort と Backend の終了では、stream は error を投げずに閉じる。
-- contract に載せないもの: Backend に届かない場合と、body の上限の 413（`PAYLOAD_TOO_LARGE`）。413 は side panel が送る前に大きさを見て「読めなかった」にするので、届くのは他のブラウザ拡張からだけ。
+- contract に載せないもの: Backend に届かない場合、古い chat の token の 401（`UNAUTHORIZED`）、body の上限の 413（`PAYLOAD_TOO_LARGE`）。413 は side panel が送る前に大きさを見て「読めなかった」にするので、side panel からは届かない。
 
 ### `retry` と `usage`
 
@@ -271,11 +271,11 @@ code は上から順に当てる。
 
 ### side panel の文言（`src/ui/failure.ts`）
 
-side panel は `ORPCError`（`@orpc/client`）の `code` で分け、`data` は contract の `askErrors` の schema で `safeParse` して読む（task の `close-bench.ts` と同じ形）。Backend の `message` は出さず、文は chat の ui が作る。Backend に届かないことは、`chat.prepare` と `chat.ask` の失敗が `TypeError` であることで見分ける。止めるボタンの abort（`DOMException` の AbortError）は失敗にしない。
+side panel は `ORPCError`（`@orpc/client`）の `code` で分け、`data` は contract の `askErrors` の schema で `safeParse` して読む（task の `close-bench.ts` と同じ形）。Backend の `message` は出さず、文は chat の ui が作る。Backend に届かないことは、`chat.prepare` と `chat.ask` の失敗が、`TypeError`、`BackendUnreachable`（host が無い・落ちた・Backend が居ない）、`ORPCError` の `UNAUTHORIZED`（古い chat の token）のどれかであることで見分ける（`isUnreachable`、下の「Backend の探し方」）。止めるボタンの abort（`DOMException` の AbortError）は失敗にしない。
 
 | 場面 | side panel が見るもの | 答えの場所に出す 1 行 | 詳しい行 |
 |---|---|---|---|
-| Backend に届かない | `chat.ask` の応答が届く前の `TypeError` | 「monica の desktop に届きませんでした」。入力欄の上に帯も出す | なし |
+| Backend に届かない | `chat.ask` の応答が届く前の `TypeError`・`BackendUnreachable`・`UNAUTHORIZED` | 「monica の desktop に届きませんでした」。入力欄の上に帯も出す | なし |
 | 答えの途中で届かなくなった | `chat.ask` の応答が届いた後の `TypeError`（`snapshot`・`retry`・`text` の後） | 途中までの答えを残し「答えが途中で切れました」。帯も出す | なし |
 | Claude Code の login が無い | `NOT_AUTHENTICATED` | 「Claude Code に login していません。terminal で claude を起こし、/login してください」 | なし |
 | plan の上限 | `USAGE_LIMIT` | 「plan の 5 時間の上限に達しました。10:00 に戻ります」 | なし |
@@ -313,10 +313,20 @@ side panel は `ORPCError`（`@orpc/client`）の `code` で分け、`data` は 
 
 ### Backend の不在の帯（`src/ui/reach.ts`）
 
-- side panel を開いた時の `chat.prepare` が `TypeError` で届かなかったら、入力欄の上に帯「monica の desktop が起動していません」を出す。`chat.ask` が `TypeError` で失敗したときも出す。
+- side panel を開いた時の `chat.prepare` が届かなかったら（上の「side panel の文言」の `isUnreachable`）、入力欄の上に帯「monica の desktop が起動していません」を出す。`chat.ask` が同じく届かずに失敗したときも出す。
 - 帯が出ている間は、5 秒おきと、side panel の window が `focus` を受けた時に `chat.prepare` で確かめ直す。届いたら（error の応答も届いたと数える）帯を消し、確かめ直しを止める。`chat.ask` に応答が届いた時も消す。5 秒おきと `focus` の `chat.prepare` は重なりうるので、後から始めた `chat.prepare` か `chat.ask` の結果が先に届いたら、前の `chat.prepare` の結果は捨てる。
 - 帯は待たずに出す。帯を出している間しか定期的に呼ばないので、notes の画面のように bun --watch の再起動（約 100ms）で帯がちらつくことは無い。
 - 帯が出ている間も送るボタンは押せる。Backend が居ない間も Chat は終わらない（ADR-0031、GLOSSARY の Chat）。
+
+### Backend の探し方（`src/ui/native-host.ts`）
+
+side panel は Backend の token の口を、Native Messaging の host から受け取った chat の token で呼ぶ（ADR-0034）。
+
+- `viaNativeHost(host 名)` は RPCLink の `url` と `headers` を返す。どちらも RPC を呼ぶたびに `chrome.runtime.sendNativeMessage(host 名, {})` で host に問い合わせ、`{ port, token }` から `http://127.0.0.1:<port>/rpc` と `Authorization: Bearer <token>` を作る。引いた値は覚えない。Backend が起き直すと port も token も変わるため。
+- oRPC は 1 回の呼び出しの `url` と `headers` に同じ options の object を渡すので、それを key にした WeakMap で、1 回の呼び出しの問い合わせを 1 回にする。oRPC が別の object を渡すようになっても、問い合わせが 2 回になるだけで、送り先は変わらない。
+- service worker を経由せず、side panel の page から直に呼ぶ（ADR-0028 の「RPC は side panel の page から呼ぶ」と同じ）。
+- host が見つからない（`Specified native messaging host not found.`）、host が落ちた（`Native host has exited.` など）、host が `{ error: 'not-running' }` を返した（Backend が居ない）は、`BackendUnreachable` を投げる。Backend が起き直す前の chat の token で呼んだ 401 は、client では `ORPCError` の `UNAUTHORIZED` になる。どれも `TypeError` と同じく「desktop に届かない」に数え、帯を出して 5 秒おきと focus の `chat.prepare` で確かめ直す（上の「Backend の不在の帯」）。確かめ直しも host に問い合わせ直すので、Backend が起き直していれば新しい port と token で届く。
+- 同じ 401 でも、Claude Code の login が無い `NOT_AUTHENTICATED` は宣言した error で、Backend に届いている。code で分ける。
 
 ### 確かめたこと
 
@@ -331,12 +341,17 @@ side panel は `ORPCError`（`@orpc/client`）の `code` で分け、`data` は 
   - Backend を起こした後に再試行を押すと、同じ質問の答えが返った。plan の使用率が 96% のときで、答えの下に「plan の 5 時間の枠を 96% 使いました（9:40 に戻ります）」が出た（本物の `allowed_warning`）。
   - 答えが流れ始めてから止めるを押すと「止めました」が出て、3 秒後も答えは増えず、Backend を親に持つ claude は無かった。
   - 答えが流れ始めてから Backend の stdin を閉じると、途中までの答えと「答えが途中で切れました」、再試行のボタン、帯が出た。stream の途中で Backend が居なくなっても `TypeError` になる。
+- Native Messaging（Brave 1.97、headless、dev の Chrome Extension、`bun run extension` が本物の場所に書いた dev の manifest）: Backend の居ない home で side panel を開くと帯が出た。同じ home に Backend を起こすと 5 秒以内に帯が消え、Backend を親に持つ spare の claude が起きた（host が返した port と chat の token で `chat.prepare` が届いた）。side panel の page を Browser Tab で開いて質問を送ると、答えが返った。
+- compile した CLI（`scripts/build.ts` と同じ flag）を host として起こし、枠付きの `{}` を渡すと、約 10ms で枠付きの `{ port, token }` が返り、token は `backend.json` の chat の token だった。新しく compile した binary の最初の 1 回は約 790ms かかった。Backend の居ない home では `{ error: 'not-running' }` が返った。
+- 本物の Backend の token の口で、chat の token は `chat.ask` に届き（不正な input の 400）、`workbench.layout.get`・`task.list`・`job.list` は 401 だった。全権の token はどれも通り、token 無しはどれも 401 だった。`/rpc/chat/../workbench/layout/get` と `/rpc/chat/%2e%2e/workbench/layout/get` を TCP に直に書いても、chat の token では 401 だった。ブラウザの口の `chat.ask` は 404 で、`note.daily.dates` は今どおり 200 だった。
 - side panel の target で、Backend の居ない口への `fetch` は `TypeError: Failed to fetch` で reject した（headless の Brave の side panel そのもので `extension-panel.ts eval` で評価した）。
 - side panel の page を Browser Tab で開いて、本文を送り終えない PDF（navigation には PDF を返し、fetch には `%PDF-` の頭だけを送って止まる URL）で送り、読み終える前に止めるを押すと、配る側でその fetch の request が abort された。「新しい Chat」でも同じだった。止めた後に別のページで送ると、body の `history[0]` は `{ question, page: { url, title }, answer: '（ユーザーが途中で止めた）' }` で、`url` と `title` は送った時の見出しの PDF のものだった。
 - 再試行は、スクリーンショットも PDF も取り直さない。headless の Brave の side panel で、Backend を止めて PDF の Browser Tab でスクリーンショットを添えて送り、Backend を起こして再試行すると、送り直した body は multipart の boundary を除いて最初の body と同じで、PDF の URL への fetch も起きなかった。
 
 ### 確かめていないこと
 
+- release の Shell が書いた manifest で、Dock から起こした普段の Brave の side panel が `.app` の CLI を host に起こして答えを受けるか（PR の確認でユーザーが確かめる）。
+- dev の host（`bun` で動く CLI）の 1 回の問い合わせにかかる時間。
 - 帯が出ている間に、ページを click してから side panel を click すると、side panel の window が `focus` を受けて 5 秒を待たずに帯が消えるか。
 - 期限切れの OAuth token の 401 で、CLI が token を更新して答えるか（CLI のコードには更新して再試行する分岐がある）。
 - 本物の plan の上限の 429。research は header を真似た 429 で確かめた。
@@ -348,7 +363,7 @@ side panel は `ORPCError`（`@orpc/client`）の `code` で分け、`data` は 
 - `src/chat.test.ts` が `createRouterClient(router, { context: { chatAgent } })` を通して確かめる。DB は使わない。本文への変換の失敗は、error を返す Worker（`src/page/fixtures/failing-worker.ts`）を `htmlWorker` に渡して作る。defuddle は自分の失敗を握って body 全体を返し、例外を投げる本物の HTML が無いため。
 - div を 3,000 段入れ子にしたページを本文にしている間に `prepare` がすぐ返ることを、`src/chat.test.ts` が本物の Worker で確かめる。本文になる前に abort して Worker を止める。
 - HTML と PDF の 30 秒の打ち切りは、返事をしない Worker（`src/page/fixtures/silent-worker.ts`）を `defaultReaders` で渡し、`setTimeout` を `spyOn` して callback を手で呼ぶ（`CODING_STANDARDS.md` の「テスト」）。いずれ返事をする本物の Worker では、打ち切りが Worker の返事を待つ実装でも通る。
-- 途中の失敗が RPCLink の client に `ORPCError` の `code` と `data` で届くことは、`apps/backend/src/browser-listener.test.ts` がブラウザの口に繋いで確かめる。
+- 途中の失敗が RPCLink の client に `ORPCError` の `code` と `data` で届くことは、`apps/backend/src/main.test.ts` が process の Backend の token の口に chat の token で繋いで確かめる。
 - 本文への変換は `src/page/snapshot.test.ts` が `src/page/fixtures/` の HTML（`getHTML` が書き出す、document element の中身の形）で、同じページと全体の上限と block の並び（スクリーンショットの `image` の置き場所と 1,500 字の数え方を含む）は `src/page/prompt.test.ts` が `PageSnapshot` を直に組んで確かめる。どちらも claude を起こさない。
 - PDF の本文は `src/page/pdf.test.ts` が、Worker を通して確かめる。PDF は `src/page/test-pdf.ts` の `testPdf(pages)` が bytes を組み、binary の file を repo に置かない。`latin` のページは埋め込まない Helvetica、`japanese` のページは埋め込まない `HeiseiKakuGo-W5` と `UniJIS-UCS2-H` で書き、cMap が無いと日本語が落ちる。`'missing'` のページは無い object を指し、読めば pdf.js が例外を投げるので、残りのページを読まないことをそれで確かめる。ページの大きさは行の長さと数に合わせて広げる。pdf.js はページの外の字を本文に入れないため。
 - claude は `src/fake-claude.ts` の偽の claude に差し替える。テストは拡張子の無い `/bin/sh` の wrapper を一時 directory に書いて `claudePath` に渡す。wrapper は `@monica/chat/testing` の `writeFakeClaude(dir, recordPath, scenario?)` が書き、Backend のテスト（`apps/backend/src/main.test.ts` と `browser-listener.test.ts`）も使う。wrapper は `exec "<process.execPath>" "<fake-claude.ts の path>" "<記録の file>" <場面> "$@"` の 1 行。SDK は path が `.js`・`.mjs`・`.ts`・`.tsx`・`.jsx` で終わると `bun` か `node` を名前で起こすが、claude の env には `PATH` が無い。拡張子の無い path は直に起こす。wrapper の `/bin/sh` は env に `PWD`・`SHLVL`・`_` を足す。
@@ -388,7 +403,7 @@ SDK 0.3.293 と同梱の claude 2.1.293 で、dev の Backend を `env -i`（`HO
 
 ## ui
 
-`packages/chat/src/ui` は Chrome Extension の side panel の Chat の画面。`@monica/chat/ui` から出すのは root の `ChatApp` だけで、apps/extension の side panel の main.tsx がブラウザの口への RPCLink を作って `client.chat` を渡す（`docs/packages/extension.md`）。ui は `@monica/ui` に依存しない。
+`packages/chat/src/ui` は Chrome Extension の side panel の Chat の画面。`@monica/chat/ui` から出すのは root の `ChatApp` と、RPCLink の `url` と `headers` を作る `viaNativeHost` だけで、apps/extension の side panel の main.tsx が host 名を渡した RPCLink を作って `client.chat` を渡す（`docs/packages/extension.md`）。ui は `@monica/ui` に依存しない。
 
 ### fluid-functionalism の写し
 
@@ -437,7 +452,7 @@ React に依らない `createChatStore(client)` が Chat を持ち、`ChatApp` �
 - 送ったスクリーンショットは、読み終えた時に質問の entry の `screenshot` に入れて縮小を出す。
 - 届いた `snapshot` の `page` に送ったスクリーンショットを足して、その問答の turn の `page` として履歴に入れ、`snapshot` から作った知らせを質問の entry の `notice` に入れる。
 - `startNewChat` は流れている stream を `signal` で abort し、問答と履歴を空にし、スクリーンショットのボタンを外す。abort の後に届いた delta は描かない。Backend は abort でその claude を止める。
-- client の型 `ChatClient` は contract から導いた `ContractRouterClient<typeof contract>`（note の ui の `client.ts` と同じ形、ADR-0002）。ブラウザの口への oRPC の client の `chat` がそのまま入り、テストは偽の client を渡す。
+- client の型 `ChatClient` は contract から導いた `ContractRouterClient<typeof contract>`（note の ui の `client.ts` と同じ形、ADR-0002）。token の口への oRPC の client の `chat` がそのまま入り、テストは偽の client を渡す。
 
 ### Current Page の追い方（`current-page.ts`）
 
@@ -465,6 +480,7 @@ React に依らない `createChatStore(client)` が Chat を持ち、`ChatApp` �
   - 偽の client は、Backend の宣言した error を `@orpc/client` の `ORPCError`（`defined: true`、contract の `askErrors` の status と message）で、届かないことを `TypeError` で投げ分ける。ui の entry は server を import できないので、router を in-process で呼べないため。
   - 失敗の文言は store の entry の `failure` で確かめる。時刻の期待値は local の `Date` から作り、時刻帯に依らせない。
   - 帯の 5 秒おきの確かめ直しは `setInterval` を `spyOn` で捕まえて callback を手で呼び、focus は `open` に渡した `EventTarget` に `focus` の event を出す。
+- `native-host.test.ts` は、`fake-chrome.ts` の偽の `chrome.runtime.sendNativeMessage` と、本物の RPCLink と `viaNativeHost` で確かめる。Backend は、oRPC の `implement(contract)` の chat を載せ、違う token には hono の `bearerAuth` と同じく 401 を返す `Bun.serve` で偽る。偽の `sendNativeMessage` は `nativeHost` に置いた返事を返し、置いていなければ host の manifest が無いときと同じ message で reject する。呼ばれた host 名と message は `nativeMessages` に残る。呼ぶたびに問い合わせ直して、その時の port と token で呼ぶこと、host が無い・落ちた・Backend が居ない・古い chat の token のどれでも帯が出ること、帯の確かめ直しが新しい token で届いて帯を消すことを見る。
 - `answer.test.tsx` は `react-dom/server` の `renderToStaticMarkup` で markdown の描画を確かめる。react-dom は devDependency。
 
 ### 実機で確かめたこと

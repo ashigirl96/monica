@@ -30,7 +30,7 @@ monica/
 ├── tsconfig.json       1 つだけ
 ├── Cargo.toml          Rust の workspace（crates/* と apps/desktop/src-tauri）
 ├── .claude-plugin/     plugin.json・marketplace.json（ADR-0006）
-├── scripts/            desktop.ts・dev-instance.ts・dev.ts・extension.ts・extension-panel.ts・cdp.ts・build.ts・install-app.ts・bundled-claude.ts・check-brief.ts・test.ts・monica-dev・oxlint/
+├── scripts/            desktop.ts・dev-instance.ts・dev.ts・extension.ts・native-host.ts・extension-panel.ts・cdp.ts・build.ts・install-app.ts・bundled-claude.ts・check-brief.ts・test.ts・monica-dev・oxlint/
 ├── apps/
 │   ├── backend/        @monica/backend   Backend の組み立て
 │   ├── cli/            @monica/cli       bin は monica
@@ -146,7 +146,7 @@ package ごとに in-memory の SQLite に自分の migration を当てる（tas
 
 ## contract の規約
 
-1. 合成した contract の root は package 名で mount する（`{ workbench, task, job }`、ブラウザの口では `{ note, chat }`）。path の先頭が package 名になり、CLI もそれに従う（`monica task track`、`monica workbench hook claude`）。
+1. 合成した contract の root は package 名で mount する（token の口では `{ workbench, task, job, chat }`、ブラウザの口では `{ note }`）。path の先頭が package 名になり、CLI もそれに従う（`monica task track`、`monica workbench hook claude`）。
 2. 全 procedure に `.meta({ description })` と `.output()` を付ける。description は CLI の help の正本、output は `--format json` の形の正本になる（#17 の JSON の形もここに書く）。
 3. CLI に出すのは `.meta({ cli: true })` を付けた procedure だけ（ADR-0003）。event iterator の procedure は付けても出ない。
 4. 呼び手が分岐する domain エラー（close の guard のように `data` に理由の一覧を持つもの）だけを `.errors()` で宣言する。それ以外は oRPC の標準 code（`NOT_FOUND`、`BAD_REQUEST`）を投げる。

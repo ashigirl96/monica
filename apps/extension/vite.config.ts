@@ -3,12 +3,8 @@ import tailwindcss from '@tailwindcss/vite'
 import react from '@vitejs/plugin-react'
 import { defineConfig } from 'vite'
 
-import {
-  RELEASE_BROWSER_PORT,
-  devHome,
-  devInstance,
-  extensionDevOutput,
-} from '../../scripts/dev-instance.ts'
+import { devHome, devInstance, extensionDevOutput } from '../../scripts/dev-instance.ts'
+import { DEV_NATIVE_HOST, RELEASE_NATIVE_HOST } from '../../scripts/native-host.ts'
 
 // key は公開鍵の DER の base64 で、ID を固定する（ADR-0029）。ID と鍵の作り方は docs/packages/extension.md にある。
 const RELEASE = {
@@ -29,8 +25,9 @@ const manifest = defineManifest(({ mode }) => ({
   background: { service_worker: 'src/background.ts', type: 'module' },
   side_panel: { default_path: 'src/sidepanel/index.html' },
   // scripting は、質問を送った時に Current Page の HTML と選択範囲を読む。
-  permissions: ['sidePanel', 'scripting'],
-  // Current Page の url と title を読み、ブラウザの口（loopback）を呼ぶ（ADR-0028）。
+  // nativeMessaging は、Backend の token の口の port と chat の token を host から引く（ADR-0034）。
+  permissions: ['sidePanel', 'scripting', 'nativeMessaging'],
+  // Current Page の url と title を読み、Backend の token の口（loopback）を呼ぶ。
   host_permissions: ['<all_urls>'],
   // 答えに埋めた画像を読み込ませない。URL に載せた Chat の中身が外へ出るため。
   content_security_policy: {
@@ -38,25 +35,25 @@ const manifest = defineManifest(({ mode }) => ({
   },
 }))
 
-// Chrome Extension は env を読めないので、ブラウザの口の port を bundle に焼き込む。
-const browserPort = (port: number) => ({ __MONICA_BROWSER_PORT__: JSON.stringify(port) })
+// release と dev の host は別の manifest に別の Chrome Extension の ID を許すので、mode で host 名を焼き込む。
+const nativeHost = (name: string) => ({ __MONICA_NATIVE_HOST__: JSON.stringify(name) })
 
 export default defineConfig(({ command, mode }) => {
   const plugins = [react(), tailwindcss(), crx({ manifest })]
   if (command === 'build') {
     return {
       plugins,
-      define: browserPort(RELEASE_BROWSER_PORT),
+      define: nativeHost(RELEASE_NATIVE_HOST),
       build: { outDir: `dist/${mode}` },
     }
   }
   const home = devHome()
   // dev の出力に port が焼き込まれるので、空いている別の port に移らない。
-  const { extensionPort, browserPort: devBrowserPort } = devInstance(home)
+  const { extensionPort } = devInstance(home)
   return {
     plugins,
-    // 同じ home の Backend が居なくても release の口に倒さず、dev の画面から release の Backend を呼ばない。
-    define: browserPort(devBrowserPort),
+    // dev の host は dev の Brave の MONICA_HOME の Backend を返し、release の Backend を返さない。
+    define: nativeHost(DEV_NATIVE_HOST),
     // CRXJS は dev も build.outDir に書くので、check:ts の build が dev で読み込んでいる中身を置き換えないよう分ける。
     build: { outDir: extensionDevOutput(home) },
     clearScreen: false,

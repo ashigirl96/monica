@@ -1,6 +1,7 @@
 import { ORPCError } from '@orpc/client'
 
 import { askErrors, type UsageEvent } from '../contract.ts'
+import { BackendUnreachable } from './native-host.ts'
 
 /** 答えの場所に出す失敗。line は 1 行目、detail は CLI の原文などを出す詳しい行。 */
 export type Failure = { line: string; detail?: string }
@@ -24,9 +25,16 @@ const LIMIT_NAMES: Record<string, string> = {
 
 const limitName = (rateLimitType: string) => LIMIT_NAMES[rateLimitType] ?? 'plan の'
 
-/** Chromium の fetch は、Backend の居ない port でも、stream の途中で Backend が落ちても TypeError を投げる。 */
+/**
+ * Chromium の fetch は、Backend の居ない port でも、stream の途中で Backend が落ちても TypeError を投げる。
+ * Native Messaging の host が Backend を引けないときと、起き直した Backend が古い chat の token を 401 で断ったときも同じに数える。
+ */
 export function isUnreachable(error: unknown): boolean {
-  return error instanceof TypeError
+  return (
+    error instanceof TypeError ||
+    error instanceof BackendUnreachable ||
+    (error instanceof ORPCError && error.code === 'UNAUTHORIZED')
+  )
 }
 
 export function messageOf(error: unknown): string {
@@ -55,12 +63,10 @@ export function usageLine({ utilization, rateLimitType, resetsAt }: UsageEvent, 
 
 /** Backend の message は出さず、code と data から日本語の文を作る。 */
 export function failureOf(error: unknown, seen: Seen, now: Date): Failure {
-  if (!(error instanceof ORPCError)) {
-    if (isUnreachable(error)) {
-      return { line: seen.reached ? CUT_OFF : 'monica の desktop に届きませんでした' }
-    }
-    return { line: NO_ANSWER, detail: messageOf(error) }
+  if (isUnreachable(error)) {
+    return { line: seen.reached ? CUT_OFF : 'monica の desktop に届きませんでした' }
   }
+  if (!(error instanceof ORPCError)) return { line: NO_ANSWER, detail: messageOf(error) }
   switch (error.code) {
     case 'NOT_AUTHENTICATED':
       return {
