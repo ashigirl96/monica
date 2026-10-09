@@ -107,12 +107,46 @@ export const ChatEventSchema = z.discriminatedUnion('type', [
     type: z.literal('text'),
     text: z.string().describe('the next piece of the answer, to append as it is'),
   }),
+  z
+    .object({
+      type: z.literal('retry'),
+      attempt: z.number().int().describe('which retry this is, from 1'),
+    })
+    .describe(
+      'claude is retrying a failed request to the Anthropic API and answers from the start; drop the answer so far',
+    ),
+  z
+    .object({
+      type: z.literal('usage'),
+      utilization: z.number().describe('how much of the plan limit is used, from 0 to 1'),
+      rateLimitType: z.string().describe('which limit, such as five_hour or seven_day'),
+      resetsAt: z.number().optional().describe('when the limit resets, in unix seconds'),
+    })
+    .describe('the answer came near the plan limit, which Chat shares with the agents in Tabs'),
 ])
 
 export const askErrors = {
   CHAT_BUSY: {
     status: 429,
     message: 'the Backend is already running as many claude processes as it may',
+  },
+  NOT_AUTHENTICATED: {
+    status: 401,
+    message: 'claude is not logged in to Claude Code',
+  },
+  USAGE_LIMIT: {
+    status: 429,
+    message: 'the plan has hit its usage limit',
+    // CLI が版ごとに足す値でも data が schema を通るよう、rateLimitType は enum にしない。
+    data: z.object({
+      rateLimitType: z.string(),
+      resetsAt: z.number().describe('unix seconds'),
+    }),
+  },
+  AGENT_FAILED: {
+    status: 500,
+    message: 'claude could not answer',
+    data: z.object({ detail: z.string().describe('what claude or the Agent SDK said, as it is') }),
   },
 }
 
@@ -123,6 +157,7 @@ export type Turn = z.infer<typeof TurnSchema>
 export type AskInput = z.infer<typeof AskInputSchema>
 export type ChatEvent = z.infer<typeof ChatEventSchema>
 export type SnapshotEvent = Extract<ChatEvent, { type: 'snapshot' }>
+export type UsageEvent = Extract<ChatEvent, { type: 'usage' }>
 
 export const contract = {
   prepare: meta
@@ -134,7 +169,7 @@ export const contract = {
   ask: meta
     .meta({
       description:
-        'Answer a question about the Current Page: turn the HTML or the PDF of the page into its text, send that Page Snapshot first, then stream the answer and close once it is done',
+        'Answer a question about the Current Page: turn the HTML or the PDF of the page into its text, send that Page Snapshot first, then stream the answer and close once it is done; a failure after that ends the stream with one of the declared errors',
     })
     .errors(askErrors)
     .input(AskInputSchema)
