@@ -21,10 +21,11 @@ async function backendPid(): Promise<number | null> {
   }
 }
 
-async function healthy(): Promise<boolean> {
+async function healthy(timeoutMs: number): Promise<boolean> {
   try {
     const { port } = await Bun.file(backendJson).json()
-    return (await fetch(`http://127.0.0.1:${port}/health`)).ok
+    const signal = AbortSignal.timeout(timeoutMs)
+    return (await fetch(`http://127.0.0.1:${port}/health`, { signal })).ok
   } catch {
     return false
   }
@@ -58,9 +59,10 @@ rmSync(stagingDir, { recursive: true, force: true })
 console.log(`Installed: ${installed}`)
 
 await $`open ${installed}`
-for (let i = 0; i < 300; i++) {
+const deadline = Date.now() + 30_000
+while (Date.now() < deadline) {
   const pid = await backendPid()
-  if (pid !== null && pid !== before && (await healthy())) {
+  if (pid !== null && pid !== before && (await healthy(Math.max(1, deadline - Date.now())))) {
     console.log(`Started: Backend pid ${pid}`)
     process.exit(0)
   }
