@@ -43,7 +43,7 @@
 
 ## 検査と CI
 
-- 検査は `bun run check` に集める。何を流すかの正本は `package.json` の `check:ts` と `check:rust` で、CI の job も同じ script を呼ぶ。CI の ts job は、ほかに actionlint で workflow を検査する（`check` には無い）。agent は `bun run check:brief`（引数で `check:ts` なども渡せる）で流す。通れば要約だけ、落ちれば Ledger の log 行・`(pass)` の行・空行を除いた末尾 200 行を出し、どちらも全文の log の path を最後の行に出して、検査の終了コードで抜ける。パイプで出力を絞ると、終了コードがパイプの末尾のものになるため。`check:ts` は最後に apps/desktop と apps/web の `vite build` を流す（`docs/packages.md` の「entry」の bundle の検査）。
+- 検査は `bun run check` に集める。何を流すかの正本は `package.json` の `check:ts` と `check:rust` で、CI の job も同じ script を呼ぶ。CI の ts job は、ほかに actionlint で workflow を検査する（`check` には無い）。CI の secrets job は gitleaks で全履歴の secret を探す（`check` には無い）。設定は `.gitleaks.toml` で、既定の rule に、拡張の manifest の公開鍵を除く allowlist を足している。agent は `bun run check:brief`（引数で `check:ts` なども渡せる）で流す。通れば要約だけ、落ちれば Ledger の log 行・`(pass)` の行・空行を除いた末尾 200 行を出し、どちらも全文の log の path を最後の行に出して、検査の終了コードで抜ける。パイプで出力を絞ると、終了コードがパイプの末尾のものになるため。`check:ts` は最後に apps/desktop と apps/web の `vite build` を流す（`docs/packages.md` の「entry」の bundle の検査）。
 - `check:ts` のテストは `scripts/test.ts` が流す。`bun test` に空の TMPDIR を渡し、テストが通っても、終わった後にそこに何か残っていれば名前と中身を出して落ちる。Bun の `rmSync({ recursive: true, force: true })` は、走査の途中で子が他の process に消されると例外を出さずに止まる。そのため、テストが起こした process の終了を待たずに home を消すと、テストは通ったまま home が tmpdir に残り、`dev:list` に死んだ行として溜まる。テストが起こした process は、終了を待ってから home を消す（`apps/backend/src/main.test.ts`）。
 - 独自の lint rule は `scripts/oxlint/monica.js` にあり、`.oxlintrc.json` の `jsPlugins` が読む。
 - oxlint は型を見る rule も流す。on にしているのは `.oxlintrc.json` の `options.typeAware` で、型は `oxlint-tsgolint` が読む。
