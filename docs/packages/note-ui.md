@@ -115,7 +115,7 @@ notes の ui は旧 Monica の `web/` と `shared/` を移して作る。
 - path の文字列と route の解釈は `routes.ts` に集める。router は旧 Monica の自作を移したもの（`router.ts`、History API）。
 - 今日は `/daily` を開くたびに `logicalDate(new Date())` で導く（`todayPath`）。開いたまま 5 時を越えても、次に `/daily` を開けば次の日になる。今日を返す procedure は無い。Daily の画面の TODAY は画面を作った時に導き、`/daily` を開き直すと作り直される。
 - `/notes/:id` は `get` で引いた Note の種類から行き先を決める（`notePagePath`）。Daily は `/daily/:date`、Essay は `/essays/:id`、Scratch は `/repos/:owner/:repo`、Repo Note は `/repos/:owner/:repo/notes/:id` に移る。
-- `/notes/:id` は行き先へ replace する前に `NoteRedirect` を描くので、Note Mention・↗・競合の通知で同じ画面の中を移るときも、route の木の位置で持つ状態（provider と画面の component の state）は一度 unmount される。画面にいる間の状態を持たせるときは、この中継も同じ位置で囲む（「Essay の画面」の取り消しの stack）。
+- `/notes/:id` は行き先へ replace する前に `NoteRedirect` を描き、`/repos` は前回の Repo へ replace する前に `RepoChooser` を描く。Note Mention・↗・競合の通知・rail の Repo と ⌃3 で同じ画面へ戻るときも、画面の component とその state は一度 unmount される。画面にいる間の状態は、route の木の位置ではなく URL から導く画面に結び付け、route を描き分けるより上で持つ（「削除と取り消し」の取り消しの stack と `routes.ts` の `removalScreenOf`）。
 - rail は Daily / Essay / Repo で、⌃1 / ⌃2 / ⌃3 で移る。Library と Settings は持ち込まない。
 - NotesShell のサイドバーは既定 400px で、境界のドラッグで 260〜720px、ダブルクリックで 400px に戻る。幅は画面の間で共有し、localStorage の `monica-notes-sidebar-w` に持つ。
 - Daily の表示名の書式は `notes/dates.ts` が持つ。サイドバーは今日が `TODAY · TUE 10.6`、ほかは `TUE 10.6`、今年以外は `TUE 2025.10.6`。見出しと競合の通知は年付きの `dayLabelWithYear`（今年なら年を省く）。
@@ -149,7 +149,7 @@ notes の ui は旧 Monica の `web/` と `shared/` を移して作る。
 | ⌥J、⌥K | 編集 | 表示中のタブの中で次と前の Essay を開く |
 
 - キーは window の capture phase の keydown で取るので、⌥Backspace は本文の中でも削除になり、macOS の単語の削除は使えない（旧 Monica どおり）。
-- 取り消しの stack は、`app.tsx` で一覧と編集と `/notes/:id` の route を 1 つに囲む `EssayRemovalsProvider`（`pages/essays/removals.tsx`）の `Removals` が持つ。一覧と編集を行き来しても provider は mount されたまま残るので、一覧の右クリックで消したものも編集の ⌥Z で、編集で消したものも一覧の ⌥Z で戻る。Note Mention・↗・競合の通知で別の Essay へ移るときは `/notes/:id` を通るので、そこも囲まないと Essay の画面の中で stack を捨てる。Daily や Repo へ移ると provider ごと捨てるので、Essay の画面に戻ってから ⌥Z を押しても戻らない。頁を読み込み直しても戻らない。
+- 一覧と編集は合わせて 1 つの画面なので、同じ取り消しの stack を読む（「削除と取り消し」）。一覧の右クリックで消したものも編集の ⌥Z で、編集で消したものも一覧の ⌥Z で戻る。Note Mention・↗・競合の通知で `/notes/:id` を経て別の Essay へ移っても残る。Daily や Repo へ移ると捨てるので、Essay の画面に戻ってから ⌥Z を押しても戻らない。頁を読み込み直しても戻らない。
 
 ### Repo の画面
 
@@ -164,7 +164,7 @@ notes の ui は旧 Monica の `web/` と `shared/` を移して作る。
   - ⌥Backspace と ⌥Delete: 開いている Repo Note を確認なしで削除して Scratch に移る。Scratch の上では素通しし、エディタの単語の削除になる。
   - ⌥Z: 削除を取り消してその Repo Note を開く。
   - ⌥J / ⌥K: Scratch と Repo Note を巡回する。
-- 削除と取り消しは「削除と取り消し」の `Removals` を `RepoEditor` が mount ごとに持つ。取り消しの stack は `RepoEditor` の寿命の間だけ持ち、Repo を切り替えると画面ごと作り直すので空になる（旧 Monica と同じ）。Note Mention などで同じ Repo の Repo Note へ移るときも、`/notes/:id` の中継で作り直すので空になる。頁を読み込み直しても空になる。
+- 削除と取り消しは「削除と取り消し」の `Removals` を `RepoEditor` が context から読む。Repo ごとに 1 つの画面と数え、Repo は `sameRepo` で比べる。Note Mention・↗ で `/notes/:id` を経て同じ Repo の Repo Note へ移っても、⌃3 で `/repos` を経て同じ Repo へ戻っても stack は残る。別の Repo か Essay・Daily に着くと空になり、元の Repo に戻っても戻らない。頁を読み込み直しても空になる。`RepoEditor` は `key={repo}` で Repo ごとに作り直すが、stack はその外にある。
 - 消せたら、待った後の URL が消した Note を指すときだけ Scratch へ replace で移る。サイドバーの × で消している間に、その Note を開いて書くことがあるため。
 - 外で消された Repo Note は、取り直しの `NOT_FOUND` で、この画面で消したときと同じく保存の予約と本文の cache を捨てて Scratch へ移る（「削除と取り消し」の `removedElsewhere`）。取り消しの stack には積まない。開いた本文を出し続けると、書いた分の保存が `NOT_FOUND` で再試行され続ける。開いた本文の無い（URL から直に開いた）消えた Note は、エラーを出す。
 - Scratch の保存は title を省く。server は title の付いた Scratch の保存を本文ごと断る。
@@ -194,7 +194,8 @@ Essay と Repo Note の削除と ⌥Z の判断は `notes/removals.ts` の `Remo
 - `Removals` は自分が消す種類（`essay` か `repo_note`）を持ち、開いている Note の種類が違えば消さない。`remove` は Essay も Repo Note も消せる種類として受け、種類ごとの route は別の種類の id でも開くので、種類を見ないと Essay の画面から Repo Note を消してしまう（旧 Monica にあった不具合）。
 - ⌥Z は stack の最後の Note を戻す。戻せなかった id は抜いた位置に戻し、次の ⌥Z で試し直せるようにする。末尾に戻すと、待つ間に積まれた削除より後になり、削除の順が崩れる。
 - 外（別の Browser Tab や desktop）で消された Note の後始末も `Removals` が持つ（`removedElsewhere`）。画面は開いている Note の取り直しが `NOT_FOUND`（`isNotFound`）を返したら呼ぶ。保存の予約と本文の cache を捨て、エディタの `noteRef` がその Note を指していれば外し、URL がその Note を指すときだけ移り先へ移る。自分で消したときとの違いは、取り消しの stack に積まないことだけ。一覧の cache は書き直さず、focus の取り直しに任せる（ADR-0018）。
-- 取り消しの stack は、削除した画面にいる間だけ持つ（`GLOSSARY.md` の Note）。`Removals` を持つ component が unmount されると stack も捨てる。stack は手元のメモリにしか無いので、頁を読み込み直すと取り消せない。
+- 取り消しの stack は、削除した画面にいる間だけ持つ（`GLOSSARY.md` の Note）。今いる画面は URL の route から導く（`routes.ts` の `removalScreenOf`）。Essay の一覧と編集は 1 つの画面、Repo は Repo ごとの画面、Daily・今日・Not found は取り消しの無い画面で、中継の `/notes/:id` と `/repos` は前の画面のまま数える。`/notes/:id` で「Note not found」に止まったときも前の画面の stack を持ち続け、そこから着いた画面で残すか捨てるかが決まる。
+- `App` が route を描き分けるより上で `useScreenRemovals` を呼び、別の画面に着いたときだけ新しい `Removals`（その画面の種類）に替えて、前の stack を捨てる。画面の component は `RemovalsContext` を `useRemovals(kind)` で読む。画面の component に持たせると、中継の route で一度 unmount されて stack を捨てる。stack は手元のメモリにしか無いので、頁を読み込み直すと取り消せない。
 
 ### 保存と競合
 
@@ -272,7 +273,7 @@ notes の画面が localStorage に書く key は次の 6 つで、どれも `mo
 - 旧 Monica の save-state（14 本）・note-sync（10 本）・summary（4 本）のテストを、contract の形（平らな種類、Date の版）に直して移してある。summary には `summaryTitle` の 1 本と `withSavedPreview` の 2 本を、note-sync には `reloadLatest` の 4 本と `noteToOpen` の 5 本を足してある。
 - 保存は `save-queue.test.ts` が、偽の保存と `spyOn` で捕まえた timer で確かめる（debounce、基準版、CONFLICT、再試行、直列、keepalive、title を省くこと、閉じると失われる編集の数え方）。
 - Essay の画面は `support.test.ts` と `actions.test.ts` で確かめる。`support.test.ts` は、旧 Monica の `pages/essays/support.test.ts`（7 本）を contract の形に直して移したもの。`actions.test.ts` は、状態の切り替えの判断を偽の保存の口で確かめる。確かめるのは、flush が返るまで待ってから未保存を見ること、残れば中止すること、往復の間の編集と移動、外で書き換わった版を基準版にしないこと。
-- 削除と取り消しは `removals.test.ts` が、偽の保存と procedure と URL で、Essay と Repo Note の両方の種類について確かめる（flush を待ってから未保存を見ること、消す往復の間の打鍵で戻すこと、予約と本文の cache を捨てること、待つ間の打鍵と移動、種類を見ること、移り先へ移る条件、⌥Z の順と失敗した ⌥Z の戻し先、外で消された Note の後始末を stack に積まないこと、`NOT_FOUND` の見分け方）。画面の取り直しが `NOT_FOUND` で `removedElsewhere` を呼ぶことも、DOM の無いテストでは見えないので、画面で確かめる。一覧と編集と `/notes/:id` を行き来しても stack が残ることと、ほかの section へ移ると捨てることは、provider の mount で決まり、DOM の無いテストでは見えないので、画面で確かめる。
+- 削除と取り消しは `removals.test.ts` が、偽の保存と procedure と URL で、Essay と Repo Note の両方の種類について確かめる（flush を待ってから未保存を見ること、消す往復の間の打鍵で戻すこと、予約と本文の cache を捨てること、待つ間の打鍵と移動、種類を見ること、移り先へ移る条件、⌥Z の順と失敗した ⌥Z の戻し先、外で消された Note の後始末を stack に積まないこと、`NOT_FOUND` の見分け方）。画面の取り直しが `NOT_FOUND` で `removedElsewhere` を呼ぶことも、DOM の無いテストでは見えないので、画面で確かめる。今いる画面の導き方（中継で前の画面のままでいること、Repo を `sameRepo` で比べること）は `routes.test.ts` が確かめる。`useScreenRemovals` が画面の変わり目で stack を替えることは DOM の無いテストでは見えないので、画面で確かめる。
 - 見た目の設定は、`fake-browser.ts` が置く偽の localStorage・matchMedia・document で確かめる。`theme.test.ts` はテーマを切り替えてから `apps/web/index.html` の描画前の script を走らせ、reload の最初の描画に同じテーマが当たるかを見る。`ambient.test.ts` は保存値の読み方（prototype の名前を弾く）、巡回の向き、⌥; の判定（⇧ で逆順、変換中も効く。`ambientStepOf`）を、`note-width.test.ts` は本文の幅の保存と読み戻しを見る。⌥B と ⌥D、zen、スライダー、密度、写真の見た目は DOM が要るので、ブラウザで確かめる。
-- route は `routes.test.ts`（今日の導出、`/notes/:id` の行き先、Repo の path で開いた Note の行き先、URL が開いている Note）、再接続は `reach.test.ts`（1 秒の待ちと確かめの request。timer は `setTimeout` を `spyOn` で捕まえて手で進める）、link は `client.test.ts`（keepalive と届いたかの合図。fetch を `spyOn` で差し替える）。
+- route は `routes.test.ts`（今日の導出、`/notes/:id` の行き先、Repo の path で開いた Note の行き先、URL が開いている Note、取り消しの stack を持つ画面）、再接続は `reach.test.ts`（1 秒の待ちと確かめの request。timer は `setTimeout` を `spyOn` で捕まえて手で進める）、link は `client.test.ts`（keepalive と届いたかの合図。fetch を `spyOn` で差し替える）。
 - 本文の中の参照は `note-references.test.ts` が、本物の RPCLink と `Reach` に、path ごとに答えを差し替えた fetch を当てて確かめる（`NOT_FOUND` とほかの答えと通信エラーの分け方、届かない間に送り直さないこと、再接続の後の取り直し、表示名の cache、copy が同期に引く解決済みの表示名、flush が終わってからの block の取得）。「↗」の飛び先は `block-jump.test.ts`。`NoteBlockEditor` が Note ごとに作り直すことと、クリックで移ることは DOM の無いテストでは見えないので、画面で確かめる。

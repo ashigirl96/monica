@@ -1,7 +1,15 @@
 import { describe, expect, test } from 'bun:test'
 
 import type { Note } from '../contract.ts'
-import { notePagePath, openNoteIdOfPath, repoNoteRedirect, routeOf, todayPath } from './routes.ts'
+import {
+  notePagePath,
+  openNoteIdOfPath,
+  removalScreenOf,
+  repoNoteRedirect,
+  routeOf,
+  sameRemovalScreen,
+  todayPath,
+} from './routes.ts'
 
 const now = new Date(2026, 9, 6, 12)
 
@@ -57,6 +65,51 @@ test('the open Note is the Essay or Repo Note the path names', () => {
   for (const path of ['/essays', '/repos/acme/app', '/daily/2026-10-06', '/notes/note-7']) {
     expect(openNoteIdOfPath(path)).toBeNull()
   }
+})
+
+describe('removalScreenOf', () => {
+  const essays = { kind: 'essay' } as const
+  const repo = { kind: 'repo_note', repo: 'acme/app' } as const
+
+  test('the list and the editor of Essays are one screen', () => {
+    expect(removalScreenOf(routeOf('/essays'), null)).toEqual(essays)
+    expect(removalScreenOf(routeOf('/essays/note-7'), null)).toEqual(essays)
+    expect(sameRemovalScreen(removalScreenOf(routeOf('/essays/note-7'), essays), essays)).toBe(true)
+  })
+
+  test('each Repo is its own screen, whether its Scratch or a Repo Note is open', () => {
+    expect(removalScreenOf(routeOf('/repos/acme/app'), null)).toEqual(repo)
+    const onNote = removalScreenOf(routeOf('/repos/acme/app/notes/note-7'), repo)
+    expect(sameRemovalScreen(onNote, repo)).toBe(true)
+    const other = removalScreenOf(routeOf('/repos/acme/web'), repo)
+    expect(sameRemovalScreen(other, repo)).toBe(false)
+  })
+
+  test('a Repo spelled with other cases in the path is the same screen', () => {
+    const upper = removalScreenOf(routeOf('/repos/Acme/App/notes/note-7'), repo)
+    expect(sameRemovalScreen(upper, repo)).toBe(true)
+  })
+
+  test('/notes/:id and /repos pass through, staying on the screen before them', () => {
+    for (const previous of [essays, repo, null]) {
+      expect(removalScreenOf(routeOf('/notes/note-7'), previous)).toBe(previous)
+      expect(removalScreenOf(routeOf('/repos'), previous)).toBe(previous)
+    }
+  })
+
+  test('the Daily, today and an unknown path are screens without undo', () => {
+    for (const path of ['/daily/2026-10-06', '/daily', '/settings']) {
+      expect(removalScreenOf(routeOf(path), essays)).toBeNull()
+      expect(removalScreenOf(routeOf(path), repo)).toBeNull()
+    }
+  })
+
+  test('the Essays and a Repo are different screens, and no screen is none of them', () => {
+    expect(sameRemovalScreen(essays, repo)).toBe(false)
+    expect(sameRemovalScreen(essays, null)).toBe(false)
+    expect(sameRemovalScreen(null, repo)).toBe(false)
+    expect(sameRemovalScreen(null, null)).toBe(true)
+  })
 })
 
 test("today is the Logical Date of the moment it is asked, the day before when it is before 5 o'clock", () => {
