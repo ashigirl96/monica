@@ -99,6 +99,7 @@ entry は層ではなく、import してよい実行環境で切る（ADR-0009�
   - package の中の entry の境界と apps どうしの向き: `.oxlintrc.json` の overrides。schema が import してよいもの、ui が server の entry と `bun:sqlite` を import しないこと、body が `bun:sqlite`・`drizzle-orm`・schema と server の entry を import しないこと、cli entry を import するのが apps/cli だけであることを見る。no-restricted-imports の設定は override をまたいで重ならないので、file の集合ごとの制限とは別の rule にしている。
   - CLI と webview とブラウザで動くコード（apps/cli、apps/desktop、apps/web、apps/extension、各 package の cli entry と ui entry）が DB に触るもの（`bun:sqlite`、`drizzle-orm`、schema entry と server entry の値）を import しないこと: 同じ overrides（ADR-0003）。cli entry で見るのは `cli.ts` の import だけで、`cli.ts` が import する内側のファイルは見ない。apps/cli のテストと `testing.ts` は in-memory の Backend を組むので、この制限から外す。
   - testing entry を import するのがテストと `testing.ts` だけであること: lint の `monica/testing-entry`。
+  - module の import が循環しないこと（`import type` だけの循環も含む）: lint の `import/no-cycle`。
   - body の entry から辿れる module が DB に触るものを読まないこと: `packages/note/src/body/entry.test.ts`。lint は直接の import しか見ないので、contract のような内側の module を経た import はこのテストが見る。
   - entry の override の書き忘れ: `scripts/oxlint/entry-boundaries.test.ts`。各 package の `exports` にある cli・ui・body・schema の entry と同じ path に禁じた import を並べた file を一時 directory に置き、oxlint を当てて全部が止まるかを見る。package を足して override を書き忘れると落ちる。
   - `chrome` の global を使うのが apps/extension と chat の ui（`packages/chat/src/ui`）だけであること: root の `no-restricted-globals` と、この 2 つで `off` にする override（ADR-0029）。`scripts/oxlint/chrome-global.test.ts` が、apps と `packages/*/src` に `chrome` を使う file を一時 directory に置き、この 2 つの外でだけ止まるかを見る。
