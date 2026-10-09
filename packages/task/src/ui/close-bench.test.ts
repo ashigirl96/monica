@@ -47,12 +47,13 @@ async function benchOf({ client }: Pick<Fixture, 'client'>) {
 }
 
 // in-place の Bench は checkout が在れば git を呼ばない。
-function runInPlace({ client, ghq }: Pick<Fixture, 'client' | 'ghq'>) {
+// webview は Bench の最後の Tab の Exit を Backend が記録してから close を呼ぶので、run の claude の Tab は先に終わらせる。
+async function runInPlace({ client, ghq, exit }: Pick<Fixture, 'client' | 'ghq' | 'exit'>) {
   mkdirSync(ghq.checkout('acme/app'), { recursive: true })
-  return client.run({ ref, inPlace: true })
+  await exit((await client.run({ ref, inPlace: true })).terminalSessionId)
 }
 
-test('the Task of a Bench no guard stops is closed, with a toast that it closed and one per warning', async () => {
+test('the Task of a Bench no guard stops is closed once its last Tab, a claude still being started, has exited, with a toast that it closed and one per warning', async () => {
   const fixture = await tracked()
   const { client, github } = fixture
   await runInPlace(fixture)
@@ -96,7 +97,7 @@ test('a refused close leaves the Bench and tells why on one line, in the words o
 async function refusedByUncommittedChanges() {
   const fixture = await tracked()
   fixture.ghq.origin('acme/app')
-  await fixture.client.run({ ref })
+  await fixture.exit((await fixture.client.run({ ref })).terminalSessionId)
   writeFileSync(join(fixture.cwd, 'draft.txt'), 'draft\n')
   const { runspaceId } = await benchOf(fixture)
   await closeTaskOfBench(fixture.client, runspaceId)

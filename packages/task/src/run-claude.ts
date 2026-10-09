@@ -53,7 +53,7 @@ export async function runTask(
   const { found, tracked } = await findOrTrack(deps, parseRef(input.ref))
   if (found.bench) refuseInPlace(found.bench, input.inPlace, formatRef(found.issue))
   const facts = copyFacts(deps.db, found.issue.id)
-  const fromLedger = planFromLedger(deps.db, found, facts, input)
+  const fromLedger = planFromLedger(deps.db, deps.reservations, found, facts, input)
   const refuse = (refusal: Refusal) => refusalOf(refusal, errors, { hintForce: true })
   if (fromLedger)
     return start(deps, { found, tracked, facts, plan: fromLedger, warnings: [] }, input, refuse)
@@ -93,12 +93,12 @@ async function start(
     plan.type === 'resume'
       ? resumeOf(found, plan.resumable)
       : await newRun(deps, found, request.inPlace, warnings)
-  const opened = deps.reservations.writeOpenTask(
+  const opened = deps.reservations.openRunTab(
     launch.bench.taskIssueId,
     launch.ref,
     (tx, current) => {
       // GitHub と Bench の準備を待つ間に、この Task か spec の Run が起動しうる。
-      const changed = replan(tx, current, facts, plan, request)
+      const changed = replan(tx, deps.reservations, current, facts, plan, request)
       if (changed) throw refuse(changed)
       return deps.workbenchLedger.openTab(tx, {
         runspaceId: launch.bench.runspaceId,

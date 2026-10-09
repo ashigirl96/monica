@@ -1,4 +1,3 @@
-import type { Db } from '@monica/workbench/server'
 import { ORPCError } from '@orpc/server'
 
 import type { BenchDeps } from './bench.ts'
@@ -30,9 +29,9 @@ function promptOf(kind: PromptKind, issue: GitHubIssue): string | undefined {
   }
 }
 
-function planOf(db: Db, issue: GitHubIssue) {
+function planOf({ db, reservations }: Pick<BenchDeps, 'db' | 'reservations'>, issue: GitHubIssue) {
   const tracked = taskIfTracked(db, isLinkedIssue(issue))
-  return { tracked, plan: planRun(db, tracked, issue, { byLabels: true }) }
+  return { tracked, plan: planRun(db, reservations, tracked, issue, { byLabels: true }) }
 }
 
 // resume と running のボタンはラベルの規則より先に決まるので、ラベルが prompt を選ばない Issue にも出る。
@@ -57,7 +56,10 @@ function buttonOf(
   }
 }
 
-export async function runButtons(deps: SyncDeps, refs: string[]): Promise<RunButtonsOutput> {
+export async function runButtons(
+  deps: SyncDeps & Pick<BenchDeps, 'reservations'>,
+  refs: string[],
+): Promise<RunButtonsOutput> {
   const asked = refs.map((ref) => ({ ref, parsed: parsedOrNull(ref) }))
   const { issues } = await readIssues(
     deps,
@@ -67,7 +69,7 @@ export async function runButtons(deps: SyncDeps, refs: string[]): Promise<RunBut
     buttons: asked.map(({ ref, parsed }) => {
       const issue = parsed && issues.get(key(parsed))
       if (!issue) return { ref, button: null, reason: null }
-      return { ref, ...buttonOf(planOf(deps.db, issue).plan, issue) }
+      return { ref, ...buttonOf(planOf(deps, issue).plan, issue) }
     }),
   }
 }
@@ -78,7 +80,7 @@ export async function runFromButton(
   errors: RunErrors,
 ): Promise<RunOutput> {
   const issue = await readIssue(deps, ref)
-  const { plan } = planOf(deps.db, issue)
+  const { plan } = planOf(deps, issue)
   switch (plan.type) {
     // resume する claude は前の会話の途中か後なので、どの種類の prompt も送り直さない（ADR-0024）。
     case 'resume':
@@ -97,7 +99,7 @@ export async function reopenFromButton(
   ref: string,
 ): Promise<ReopenOutput> {
   const issue = await readIssue(deps, ref)
-  const { tracked, plan } = planOf(deps.db, issue)
+  const { tracked, plan } = planOf(deps, issue)
   // Task Ledger の写しは次の sync まで repo の改名前の名前を持つので、頼まれた ref でなく node ID で引き当てた Task の ref で reopen する。
   if (plan.type === 'reopen' && tracked) {
     return reopenTask(

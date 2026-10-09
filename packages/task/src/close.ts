@@ -22,8 +22,11 @@ export async function closeTask(
 ): Promise<CloseOutput> {
   const asked = parseRef(input.ref)
   const tracked = openTaskToClose(deps.db, isIssue(asked), formatRef(asked))
-  return deps.reservations.whileClosing(tracked.issue.id, formatRef(tracked.issue), () =>
-    closeReserved(deps, tracked.issue, input, errors),
+  return deps.reservations.whileClosing(
+    tracked.issue.id,
+    formatRef(tracked.issue),
+    input.force ?? false,
+    () => closeReserved(deps, tracked.issue, input, errors),
   )
 }
 

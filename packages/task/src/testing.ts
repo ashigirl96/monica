@@ -3,6 +3,7 @@ import { mkdirSync, mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
+import { terminalSession } from '@monica/workbench/schema'
 import {
   createWorkbenchLedger,
   router as workbenchRouter,
@@ -116,6 +117,18 @@ export function setup() {
   const settled = (terminalSessionId: string) =>
     untilSettled(() => workbenchClient.terminalSession.list(), terminalSessionId)
 
+  // shell の Exit は ptyd から非同期に届くので、Backend が行を exited にするまで待つ。
+  async function exit(terminalSessionId: string) {
+    await settled(terminalSessionId)
+    ptyd.exit(terminalSessionId, 0)
+    while (
+      db.select().from(terminalSession).where(eq(terminalSession.id, terminalSessionId)).get()
+        ?.status !== 'exited'
+    ) {
+      await Bun.sleep(5)
+    }
+  }
+
   // agent の報告は workbench の procedure に渡し、Backend と同じ経路で Agent Session を作る。
   function hook(
     terminalSessionId: string,
@@ -149,6 +162,7 @@ export function setup() {
     openTab,
     openTabOutsideBench,
     settled,
+    exit,
     hook,
   }
 }

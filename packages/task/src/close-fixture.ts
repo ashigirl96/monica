@@ -23,7 +23,18 @@ export async function tracked({ origin }: { origin?: Files } = {}) {
 export async function withWorktreeBench(files: Files = {}) {
   const fixture = await tracked({ origin: files })
   const { terminalSessionId } = await fixture.client.run({ ref })
+  await startedAndEnded(fixture, terminalSessionId)
   return { ...fixture, claudeTab: terminalSessionId, runspaceId: benchOf(fixture)!.runspaceId }
+}
+
+// run が起こした claude が Run にならないうちは、起動中の予約が強制でない close と次の run を断る。
+export async function startedAndEnded(
+  { hook }: Pick<Fixture, 'hook'>,
+  terminalSessionId: string,
+  sessionId = 's-0',
+) {
+  await hook(terminalSessionId, sessionId, 'SessionStart', { source: 'startup' })
+  await hook(terminalSessionId, sessionId, 'SessionEnd', { reason: 'exit' })
 }
 
 export function benchOf({ db }: Pick<Fixture, 'db'>) {

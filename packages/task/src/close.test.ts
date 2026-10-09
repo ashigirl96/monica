@@ -10,6 +10,7 @@ import {
   benchOf,
   hasBranch,
   ref,
+  startedAndEnded,
   tabsOf,
   terminated,
   terminatedAfterClose,
@@ -209,7 +210,7 @@ test('a merged pull request whose head commit the checkout does not have does no
 test('close of an in-place Bench looks only at live Runs, and leaves the checkout and its branches alone', async () => {
   const fixture = await tracked({ origin: {} })
   const { client, ghq, db } = fixture
-  await client.run({ ref, inPlace: true })
+  await startedAndEnded(fixture, (await client.run({ ref, inPlace: true })).terminalSessionId)
   const checkout = ghq.checkout('acme/app')
   git(checkout, 'switch', '--quiet', '-c', 'issue-12')
   commit(checkout, { 'wip.txt': { content: 'wip\n' } }, 'wip')

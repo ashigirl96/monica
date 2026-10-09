@@ -2,7 +2,7 @@ import { afterEach, expect, mock, setSystemTime, spyOn, test } from 'bun:test'
 import { existsSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 
-import { runspace } from '@monica/workbench/schema'
+import { runspace, tab } from '@monica/workbench/schema'
 
 import { commit, git } from './fake-ghq.ts'
 import { bench, issue, task } from './schema.ts'
@@ -69,7 +69,7 @@ test("run makes a worktree on a new branch issue-n from origin's default branch,
   ])
 })
 
-test('the Bench is listed while it prepares, and a second run waits for the same preparation', async () => {
+test('the Bench is listed while it prepares, and a second run waits for the same preparation, then is refused without a Tab once the first opens its own', async () => {
   const { db, ghq, client, cwd } = await tracked(null)
   const root = await ghq.client.root()
   const asked = Promise.withResolvers<void>()
@@ -86,13 +86,17 @@ test('the Bench is listed while it prepares, and a second run waits for the same
   expect(db.select().from(runspace).all()).toMatchObject([{ cwd, owned: true }])
   expect((await client.list({})).tasks).toMatchObject([{ displayState: { state: 'preparing' } }])
 
-  const second = client.run({ ref })
+  const second = failure(client.run({ ref }))
   answer.resolve(root)
 
   expect(await first).toMatchObject({ benchCreated: true })
-  expect(await second).toMatchObject({ cwd, benchCreated: false })
+  expect(await second).toMatchObject({
+    code: 'CONFLICT',
+    message: `${ref} has a Run being started; to add an agent alongside, open a Tab in its Bench and run claude there`,
+  })
   expect(roots).toHaveBeenCalledTimes(1)
   expect(await client.bench.list()).toMatchObject([{ setupState: 'ready' }])
+  expect(db.select().from(tab).all()).toHaveLength(1)
 })
 
 test('run checks out a branch issue-n that already exists, without cloning a Repo that is cloned', async () => {
@@ -249,10 +253,11 @@ test('run after a failure makes the worktree again when it is gone', async () =>
 })
 
 test("run --in-place opens the Bench on the Repo's checkout, cloning it, and runs no setup", async () => {
-  const { home, ghq, client } = await tracked('#!/bin/sh\nexit 1\n')
+  const { home, ghq, client, exit } = await tracked('#!/bin/sh\nexit 1\n')
   const checkout = ghq.checkout('acme/app')
 
   const output = await client.run({ ref, inPlace: true })
+  await exit(output.terminalSessionId)
 
   expect(output).toMatchObject({
     ref,
