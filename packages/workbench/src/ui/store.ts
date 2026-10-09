@@ -44,6 +44,9 @@ export const workbenchClientAtom = atom<WorkbenchClient | null>(null)
 // workbench は誰が Runspace を所有するかを知らないので、閉じて空になった所有された Runspace は slot に渡す（ADR-0005）。
 export const lastTabClosedAtom = atom<((runspaceId: string) => void) | null>(null)
 
+// Tab が 0 になってから Exit の記録を待って slot に渡すまでの Runspace。その間に Bench の画面へ Task の操作を出さない。
+export const handingOverRunspaceIdsAtom = atom<ReadonlySet<string>>(new Set<string>())
+
 function clientOf(get: Getter): WorkbenchClient {
   const client = get(workbenchClientAtom)
   if (!client) throw new Error('Backend is unavailable')
@@ -316,10 +319,19 @@ async function closeTab(get: Getter, set: Setter, { runspace, tab }: TabInRunspa
   }
   releaseTabConnection(tab.id)
   set(tabClosedAtom, runspace, tab.id)
-  await set(reloadAtom)
-  if (!emptiedRunspaceId) return
-  await untilExitRecorded(get, tab.terminalSessionId)
-  get(lastTabClosedAtom)?.(emptiedRunspaceId)
+  if (!emptiedRunspaceId) {
+    await set(reloadAtom)
+    return
+  }
+  const handedOver = emptiedRunspaceId
+  set(handingOverRunspaceIdsAtom, (ids) => new Set(ids).add(handedOver))
+  try {
+    await set(reloadAtom)
+    await untilExitRecorded(get, tab.terminalSessionId)
+    get(lastTabClosedAtom)?.(handedOver)
+  } finally {
+    set(handingOverRunspaceIdsAtom, (ids) => new Set([...ids].filter((id) => id !== handedOver)))
+  }
 }
 
 export const closeTerminalTabAtom = action(async (get, set, tabId?: string) => {

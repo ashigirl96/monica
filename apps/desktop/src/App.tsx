@@ -1,4 +1,10 @@
-import { useBenchLabels, useCloseTaskOfBench, useTabMenuItems } from '@monica/task/ui'
+import {
+  useBenches,
+  useBenchLabels,
+  useCloseTaskOfBench,
+  useEmptyBenchContent,
+  useTabMenuItems,
+} from '@monica/task/ui'
 import { Toaster } from '@monica/ui'
 import { Workbench } from '@monica/workbench/ui'
 import { useMemo } from 'react'
@@ -10,7 +16,9 @@ export function App() {
   // oRPC の client は property を読むたびに新しい Proxy を返すので、endpoint ごとに 1 つに固定する。
   const workbench = useMemo(() => client?.workbench ?? null, [client])
   const task = useMemo(() => client?.task ?? null, [client])
-  const benchLabelOf = useBenchLabels(task)
+  const benches = useBenches(task)
+  const benchLabelOf = useBenchLabels(benches)
+  const emptyBenchContent = useEmptyBenchContent(task, benches)
   const tabMenuItems = useTabMenuItems(task)
   const closeTaskOfBench = useCloseTaskOfBench(task)
 
@@ -21,6 +29,7 @@ export function App() {
         benchLabelOf={benchLabelOf}
         tabMenuItems={tabMenuItems}
         onLastTabClosed={closeTaskOfBench}
+        emptyBenchContent={emptyBenchContent}
       />
       <Toaster />
     </>

@@ -1,6 +1,8 @@
 import { afterEach, expect, mock, spyOn, test } from 'bun:test'
-import { mkdirSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
+
+import { getDefaultStore } from 'jotai'
 
 // toast は画面の外にあるので、出した文言だけを記録する。
 const toasts: { type: 'info' | 'error'; message: string }[] = []
@@ -16,7 +18,9 @@ await mock.module('@monica/ui', () => ({
 }))
 
 const { cleanUp, setup } = await import('../testing.ts')
-const { closeTaskOfBench } = await import('./close-bench.ts')
+const { git } = await import('../fake-ghq.ts')
+const { closeTaskOfBench, closingRunspaceIdsAtom, refusedReasonsAtom } =
+  await import('./close-bench.ts')
 
 afterEach(() => {
   mock.restore()
@@ -86,6 +90,82 @@ test('a refused close leaves the Bench and tells why on one line, in the words o
       message: `CLOSE_REFUSED: ${ref} stays open: claude s-1 is a live Run (waiting); the worktree ${cwd} has uncommitted changes`,
     },
   ])
+})
+
+// claude の居ない worktree の Bench に uncommitted な変更を置き、guard だけが止める形にする。
+async function refusedByUncommittedChanges() {
+  const fixture = await tracked()
+  fixture.ghq.origin('acme/app')
+  await fixture.client.run({ ref })
+  writeFileSync(join(fixture.cwd, 'draft.txt'), 'draft\n')
+  const { runspaceId } = await benchOf(fixture)
+  await closeTaskOfBench(fixture.client, runspaceId)
+  toasts.length = 0
+  return { ...fixture, runspaceId }
+}
+
+const reasonsOf = (runspaceId: string) => getDefaultStore().get(refusedReasonsAtom).get(runspaceId)
+
+test('a refused close remembers the reasons for its Bench', async () => {
+  const { runspaceId, cwd } = await refusedByUncommittedChanges()
+
+  expect(reasonsOf(runspaceId)).toEqual([{ kind: 'uncommitted_changes', worktree: cwd }])
+})
+
+test('a forced close of a refused Bench passes force and forgets the reasons', async () => {
+  const { client, runspaceId, cwd } = await refusedByUncommittedChanges()
+
+  await closeTaskOfBench(client, runspaceId, { force: true })
+
+  expect(await client.bench.list()).toEqual([])
+  expect((await client.list({ closed: true })).tasks).toMatchObject([{ ref }])
+  expect(existsSync(cwd)).toBe(false)
+  expect(reasonsOf(runspaceId)).toBeUndefined()
+  expect(toasts).toEqual([{ type: 'info', message: `closed ${ref}` }])
+})
+
+test('a forced close that fails tells why on one line and keeps the reasons', async () => {
+  const { client, ghq, runspaceId, cwd } = await refusedByUncommittedChanges()
+  git(ghq.checkout('acme/app'), 'worktree', 'lock', cwd)
+
+  await closeTaskOfBench(client, runspaceId, { force: true })
+
+  expect(await client.bench.list()).toMatchObject([{ runspaceId, ref }])
+  expect(reasonsOf(runspaceId)).toEqual([{ kind: 'uncommitted_changes', worktree: cwd }])
+  expect(toasts).toEqual([
+    {
+      type: 'error',
+      message: expect.stringMatching(/^could not close .*git worktree remove failed/),
+    },
+  ])
+  expect(toasts[0]!.message).not.toContain('\n')
+})
+
+test('a close run anew forgets the reasons it remembered before, even when it fails for another cause', async () => {
+  const { client, ghq, runspaceId, cwd } = await refusedByUncommittedChanges()
+  rmSync(join(cwd, 'draft.txt'))
+  git(ghq.checkout('acme/app'), 'worktree', 'lock', cwd)
+
+  await closeTaskOfBench(client, runspaceId)
+
+  expect(await client.bench.list()).toMatchObject([{ runspaceId, ref }])
+  expect(reasonsOf(runspaceId)).toBeUndefined()
+  expect(toasts).toEqual([
+    {
+      type: 'error',
+      message: expect.stringMatching(/^could not close .*git worktree remove failed/),
+    },
+  ])
+})
+
+test('a Bench that closed stays among those closing, so it shows no Close anyway until it is gone', async () => {
+  const fixture = await tracked()
+  await runInPlace(fixture)
+  const { runspaceId } = await benchOf(fixture)
+
+  await closeTaskOfBench(fixture.client, runspaceId)
+
+  expect(getDefaultStore().get(closingRunspaceIdsAtom).has(runspaceId)).toBe(true)
 })
 
 test('a Bench still preparing is not closed', async () => {

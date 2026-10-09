@@ -2,6 +2,7 @@ import { cn, PromptIcon, TRAFFIC_LIGHT_ZONE_HEIGHT, TRAFFIC_LIGHT_ZONE_WIDTH } f
 import { useAtomValue, useSetAtom, useStore } from 'jotai'
 import { lazy, Suspense, useEffect } from 'react'
 
+import type { EmptyBenchContent } from './content.tsx'
 import { WorkbenchHeader } from './header.tsx'
 import { followKeys } from './keys.ts'
 import { followMetaHold } from './meta-hold.ts'
@@ -62,11 +63,13 @@ export function Workbench({
   benchLabelOf,
   tabMenuItems,
   onLastTabClosed,
+  emptyBenchContent,
 }: {
   client: WorkbenchClient | null
   benchLabelOf?: BenchLabelOf
   tabMenuItems?: TabMenuItems
   onLastTabClosed?: (runspaceId: string) => void
+  emptyBenchContent?: EmptyBenchContent
 }) {
   useWorkbenchChanges(client)
   const store = useStore()
@@ -138,7 +141,7 @@ export function Workbench({
         <div className="relative min-h-0 flex-1 p-2 pt-0" style={{ zoom: uiZoom }}>
           <div className="content-panel h-full overflow-hidden">
             <Suspense>
-              <WorkbenchContent />
+              <WorkbenchContent emptyBenchContent={emptyBenchContent} />
             </Suspense>
           </div>
         </div>
