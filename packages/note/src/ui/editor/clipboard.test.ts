@@ -16,9 +16,8 @@ import {
   type RenderMarkdown,
   serializeBlocksPayload,
 } from './clipboard.ts'
-import { docFromJSON } from './create-editor.ts'
 import { selectBlocks } from './selection-state.ts'
-import { block, contentPos, docOf, heading, para, paste } from './test-fixtures.ts'
+import { block, contentPos, docOf, heading, para, paste, readDoc } from './test-fixtures.ts'
 
 function pasteBlocks(state: EditorState, payload: string): EditorState {
   const pasted = paste(clipboardPlugin(), state, { [BLOCKS_MIME]: payload })
@@ -229,7 +228,7 @@ describe('markdown の copy と paste', () => {
   test('block を選んで copy すると、選んだ block の markdown が text/plain に載る', () => {
     const plugin = clipboardPlugin({ renderMarkdown: (json) => toMarkdown(json, noteName) })
     const base = EditorState.create({
-      doc: docFromJSON(fullDoc),
+      doc: readDoc(fullDoc),
       plugins: [blockSelectionPlugin()],
     })
     const view = { state: base.apply(selectBlocks(base.tr, 'b1', 'b13')) } as unknown as EditorView
@@ -246,7 +245,7 @@ describe('markdown の copy と paste', () => {
   })
 
   test('全種類の block を含む本文を選んで copy すると、markdown が text/plain に載る', () => {
-    const state = EditorState.create({ doc: docFromJSON(fullDoc) })
+    const state = EditorState.create({ doc: readDoc(fullDoc) })
 
     const text = copiedText(
       state,

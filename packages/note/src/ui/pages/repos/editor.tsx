@@ -15,6 +15,7 @@ import {
   useEditorDoc,
 } from '../../notes/editor-support.ts'
 import { NoteBlockEditor } from '../../notes/note-block-editor.tsx'
+import { readBody, UnreadableBody, UnreadableNotice } from '../../notes/note-body.tsx'
 import { useServerDoc } from '../../notes/note-sync.ts'
 import { NotesShell } from '../../notes/notes-shell.tsx'
 import {
@@ -91,6 +92,7 @@ export function RepoEditor({ repo, noteId }: { repo: string; noteId: string | nu
   // 描画できる note がある間はエラーを出さない（Daily と同じ理由 — 復帰時の一時的な
   // 再フェッチ失敗でエディタを unmount すると、保存済みの編集が巻き戻る）。
   const loadError = note === null ? openQuery.error : null
+  const read = note === null ? null : readBody(note.content)
 
   // 別のタブで消された Repo Note は、このタブで消したときと同じく、保存の予約を捨てて Scratch へ移る。
   const goneId = note !== null && isNotFound(noteQuery.error) ? noteId : null
@@ -140,6 +142,7 @@ export function RepoEditor({ repo, noteId }: { repo: string; noteId: string | nu
 
   const scheduleSave = useCallback(
     (target: Note) => {
+      if (!readBody(target.content).ok) return
       const content = persistableContent(contentRef.current ?? target.content)
       // Scratch の保存に title を付けると、server は本文ごと断る。
       const draft = target.kind === 'repo_note' ? { content, title: target.title } : { content }
@@ -265,7 +268,7 @@ export function RepoEditor({ repo, noteId }: { repo: string; noteId: string | nu
           <div className="flex h-full items-center justify-center text-sm text-destructive">
             {loadError.message}
           </div>
-        ) : note !== null ? (
+        ) : note !== null && read !== null ? (
           <div className="mx-auto w-full max-w-[calc(760px+var(--note-extra-w,0px))] px-10">
             <header className="pt-12">
               {note.kind === 'repo_note' ? (
@@ -276,6 +279,7 @@ export function RepoEditor({ repo, noteId }: { repo: string; noteId: string | nu
                   autoFocus={note.id === titleFocusId}
                   value={note.title}
                   placeholder="Untitled"
+                  readOnly={!read.ok}
                   onChange={(e) => onTitleChange(e.target.value)}
                   onKeyDown={(e) => titleFieldKeyDown(e, focusEditorStart)}
                   className="w-full bg-transparent text-[20px] font-normal tracking-[0.03em] text-[var(--ink-text)] outline-none placeholder:text-[var(--ink-faint)]"
@@ -294,15 +298,21 @@ export function RepoEditor({ repo, noteId }: { repo: string; noteId: string | nu
                 </span>
                 <SaveStatus noteId={note.id} onReload={() => void reload()} />
               </div>
+              {!read.ok && <UnreadableNotice error={read.error} />}
             </header>
-            <NoteBlockEditor
-              note={note}
-              generation={generation}
-              autoFocus={note.id !== titleFocusId}
-              onDocChange={onDocChange}
-              onExitUp={isScratch ? undefined : () => titleRef.current?.focus()}
-              handleRef={editorHandleRef}
-            />
+            {read.ok ? (
+              <NoteBlockEditor
+                note={note}
+                doc={read.doc}
+                generation={generation}
+                autoFocus={note.id !== titleFocusId}
+                onDocChange={onDocChange}
+                onExitUp={isScratch ? undefined : () => titleRef.current?.focus()}
+                handleRef={editorHandleRef}
+              />
+            ) : (
+              <UnreadableBody noteId={note.id} content={note.content} error={read.error} />
+            )}
           </div>
         ) : null}
       </main>

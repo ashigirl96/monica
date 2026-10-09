@@ -5,6 +5,7 @@ import type { Command, Plugin, Transaction } from 'prosemirror-state'
 import type { EditorView } from 'prosemirror-view'
 
 import { containerById } from './context.ts'
+import { docFromJSON } from './create-editor.ts'
 import { createContainer, nodes, schema } from './schema.ts'
 
 // テスト専用: doc fixture builder、位置解決 helper、stub view で plugin を呼ぶ helper。
@@ -60,6 +61,12 @@ export function tableOf(rows: string[][], headerFirst = false): PMNode {
 
 export function block(id: string, content: PMNode, children: PMNode[] = []): PMNode {
   return createContainer(content, children, id)
+}
+
+export function readDoc(json: unknown): PMNode {
+  const read = docFromJSON(json)
+  if (!read.ok) throw new Error(read.error)
+  return read.doc
 }
 
 export function docOf(...blocks: PMNode[]): PMNode {

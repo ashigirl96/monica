@@ -8,6 +8,7 @@ import { altOnly, ctrlOnly } from '../../keys.ts'
 import { useAutosaveContext } from '../../notes/autosave-context.tsx'
 import { cycleSelect, persistableContent, titleFieldKeyDown } from '../../notes/editor-support.ts'
 import { NoteBlockEditor } from '../../notes/note-block-editor.tsx'
+import { readBody, UnreadableBody, UnreadableNotice } from '../../notes/note-body.tsx'
 import { useServerDoc } from '../../notes/note-sync.ts'
 import { NotesShell } from '../../notes/notes-shell.tsx'
 import { useEssaysCache, useEssaysQuery, useNoteQuery, useSeedNote } from '../../notes/queries.ts'
@@ -75,6 +76,7 @@ export function EssayEditorPage({ id }: { id: string }) {
   // 描画できる note がある間はエラーを出さない（Daily と同じく、復帰の取り直しの一時的な失敗で
   // エディタを外すと、保存済みの編集が巻き戻る）。
   const noteError = note === null && noteQuery.error !== null ? noteQuery.error.message : null
+  const read = note === null ? null : readBody(note.content)
 
   useDocumentTitle(note?.kind === 'essay' ? displayName(note) : null)
 
@@ -109,7 +111,7 @@ export function EssayEditorPage({ id }: { id: string }) {
 
   const scheduleSave = useCallback(
     (target: Note) => {
-      if (target.kind !== 'essay') return
+      if (target.kind !== 'essay' || !readBody(target.content).ok) return
       schedule(
         target.id,
         {
@@ -299,13 +301,14 @@ export function EssayEditorPage({ id }: { id: string }) {
           <div className="flex h-full items-center justify-center text-sm text-destructive">
             {noteError}
           </div>
-        ) : note !== null && note.kind === 'essay' ? (
+        ) : note !== null && read !== null && note.kind === 'essay' ? (
           <div className="mx-auto w-full max-w-[calc(760px+var(--note-extra-w,0px))] px-10">
             <header className="pt-12">
               <input
                 ref={titleRef}
                 value={note.title}
                 placeholder="Untitled"
+                readOnly={!read.ok}
                 onChange={(e) => onTitleChange(e.target.value)}
                 onKeyDown={(e) => titleFieldKeyDown(e, focusEditorStart)}
                 onBlur={() => setTitleFirst(null)}
@@ -318,15 +321,21 @@ export function EssayEditorPage({ id }: { id: string }) {
                 </span>
                 <SaveStatus noteId={note.id} onReload={() => void reload()} />
               </div>
+              {!read.ok && <UnreadableNotice error={read.error} />}
             </header>
-            <NoteBlockEditor
-              note={note}
-              generation={generation}
-              autoFocus={note.id !== titleFirst}
-              onDocChange={onDocChange}
-              onExitUp={() => titleRef.current?.focus()}
-              handleRef={editorHandleRef}
-            />
+            {read.ok ? (
+              <NoteBlockEditor
+                note={note}
+                doc={read.doc}
+                generation={generation}
+                autoFocus={note.id !== titleFirst}
+                onDocChange={onDocChange}
+                onExitUp={() => titleRef.current?.focus()}
+                handleRef={editorHandleRef}
+              />
+            ) : (
+              <UnreadableBody noteId={note.id} content={note.content} error={read.error} />
+            )}
           </div>
         ) : note !== null ? (
           <div className="flex h-full items-center justify-center text-sm text-[var(--ink-faint)]">

@@ -7,7 +7,6 @@ import { EditorState, type Transaction } from 'prosemirror-state'
 import type { EditorView } from 'prosemirror-view'
 
 import { EMPTY_DOC } from '../../body/index.ts'
-import { docFromJSON } from './create-editor.ts'
 import {
   buildInsertImagesTr,
   imageUploadKey,
@@ -16,6 +15,7 @@ import {
   stripPendingImages,
 } from './image-upload.ts'
 import { acceptedPastedImageSrc, createContainer, nodes, schema } from './schema.ts'
+import { readDoc } from './test-fixtures.ts'
 
 function para(text = ''): PMNode {
   return nodes.paragraph.create(null, text ? schema.text(text) : undefined)
@@ -328,7 +328,7 @@ describe('stripPendingImages（永続化用）', () => {
       },
       { type: 'blockContainer', attrs: { id: 'next' }, content: [{ type: 'paragraph' }] },
     ])
-    const reopened = docFromJSON(stripPendingImages(input))
+    const reopened = readDoc(stripPendingImages(input))
     const ids: unknown[] = []
     reopened.child(0).forEach((block) => ids.push(block.attrs.id))
     expect(ids).toEqual(['parent', 'next'])

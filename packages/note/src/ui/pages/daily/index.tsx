@@ -9,6 +9,7 @@ import { useAutosaveContext } from '../../notes/autosave-context.tsx'
 import { addMonths, dayLabelWithYear, type Month, monthOf, sameMonth } from '../../notes/dates.ts'
 import { cycleSelect, persistableContent } from '../../notes/editor-support.ts'
 import { NoteBlockEditor } from '../../notes/note-block-editor.tsx'
+import { readBody, UnreadableBody, UnreadableNotice } from '../../notes/note-body.tsx'
 import { useServerDoc } from '../../notes/note-sync.ts'
 import { NotesShell } from '../../notes/notes-shell.tsx'
 import { useDailyDatesQuery, useDailyNoteQuery } from '../../notes/queries.ts'
@@ -53,6 +54,7 @@ export function DailyPage({ date }: { date: string }) {
   // エディタを unmount しないため（latch の古い content で remount され、保存済みの
   // 編集が巻き戻ってそのまま上書きされる）。
   const noteError = note === null && noteQuery.error !== null ? noteQuery.error.message : null
+  const read = note === null ? null : readBody(note.content)
 
   const datesQuery = useDailyDatesQuery()
 
@@ -112,7 +114,7 @@ export function DailyPage({ date }: { date: string }) {
     (doc: unknown) => {
       contentRef.current = doc
       const current = noteRef.current
-      if (current) {
+      if (current && readBody(current.content).ok) {
         // daily は title を持たないので送らない。競合通知の見出しも title ではなく日付になる
         schedule(
           current.id,
@@ -151,23 +153,31 @@ export function DailyPage({ date }: { date: string }) {
           <div className="flex h-full items-center justify-center text-sm text-destructive">
             {noteError}
           </div>
-        ) : note ? (
+        ) : note && read ? (
           <div className="mx-auto w-full max-w-[calc(760px+var(--note-extra-w,0px))] px-10">
-            <header className="flex items-baseline justify-between gap-3 pt-10">
-              <h1 className="font-mono text-[0.8rem] tracking-widest text-[var(--ink-muted)] uppercase">
-                {dayLabelWithYear(date)}
-              </h1>
-              <span className="truncate text-xs">
-                <SaveStatus noteId={note.id} onReload={() => void reload()} />
-              </span>
+            <header className="pt-10">
+              <div className="flex items-baseline justify-between gap-3">
+                <h1 className="font-mono text-[0.8rem] tracking-widest text-[var(--ink-muted)] uppercase">
+                  {dayLabelWithYear(date)}
+                </h1>
+                <span className="truncate text-xs">
+                  <SaveStatus noteId={note.id} onReload={() => void reload()} />
+                </span>
+              </div>
+              {!read.ok && <UnreadableNotice error={read.error} />}
             </header>
-            <NoteBlockEditor
-              note={note}
-              generation={generation}
-              autoFocus
-              onDocChange={onDocChange}
-              handleRef={editorHandleRef}
-            />
+            {read.ok ? (
+              <NoteBlockEditor
+                note={note}
+                doc={read.doc}
+                generation={generation}
+                autoFocus
+                onDocChange={onDocChange}
+                handleRef={editorHandleRef}
+              />
+            ) : (
+              <UnreadableBody noteId={note.id} content={note.content} error={read.error} />
+            )}
           </div>
         ) : null}
       </main>

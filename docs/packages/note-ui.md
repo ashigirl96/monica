@@ -44,7 +44,7 @@ notes の ui は旧 Monica の `web/` と `shared/` を移して作る。
 
 ### node 型と plugin を減らせない理由
 
-- `create-editor.ts` の `docFromJSON` は、`Node.fromJSON` か `check()` に失敗した本文を空の doc にして開く。開いたまま 1 打鍵すると、autosave がその空の doc を保存する。node 型か mark が 1 つでも欠けたエディタは、それを含む保存済みの本文を消す。
+- `create-editor.ts` の `docFromJSON` は、`Node.fromJSON` か `check()` に失敗した本文を、例外の message を付けた失敗として返す。画面はその Note をエディタで開かず、読み取り専用で出す（「読めない本文」）。node 型か mark が 1 つでも欠けたエディタでは、それを含む保存済みの本文を編集できなくなる。
 - module どうしが循環して import している（`node-views` と `synced-block`、`note-mention-menu` と `clipboard` など）ので、一部の plugin だけを外して持ち込むこともできない。
 - 機能を止めたいときは、`BlockEditor` の props を渡さない。`fetchLinkMetadata`・`searchNoteMentions`・`resolveNoteMention`・`resolveBlock`・`uploadImage`・`renderMarkdown`・`parseMarkdown` は、渡さなければその機能が無効になる（`block-editor.tsx`、`create-editor.ts`、`synced-block.ts`）。`NoteBlockEditor` は今この 7 つをすべて渡し、ほかに Note Mention と Synced Block の `onNoteMentionClick`・`noteId`・`onOpenBlock` と、画像の取り込みの `importExternalImage` を渡す。props の有無は mount 時に固定され、差し替えは `key` を変えた再 mount で行う。
 - 画像の props は `notes/editor-support.ts` の `imageCallbacks` が作る。どちらも `image.upload` と `image.import` を呼び、失敗は null にする。エディタは upload の失敗を再試行のボタンで、取り込みの失敗を外部 URL のままで見せ、理由では分岐しない。
@@ -78,7 +78,7 @@ notes の ui は旧 Monica の `web/` と `shared/` を移して作る。
 - 保存済みの本文を開けることは、`src/body/fixtures/full-doc.json`（全 node 型を持つ）を `docFromJSON` に通し、block がすべて残ることで確かめる。
 - markdown の copy と paste は、copy の handler・`clipboardTextSerializer`・`handlePaste` を最小のモックの view で呼んで確かめる。`handlePaste` は `test-fixtures.ts` の `paste` で呼ぶ。dispatch を `state.apply` で当てるので、state に登録した plugin の `appendTransaction` も同じ dispatch で走る。block 選択の copy は text/html を `document` で組むので、そのテストの間だけ組めるだけの偽の `document` を置く。
 - paste の menu が開いたままかを確かめる state には、menu の plugin と一緒に normalizer を登録する。登録しないと id を振る transaction が走らず、menu を閉じる経路を通らない。
-- `src/body/fixtures/unknown-nodes.json` はエディタのテストに使わない。server が知らない node を読み飛ばすことを確かめる fixture で、schema に無い node（`aiHint`・`chart`）と mark（`highlight`）を持つので、エディタでは旧 Monica と同じく空の doc になる。旧 Monica の本文に出てくる node と mark は、どれも schema にある。
+- 読めない本文は、`docFromJSON` に `src/body/fixtures/unknown-nodes.json` と、`full-doc.json` に子の無い `blockGroup` を足した doc を通し、失敗と例外の message が返ることで確かめる。`unknown-nodes.json` は server が知らない node を読み飛ばすことを確かめる fixture で、schema に無い node（`aiHint`・`chart`）と mark（`highlight`）を持つ。旧 Monica の本文に出てくる node と mark は、どれも schema にある。読めない本文の画面（エディタを出さないこと、保存を送らないこと）は DOM が要るので、ブラウザで確かめる。
 
 ## 画面
 
@@ -166,6 +166,17 @@ notes の ui は旧 Monica の `web/` と `shared/` を移して作る。
 - 消せたら、待った後の URL が消した Note を指すときだけ Scratch へ replace で移る。サイドバーの × で消している間に、その Note を開いて書くことがあるため。
 - 別のタブで消された Repo Note は、取り直しの `NOT_FOUND` で、このタブで消したときと同じく保存の予約を捨てて Scratch へ移る。開いた本文を出し続けると、書いた分の保存が `NOT_FOUND` で再試行され続ける。開いた本文の無い（URL から直に開いた）消えた Note は、エラーを出す。
 - Scratch の保存は title を省く。server は title の付いた Scratch の保存を本文ごと断る。
+
+### 読めない本文
+
+エディタの schema で読めない本文（`docFromJSON` が失敗を返すもの）の Note は、Daily・Essay・Repo のどの画面でもエディタを mount しない。空の doc で開くと、1 打鍵で autosave がその空の doc を元の本文の上に保存するため（旧 Monica にあった不具合）。
+
+- 本文の代わりに、`@monica/note/body` の `toMarkdown` で書き出した本文を、選択できる読み取り専用のテキストで出す。schema に無い node は表示から落ちるが、DB の本文はそのまま残る。
+- ヘッダに「この本文はエディタで開けません」と ProseMirror の例外の message を出し、同じ message を `console.error` にも出す（`notes/note-body.tsx`）。
+- その Note には本文も title も保存しない。title の欄は読み取り専用にし、各画面の保存の予約（Essay と Repo の `scheduleSave`、Daily の `onDocChange`）も本文が読めるかを見て止める。Essay の状態の切り替え、削除、取り消しは本文に触れないので、読める Note と同じく動く。
+- 外の更新は今の採用の経路で受ける。focus で取り直して読める版が来ればエディタで開き直し、読めない版を採用すれば読み取り専用に切り替わる。
+- 本文は Note の本文の object ごとに 1 度だけ読む（`readBody`）。`scheduleSave` は打鍵のたびに読めるかを見るため。
+- 本文が `null` か `undefined` なら、空の doc で開く。
 
 ### 削除と取り消し
 

@@ -7,13 +7,21 @@ import { EditorState, Selection, TextSelection } from 'prosemirror-state'
 import { EMPTY_DOC } from '../../body/index.ts'
 import type { LinkMetadata } from '../../contract.ts'
 import { clipboardPlugin } from './clipboard.ts'
-import { docFromJSON } from './create-editor.ts'
 import { linkMenuPlugin, previewTransaction } from './link-menu.ts'
 import type { LinkMenuActiveState } from './link-menu.ts'
 import { linkMenuKey } from './menu-keys.ts'
 import { normalizerPlugin } from './normalizer.ts'
 import { createContainer, nodes, schema } from './schema.ts'
-import { beyondBlockIds, block, contentPos, docOf, heading, paste, todo } from './test-fixtures.ts'
+import {
+  beyondBlockIds,
+  block,
+  contentPos,
+  docOf,
+  heading,
+  paste,
+  readDoc,
+  todo,
+} from './test-fixtures.ts'
 
 const URL = 'https://example.com/x'
 
@@ -221,7 +229,7 @@ function openedBeforeTodo(): EditorState {
 
 describe('menu を開いた後の transaction', () => {
   test('id の無い block に URL を貼ると、normalizer が id を振った後も開いたまま', () => {
-    const after = pasteUrl(editorState(docFromJSON(EMPTY_DOC)))
+    const after = pasteUrl(editorState(readDoc(EMPTY_DOC)))
 
     expect(linkMenuKey.getState(after)?.active).toBe(true)
     expect(after.doc.child(0).child(0).attrs.id).toEqual(expect.any(String))
