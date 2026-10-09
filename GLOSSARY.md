@@ -70,6 +70,10 @@ _Avoid_: 固定, pinned runspace（印は Tab に付く）
 Workbench Ledger のうち、Runspace の並び、各 Runspace の Tab の並び、Pin、各 Tab が表示する Terminal Session を合わせたもの。Terminal Session と Agent Session の状態は含まない。
 _Avoid_: 配置, 並び（単独で使わない）, arrangement
 
+**Jump Mode**:
+Workbench で、sidebar に見えている Runspace と、active な Runspace の Tab に番号を出し、番号で選ぶ間の状態。この間は Tab を閉じる・新しく開く・並べ替えることもできる。選ぶか、表示する Tab が替わるか、Workbench をクリックするか、取り消すと抜ける。live な Agent Session がいる Tab を閉じるときは、閉じる操作をもう一度求める。
+_Avoid_: jump hint モード, ジャンプ, hint mode
+
 **Terminal Session**:
 ptyd が持つ 1 つの PTY。app より長生きし、再 attach すると Terminal Session Transcript を replay する。生きている Terminal Session は必ず 1 つの Tab が表示している。
 _Avoid_: session（Agent Session と紛れる）, detached（Tab の無い Terminal Session は残さない）
