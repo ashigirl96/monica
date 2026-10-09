@@ -170,8 +170,11 @@ const InputMessage = forwardRef<HTMLDivElement, InputMessageProps>(
       return () => ro.disconnect()
     }, [resizeTextarea])
 
+    // Answering has no queue to send into, so the Stop control stands in
+    // for Send and Enter sends nothing until the answer ends.
+    const stopping = streaming && onStop !== undefined
     const trimmed = value.trim()
-    const canSend = !disabled && trimmed.length > 0
+    const canSend = !disabled && trimmed.length > 0 && !stopping
 
     // Edge = the box-shadow's 1px ring, recoloured in place per state so the
     // stroke gains contrast without ever appearing to thicken (no second
@@ -197,7 +200,7 @@ const InputMessage = forwardRef<HTMLDivElement, InputMessageProps>(
 
     // Send button morph: Stop (streaming) → Send (idle). Only the Stop⇄arrow
     // swap animates.
-    const buttonMode: 'send' | 'stop' = streaming && onStop ? 'stop' : 'send'
+    const buttonMode: 'send' | 'stop' = stopping ? 'stop' : 'send'
     const buttonLabel = buttonMode === 'stop' ? '止める' : sendLabel
 
     const setCaretEnd = useCallback(() => {

@@ -4,11 +4,12 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 
-import { MAX_ASK_BODY_BYTES } from '@monica/chat/contract'
+import { type contract as chatContract, MAX_ASK_BODY_BYTES } from '@monica/chat/contract'
 import { createChatAgent } from '@monica/chat/server'
+import { type FakeScenario, writeFakeClaude } from '@monica/chat/testing'
 import type { contract } from '@monica/note/contract'
 import { createNoteLedger, migrations } from '@monica/note/server'
-import { createORPCClient } from '@orpc/client'
+import { createORPCClient, ORPCError } from '@orpc/client'
 import { RPCLink } from '@orpc/client/fetch'
 import type { ContractRouterClient } from '@orpc/contract'
 import { drizzle } from 'drizzle-orm/bun-sqlite'
@@ -32,13 +33,19 @@ function webDist(files: Record<string, string>): string {
   return dir
 }
 
-function listen(port: number | undefined, dist = webDist({ 'index.html': '<p>notes</p>' })) {
+function listen(
+  port: number | undefined,
+  dist = webDist({ 'index.html': '<p>notes</p>' }),
+  claude?: FakeScenario,
+) {
   const home = mkdtempSync(join(tmpdir(), 'monica-home-'))
   cleanups.push(() => rmSync(home, { recursive: true, force: true }))
   const db = drizzle(new Database(':memory:'))
   migrate(db, { migrationsFolder: migrations.folder, migrationsTable: migrations.table })
   const noteLedger = createNoteLedger({ db, home })
-  const chatAgent = createChatAgent({ home })
+  const claudePath = claude && writeFakeClaude(home, join(home, 'claude.jsonl'), claude)
+  const chatAgent = createChatAgent({ home, ...(claudePath && { claudePath }) })
+  cleanups.push(() => chatAgent.stop())
   const listener = listenBrowser(port?.toString(), {
     context: { db, noteLedger, chatAgent },
     webDist: dist,
@@ -200,6 +207,42 @@ test('a GET for an image whose name is not one the Note Ledger makes is not foun
     expect([path, response.status]).toEqual([path, 404])
     expect([path, await response.text()]).not.toEqual([path, 'the DB'])
   }
+})
+
+// 答えの途中の失敗は、流した text の後に、宣言した error の code と data で Chrome Extension に届く。
+test('a failure after some text of the answer reaches an RPCLink client after that text as the declared error with its data', async () => {
+  const port = freePort()
+  listen(port, undefined, 'max-output-tokens')
+  const client: ContractRouterClient<{ chat: typeof chatContract }> = createORPCClient(
+    new RPCLink({
+      url: `http://127.0.0.1:${port}/rpc`,
+      headers: { 'sec-fetch-site': 'none', 'sec-fetch-mode': 'cors' },
+    }),
+  )
+  const texts: string[] = []
+
+  const failing = (async () => {
+    for await (const event of await client.chat.ask({
+      question: 'What is 1+1?',
+      page: { content: { kind: 'unreadable', reason: 'restricted' } },
+      history: [],
+    })) {
+      if (event.type === 'text') texts.push(event.text)
+    }
+  })()
+
+  const error = await failing.then(
+    () => undefined,
+    (e: unknown) => e,
+  )
+  expect(texts).toEqual(['Two', ' is'])
+  expect(error).toBeInstanceOf(ORPCError)
+  expect(error).toMatchObject({
+    code: 'AGENT_FAILED',
+    status: 500,
+    defined: true,
+    data: { detail: expect.stringContaining('output token maximum') },
+  })
 })
 
 // headless で起こした dev の Backend が release の 19380 を取らないよう、env が無ければ既定の port にも倒さない。

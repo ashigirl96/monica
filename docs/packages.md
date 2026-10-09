@@ -88,7 +88,7 @@ entry は層ではなく、import してよい実行環境で切る（ADR-0009�
 | `@monica/<d>/ui` | React の component と atom。画面を持たない job には無い | browser | apps/desktop、apps/web（note）、apps/extension（chat）、他 package の ui |
 | `@monica/<d>/cli` | 出力の整形関数、補完の候補を返す関数、手で書く command。CLI に出す procedure の無い note と chat には無い | Bun | apps/cli |
 | `@monica/<d>/body` | Note の本文の JSON を読む関数と、本文と markdown の変換（`docs/packages/note-ledger.md`）。今は note だけが持つ | どこでも | 自分の contract と server と ui |
-| `@monica/<d>/testing` | 他の package のテストに出す fake。今は workbench と chat が持つ。workbench は `src/fake-ptyd.ts` の fake の ptyd（`startFakePtyd`）、短い home を作る `tempHome`、Terminal Session が starting を抜けるのを待つ `untilSettled` を出す。chat は `src/testing.ts` の、偽の claude を起こす wrapper を書く `writeFakeClaude` を出す | Bun | 他 package のテストと `testing.ts` |
+| `@monica/<d>/testing` | 他の package のテストに出す fake。今は workbench と chat が持つ。workbench は `src/fake-ptyd.ts` の fake の ptyd（`startFakePtyd`）、短い home を作る `tempHome`、Terminal Session が starting を抜けるのを待つ `untilSettled` を出す。chat は `src/testing.ts` の、偽の claude を起こす wrapper を書く `writeFakeClaude` と、その失敗の場面の型 `FakeScenario` を出す | Bun | 他 package のテストと `testing.ts` |
 
 - 依存の向きは task → workbench だけ。workbench は task を import しない（ADR-0005）。job は task も workbench も import しない（ADR-0016）。note は他の domain を import せず、他の domain からも import されない。chat も同じ。
 - task の schema は workbench の table を FK のために import するが、re-export しない（ADR-0010）。
@@ -152,6 +152,8 @@ package ごとに in-memory の SQLite に自分の migration を当てる（tas
 5. 変更の stream は domain ごとに 1 本（`workbench.changes`、`task.changes`）で、判別 union の event を流す。中身は `events` と同じ合図。合図は、その domain の procedure の output が変わる経路すべてで出す。stream だけを購読して読み直す client が、古い output を持ったまま残らないようにするため。他の domain の行から導く output（task の表示状態は workbench の Agent Session から導く）は、相手の合図を受けて自分の合図を出す。購読する画面の無い job と、focus のたびに取り直す note は stream を持たない（ADR-0016・0018）。
 6. `oc.$meta(...)` と `createSchemaFactory({ coerce: { date: true } })` は各 package の `contract.ts` の中にだけ書く。oRPC 2.0 で `.meta` が plugin 制になったときに直す場所を 1 つにするため（#21）。例外は `apps/cli/src/forward.ts` で、output を持たない procedure を組み直すために contract の meta を `os.$meta` で引き継ぐ（`docs/packages/cli.md`）。
 7. 応答の stream は、1 回の呼び出しへの応答を流す event iterator（`chat.ask`）。答えが終われば閉じ、client は payload をそのまま描く。規約 5 の change stream とは別の種類で、購読し続けない（ADR-0028）。
+   - 途中の失敗は、それまで流した event の後に、`.errors()` で宣言した typed error で投げる。client には先の event の後に `ORPCError` で届き、`code` と `data` も届く。
+   - handler の中で起きた想定外の error も宣言した error に包み、素の `Error` を外へ出さない。素の `Error` は oRPC で `INTERNAL_SERVER_ERROR`「Internal server error」になり、理由が client に届かないため。
 
 contract を走査するテストが、description と output が全 procedure にあること、`cli: true` の procedure に整形関数があることを確かめる。CLI に載る workbench・task・job は `apps/cli/src/contract.test.ts`、note と chat は `packages/note/src/contract.test.ts` と `packages/chat/src/contract.test.ts` が見る。
 

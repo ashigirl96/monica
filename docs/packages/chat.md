@@ -6,14 +6,15 @@
 
 ```
 prepare   → void
-ask       { question, page: Page, history: { question, answer, page: PageSnapshot }[] } → event iterator of ChatEvent   errors: CHAT_BUSY
+ask       { question, page: Page, history: { question, answer, page: PageSnapshot }[] } → event iterator of ChatEvent   errors: CHAT_BUSY, NOT_AUTHENTICATED, USAGE_LIMIT, AGENT_FAILED
 ```
 
 - `prepare` は spare（下の「spare」）を起こし、その initialize を待たずに返る。spare が既にあるか、claude を 4 つ持っていれば何もしない。Chrome Extension は Backend の不在の確かめにもこれを呼ぶので、速く返す。
 - `ask` は 1 回の質問への応答の stream（`docs/packages.md` の contract の規約 7）。`ChatEvent` は `type` の判別 union で、最初に `{ type: 'snapshot', page: PageSnapshot, omitted: { pages, turns } }` を 1 つ流し、続けて `{ type: 'text', text }`（答えの文字の delta）を流す。client は届いた順に `text` をつなぐ。result を受けたら stream を閉じる。形は下の「Page Snapshot」にある。
+- 答えの間に `{ type: 'retry', attempt }`（API の再試行）と `{ type: 'usage', utilization, rateLimitType, resetsAt? }`（plan の使用量の警告）も流す。下の「失敗」にある。
 - `question` は 1 字以上。`page` と `PageSnapshot` の `url` と `title` は省略できるただの文字列で、形を検めない。`chrome://` などの Browser Tab では side panel から見えず、`file://` のページもあるため。
 - `history` は Chat の前の問答を古い順に並べたもの。turn ごとに、その質問の `snapshot` で返した `PageSnapshot` を持つ。Backend は Chat を持たず、送られた履歴をそのまま prompt にする（ADR-0031）。
-- `.errors()` で宣言するのは `CHAT_BUSY`（status 429）だけ。claude を 4 つ持っているときの `ask` に、iterator を返す前に投げる。claude が落ちたときの error は型にせず、SDK の iterator が投げた error がそのまま oRPC の `INTERNAL_SERVER_ERROR` として流れる。
+- `.errors()` で宣言するのは `CHAT_BUSY`・`NOT_AUTHENTICATED`・`USAGE_LIMIT`・`AGENT_FAILED`。`CHAT_BUSY`（status 429）は、claude を 4 つ持っているときの `ask` に、iterator を返す前に投げる。ほかの 3 つは下の「失敗」にある。
 - `MAX_ASK_BODY_BYTES`（50MB）は、ブラウザの口が受ける body の上限。ブラウザの口の 2 つの `Bun.serve` に `maxRequestBodySize` で渡し、超えた body には 413 が返る。
 - router は CLI に出さず、ブラウザの口にだけ `{ note, chat }` で載せる。token の口には載せない。change stream は持たない（ADR-0028・0031）。
 
@@ -71,11 +72,14 @@ SDK の `env` は `process.env` に重ならず丸ごと置き換わる。claude
 ## claude の持ち方
 
 - `spawnClaudeCodeProcess` で、`node:child_process` の `spawn` に SDK の `command`・`args`・`cwd`・`env`・`signal` を渡して起こし、その child を持つ。SDK は `query()` と `startup()` の呼び出しの中で同期に spawn する。
-- 子の stderr は Backend の stderr に流す（`stdio` の 3 つ目を `'inherit'`）。`spawnClaudeCodeProcess` で起こすと SDK は子の stderr を読まないので、pipe にすると詰まって子が止まる。
-- SIGKILL を送る契機は 3 つ。SDK の `close()` や `AbortController` に任せると、turn の途中の子が 2〜3 秒 delta を出し続けて残り、使用量を使うため（ADR-0031）。
+- 子の stderr は pipe にし、読んだそばから Backend の stderr に流しながら、末尾の 2,000 字を持つ（`src/claude.ts`）。claude が result の前に落ちたとき、その末尾を `AGENT_FAILED` の `detail` に足す。`spawnClaudeCodeProcess` で起こすと SDK は子の stderr を読まず、SDK の error の message に `stderr: …` は付かない。読まずに放った pipe は詰まって子が止まるので、必ず読み続ける。
+  - SDK は子の `exit` で error を投げ、`exit` は stderr の残りより先に届くことがある。末尾を読む前に pipe が閉じるのを待つ。claude の子が pipe を握ったままでも失敗を返せるよう、待つのは 200ms までにする。
+- SIGKILL を送る契機は 4 つ。SDK の `close()` や `AbortController` に任せると、turn の途中の子が 2〜3 秒 delta を出し続けて残り、使用量を使うため（ADR-0031）。
   - handler の `signal` の abort。listener を付けてすぐ送る。generator の `finally` は走っている `await` が終わるまで走らないため。side panel を閉じたときや、client が止めたとき。
   - result を受ける前に generator が閉じられたとき（`finally`）。`createRouterClient` の client で `for await` を break したときは `signal` が abort せず、generator の `return` だけが走る。
   - `stop()`。spare も含めて持っている child すべてに送る。
+  - 失敗を決めた時（下の「失敗」）。自分で抜けるのを待つと、0.5〜1.4 秒のあいだ同時の 4 つに数えたまま残るため。
+- SIGKILL した claude について SDK の iterator は `Claude Code process terminated by signal SIGKILL` を投げる。この error だけでは claude が自分で落ちたのかを見分けられないので、`ChatAgent` は SIGKILL を送った child を覚えておき、その child の error は失敗にせず stream を閉じる。
 - result を受けたら、prompt の AsyncIterable を終えて stream を閉じる。SDK が claude の stdin を閉じ、claude は自分から抜ける。SDK の iterator は閉じない。`for await` を抜けると SDK は claude の終了を最大 2 秒待ち、その間 stream が閉じないため。
 - 同時に持つ claude は 4 つまでで、spare も数える。1 つ 270〜290MB の process でメモリを食い潰されないための上限で、spare も同じだけ食うため。数は spawn した child の集合で数え、child の `exit` で外す。答えを閉じてから子が抜けるまでの間もメモリを食うため。空きの確かめと `query()`・`startup()` の呼び出しの間に await を挟まないので、並んだ質問が 5 つ目を起こすことは無い。
 
@@ -181,17 +185,133 @@ snapshot      { type: 'snapshot', page: PageSnapshot, omitted: { pages, turns } 
 - 本物のクリックで side panel の入力欄に focus を移した後も、ページの選択範囲が `selection` に入るか（CDP の操作でだけ確かめた）。
 - 入れ子の深い DOM での変換の時間。div を 256・512・1000 段入れ子にしたページで、defuddle は 0.33 秒・1.1 秒・4.4 秒かかった（3000 段で 79 秒）。main thread で走るので、その間 Backend は他の request に応えない。
 
+## 失敗
+
+質問に答えを返せないとき、side panel はその質問の答えの場所に日本語で理由を出し、どの失敗にも「再試行」のボタンを付ける。Backend に届かないことは、入力欄の上の帯でも知らせる（#269 の resolution）。読めなかった・切り詰めた・渡していないことの知らせ（上の「知らせ」）は質問の吹き出しの下に出し、答えの場所の失敗とは混ぜない。
+
+### 失敗を決める（`src/chat-agent.ts`）
+
+`ChatAgent` は SDK の message から失敗を決める。決めるのは `result` を受けた時で、`is_error` が true か `subtype` が `success` でなければ失敗にする。調べたどの失敗でも `assistant` の `error` の直後に `result` が来たので遅れは無く、`max_output_tokens` のように CLI が続きを頼む途中の message で早まって決めない。SDK がその 0.5〜1.4 秒後に投げる `Error("Claude Code returned an error result: …")` は待たず、claude を SIGKILL してから typed error を投げる。
+
+code は上から順に当てる。
+
+| code | status | 当てる失敗 | data |
+|---|---|---|---|
+| `USAGE_LIMIT` | 429 | その質問で最後に来た `rate_limit_event` の `rate_limit_info.status` が `rejected` で、`resetsAt` と `rateLimitType` を持つ | `{ rateLimitType, resetsAt }`（`resetsAt` は unix 秒） |
+| `NOT_AUTHENTICATED` | 401 | 最後の `assistant` の `error` が `authentication_failed`・`oauth_org_not_allowed`・`verification_required` のどれか | なし |
+| `AGENT_FAILED` | 500 | それ以外のすべて。`billing_error`・`account_on_hold`・`max_output_tokens`・`invalid_request`・`server_error`（再試行が尽きた 529・500・接続の失敗）・`rate_limit`（上限の header の無い 429）など | `{ detail }`: CLI の原文 |
+
+- 上限の header の無い 429 も `rate_limit_event` は `rejected` になるが、`resetsAt` を持たない。API の一時的な失敗なので、`resetsAt` の有無で plan の上限と分ける。
+- `rateLimitType` は enum にせず文字列にする。CLI が版ごとに足す値で data が schema を通らないと、typed error が `defined: false` になり、side panel が上限と分からなくなるため。
+- `detail` は先頭 2,000 字で切る。side panel が詳しい行にそのまま出すため。
+  - `result` があればその文字列にする。成功の形の `result` は `result`、`SDKResultError` は `errors` を改行でつないだもの。
+  - `result` の前に SDK の iterator が投げたら、その message に claude の stderr の末尾（上の「claude の持ち方」）を足す。claude の場所に何も無い、起きてすぐ落ちた（`Claude Code process exited with code 1`）、答えの途中で落ちた、`initialize_timeout` がこれに当たる。
+  - result 無しに iterator が終わったら、`claude exited before it answered` に stderr の末尾を足す。
+- typed error は、それまで流した `snapshot`・`text`・`retry`・`usage` の後に投げる（`docs/packages.md` の contract の規約 7）。
+- `chat.ask` の handler（`src/server.ts`）は、`ChatAgent` が投げた `ChatFailure` を宣言した error にし、ほかの想定外の error も `AGENT_FAILED` に包む。iterator を返す前（Page Snapshot の変換や claude の起動）に投げた error も同じに包む。素の `Error` は `INTERNAL_SERVER_ERROR`「Internal server error」になり、理由が消えるため。
+- 自分で SIGKILL した claude の error は失敗にしない（上の「claude の持ち方」）。stream の abort と Backend の終了では、stream は error を投げずに閉じる。
+- contract に載せないもの: Backend に届かない場合と、body の上限の 413（`PAYLOAD_TOO_LARGE`）。413 は side panel が送る前に大きさを見て「読めなかった」にするので、届くのは他のブラウザ拡張からだけ。
+
+### `retry` と `usage`
+
+- `system` の `api_retry` が来るたびに `{ type: 'retry', attempt }` を流す。text の前か後かで分けない。CLI は API の stream が切れると答えを最初からやり直すので、side panel は途中の答えを消して描き直す。
+- CLI が stream しない request に替えると、答えは `stream_event` の delta を伴わない `assistant` 1 つで届く。最後の `api_retry` の後に text の delta を流していないとき、`error` の無い `assistant` の text block をつないで 1 つの `text` で流す。delta を流した答えでは、`assistant` の text を重ねて流さない。
+- `rate_limit_event` の `status` が `allowed_warning` で、`utilization` と `rateLimitType` があるとき、`{ type: 'usage', utilization, rateLimitType, resetsAt? }` を流す。Chat は答えるのを断らない。上限は Tab の agent と共有している。
+- `CLAUDE_CODE_MAX_RETRIES=4`（ADR-0033）で、再試行が尽きるまでを約 8 秒にする。既定は 10 回・約 3 分で、その間は `api_retry` だけが来る。
+
+### side panel の文言（`src/ui/failure.ts`）
+
+side panel は `ORPCError`（`@orpc/client`）の `code` で分け、`data` は contract の `askErrors` の schema で `safeParse` して読む（task の `close-bench.ts` と同じ形）。Backend の `message` は出さず、文は chat の ui が作る。Backend に届かないことは、`chat.prepare` と `chat.ask` の失敗が `TypeError` であることで見分ける。止めるボタンの abort（`DOMException` の AbortError）は失敗にしない。
+
+| 場面 | side panel が見るもの | 答えの場所に出す 1 行 | 詳しい行 |
+|---|---|---|---|
+| Backend に届かない | 途中の答えの無い `TypeError` | 「monica の desktop に届きませんでした」。入力欄の上に帯も出す | なし |
+| 答えの途中で届かなくなった | 途中の答えの後の `TypeError` | 途中までの答えを残し「答えが途中で切れました」。帯も出す | なし |
+| Claude Code の login が無い | `NOT_AUTHENTICATED` | 「Claude Code に login していません。terminal で claude を起こし、/login してください」 | なし |
+| plan の上限 | `USAGE_LIMIT` | 「plan の 5 時間の上限に達しました。10:00 に戻ります」 | なし |
+| 同時の claude の上限 | `CHAT_BUSY` | 「ほかの Chat が答えています」 | なし |
+| 答えの途中の失敗 | 途中の答えの後の `AGENT_FAILED` | 途中までの答えを残し「答えが途中で切れました」 | `detail` |
+| 再試行が尽きた API の失敗 | `retry` を受けた後の `AGENT_FAILED` | 「Anthropic の API に繋がりませんでした」 | `detail` |
+| claude が起きない・落ちた・ほか | 上の 2 つに当たらない `AGENT_FAILED` | 「claude が答えを返せませんでした」 | `detail` |
+| 宣言していない `ORPCError` | 上のどれでもない `ORPCError` | 「claude が答えを返せませんでした」 | `<code>: <message>` |
+| `ORPCError` でも `TypeError` でもない error | 上のどれでもない error | 「claude が答えを返せませんでした」 | error の message |
+| API の再試行を待つ間 | `retry` | 途中の答えを消し「Anthropic の API に繋がりません。再試行しています（n 回目）」。次の `text` から答えを描き直す | なし |
+| 止めた | 止めるボタン | 途中までの答えの後に淡く「止めました」 | なし |
+| 使用量の警告 | `usage` | 答えの下に淡く「plan の 5 時間の枠を 91% 使いました（10:00 に戻ります）」 | なし |
+
+- `AGENT_FAILED` の 1 行目は、画面の途中の答え → その質問で受けた `retry` → それ以外、の順に選ぶ。code だけでは「途中で切れた」「API に繋がらない」「起きない」を分けられないが、side panel はその質問で受けた event を知っているため。`TypeError` も、画面に途中の答えがあれば「答えが途中で切れました」にする。
+- 時刻は side panel が動く Mac の時刻帯で、今日なら `10:00`、別の日なら `10月12日 16:27` と書く。使用率は四捨五入した % にする。`usage` に `resetsAt` が無ければ「（…に戻ります）」を省く。
+- `rateLimitType` の呼び名は `five_hour` を「5 時間の」、`seven_day` を「週の」、`seven_day_opus` を「Opus の週の」、`seven_day_sonnet` を「Sonnet の週の」にし、ほかは呼び名を付けない（「plan の上限に達しました」）。知らない値でも文が壊れないようにするため。
+- toast は使わない。toast は server の英語の message をそのまま出す形（`packages/ui/src/toast.ts`）で、失敗はその質問の答えの場所に出すため。
+
+### 再試行と履歴（`src/ui/chat-store.ts`）
+
+- 再試行のボタンは、最後の質問の失敗にだけ出す。押すと、その質問で送った `chat.ask` の input をそのまま送り直し、ページは読み直さない。失敗した質問は最後の質問なので、その `history` は送った時から変わらず、Page Snapshot の中身（HTML など）も同じ物を送れる。
+- side panel は送った input を、答えが返るか、次の質問で履歴から外れるまで持つ。
+- oRPC の `ClientRetryPlugin` は使わない。event iterator の途中の error で handler を最初から呼び直すので、途中まで流した値が client で重なる（research の §3）。side panel が自分で送り直す自動の再試行もしない。
+- 失敗した質問は、再試行して答えが返るまで、後の質問の `history` に入れない。再試行せずに次の質問を送ったら、失敗した質問を履歴から外し、画面には残す。Backend が `snapshot` を返した後に失敗した場合も、その Page Snapshot を `history` に入れない。
+- 止めた質問は、途中までの答えの後に空行を挟んで「（ユーザーが途中で止めた）」を付けて履歴に入れる。答えが空なら印だけにする。「続けて」と訊いたときの材料になる。Backend は答えの文字をそのまま prompt にするので、印も文字のまま claude に渡る。
+- `snapshot` が届く前に止めた質問は、送ったページの URL と title だけで履歴に入れる。Backend が本文にしたものが side panel に無いため。ページを読み終える前に止めたら、URL も title も無い。
+- 止めた質問には再試行を付けない。履歴に入り、「続けて」で続きを訊けるため。
+
+### 止めるボタン
+
+- 答えの間（送ってから stream が閉じるまで。最初の text の前と、再試行を待つ間も含む）、InputMessage の送るボタンを止めるボタン（label は「止める」）にする。入力欄に文字があっても止めるボタンにし、Enter では送らない。queue を消したので、答えの間に送れる先が無いため。
+- 押すと side panel は `chat.ask` の stream を abort し、Backend は handler の `signal` の abort で子の claude を SIGKILL する（上の「claude の持ち方」）。side panel は押した後に届いた event を描かず、答えに「止めました」を淡く添える。`AbortController` だけでは、子が 2〜3 秒 delta を出し続けて残る。
+- 答えの途中で「新しい Chat」を押したときも、同じく stream を abort する。
+
+### Backend の不在の帯（`src/ui/reach.ts`）
+
+- side panel を開いた時の `chat.prepare` が `TypeError` で届かなかったら、入力欄の上に帯「monica の desktop が起動していません」を出す。`chat.ask` が `TypeError` で失敗したときも出す。
+- 帯が出ている間は、5 秒おきと、side panel の window が `focus` を受けた時に `chat.prepare` で確かめ直す。届いたら（error の応答も届いたと数える）帯を消し、確かめ直しを止める。`chat.ask` に応答が届いた時も消す。
+- 帯は待たずに出す。帯を出している間しか定期的に呼ばないので、notes の画面のように bun --watch の再起動（約 100ms）で帯がちらつくことは無い。
+- 帯が出ている間も送るボタンは押せる。Backend が居ない間も Chat は終わらない（ADR-0031、GLOSSARY の Chat）。
+
+### 確かめたこと
+
+- `CLAUDE_CODE_MAX_RETRIES=4` は効く。scratchpad の `Bun.serve` の proxy が、すべての `POST /v1/messages` に 529（`overloaded_error`）を返し、届いた時刻だけを記録した。`createChatAgent` の claude の場所には、`ANTHROPIC_BASE_URL` をその proxy に向けて本物の claude（SDK 0.3.293 の platform package）を `exec` する wrapper を渡した。
+  - wrapper が受けた env に `CLAUDE_CODE_MAX_RETRIES=4` があった。
+  - `retry` が attempt 1〜4 で届き、proxy に 5 回届いた（2〜5 回目は最初の request の 0.6・1.8・3.8・8.5 秒後）。
+  - 最初の request から 8.5 秒で `AGENT_FAILED` になり、`detail` は「API Error: 529 Overloaded. This is a server-side issue, usually temporary — try again in a moment. If it persists, check your inference gateway (127.0.0.1:<port>).」だった。
+  - claude を起こしてから最初の request まで 3.0 秒かかった。
+- 本物の side panel（Brave 1.97、headless、dev の Chrome Extension）で、Backend の居ない home で side panel を開くと帯が出た。同じ home の Backend をブラウザの口の port を付けて起こすと、5 秒以内に帯が消えた。
+- side panel の page を Browser Tab で開いて（ui の「実機で確かめたこと」と同じ）、本物の claude で次を確かめた。
+  - Backend の居ない間に「1 から 300 まで数字を 1 行ずつ書いて」を送ると、「monica の desktop に届きませんでした」と再試行のボタンと帯が出た。`TypeError` 以外なら「claude が答えを返せませんでした」と message が出るので、Chrome Extension の page の fetch の失敗も `TypeError` になる。
+  - Backend を起こした後に再試行を押すと、同じ質問の答えが返った。plan の使用率が 96% のときで、答えの下に「plan の 5 時間の枠を 96% 使いました（9:40 に戻ります）」が出た（本物の `allowed_warning`）。
+  - 答えが流れ始めてから止めるを押すと「止めました」が出て、3 秒後も答えは増えず、Backend を親に持つ claude は無かった。
+  - 答えが流れ始めてから Backend の stdin を閉じると、途中までの答えと「答えが途中で切れました」、再試行のボタン、帯が出た。stream の途中で Backend が居なくなっても `TypeError` になる。
+
+### 確かめていないこと
+
+- side panel の target で、Backend の居ない口への `fetch` が reject した error の constructor の名前と message。`extension-panel.ts eval` が worktree の guard に止められた。上の Browser Tab の page では、文言から `TypeError` だと分かった。
+- 帯が出ている間に、ページを click してから side panel を click すると、side panel の window が `focus` を受けて 5 秒を待たずに帯が消えるか。
+- 期限切れの OAuth token の 401 で、CLI が token を更新して答えるか（CLI のコードには更新して再試行する分岐がある）。
+- 本物の plan の上限の 429。research は header を真似た 429 で確かめた。
+- spare から答えたときの本物の失敗と `initialize_timeout`。偽の claude では、spare の login 無しも `NOT_AUTHENTICATED` になった。
+- CLI が合成の user message で続きを頼む場合（research の「毎回 RST で切る」）に、`retry` で消した前半が戻るか。CLI は途中までの答えを残して続きだけを頼むので、前半が戻らないことがある。
+
 ## テスト
 
 - `src/chat.test.ts` が `createRouterClient(router, { context: { chatAgent } })` を通して確かめる。DB は使わない。本文への変換の失敗は、`defuddle/node` の `Defuddle` を `spyOn` で reject させて作る。
+- 途中の失敗が RPCLink の client に `ORPCError` の `code` と `data` で届くことは、`apps/backend/src/browser-listener.test.ts` がブラウザの口に繋いで確かめる。
 - 本文への変換は `src/page/snapshot.test.ts` が `src/page/fixtures/` の HTML（`getHTML` が書き出す、document element の中身の形）で、同じページと全体の上限と block の並びは `src/page/prompt.test.ts` が `PageSnapshot` を直に組んで確かめる。どちらも claude を起こさない。
-- claude は `src/fake-claude.ts` の偽の claude に差し替える。テストは拡張子の無い `/bin/sh` の wrapper を一時 directory に書いて `claudePath` に渡す。wrapper は `@monica/chat/testing` の `writeFakeClaude(dir, recordPath)` が書き、Backend のテスト（`apps/backend/src/main.test.ts`）も `MONICA_CLAUDE_PATH` に渡して使う。wrapper は `exec "<process.execPath>" "<fake-claude.ts の path>" "<記録の file>" "$@"` の 1 行。SDK は path が `.js`・`.mjs`・`.ts`・`.tsx`・`.jsx` で終わると `bun` か `node` を名前で起こすが、claude の env には `PATH` が無い。拡張子の無い path は直に起こす。wrapper の `/bin/sh` は env に `PWD`・`SHLVL`・`_` を足す。
+- claude は `src/fake-claude.ts` の偽の claude に差し替える。テストは拡張子の無い `/bin/sh` の wrapper を一時 directory に書いて `claudePath` に渡す。wrapper は `@monica/chat/testing` の `writeFakeClaude(dir, recordPath, scenario?)` が書き、Backend のテスト（`apps/backend/src/main.test.ts` と `browser-listener.test.ts`）も使う。wrapper は `exec "<process.execPath>" "<fake-claude.ts の path>" "<記録の file>" <場面> "$@"` の 1 行。SDK は path が `.js`・`.mjs`・`.ts`・`.tsx`・`.jsx` で終わると `bun` か `node` を名前で起こすが、claude の env には `PATH` が無い。拡張子の無い path は直に起こす。wrapper の `/bin/sh` は env に `PWD`・`SHLVL`・`_` を足す。
 - 偽の claude は次のように話す。
   - stdin の `control_request` に `control_response`（`subtype: success`、`response: {}`）を返す。
   - `user` の message を受けたら、`system`（`init`）、`stream_event`（`content_block_delta` の `text_delta` を 3 つと `thinking_delta` を 1 つ）、`assistant`、`result`（`subtype: success`）を 1 行ずつ書く。
   - stdin の EOF で抜ける。
   - argv、env、cwd、pid、`initialize` の request、`user` の content、EOF を、記録の file に JSON 行で書く。
   - 質問に `HOLD` を含むと、最初の text の delta の後に止まり、stdin の EOF と SIGTERM では抜けない。居なくなれば SIGKILL で終わっている。30 秒で自分から抜ける。
+- 失敗の場面は wrapper ごとに `scenario`（`FakeScenario`）で選ぶ。`ChatAgent` に場面を渡す口は足さない。偽の claude は、research（`docs/research/chat-failures.md` の §2）で本物の claude が流した message の並びを真似る。
+  - `not-logged-in`: `assistant`（`error: authentication_failed`）、`result`（`is_error`）の後、5 秒 exit しない。`ChatAgent` が SDK の error を待たずに決め、claude を止めることを見る。
+  - `usage-limit`: `rejected` で `resetsAt`（`FAKE_RESETS_AT`）と `five_hour` を持つ `rate_limit_event`、`assistant`（`rate_limit`）、`result`（429）。
+  - `throttled`: `api_retry` の後に `resetsAt` の無い `rejected`（`rateLimitType` はある）、`assistant`（`rate_limit`）、`result`（429）。
+  - `overloaded`: `api_retry` を 4 回、`assistant`（`server_error`）、`result`（529）。`billing`: `assistant`（`billing_error`）と `result`。
+  - `max-output-tokens`: text の delta を 2 つ流した後に `assistant`（`max_output_tokens`）と `result`。
+  - `exit-at-start`: stdin を読む前に stderr に 1 行書いて exit 1。`exit-mid-answer`: text の delta の後に stderr に 1 行書いて exit 1。
+  - `restart`: text の delta、`api_retry`、最初からの delta、`result`。`unstreamed`: text の delta、`api_retry`、delta の無い `assistant`、`result`。
+  - `usage-warning`: 普段の答えの `result` の前に `allowed_warning`（`utilization` 0.91）の `rate_limit_event`。普段の答え（`answer`）は `allowed` の `rate_limit_event` を流す。
+- claude の場所に何も無い場面は、`createChatAgent` に一時 directory の無い path を渡して作る。
 - 起こした claude は、テストの process の子のうち生きているもの（`ps` の ppid と stat）で数える。SDK は呼び出しの中で同期に spawn するので、`ask` と `prepare` が返った直後に数えれば、起こしていないことも確かめられる。
 - 5 分の時限は、`setTimeout` を `spyOn` で捕まえ、300000ms の callback を手で呼ぶ。
 - テストは偽の claude が居なくなるのを待ってから home を消す（`docs/packages/dev-loop.md` の「検査と CI」）。
@@ -221,7 +341,7 @@ SDK 0.3.293 と同梱の claude 2.1.293 で、dev の Backend を `env -i`（`HO
 - 写さないもの: Tooltip、use-fluid-hover、fluid-hover-highlight、popup、file-thumbnail。Button の loading の spinner の keyframes も、使わないので写さない。
 - 写すときの直し:
   - `"use client"` を消し、import を拡張子付きの相対 path にし、oxfmt を当てた。
-  - InputMessage は history を残し、添付・queue・suggestions・placeholder の suggestion を消した。`leftSlot` と `rightSlot` は ReactNode だけを受ける。`onStop` と止めるボタンは写したまま残し、今は渡さない。
+  - InputMessage は history を残し、添付・queue・suggestions・placeholder の suggestion を消した。`leftSlot` と `rightSlot` は ReactNode だけを受ける。queue を消したので、`status` が `streaming` で `onStop` を渡した間は、送るボタンをいつも止めるボタンにし、Enter でも送らない（上の「失敗」の「止めるボタン」）。
   - history の添字の 2 か所は、範囲外を分岐で扱う。新しい Chat で history が縮んでも、古い添字で `undefined` を入れない。
   - ChatMessage から、file-thumbnail を使う添付の表示を消した。
   - ThinkingIndicator はその場で日本語にした（「考えています」「ページを読んでいます」「まとめています」）。英語版は残さない。
@@ -241,8 +361,9 @@ SDK 0.3.293 と同梱の claude 2.1.293 で、dev の Backend を `env -i`（`HO
 - 並べ方は prototype の B。質問は ChatMessage の右の吹き出し、答えは ChatMessage に `w-full max-w-full items-stretch` で幅いっぱいに入れる。`max-w-full` だけでは、表とコードブロックだけの答えで吹き出しが潰れた（`contain: inline-size` で両方を幅の計算から外しているため）。質問の吹き出しに、その質問の Current Page は出さない。
 - 上端の見出し（`page-header.tsx`）は Current Page の title と host を出し、右端に「新しい Chat」を置く。host の行の `title` 属性に URL を持つ。host の無い URL（`file:` など）は URL をそのまま出し、URL も title も見えない Browser Tab は「読めないページ」と出す。favicon は出さない。外の画像は CSP の `img-src` で止まり、`_favicon` には `favicon` の権限が要るため。
 - 答えは use-stick-to-bottom（`chat-scroll.tsx`）で下端に張り付き、上へスクロールすると外れて「↓ 最新へ」を出す。
-- 最初の `text` が届くまで ThinkingIndicator を出す。答えている間は送らないが、入力欄には打てる。
-- 失敗は種類を分けず、答えの場所に「答えを受け取れませんでした」と出し、その問答を履歴に入れない。
+- 最初の `text` が届くまで ThinkingIndicator を出す。答えている間は送らず、送るボタンは止めるボタンになる。入力欄には打てる。
+- 失敗は答えの場所に、途中までの答えの後に赤い 1 行と、CLI の原文の詳しい行（等幅の淡い字）と「再試行」のボタンで出す。止めた答えには「止めました」、再試行を待つ間の 1 行と使用量の警告は淡い字で出す。文言は上の「失敗」にある。
+- 帯「monica の desktop が起動していません」は、入力欄の上に `destructive` の色で出す。
 - 読めなかった・切り詰めた・渡していないことの知らせ（上の「Page Snapshot」の「知らせ」）は、質問の吹き出しの下に右寄せの淡い 1 行で出し、答えの場所の失敗とは分ける。
 
 ### Chat の状態（`chat-store.ts`）
@@ -250,8 +371,8 @@ SDK 0.3.293 と同梱の claude 2.1.293 で、dev の Backend を `env -i`（`HO
 React に依らない `createChatStore(client)` が Chat を持ち、`ChatApp` は `useSyncExternalStore` で描くだけにする。DOM の無い bun test で送受信を確かめるため。
 
 - Chat は side panel の document の memory にだけあり、window ごとに 1 つ。「新しい Chat」を押すか side panel を閉じると終わり、どこにも残さない。Backend が居なくなっても終わらない（ADR-0030・0031）。
-- `open(readPage)` は side panel を開いた時に `ChatApp` の effect が 1 回呼び、`chat.prepare` を呼んで spare を起こさせる。失敗は無視する。Backend の不在を知らせる帯はまだ無い。dev の StrictMode で 2 回呼ばれても、Backend が spare を 1 つに保つので害は無い。
-- `ask` は、送る時に `readPage` で Current Page を読み直して `page` に入れ、答え終えた問答を古い順に `history` に入れて `chat.ask` を呼ぶ。`ChatApp` が渡す `readPage` は、Browser Tab を取り直して `read-page.ts` で読む（上の「Page Snapshot」）。答えている間は送らずに false を返す。答えの途中で Current Page が替わっても、delta はその質問の答えに足す。
+- `open(readPage, focus)` は side panel を開いた時に `ChatApp` の effect が 1 回呼び、`chat.prepare` を呼んで spare を起こさせる。届かなければ帯を出す（上の「失敗」の「Backend の不在の帯」）。`focus` は `ChatApp` が渡す `window` で、帯の間はその `focus` の event でも確かめ直す。返す関数で確かめ直しを止める。dev の StrictMode で 2 回呼ばれても、Backend が spare を 1 つに保つので害は無い。
+- `ask` は、送る時に `readPage` で Current Page を読み直して `page` に入れ、答え終えた問答を古い順に `history` に入れて `chat.ask` を呼ぶ。送った input は、答えが返るか次の質問を送るまで持ち、`retry` が送り直す。`stop` は stream を abort し、止めた印を付けて履歴に入れる。`ChatApp` が渡す `readPage` は、Browser Tab を取り直して `read-page.ts` で読む（上の「Page Snapshot」）。答えている間は送らずに false を返す。答えの途中で Current Page が替わっても、delta はその質問の答えに足す。
 - 届いた `snapshot` の `page` を、その問答の turn の `page` として履歴に入れ、`snapshot` から作った知らせを質問の entry の `notice` に入れる。
 - `startNewChat` は流れている stream を `signal` で abort し、問答と履歴を空にする。abort の後に届いた delta は描かない。Backend は abort でその claude を止める。
 - client の型 `ChatClient` は、side panel が呼ぶ `prepare` と `ask` だけの形。ブラウザの口への oRPC の client の `chat` がそのまま入り、テストは偽の client を渡す。
@@ -276,6 +397,9 @@ React に依らない `createChatStore(client)` が Chat を持ち、`ChatApp` �
 - `current-page.test.ts` は `fake-chrome.ts` の偽の `chrome.tabs` で確かめる。偽物は `globalThis.chrome` に置いてテストの後に外し、`query` の `active`・`windowId`・`currentWindow` を本物と同じく絞る。chrome:// へ移ったときの url も title も無い `onUpdated` も出せる。
 - `read-page.test.ts` は同じ偽物の `chrome.scripting.executeScript` で確かめる。偽物は注入された関数を走らせず、`readings` に置いた結果を返すか、reject するか、返らない。渡された injection は `injections` に残る。注入する関数そのもの（shadow root と選択範囲）は DOM が要るので、実機で確かめる。3 秒の打ち切りは `setTimeout` を `spyOn` して callback を手で呼ぶ。
 - `chat-store.test.ts` は偽の client で確かめる。偽の答えの stream は `signal` に応えず、test が流した delta をそのまま渡すので、abort の後に届いた delta を描かないことを確かめられる。
+  - 偽の client は、Backend の宣言した error を `@orpc/client` の `ORPCError`（`defined: true`、contract の `askErrors` の status と message）で、届かないことを `TypeError` で投げ分ける。ui の entry は server を import できないので、router を in-process で呼べないため。
+  - 失敗の文言は store の entry の `failure` で確かめる。時刻の期待値は local の `Date` から作り、時刻帯に依らせない。
+  - 帯の 5 秒おきの確かめ直しは `setInterval` を `spyOn` で捕まえて callback を手で呼び、focus は `open` に渡した `EventTarget` に `focus` の event を出す。
 - `answer.test.tsx` は `react-dom/server` の `renderToStaticMarkup` で markdown の描画を確かめる。react-dom は devDependency。
 
 ### 実機で確かめたこと

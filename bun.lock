@@ -120,6 +120,7 @@
       "dependencies": {
         "@anthropic-ai/claude-agent-sdk": "catalog:",
         "@base-ui/react": "catalog:",
+        "@orpc/client": "catalog:",
         "@orpc/contract": "catalog:",
         "@orpc/server": "catalog:",
         "class-variance-authority": "catalog:",
