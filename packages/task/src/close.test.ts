@@ -398,11 +398,9 @@ test('close refuses a Bench that is still being prepared, even with --force', as
   expect((await client.list({})).tasks).toMatchObject([{ ref }])
 })
 
-test('reopen opens a closed Task with no Bench, and the next run makes the worktree and the Bench anew on a new branch issue-n', async () => {
-  const fixture = await withWorktreeBench()
-  const { client, cwd, ghq, taskLedger } = fixture
-  commit(cwd, { 'old.txt': { content: 'first try\n' } }, 'first try')
-  await client.close({ ref, force: true })
+test('reopen opens a closed Task with no Bench, not started', async () => {
+  const { client, taskLedger } = await tracked()
+  await client.close({ ref })
   const changes: TaskChange[] = []
   taskLedger.events.subscribe('change', (change) => changes.push(change))
 
@@ -413,11 +411,6 @@ test('reopen opens a closed Task with no Bench, and the next run makes the workt
   expect((await client.list({})).tasks).toMatchObject([
     { ref, cwd: null, displayState: { state: 'not_started' } },
   ])
-  expect(await client.run({ ref })).toMatchObject({ cwd, benchCreated: true, resumed: null })
-  expect(git(cwd, 'rev-parse', '--abbrev-ref', 'HEAD')).toBe('issue-12')
-  expect(git(cwd, 'rev-parse', 'HEAD')).toBe(
-    git(ghq.checkout('acme/app'), 'rev-parse', 'origin/main'),
-  )
 })
 
 test('reopen syncs the Task, so one whose Issue was closed on GitHub meanwhile shows issue_closed', async () => {

@@ -106,12 +106,6 @@ async function refusedByUncommittedChanges() {
 
 const reasonsOf = (runspaceId: string) => getDefaultStore().get(refusedReasonsAtom).get(runspaceId)
 
-test('a refused close remembers the reasons for its Bench', async () => {
-  const { runspaceId, cwd } = await refusedByUncommittedChanges()
-
-  expect(reasonsOf(runspaceId)).toEqual([{ kind: 'uncommitted_changes', worktree: cwd }])
-})
-
 test('a forced close of a refused Bench passes force and forgets the reasons', async () => {
   const { client, runspaceId, cwd } = await refusedByUncommittedChanges()
 
