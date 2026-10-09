@@ -34,16 +34,18 @@ import { SyncedBlockView, syncedBlockRefreshPlugin } from './synced-block.ts'
 import type { OnOpenBlock, ResolveBlock } from './synced-block.ts'
 import { tableMenuPlugin } from './table-menu.ts'
 
-export function docFromJSON(json: unknown): PMNode {
-  if (json === null || json === undefined) return emptyDoc()
+export type DocRead = { ok: true; doc: PMNode } | { ok: false; error: string }
+
+export function docFromJSON(json: unknown): DocRead {
+  if (json === null || json === undefined) return { ok: true, doc: emptyDoc() }
   try {
     const doc = PMNode.fromJSON(schema, json)
     // fromJSON は content 制約を検証しない。空 doc（{"type":"doc","content":[]} 等）を
     // そのまま返すとプラグインが壊れるので、schema 違反はここで弾く。
     doc.check()
-    return doc
-  } catch {
-    return emptyDoc()
+    return { ok: true, doc }
+  } catch (error) {
+    return { ok: false, error: error instanceof Error ? error.message : String(error) }
   }
 }
 
@@ -119,7 +121,7 @@ export type BlockEditorCallbacks = {
 
 export function createBlockEditor(
   mount: HTMLElement,
-  initialDoc: unknown,
+  initialDoc: PMNode,
   {
     onDocChange,
     onExitUp,
@@ -139,7 +141,7 @@ export function createBlockEditor(
   // synced block の NodeView 群を refresh plugin と共有する（同一ノート内のライブ反映用）
   const syncedRegistry = new Set<SyncedBlockView>()
   const state = EditorState.create({
-    doc: docFromJSON(initialDoc),
+    doc: initialDoc,
     // menu → block selection → 構造キー → inline → default の順
     plugins: [
       // 全 keystroke の logging + 全文 walk を伴うため dev 限定

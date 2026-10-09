@@ -1,3 +1,4 @@
+import type { Node as PMNode } from 'prosemirror-model'
 import { TextSelection } from 'prosemirror-state'
 import { type RefObject, useEffect, useRef } from 'react'
 
@@ -32,8 +33,8 @@ function useLatest<T>(value: T): { readonly current: T } {
 }
 
 type BlockEditorProps = {
-  /** ProseMirror doc の JSON。mount 時に一度だけ読む */
-  initialDoc?: unknown
+  /** mount 時に一度だけ読む */
+  initialDoc: PMNode
   autoFocus?: boolean
   /** doc が変わるたびに現在の doc（immutable node、JSON.stringify 可能）を受け取る（autosave フック） */
   onDocChange?: (doc: unknown) => void
@@ -70,7 +71,7 @@ type BlockEditorProps = {
 }
 
 export function BlockEditor({
-  initialDoc = null,
+  initialDoc,
   autoFocus = false,
   onDocChange,
   onExitUp,

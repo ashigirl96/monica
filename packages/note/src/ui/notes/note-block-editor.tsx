@@ -1,3 +1,4 @@
+import type { Node as PMNode } from 'prosemirror-model'
 import { type RefObject, useCallback, useEffect, useState } from 'react'
 
 import { fromMarkdown, toMarkdown } from '../../body/index.ts'
@@ -13,6 +14,7 @@ import { noteReferences } from './note-references.ts'
 
 type NoteBlockEditorProps = {
   note: Note
+  doc: PMNode
   /** 外部更新を採用したときだけ進む世代。自分の autosave では進まないので、
    * 打鍵のたびに再マウントしてカーソルと undo を失うことがない。 */
   generation: number
@@ -29,6 +31,7 @@ export function NoteBlockEditor(props: NoteBlockEditorProps) {
 
 function OpenNoteEditor({
   note,
+  doc,
   generation,
   autoFocus,
   onDocChange,
@@ -68,7 +71,7 @@ function OpenNoteEditor({
   return (
     <BlockEditor
       key={generation}
-      initialDoc={note.content}
+      initialDoc={doc}
       autoFocus={autoFocus}
       onDocChange={onDocChange}
       uploadImage={uploadImage}
@@ -83,7 +86,7 @@ function OpenNoteEditor({
       resolveBlock={references.resolveBlock}
       onOpenBlock={openBlock}
       handleRef={handleRef}
-      renderMarkdown={(doc) => toMarkdown(doc, references.noteName)}
+      renderMarkdown={(selected) => toMarkdown(selected, references.noteName)}
       parseMarkdown={fromMarkdown}
       className="min-h-[70dvh] pt-4 pb-[40dvh]"
     />
