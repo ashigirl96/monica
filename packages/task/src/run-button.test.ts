@@ -25,7 +25,7 @@ test('an untracked ready-for-agent Issue gets a tackle button for a new Run', as
   github.issue(ref, { title: 'Ship it', labels: ['ready-for-agent'] })
 
   expect(await client.runButtons({ refs: [ref] })).toEqual({
-    buttons: [{ ref, button: { kind: 'tackle', run: 'new' } }],
+    buttons: [{ ref, button: { kind: 'tackle', run: 'new' }, reason: null }],
   })
 })
 
@@ -42,8 +42,8 @@ test('an Issue with an open Blocker gets no button, and one whose Blockers are a
 
   expect(await client.runButtons({ refs: [ref, 'acme/app#13'] })).toEqual({
     buttons: [
-      { ref, button: null },
-      { ref: 'acme/app#13', button: { kind: 'tackle', run: 'new' } },
+      { ref, button: null, reason: expect.stringContaining('blocked by acme/lib#3') },
+      { ref: 'acme/app#13', button: { kind: 'tackle', run: 'new' }, reason: null },
     ],
   })
 })
@@ -54,7 +54,9 @@ test.each([['ready-for-human'], ['needs-info'], ['wontfix']])(
     const { github, client } = withRepo()
     github.issue(ref, { title: 'Ship it', labels: [label, 'bug'] })
 
-    expect(await client.runButtons({ refs: [ref] })).toEqual({ buttons: [{ ref, button: null }] })
+    expect(await client.runButtons({ refs: [ref] })).toEqual({
+      buttons: [{ ref, button: null, reason: `${ref} has no label that picks a prompt` }],
+    })
   },
 )
 
@@ -63,7 +65,7 @@ test('a wayfinder Issue with no parent map gets no button, and running it is ref
   fixture.github.issue(ref, { title: 'Ask it', labels: ['wayfinder:grilling'] })
 
   expect(await fixture.client.runButtons({ refs: [ref] })).toEqual({
-    buttons: [{ ref, button: null }],
+    buttons: [{ ref, button: null, reason: expect.stringContaining('no map above it') }],
   })
   expect((await failure(fixture.client.runFromButton({ ref }))).code).toBe('PRECONDITION_FAILED')
 })
@@ -74,7 +76,7 @@ test('a wayfinder Issue under a parent that is not a map gets no button, and run
   fixture.github.issue(ref, { title: 'Ask it', labels: ['wayfinder:task'], parent: 'acme/app#7' })
 
   expect(await fixture.client.runButtons({ refs: [ref] })).toEqual({
-    buttons: [{ ref, button: null }],
+    buttons: [{ ref, button: null, reason: expect.stringContaining('acme/app#7') }],
   })
   const refused = await failure(fixture.client.runFromButton({ ref }))
   expect(refused.code).toBe('PRECONDITION_FAILED')
@@ -88,7 +90,7 @@ test.each([[[]], [['bug', 'enhancement']]])(
     github.issue(ref, { title: 'Ship it', labels })
 
     expect(await client.runButtons({ refs: [ref] })).toEqual({
-      buttons: [{ ref, button: { kind: 'triage', run: 'new' } }],
+      buttons: [{ ref, button: { kind: 'triage', run: 'new' }, reason: null }],
     })
   },
 )
@@ -97,7 +99,9 @@ test('a closed Issue gets no button', async () => {
   const { github, client } = withRepo()
   github.issue(ref, { title: 'Ship it', state: 'closed', labels: ['ready-for-agent'] })
 
-  expect(await client.runButtons({ refs: [ref] })).toEqual({ buttons: [{ ref, button: null }] })
+  expect(await client.runButtons({ refs: [ref] })).toEqual({
+    buttons: [{ ref, button: null, reason: `${ref} is a closed Issue` }],
+  })
 })
 
 test('telling the buttons tracks no Issue', async () => {
@@ -115,7 +119,9 @@ test('a closed Task gets no button', async () => {
   await client.track({ ref })
   await client.close({ ref })
 
-  expect(await client.runButtons({ refs: [ref] })).toEqual({ buttons: [{ ref, button: null }] })
+  expect(await client.runButtons({ refs: [ref] })).toEqual({
+    buttons: [{ ref, button: null, reason: `${ref} is a closed Task; reopen it to run it` }],
+  })
 })
 
 test('an Issue GitHub does not return, one of a failing repo and a malformed ref get no button, and the rest still do', async () => {
@@ -128,10 +134,10 @@ test('an Issue GitHub does not return, one of a failing repo and a malformed ref
     await client.runButtons({ refs: [ref, 'acme/app#99', 'acme/lib#3', 'not a ref'] }),
   ).toEqual({
     buttons: [
-      { ref, button: { kind: 'tackle', run: 'new' } },
-      { ref: 'acme/app#99', button: null },
-      { ref: 'acme/lib#3', button: null },
-      { ref: 'not a ref', button: null },
+      { ref, button: { kind: 'tackle', run: 'new' }, reason: null },
+      { ref: 'acme/app#99', button: null, reason: null },
+      { ref: 'acme/lib#3', button: null, reason: null },
+      { ref: 'not a ref', button: null, reason: null },
     ],
   })
 })
@@ -167,7 +173,7 @@ test('running from a triage button types claude with /triage and the Issue numbe
   fixture.github.issue(ref, { title: 'Ship it', labels: ['needs-triage'] })
 
   expect(await fixture.client.runButtons({ refs: [ref] })).toEqual({
-    buttons: [{ ref, button: { kind: 'triage', run: 'new' } }],
+    buttons: [{ ref, button: { kind: 'triage', run: 'new' }, reason: null }],
   })
   const output = await fixture.client.runFromButton({ ref })
 
@@ -186,7 +192,7 @@ test('running from a wayfinder map button types claude with /wayfinder and the m
   })
 
   expect(await fixture.client.runButtons({ refs: [ref] })).toEqual({
-    buttons: [{ ref, button: { kind: 'wayfinder', run: 'new' } }],
+    buttons: [{ ref, button: { kind: 'wayfinder', run: 'new' }, reason: null }],
   })
   const output = await fixture.client.runFromButton({ ref })
 
@@ -202,7 +208,7 @@ test('running from the button of a ready-for-agent Issue with an open sub-issue 
   fixture.github.issue('acme/app#14', { title: 'Next part', parent: ref })
 
   expect(await fixture.client.runButtons({ refs: [ref] })).toEqual({
-    buttons: [{ ref, button: { kind: 'implement-spec', run: 'new' } }],
+    buttons: [{ ref, button: { kind: 'implement-spec', run: 'new' }, reason: null }],
   })
   const output = await fixture.client.runFromButton({ ref })
 
@@ -217,7 +223,7 @@ test('a ready-for-agent Issue whose sub-issues are all closed gets no button, an
   fixture.github.issue('acme/app#13', { title: 'Done part', state: 'closed', parent: ref })
 
   expect(await fixture.client.runButtons({ refs: [ref] })).toEqual({
-    buttons: [{ ref, button: null }],
+    buttons: [{ ref, button: null, reason: expect.stringContaining('sub-issues are all closed') }],
   })
   expect((await failure(fixture.client.runFromButton({ ref }))).code).toBe('PRECONDITION_FAILED')
 })
@@ -235,7 +241,7 @@ test.each([
     fixture.github.issue(ref, { title: 'Ask it', labels: [label], parent: 'acme/app#7' })
 
     expect(await fixture.client.runButtons({ refs: [ref] })).toEqual({
-      buttons: [{ ref, button: { kind: 'wayfinder', run: 'new' } }],
+      buttons: [{ ref, button: { kind: 'wayfinder', run: 'new' }, reason: null }],
     })
     const output = await fixture.client.runFromButton({ ref })
 
@@ -329,7 +335,7 @@ test('an Issue whose Task has a live Run gets a running button, and running from
   await liveRun(fixture)
 
   expect(await fixture.client.runButtons({ refs: [ref] })).toEqual({
-    buttons: [{ ref, button: { kind: 'tackle', run: 'running' } }],
+    buttons: [{ ref, button: { kind: 'tackle', run: 'running' }, reason: null }],
   })
   expect((await failure(fixture.client.runFromButton({ ref }))).code).toBe('CONFLICT')
 })
@@ -340,7 +346,7 @@ test('an Issue whose Task has an ended Run gets a resume button, and running fro
   await end()
 
   expect(await fixture.client.runButtons({ refs: [ref] })).toEqual({
-    buttons: [{ ref, button: { kind: 'tackle', run: 'resume' } }],
+    buttons: [{ ref, button: { kind: 'tackle', run: 'resume' }, reason: null }],
   })
   const output = await fixture.client.runFromButton({ ref })
   expect(output.resumed).toBe('s-1')
@@ -355,7 +361,7 @@ test('running from the resume button of a triage Issue resumes claude without th
   await end()
 
   expect(await fixture.client.runButtons({ refs: [ref] })).toEqual({
-    buttons: [{ ref, button: { kind: 'triage', run: 'resume' } }],
+    buttons: [{ ref, button: { kind: 'triage', run: 'resume' }, reason: null }],
   })
   const output = await fixture.client.runFromButton({ ref })
   expect((await typedInto(fixture, output.terminalSessionId)).at(-1)).toMatchObject({
@@ -371,7 +377,7 @@ test('a Task whose repo was renamed before any sync still gets its resume button
   const renamed = 'acme/renamed#12'
 
   expect(await fixture.client.runButtons({ refs: [renamed] })).toEqual({
-    buttons: [{ ref: renamed, button: { kind: 'triage', run: 'resume' } }],
+    buttons: [{ ref: renamed, button: { kind: 'triage', run: 'resume' }, reason: null }],
   })
   const output = await fixture.client.runFromButton({ ref: renamed })
   expect((await typedInto(fixture, output.terminalSessionId)).at(-1)).toMatchObject({
@@ -386,7 +392,7 @@ test('an Issue that GitHub now gives another node ID under the same name and num
   fixture.db.update(issue).set({ nodeId: 'an-issue-of-the-repo-that-had-this-name' }).run()
 
   expect(await fixture.client.runButtons({ refs: [ref] })).toEqual({
-    buttons: [{ ref, button: { kind: 'triage', run: 'new' } }],
+    buttons: [{ ref, button: { kind: 'triage', run: 'new' }, reason: null }],
   })
   const refused = await failure(fixture.client.runFromButton({ ref }))
   expect(refused.message).toContain('now another issue on GitHub')
@@ -403,7 +409,7 @@ test('a Task whose Bench was closed and reopened gets a button for a new Run, no
   await fixture.client.reopen({ ref })
 
   expect(await fixture.client.runButtons({ refs: [ref] })).toEqual({
-    buttons: [{ ref, button: { kind: 'tackle', run: 'new' } }],
+    buttons: [{ ref, button: { kind: 'tackle', run: 'new' }, reason: null }],
   })
 })
 
@@ -418,8 +424,12 @@ test('no sub-issue of a spec gets a button while the spec has a live Run, whatev
 
   expect(await fixture.client.runButtons({ refs: [ref, ...children] })).toEqual({
     buttons: [
-      { ref, button: { kind: 'implement-spec', run: 'running' } },
-      ...children.map((child) => ({ ref: child, button: null })),
+      { ref, button: { kind: 'implement-spec', run: 'running' }, reason: null },
+      ...children.map((child) => ({
+        ref: child,
+        button: null,
+        reason: `${child} is under ${ref}, a spec with a live Run`,
+      })),
     ],
   })
   const refused = await failure(fixture.client.runFromButton({ ref: children[1]! }))
@@ -440,7 +450,7 @@ test.each([
     await liveRun(fixture, [...parentLabels])
 
     expect(await fixture.client.runButtons({ refs: [child] })).toEqual({
-      buttons: [{ ref: child, button: { kind, run: 'new' } }],
+      buttons: [{ ref: child, button: { kind, run: 'new' }, reason: null }],
     })
   },
 )
@@ -478,7 +488,7 @@ test('a sub-issue of a spec whose Run has ended gets a tackle button', async () 
   await end()
 
   expect(await fixture.client.runButtons({ refs: [child] })).toEqual({
-    buttons: [{ ref: child, button: { kind: 'tackle', run: 'new' } }],
+    buttons: [{ ref: child, button: { kind: 'tackle', run: 'new' }, reason: null }],
   })
 })
 
@@ -487,5 +497,7 @@ test('no Issue gets a button while gh is logged out', async () => {
   github.issue(ref, { title: 'Ship it', labels: ['ready-for-agent'] })
   github.logOut()
 
-  expect(await client.runButtons({ refs: [ref] })).toEqual({ buttons: [{ ref, button: null }] })
+  expect(await client.runButtons({ refs: [ref] })).toEqual({
+    buttons: [{ ref, button: null, reason: null }],
+  })
 })

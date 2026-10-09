@@ -125,6 +125,12 @@ export const RunButtonsOutputSchema = z.object({
     z.object({
       ref: z.string().describe('the ref as asked'),
       button: RunButtonSchema.nullable().describe('null when the Issue gets no Run button'),
+      reason: z
+        .string()
+        .nullable()
+        .describe(
+          'why the Issue gets no Run button, or null when it gets one or could not be read from GitHub',
+        ),
     }),
   ),
 })
