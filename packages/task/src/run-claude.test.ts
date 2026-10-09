@@ -534,7 +534,7 @@ test('when GitHub cannot be reached, an open Blocker in the copy still holds the
 
 test("run asked by a repo's old name follows the rename its sync finds, keeping the Bench where it is", async () => {
   const fixture = await tracked()
-  await fixture.client.run({ ref })
+  await fixture.exit((await fixture.client.run({ ref })).terminalSessionId)
   fixture.github.renameRepo('acme/app', 'acme/renamed')
 
   const output = await fixture.client.run({ ref })

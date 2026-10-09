@@ -9,6 +9,7 @@ const probes = {
   'packages/task/src/open.ts': "reservations.writeOpenTask(1, 'a/b#1', async (tx) => tx)\n",
   'packages/task/src/closed.ts':
     "async function write(tx) { return tx }\nreservations.writeClosedTask(1, 'a/b#1', write)\n",
+  'packages/task/src/launch.ts': "reservations.openRunTab(1, 'a/b#1', async (tx) => tx)\n",
   'packages/task/src/sync.ts': "reservations.writeOpenTask(1, 'a/b#1', (tx) => tx)\n",
 }
 
@@ -21,6 +22,7 @@ test('transaction と、それを開く task の reservation の method に asyn
     .toSorted()
   expect(flagged).toEqual([
     'packages/task/src/closed.ts',
+    'packages/task/src/launch.ts',
     'packages/task/src/open.ts',
     'packages/task/src/transaction.ts',
   ])

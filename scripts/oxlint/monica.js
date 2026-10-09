@@ -22,7 +22,7 @@ function isFunction(node) {
 }
 
 // task の reservation の method は transaction を開いて最後の引数を中で呼ぶので、transaction と同じく async 関数を受けてはいけない。
-const TRANSACTION_CALLBACK_LAST = new Set(['writeOpenTask', 'writeClosedTask'])
+const TRANSACTION_CALLBACK_LAST = new Set(['writeOpenTask', 'writeClosedTask', 'openRunTab'])
 
 function isAsyncFunction(node) {
   return isFunction(node) && node.async

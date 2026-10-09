@@ -10,6 +10,7 @@ import { isIssue, isLinkedIssue, openBlockersOf } from './copy.ts'
 import type { GitHubIssue } from './github.ts'
 import { type FoundTask, taskIfTracked } from './open-task.ts'
 import { formatRef, type IssueRef } from './ref.ts'
+import type { Reservations } from './reservation.ts'
 import { runAgentSessionsByTask } from './run.ts'
 import { issue, run } from './schema.ts'
 
@@ -39,17 +40,21 @@ export type RunPlan = Launchable | Refusal
 
 type Options = { force?: boolean; byLabels?: boolean }
 
+type Launches = Pick<Reservations, 'launchingRun'>
+
 export function planRun(
   db: Db,
+  launches: Launches,
   found: FoundTask | undefined,
   facts: IssueFacts,
   options: Options = {},
 ): RunPlan {
-  return planFromLedger(db, found, facts, options) ?? planNewRun(facts, options)
+  return planFromLedger(db, launches, found, facts, options) ?? planNewRun(facts, options)
 }
 
 export function planFromLedger(
   db: Pick<Db, 'select'>,
+  launches: Launches,
   found: FoundTask | undefined,
   facts: IssueFacts,
   { force = false }: Options = {},
@@ -67,8 +72,12 @@ export function planFromLedger(
     )
     return {
       type: 'running',
-      message: `${ref} has ${live.length === 1 ? 'a live Run' : 'live Runs'} (${states.join(', ')}); to add an agent alongside, open a Tab in its Bench and run claude there`,
+      message: `${ref} has ${live.length === 1 ? 'a live Run' : 'live Runs'} (${states.join(', ')}); ${ALONGSIDE}`,
     }
+  }
+  // Run は SessionStart の hook で付くので、Tab を開いてから claude が起動するまでは live な Run に出ない。
+  if (found && launches.launchingRun(db, found.issue.id)) {
+    return { type: 'running', message: `${ref} has a Run being started; ${ALONGSIDE}` }
   }
   // spec の Run が子を実装している最中なので、子の Run を起こすと resume でも同じ子に 2 つの agent が動く。
   const spec = facts.parent && isSpec(facts.parent) ? facts.parent : null
@@ -103,12 +112,13 @@ export function planNewRun(
 
 export function replan(
   tx: Pick<Db, 'select'>,
+  launches: Launches,
   found: FoundTask,
   facts: IssueFacts,
   planned: Launchable,
   options: Options = {},
 ): Refusal | undefined {
-  const now = planFromLedger(tx, found, facts, options) ?? { type: 'new' }
+  const now = planFromLedger(tx, launches, found, facts, options) ?? { type: 'new' }
   switch (now.type) {
     case 'new':
     case 'resume':
@@ -134,6 +144,8 @@ function refused(
 ): Refusal {
   return { type: 'refused', message, blockers, forceHint }
 }
+
+const ALONGSIDE = 'to add an agent alongside, open a Tab in its Bench and run claude there'
 
 const PAST_THE_GATE = 'pass --force to start a Run anyway'
 

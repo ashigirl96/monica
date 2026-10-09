@@ -8,6 +8,7 @@ import {
   benchOf,
   type Fixture,
   ref,
+  startedAndEnded,
   tabsOf,
   terminatedAfterClose,
   tracked,
@@ -182,7 +183,7 @@ test('a reopen that reaches its transaction while close is under way is refused,
   await reopened
   const running = client.run({ ref })
   await giveUpJoinedSync(1)
-  await running
+  await startedAndEnded(fixture, (await running).terminalSessionId)
   const pause = pauseBranchDeletion(fixture)
   const closing = client.close({ ref })
   await giveUpJoinedSync(2)
