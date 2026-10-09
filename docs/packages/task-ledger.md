@@ -11,7 +11,7 @@ list        { closed? } → { tasks: ListItem[], backgroundSyncError: { at, mess
 run         { ref, prompt?, inPlace?, force? } → { ref, title, tracked, cwd, mode,              cli
               benchCreated, warnings, tabId, terminalSessionId, resumed }  errors: BLOCKED { blockers }
 runButtons  { refs } → { buttons: { ref, button: { kind, run } | null }[] }
-runFromButton { ref } → run と同じ  errors: BLOCKED { blockers }, NO_RUN_BUTTON
+runFromButton { ref } → run と同じ  errors: BLOCKED { blockers }
 current     { terminalSessionId? } → { ref, title, displayState, agentSessionId, source }   cli
 attach      { ref, terminalSessionId? } → { ref, title, benchCreated, runCreated,               cli
               agentSessionId }
@@ -108,11 +108,12 @@ createTaskLedger(deps: {
 
 Chrome Extension が GitHub の Issues の一覧に差し込む Run ボタンを決め、押されたら run する（ADR-0035）。どちらも prompt を受け取らず、Backend が Issue から prompt を決める。Backend は Chrome Extension の token でこの 2 つだけを通す（`docs/packages/backend.md` の「token の口の 2 つの token」）。CLI には出さない。
 
-- `runButtons` は ref ごとに、ボタンが無ければ `null`、あれば prompt の種類 `kind` と、押したら何が起きるかの `run` を返す。ref は頼まれた文字列のまま返す。Issue は Track せずに GitHub の GraphQL（sync と同じ一括の query）から 10 秒まで引き、写しにも書かない。query は sub-issue の子の数（`subIssuesSummary` の全体と closed）も取る。ref の形が違う、GitHub が返さない、repo ごと失敗した、`gh auth token` が失敗した Issue はボタン無しにする。
-- 判定は `run-button.ts` の規則の並びを上から当て、最初に決まったものを使う。種類と、ボタンを出さない条件は、行を足して増やす。今の並びは、closed な Issue、closed な Task、open な Blocker（GitHub の答えで見る）、`wayfinder:map` なら `wayfinder`、他の `wayfinder:*` は親があれば `wayfinder`・無ければボタン無し、`ready-for-agent` は、親の Task に live な Run があればボタン無し、子が無ければ `tackle`、open な子があれば spec として `implement-spec`、子が全部 closed ならボタン無し、`needs-triage` か state のラベル（`needs-triage`・`ready-for-agent`・`ready-for-human`・`needs-info`・`wontfix`・`wayfinder:*`）が無ければ `triage`、どれにも当たらなければボタン無し。`ready-for-human`・`needs-info`・`wontfix` は最後に落ちてボタン無しになる。`wayfinder:map` は sub-issue を持っても spec にしない。
+- `runButtons` は ref ごとに、ボタンが無ければ `null`、あれば prompt の種類 `kind` と、押したら何が起きるかの `run` を返す。ref は頼まれた文字列のまま返す。Issue は Track せずに GitHub の GraphQL（sync と同じ一括の query）から 10 秒まで引き、写しにも書かない。query は Issue と親の両方について、ラベルと sub-issue の子の数（`subIssuesSummary` の全体と closed）も取る。repo ごとに一括の query に分けて投げる処理（`sync.ts` の `queryByRepo`）は sync と共にする。ref の形が違う、GitHub が返さない、repo ごと失敗した、`gh auth token` が失敗した Issue はボタン無しにする。
+- 判定は `run-button.ts` の規則の並びを上から当て、最初に決まったものを使う。種類と、ボタンを出さない条件は、行を足して増やす。今の並びは、closed な Issue、closed な Task、open な Blocker（GitHub の答えで見る）、親が spec（`wayfinder:map` でない `ready-for-agent` で open な子を持つ）でその Task に live な Run があれば、ラベルによらずボタン無し、`wayfinder:map` なら `wayfinder`、他の `wayfinder:*` は親が `wayfinder:map` なら `wayfinder`・親が無いか map でなければボタン無し、`ready-for-agent` は、子が無ければ `tackle`、open な子があれば spec として `implement-spec`、子が全部 closed ならボタン無し、`needs-triage` か state のラベル（`needs-triage`・`ready-for-agent`・`ready-for-human`・`needs-info`・`wontfix`・`wayfinder:*`）が無ければ `triage`、どれにも当たらなければボタン無し。`ready-for-human`・`needs-info`・`wontfix` は最後に落ちてボタン無しになる。`wayfinder:map` は sub-issue を持っても spec にしない。
 - `run` は track 済みの Task を Task Ledger から引き、`run` と同じ規則で決める。Bench があって live な Run があれば `running`（押しても `CONFLICT` で断られる）、resume の候補（「Run の起動」の節）があれば `resume`、それ以外と track していない Issue は `new`。
 - `kind` から prompt を作る。`tackle` は prompt を渡さず、`run` の既定（新しい Run なら `/tackle`、resume なら何も送らない）に任せる。`implement-spec` は `/implement-spec #<n>`。`triage` は `/triage #<n>`、`wayfinder` は map なら `/wayfinder <n>`、map の子なら親の番号を足して `/wayfinder <map> <n>` を送る。子の Task と Bench は子の Issue に付く。
-- `runFromButton` は ref 1 つを受け、GitHub から Issue を引き直して同じ判定をやり直す。ボタンが無ければ、open な Blocker なら `BLOCKED`、それ以外は `NO_RUN_BUTTON` で断り、Track しない。ボタンがあれば、その prompt で `run` と同じ手順に渡す（Track・Bench の準備・Tab を開いて claude を打つ。live な Run の `CONFLICT` も同じ）。resume になるときは、どの種類でも prompt を渡さない。resume する claude は前の会話の途中か後にいるため（ADR-0024）。GitHub に届かなければ `BAD_GATEWAY`、返らなければ `NOT_FOUND` で断る。
+- `runFromButton` は ref 1 つを受け、GitHub から Issue を引き直して同じ判定をやり直す。ボタンが無ければ、open な Blocker なら `BLOCKED`、それ以外は標準の `PRECONDITION_FAILED` で、ボタンが無い理由を message に書いて断り、Track しない。Chrome Extension は理由を message だけから出し、code で分岐しないので、error を宣言しない（`docs/packages.md` の「contract の規約」の 4）。ボタンがあれば、その prompt で `run` と同じ手順に渡す（Track・Bench の準備・Tab を開いて claude を打つ。live な Run の `CONFLICT` も同じ）。resume になるときは、どの種類でも prompt を渡さない。resume する claude は前の会話の途中か後にいるため（ADR-0024）。GitHub に届かなければ `BAD_GATEWAY`、返らなければ `NOT_FOUND` で断る。
+- 親の spec に live な Run が無いという判定は、GitHub の読み直しと Track と Bench の準備を待つ前に下すので、その間に spec の claude が起動しうる。Tab を開く transaction の中で spec の live な Run を見直し、あれば同じ `PRECONDITION_FAILED` で断る（`runTask` の `recheck`）。Run は claude の SessionStart の hook で付くので、spec の Tab が開いてから claude が起動するまでの間は、この見直しでも止まらない。
 
 ## close と reopen
 

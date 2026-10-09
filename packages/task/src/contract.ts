@@ -129,14 +129,6 @@ export const RunButtonsOutputSchema = z.object({
   ),
 })
 
-export const runFromButtonErrors = {
-  ...runErrors,
-  NO_RUN_BUTTON: {
-    status: 409,
-    message: 'the Issue gets no Run button',
-  },
-}
-
 export const CurrentOutputSchema = z.object({
   ref: z.string(),
   title: z.string(),
@@ -265,9 +257,9 @@ export const contract = {
   runFromButton: meta
     .meta({
       description:
-        'Run the Task of an Issue with the prompt its Run button has now, reading the Issue from GitHub anew, or refuse when it gets no Run button',
+        'Run the Task of an Issue with the prompt its Run button has now, reading the Issue from GitHub anew, or refuse with PRECONDITION_FAILED and the reason when it gets no Run button',
     })
-    .errors(runFromButtonErrors)
+    .errors(runErrors)
     .input(z.object({ ref }))
     .output(RunOutputSchema),
   current: meta

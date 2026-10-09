@@ -4,7 +4,14 @@ import { and, eq, inArray, isNull, type SQL } from 'drizzle-orm'
 
 import type { SyncOutput, TaskChange, TrackOutput } from './contract.ts'
 import { isIssue, isRepo, writeIssues, writePullRequests } from './copy.ts'
-import { BATCH, type GitHub, oneLine, queryIssues, RepositoryNotFound } from './github.ts'
+import {
+  BATCH,
+  type GitHub,
+  type IssuesAnswer,
+  oneLine,
+  queryIssues,
+  RepositoryNotFound,
+} from './github.ts'
 import { formatRef, type IssueRef, parseRef } from './ref.ts'
 import { bench, issue, task } from './schema.ts'
 
@@ -156,38 +163,28 @@ async function syncRefs(
     outcome.failures.push(reason(error))
     return outcome
   }
-  await Promise.all(
-    byRepo(refs).map(async ([repo, numbers]) => {
-      try {
-        for (let i = 0; i < numbers.length; i += BATCH) {
-          const batch = numbers.slice(i, i + BATCH)
-          const branches = benchBranches(deps.db, repo, batch)
-          const answer = await queryIssues(
-            { url: deps.github.url, token },
-            repo,
-            batch.map((number) => ({ number, benchBranch: branches.get(number) ?? null })),
-            signal,
-          )
-          const syncedAt = new Date()
-          deps.db.transaction((tx) => {
-            const written = writeIssues(tx, answer.issues, repo, syncedAt)
-            for (const { id } of written) track?.(tx, id)
-            // track の Task の行ができてから、Task と PR の対応を書く。
-            for (const { id, copied } of written) writePullRequests(tx, id, copied, syncedAt)
-          })
-          outcome.synced += answer.issues.length
-          outcome.missing.push(...answer.missing.map(formatRef))
-        }
-      } catch (error) {
-        // 打ち間違えた repo を track したときに、GitHub の障害に見せない。
-        if (track && error instanceof RepositoryNotFound) {
-          outcome.missing.push(...numbers.map((number) => formatRef({ repo, number })))
-          return
-        }
-        outcome.failures.push(`${repo}: ${reason(error)}`)
+  await queryByRepo({ url: deps.github.url, token }, refs, signal, {
+    branches: (repo, numbers) => benchBranches(deps.db, repo, numbers),
+    answered(repo, answer) {
+      const syncedAt = new Date()
+      deps.db.transaction((tx) => {
+        const written = writeIssues(tx, answer.issues, repo, syncedAt)
+        for (const { id } of written) track?.(tx, id)
+        // track の Task の行ができてから、Task と PR の対応を書く。
+        for (const { id, copied } of written) writePullRequests(tx, id, copied, syncedAt)
+      })
+      outcome.synced += answer.issues.length
+      outcome.missing.push(...answer.missing.map(formatRef))
+    },
+    failed(repo, numbers, error) {
+      // 打ち間違えた repo を track したときに、GitHub の障害に見せない。
+      if (track && error instanceof RepositoryNotFound) {
+        outcome.missing.push(...numbers.map((number) => formatRef({ repo, number })))
+        return
       }
-    }),
-  )
+      outcome.failures.push(`${repo}: ${reason(error)}`)
+    },
+  })
   outcome.missing.sort()
   outcome.failures.sort()
   return outcome
@@ -204,7 +201,39 @@ function benchBranches(db: Db, repo: string, numbers: number[]): Map<number, str
   return new Map(rows.flatMap(({ number, branch }) => (branch === null ? [] : [[number, branch]])))
 }
 
-export function byRepo(refs: IssueRef[]): [string, number[]][] {
+/** repo ごとに並べて、Issue を BATCH 件ずつ GitHub に問う。失敗した repo は `failed` に渡し、他の repo は続ける。 */
+export async function queryByRepo(
+  github: { url: string; token: string },
+  refs: IssueRef[],
+  signal: AbortSignal,
+  each: {
+    branches?: (repo: string, numbers: number[]) => Map<number, string>
+    answered: (repo: string, answer: IssuesAnswer) => void
+    failed: (repo: string, numbers: number[], error: unknown) => void
+  },
+): Promise<void> {
+  await Promise.all(
+    byRepo(refs).map(async ([repo, numbers]) => {
+      try {
+        for (let i = 0; i < numbers.length; i += BATCH) {
+          const batch = numbers.slice(i, i + BATCH)
+          const branches = each.branches?.(repo, batch)
+          const answer = await queryIssues(
+            github,
+            repo,
+            batch.map((number) => ({ number, benchBranch: branches?.get(number) ?? null })),
+            signal,
+          )
+          each.answered(repo, answer)
+        }
+      } catch (error) {
+        each.failed(repo, numbers, error)
+      }
+    }),
+  )
+}
+
+function byRepo(refs: IssueRef[]): [string, number[]][] {
   const groups = new Map<string, [string, number[]]>()
   for (const { repo, number } of refs) {
     const key = repo.toLowerCase()

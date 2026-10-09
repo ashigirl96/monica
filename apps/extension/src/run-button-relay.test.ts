@@ -29,10 +29,12 @@ function fakeBackend() {
           })),
         }
       }),
-      runFromButton: os.runFromButton.handler(({ input, errors }) => {
+      runFromButton: os.runFromButton.handler(({ input }) => {
         calls.push({ path: 'runFromButton', input })
         if (input.ref.endsWith('#13')) {
-          throw errors.NO_RUN_BUTTON({ message: `${input.ref} has no label that picks a prompt` })
+          throw new ORPCError('PRECONDITION_FAILED', {
+            message: `${input.ref} has no label that picks a prompt`,
+          })
         }
         if (input.ref.endsWith('#14')) throw new ORPCError('CONFLICT', { message: 'a live Run' })
         return {

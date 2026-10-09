@@ -2,20 +2,14 @@ import type { Db } from '@monica/workbench/server'
 import { ORPCError, type ORPCErrorConstructorMap } from '@orpc/server'
 
 import type { BenchDeps } from './bench.ts'
-import type {
-  PromptKind,
-  RunButton,
-  RunButtonsOutput,
-  RunOutput,
-  runFromButtonErrors,
-} from './contract.ts'
+import type { PromptKind, RunButton, RunButtonsOutput, RunOutput, runErrors } from './contract.ts'
 import { isIssue } from './copy.ts'
-import { BATCH, type GitHubIssue, oneLine, queryIssues } from './github.ts'
+import { type GitHubIssue, oneLine } from './github.ts'
 import { taskIfTracked } from './open-task.ts'
 import { formatRef, type IssueRef, parseRef } from './ref.ts'
 import { resumableRunOf, runTask } from './run-claude.ts'
 import { runAgentSessionsByTask } from './run.ts'
-import { byRepo, type SyncDeps } from './sync.ts'
+import { queryByRepo, type SyncDeps } from './sync.ts'
 
 const READ_TIMEOUT_MS = 10_000
 
@@ -23,16 +17,18 @@ const READ_TIMEOUT_MS = 10_000
 type Seen = {
   issue: GitHubIssue
   task: { closed: boolean; run: RunButton['run'] } | null
-  parentRunning: boolean
+  /** 親が spec で live な Run を持つとき、その親。 */
+  runningSpec: IssueRef | null
 }
 
-type Refusal =
-  | { code: 'BLOCKED'; message: string; blockers: string[] }
-  | { code: 'NO_RUN_BUTTON'; message: string }
+type Verdict =
+  | { type: 'button'; kind: PromptKind }
+  | { type: 'blocked'; message: string; blockers: string[] }
+  | { type: 'none'; message: string }
 
-type Verdict = { kind: PromptKind } | { refusal: Refusal }
+const button = (kind: PromptKind): Verdict => ({ type: 'button', kind })
 
-const noButton = (message: string): Verdict => ({ refusal: { code: 'NO_RUN_BUTTON', message } })
+const noButton = (message: string): Verdict => ({ type: 'none', message })
 
 const STATE_LABELS = ['needs-triage', 'ready-for-agent', 'ready-for-human', 'needs-info', 'wontfix']
 
@@ -40,7 +36,15 @@ const isWayfinderLabel = (label: string) => label.startsWith('wayfinder:')
 
 const isStateLabel = (label: string) => STATE_LABELS.includes(label) || isWayfinderLabel(label)
 
-const isMap = (issue: GitHubIssue) => issue.labels.includes('wayfinder:map')
+type Labelled = Pick<GitHubIssue, 'labels' | 'subIssues'>
+
+const isMap = (issue: Labelled) => issue.labels.includes('wayfinder:map')
+
+const isSpec = (issue: Labelled) =>
+  issue.labels.includes('ready-for-agent') && !isMap(issue) && issue.subIssues.open > 0
+
+const underRunningSpec = (issue: IssueRef, spec: IssueRef) =>
+  `${formatRef(issue)} is under ${formatRef(spec)}, a spec with a live Run`
 
 // 上から順に当て、最初に決まった答えを使う。種類やボタンを出さない条件は、行を足して増やす。
 const rules: ((seen: Seen) => Verdict | undefined)[] = [
@@ -54,36 +58,35 @@ const rules: ((seen: Seen) => Verdict | undefined)[] = [
     const blockers = issue.blockers.filter((b) => b.state === 'open').map(formatRef)
     if (blockers.length === 0) return undefined
     return {
-      refusal: {
-        code: 'BLOCKED',
-        message: `${formatRef(issue)} is blocked by ${blockers.join(', ')}`,
-        blockers,
-      },
+      type: 'blocked',
+      message: `${formatRef(issue)} is blocked by ${blockers.join(', ')}`,
+      blockers,
     }
   },
-  ({ issue }) => (isMap(issue) ? { kind: 'wayfinder' } : undefined),
+  // spec の Run が子を実装している最中なので、子を別に run すると同じ子に 2 つの Run が走る。
+  ({ issue, runningSpec }) =>
+    runningSpec ? noButton(underRunningSpec(issue, runningSpec)) : undefined,
+  ({ issue }) => (isMap(issue) ? button('wayfinder') : undefined),
   ({ issue }) => {
     if (!issue.labels.some(isWayfinderLabel)) return undefined
-    return issue.parent
-      ? { kind: 'wayfinder' }
-      : noButton(`${formatRef(issue)} is a wayfinder Issue with no map above it`)
+    if (!issue.parent)
+      return noButton(`${formatRef(issue)} is a wayfinder Issue with no map above it`)
+    return isMap(issue.parent)
+      ? button('wayfinder')
+      : noButton(
+          `${formatRef(issue)} is a wayfinder Issue under ${formatRef(issue.parent)}, which is not a wayfinder:map`,
+        )
   },
-  ({ issue, parentRunning }) => {
+  ({ issue }) => {
     if (!issue.labels.includes('ready-for-agent')) return undefined
-    // spec の Run が子を実装している最中なので、子を別に run すると同じ実装が 2 つ走る。
-    if (parentRunning && issue.parent) {
-      return noButton(
-        `${formatRef(issue)} is under ${formatRef(issue.parent)}, which has a live Run`,
-      )
-    }
-    if (issue.subIssues.total === 0) return { kind: 'tackle' }
+    if (issue.subIssues.total === 0) return button('tackle')
     return issue.subIssues.open > 0
-      ? { kind: 'implement-spec' }
+      ? button('implement-spec')
       : noButton(`${formatRef(issue)} is a spec whose sub-issues are all closed`)
   },
   ({ issue }) =>
     issue.labels.includes('needs-triage') || !issue.labels.some(isStateLabel)
-      ? { kind: 'triage' }
+      ? button('triage')
       : undefined,
 ]
 
@@ -125,7 +128,8 @@ export async function runButtons(deps: SyncDeps, refs: string[]): Promise<RunBut
       const verdict = verdictOf(seen)
       return {
         ref,
-        button: 'kind' in verdict ? { kind: verdict.kind, run: seen.task?.run ?? 'new' } : null,
+        button:
+          verdict.type === 'button' ? { kind: verdict.kind, run: seen.task?.run ?? 'new' } : null,
       }
     }),
   }
@@ -134,7 +138,7 @@ export async function runButtons(deps: SyncDeps, refs: string[]): Promise<RunBut
 export async function runFromButton(
   deps: SyncDeps & BenchDeps,
   ref: string,
-  errors: ORPCErrorConstructorMap<typeof runFromButtonErrors>,
+  errors: ORPCErrorConstructorMap<typeof runErrors>,
 ): Promise<RunOutput> {
   const parsed = parseRef(ref)
   const { issues, failures } = await readIssues(deps, [parsed])
@@ -149,36 +153,42 @@ export async function runFromButton(
   }
   const seen = seenOf(deps.db, parsed, issue)
   const verdict = verdictOf(seen)
-  if ('refusal' in verdict) {
-    const { refusal } = verdict
-    if (refusal.code === 'BLOCKED') {
-      throw errors.BLOCKED({ message: refusal.message, data: { blockers: refusal.blockers } })
-    }
-    throw errors.NO_RUN_BUTTON({ message: refusal.message })
+  switch (verdict.type) {
+    case 'blocked':
+      throw errors.BLOCKED({ message: verdict.message, data: { blockers: verdict.blockers } })
+    case 'none':
+      throw refused(verdict.message)
   }
   // resume する claude は前の会話の途中か後なので、どの種類の prompt も送り直さない（ADR-0024）。
   const prompt = seen.task?.run === 'resume' ? undefined : promptOf(verdict.kind, issue)
-  return runTask(deps, { ref, prompt }, errors)
+  const spec = issue.parent && isSpec(issue.parent) ? issue.parent : null
+  return runTask(deps, { ref, prompt }, errors, {
+    // GitHub と Bench の準備を待つ間に spec の Run が起動しうるので、Tab を開く transaction の中で見直す。
+    recheck(tx) {
+      if (spec && hasLiveRun(tx, spec)) throw refused(underRunningSpec(issue, spec))
+    },
+  })
 }
 
-const reason = (error: unknown) => oneLine(error instanceof Error ? error.message : String(error))
+const refused = (message: string) => new ORPCError('PRECONDITION_FAILED', { message })
 
 function seenOf(db: Db, ref: IssueRef, issue: GitHubIssue): Seen {
   const tracked = taskIfTracked(db, isIssue(ref))
+  const { parent } = issue
   return {
     issue,
     task: tracked ? { closed: tracked.task.closedAt !== null, run: runOf(db, tracked) } : null,
-    parentRunning: issue.parent !== null && parentHasLiveRun(db, issue.parent),
+    runningSpec: parent && isSpec(parent) && hasLiveRun(db, parent) ? parent : null,
   }
 }
 
-function parentHasLiveRun(db: Db, parent: IssueRef): boolean {
-  const tracked = taskIfTracked(db, isIssue(parent))
-  return tracked ? hasLiveRun(db, tracked.issue.id) : false
+function hasLiveRun(db: Pick<Db, 'select'>, ref: IssueRef): boolean {
+  const tracked = taskIfTracked(db, isIssue(ref))
+  return tracked !== undefined && liveRunCount(db, tracked.issue.id) > 0
 }
 
-const hasLiveRun = (db: Db, taskIssueId: number) =>
-  runAgentSessionsByTask(db, [taskIssueId])(taskIssueId).length > 0
+const liveRunCount = (db: Pick<Db, 'select'>, taskIssueId: number) =>
+  runAgentSessionsByTask(db, [taskIssueId])(taskIssueId).length
 
 // run と同じ規則で決める。live な Run は CONFLICT で断られ、resume の候補は今の Bench の後に始まった Run だけ。
 function runOf(
@@ -186,7 +196,7 @@ function runOf(
   { issue: { id }, bench }: NonNullable<ReturnType<typeof taskIfTracked>>,
 ): RunButton['run'] {
   if (!bench) return 'new'
-  if (hasLiveRun(db, id)) return 'running'
+  if (liveRunCount(db, id) > 0) return 'running'
   return resumableRunOf(db, id, bench) ? 'resume' : 'new'
 }
 
@@ -200,6 +210,8 @@ function parsedOrNull(ref: string): IssueRef | null {
 
 // GitHub は改名前の名前で頼んでも今の名前で返すので、頼んだ名前と番号で引き当てる。
 const key = ({ repo, number }: IssueRef) => `${repo.toLowerCase()}#${number}`
+
+const reason = (error: unknown) => oneLine(error instanceof Error ? error.message : String(error))
 
 /** Track せず、写しにも書かない。失敗した repo の Issue は答えに入らず、理由が `failures` に残る。 */
 async function readIssues(
@@ -216,22 +228,13 @@ async function readIssues(
   } catch (error) {
     return { issues, failures: [reason(error)] }
   }
-  await Promise.all(
-    byRepo(refs).map(async ([repo, numbers]) => {
-      try {
-        for (let i = 0; i < numbers.length; i += BATCH) {
-          const answer = await queryIssues(
-            { url: deps.github.url, token },
-            repo,
-            numbers.slice(i, i + BATCH).map((number) => ({ number, benchBranch: null })),
-            signal,
-          )
-          for (const found of answer.issues) issues.set(key({ repo, number: found.number }), found)
-        }
-      } catch (error) {
-        failures.push(`${repo}: ${reason(error)}`)
-      }
-    }),
-  )
+  await queryByRepo({ url: deps.github.url, token }, refs, signal, {
+    answered(repo, answer) {
+      for (const found of answer.issues) issues.set(key({ repo, number: found.number }), found)
+    },
+    failed(repo, _, error) {
+      failures.push(`${repo}: ${reason(error)}`)
+    },
+  })
   return { issues, failures }
 }

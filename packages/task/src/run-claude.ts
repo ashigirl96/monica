@@ -1,7 +1,7 @@
 import { existsSync } from 'node:fs'
 
 import { agentSession } from '@monica/workbench/schema'
-import type { Db } from '@monica/workbench/server'
+import type { Db, Tx } from '@monica/workbench/server'
 import { ORPCError, type ORPCErrorConstructorMap } from '@orpc/server'
 import { and, desc, eq, gte } from 'drizzle-orm'
 
@@ -35,6 +35,7 @@ export async function runTask(
   deps: SyncDeps & BenchDeps,
   input: { ref: string; prompt?: string; inPlace?: boolean; force?: boolean },
   errors: ORPCErrorConstructorMap<typeof runErrors>,
+  { recheck }: { recheck?: (tx: Tx) => void } = {},
 ): Promise<RunOutput> {
   const asked = parseRef(input.ref)
   refuseUnsendable(input.prompt)
@@ -46,7 +47,7 @@ export async function runTask(
   const launch =
     (found.bench && resumeOf(deps.db, found.issue, found.bench)) ??
     (await newRun(deps, found.issue, input, errors))
-  const opened = openClaudeTab(deps, launch, input.prompt)
+  const opened = openClaudeTab(deps, launch, input.prompt, recheck)
   return {
     ref: launch.ref,
     title: launch.title,
@@ -80,7 +81,7 @@ function refuseLiveRuns(db: Db, forIssue: Issue) {
 }
 
 // Bench より前の Run は reopen の前の挑戦で、Agent Session Transcript の無い Agent Session（claude は最初の prompt まで書かない）は --resume が会話を見つけられないので、どちらも候補にしない。
-export function resumableRunOf(db: Db, taskIssueId: number, row: Pick<Bench, 'createdAt'>) {
+export function resumableRunOf(db: Db, taskIssueId: number, since: Pick<Bench, 'createdAt'>) {
   return db
     .select({
       agentSessionId: agentSession.sessionId,
@@ -89,7 +90,7 @@ export function resumableRunOf(db: Db, taskIssueId: number, row: Pick<Bench, 'cr
     })
     .from(run)
     .innerJoin(agentSession, eq(agentSession.sessionId, run.agentSessionId))
-    .where(and(eq(run.taskIssueId, taskIssueId), gte(run.startedAt, row.createdAt)))
+    .where(and(eq(run.taskIssueId, taskIssueId), gte(run.startedAt, since.createdAt)))
     .orderBy(desc(agentSession.lastEventAt), desc(run.id))
     .all()
     .find(({ transcriptPath }) => transcriptPath === null || existsSync(transcriptPath))
@@ -140,11 +141,17 @@ async function newRun(
   }
 }
 
-function openClaudeTab(deps: BenchDeps, launch: Launch, prompt: string | undefined) {
+function openClaudeTab(
+  deps: BenchDeps,
+  launch: Launch,
+  prompt: string | undefined,
+  recheck: ((tx: Tx) => void) | undefined,
+) {
   const { db, workbenchLedger } = deps
   return db.transaction((tx) => {
     findOpenTask(tx, eq(issue.id, launch.bench.taskIssueId), launch.ref)
     refuseClosing(deps, launch.bench.taskIssueId, launch.ref)
+    recheck?.(tx)
     return workbenchLedger.openTab(tx, {
       runspaceId: launch.bench.runspaceId,
       cwd: launch.tabCwd,

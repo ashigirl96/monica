@@ -64,6 +64,14 @@ export function startFakeGitHub() {
     }
   }
 
+  function labelledNode(ref: string) {
+    return {
+      ...node(ref),
+      labels: { nodes: (find(ref)?.labels ?? []).map((name) => ({ name })) },
+      subIssuesSummary: subIssuesOf(ref),
+    }
+  }
+
   function pullRequestNode({
     ref,
     title,
@@ -148,10 +156,8 @@ export function startFakeGitHub() {
           continue
         }
         repository[`i${number}`] = {
-          ...node(found.ref),
-          labels: { nodes: (found.labels ?? []).map((name) => ({ name })) },
-          parent: found.parent ? node(found.parent) : null,
-          subIssuesSummary: subIssuesOf(found.ref),
+          ...labelledNode(found.ref),
+          parent: found.parent ? labelledNode(found.parent) : null,
           blockedBy: { nodes: (found.blockedBy ?? []).map(node) },
           closedByPullRequestsReferences: {
             nodes: (found.closingPullRequests ?? [])

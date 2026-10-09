@@ -65,7 +65,20 @@ test('a wayfinder Issue with no parent map gets no button, and running it is ref
   expect(await fixture.client.runButtons({ refs: [ref] })).toEqual({
     buttons: [{ ref, button: null }],
   })
-  expect((await failure(fixture.client.runFromButton({ ref }))).code).toBe('NO_RUN_BUTTON')
+  expect((await failure(fixture.client.runFromButton({ ref }))).code).toBe('PRECONDITION_FAILED')
+})
+
+test('a wayfinder Issue under a parent that is not a map gets no button, and running it is refused', async () => {
+  const fixture = withRepo()
+  fixture.github.issue('acme/app#7', { title: 'Plain', labels: ['enhancement'] })
+  fixture.github.issue(ref, { title: 'Ask it', labels: ['wayfinder:task'], parent: 'acme/app#7' })
+
+  expect(await fixture.client.runButtons({ refs: [ref] })).toEqual({
+    buttons: [{ ref, button: null }],
+  })
+  const refused = await failure(fixture.client.runFromButton({ ref }))
+  expect(refused.code).toBe('PRECONDITION_FAILED')
+  expect(refused.message).toContain('acme/app#7')
 })
 
 test.each([[[]], [['bug', 'enhancement']]])(
@@ -122,6 +135,14 @@ test('an Issue GitHub does not return, one of a failing repo and a malformed ref
     ],
   })
 })
+
+async function until(done: () => boolean) {
+  for (let i = 0; i < 200; i++) {
+    if (done()) return
+    await Bun.sleep(25)
+  }
+  throw new Error('timed out waiting')
+}
 
 // run は Tab を書いて commit したら返り、Write はその後で ptyd に届く。
 async function typedInto(fixture: Fixture, terminalSessionId: string) {
@@ -198,7 +219,7 @@ test('a ready-for-agent Issue whose sub-issues are all closed gets no button, an
   expect(await fixture.client.runButtons({ refs: [ref] })).toEqual({
     buttons: [{ ref, button: null }],
   })
-  expect((await failure(fixture.client.runFromButton({ ref }))).code).toBe('NO_RUN_BUTTON')
+  expect((await failure(fixture.client.runFromButton({ ref }))).code).toBe('PRECONDITION_FAILED')
 })
 
 test.each([
@@ -247,7 +268,7 @@ test('running from a button reads the labels anew and refuses an Issue that has 
 
   const error = await failure(fixture.client.runFromButton({ ref }))
 
-  expect(error.code).toBe('NO_RUN_BUTTON')
+  expect(error.code).toBe('PRECONDITION_FAILED')
   expect(error.message).toContain(ref)
   expect(await fixture.client.bench.list()).toEqual([])
   expect(fixture.db.select().from(task).all()).toEqual([])
@@ -296,8 +317,8 @@ async function claudeStarted(fixture: Fixture, terminalSessionId: string) {
     })
 }
 
-async function liveRun(fixture: Fixture) {
-  fixture.github.issue(ref, { title: 'Ship it', labels: ['ready-for-agent'] })
+async function liveRun(fixture: Fixture, labels = ['ready-for-agent']) {
+  fixture.github.issue(ref, { title: 'Ship it', labels })
   fixture.taskLedger.start()
   const started = await fixture.client.runFromButton({ ref })
   return claudeStarted(fixture, started.terminalSessionId)
@@ -328,6 +349,20 @@ test('an Issue whose Task has an ended Run gets a resume button, and running fro
   })
 })
 
+test('running from the resume button of a triage Issue resumes claude without the /triage prompt', async () => {
+  const fixture = withRepo()
+  const end = await liveRun(fixture, ['needs-triage'])
+  await end()
+
+  expect(await fixture.client.runButtons({ refs: [ref] })).toEqual({
+    buttons: [{ ref, button: { kind: 'triage', run: 'resume' } }],
+  })
+  const output = await fixture.client.runFromButton({ ref })
+  expect((await typedInto(fixture, output.terminalSessionId)).at(-1)).toMatchObject({
+    data: "claude --resume 's-1'\r",
+  })
+})
+
 test('a Task whose Bench was closed and reopened gets a button for a new Run, not a resume', async () => {
   const fixture = withRepo()
   const end = await liveRun(fixture)
@@ -340,20 +375,66 @@ test('a Task whose Bench was closed and reopened gets a button for a new Run, no
   })
 })
 
-test('a sub-issue of a spec gets a tackle button of its own, and none while the spec has a live Run', async () => {
+test('no sub-issue of a spec gets a button while the spec has a live Run, whatever its labels', async () => {
   const fixture = withRepo()
-  const child = 'acme/app#13'
-  fixture.github.issue(child, { title: 'Part', labels: ['ready-for-agent'], parent: ref })
+  const children = ['acme/app#13', 'acme/app#14', 'acme/app#15']
+  fixture.github.issue(children[0]!, { title: 'Part', labels: ['ready-for-agent'], parent: ref })
+  fixture.github.issue(children[1]!, { title: 'Untriaged', labels: [], parent: ref })
+  fixture.github.issue(children[2]!, { title: 'Ask', labels: ['wayfinder:task'], parent: ref })
 
   await liveRun(fixture)
 
-  expect(await fixture.client.runButtons({ refs: [ref, child] })).toEqual({
+  expect(await fixture.client.runButtons({ refs: [ref, ...children] })).toEqual({
     buttons: [
       { ref, button: { kind: 'implement-spec', run: 'running' } },
-      { ref: child, button: null },
+      ...children.map((child) => ({ ref: child, button: null })),
     ],
   })
-  expect((await failure(fixture.client.runFromButton({ ref: child }))).code).toBe('NO_RUN_BUTTON')
+  const refused = await failure(fixture.client.runFromButton({ ref: children[1]! }))
+  expect(refused.code).toBe('PRECONDITION_FAILED')
+  expect(refused.message).toContain(ref)
+})
+
+test.each([
+  ['a triage Issue', ['needs-triage'], ['ready-for-agent'], 'tackle'],
+  ['a wayfinder map', ['wayfinder:map'], ['wayfinder:task'], 'wayfinder'],
+] as const)(
+  'a sub-issue of %s with a live Run keeps its button',
+  async (_, parentLabels, childLabels, kind) => {
+    const fixture = withRepo()
+    const child = 'acme/app#13'
+    fixture.github.issue(child, { title: 'Part', labels: [...childLabels], parent: ref })
+
+    await liveRun(fixture, [...parentLabels])
+
+    expect(await fixture.client.runButtons({ refs: [child] })).toEqual({
+      buttons: [{ ref: child, button: { kind, run: 'new' } }],
+    })
+  },
+)
+
+test('a sub-issue whose run started before its spec got a live Run is refused once the spec has one', async () => {
+  const fixture = withRepo()
+  const child = 'acme/app#13'
+  fixture.github.issue(ref, { title: 'Spec it', labels: ['ready-for-agent'] })
+  fixture.github.issue(child, { title: 'Part', labels: ['ready-for-agent'], parent: ref })
+  fixture.taskLedger.start()
+  const spec = await fixture.client.runFromButton({ ref })
+
+  // 子が GitHub の答えを見て決めた後、track の往復の間に spec の claude が起動する。
+  const releaseRead = fixture.github.hold()
+  const before = fixture.github.requests.length
+  const running = failure(fixture.client.runFromButton({ ref: child }))
+  await until(() => fixture.github.requests.length > before)
+  releaseRead()
+  const releaseTrack = fixture.github.hold()
+  await until(() => fixture.github.requests.length > before + 1)
+  await claudeStarted(fixture, spec.terminalSessionId)
+  releaseTrack()
+
+  const refused = await running
+  expect(refused.code).toBe('PRECONDITION_FAILED')
+  expect(refused.message).toContain(ref)
 })
 
 test('a sub-issue of a spec whose Run has ended gets a tackle button', async () => {
