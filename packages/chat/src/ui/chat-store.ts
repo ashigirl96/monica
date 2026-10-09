@@ -8,6 +8,7 @@ import {
   type Page,
   type PageSnapshot,
   type Turn,
+  type Unreadable,
 } from '../contract.ts'
 import { addressOf, type CurrentPage } from './current-page.ts'
 import { type Failure, failureOf, isUnreachable, retryingLine, usageLine } from './failure.ts'
@@ -42,32 +43,57 @@ const jsonBytes = (value: unknown) => new TextEncoder().encode(JSON.stringify(va
 // Backend は答えの文字をそのまま prompt にするので、印も文字のまま claude に渡る。
 const STOPPED_MARK = '（ユーザーが途中で止めた）'
 
-/**
- * Current Page の PDF に残る bytes。body の上限から、PDF の他の input と余白を引く。
- * Current Page のスクリーンショットは読むのと並べて撮るので数えず、送る前の withinBodyLimit が数える。
- */
-function pdfBudget(question: string, history: readonly Turn[]): number {
-  return MAX_ASK_BODY_BYTES - BODY_MARGIN_BYTES - jsonBytes({ question, history })
+const TOO_LARGE: Unreadable = { kind: 'unreadable', reason: 'too-large' }
+
+const bodyBytes = (input: AskInput) =>
+  jsonBytes(input) + (input.page.content.kind === 'pdf' ? input.page.content.pdf.size : 0)
+
+/** 前のページから本文・選択範囲・スクリーンショットを外し、本文は大きすぎて渡せなかったことにする。外すものが無ければ undefined。 */
+function withoutBody(page: PageSnapshot): PageSnapshot | undefined {
+  const { selection, screenshot, ...rest } = page
+  const text = page.content?.kind === 'text' && page.content.text !== ''
+  if (!text && selection === undefined && screenshot === undefined) return undefined
+  return text ? { ...rest, content: TOO_LARGE } : rest
 }
 
 /**
- * body の上限を超える input は、Current Page の HTML・PDF・選択範囲を外し、大きすぎて読めなかったことにする。履歴は削らない。
- * ユーザーが添えると決めたスクリーンショットは残す。
+ * Current Page の PDF に残る bytes。body の上限から、前のページを外した PDF の他の input と余白を引く。
+ * Current Page のスクリーンショットは読むのと並べて撮るので数えず、送る前の withinBodyLimit が数える。
+ */
+function pdfBudget(question: string, history: readonly Turn[]): number {
+  const bare = history.map((turn) => ({ ...turn, page: withoutBody(turn.page) ?? turn.page }))
+  return MAX_ASK_BODY_BYTES - BODY_MARGIN_BYTES - jsonBytes({ question, history: bare })
+}
+
+// turn は落とさない。same が turn の番号で前のページを指すため。
+function leaveOutEarlierPages(input: AskInput): AskInput | undefined {
+  let over = bodyBytes(input) + BODY_MARGIN_BYTES - MAX_ASK_BODY_BYTES
+  const history = input.history.map((turn) => {
+    const page = over > 0 ? withoutBody(turn.page) : undefined
+    if (!page) return turn
+    over -= jsonBytes(turn.page) - jsonBytes(page)
+    return { ...turn, page }
+  })
+  return over <= 0 ? { ...input, history } : undefined
+}
+
+/**
+ * body の上限を超える input は、Backend が字数の上限で落とすのと同じく、古い turn のページから外していく。
+ * 前のページを全部外しても超えるなら、Current Page の HTML・PDF・選択範囲を外し、大きすぎて読めなかったことにする。
+ * ユーザーが添えると決めた Current Page のスクリーンショットは残す。
  */
 function withinBodyLimit(input: AskInput): AskInput {
-  const { content } = input.page
-  const bytes = jsonBytes(input) + (content.kind === 'pdf' ? content.pdf.size : 0)
-  if (bytes + BODY_MARGIN_BYTES <= MAX_ASK_BODY_BYTES) return input
+  if (bodyBytes(input) + BODY_MARGIN_BYTES <= MAX_ASK_BODY_BYTES) return input
   const { url, title, screenshot, screenshotFailed } = input.page
-  return {
-    ...input,
-    page: {
-      ...addressOf({ url, title }),
-      content: { kind: 'unreadable', reason: 'too-large' },
-      ...(screenshot !== undefined && { screenshot }),
-      ...(screenshotFailed && { screenshotFailed }),
-    },
+  const page: Page = {
+    ...addressOf({ url, title }),
+    content: TOO_LARGE,
+    ...(screenshot !== undefined && { screenshot }),
+    ...(screenshotFailed && { screenshotFailed }),
   }
+  return (
+    leaveOutEarlierPages(input) ?? leaveOutEarlierPages({ ...input, page }) ?? { ...input, page }
+  )
 }
 
 export type ChatSnapshot = {

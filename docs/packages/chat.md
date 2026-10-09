@@ -122,7 +122,7 @@ claude の `system`（`init`）を受けたら、stderr に 1 行出す。tools 
   - 選択範囲は top frame の `getSelection().toString()`。activeElement が textarea か、`type` が `text`・`search`・`url`・`tel` の input なら、その `selectionStart`・`selectionEnd` で読む。別の場所を選んだ後も古い値が残るので、focus のある欄だけを読む。それ以外の input（`password` など）に focus があれば読まない。空なら `selection` を送らない。
 - `executeScript` が reject したら `restricted` にし、`detail` に error の message を入れる。
 - 送る時に見出しが出していた Current Page の URL と title（`CurrentPageWatch.shown()`）を、読んだページと並べて `ChatStore` に返す。読み終える前に止めた質問の履歴に入れる（下の「失敗」の「再試行と履歴」）。
-- 送る前に、input を `JSON.stringify` した UTF-8 の bytes に、PDF の bytes と 1MiB（oRPC の包みの分）を足して `MAX_ASK_BODY_BYTES` と比べる。File は `JSON.stringify` で `{}` になるので、PDF の大きさは `size` で足す。超えたら Current Page の `html`・`pdf`・`selection` を外して `too-large` にする（`chat-store.ts`）。履歴は削らない。
+- 送る前に、input を `JSON.stringify` した UTF-8 の bytes に、PDF の bytes と 1MiB（oRPC の包みの分）を足して `MAX_ASK_BODY_BYTES` と比べる。File は `JSON.stringify` で `{}` になるので、PDF の大きさは `size` で足す。超えたら、古い turn のページから本文・選択範囲・スクリーンショットを外し、本文は `too-large` にする（`chat-store.ts`）。長い Chat では履歴だけで上限を超えうるためで、Backend が字数の上限で落とすのと同じく Current Page より先に古いページを外す。turn は落とさない。`same` が turn の番号で前のページを指すため。前のページを全部外しても超えたら、Current Page の `html`・`pdf`・`selection` を外して `too-large` にし、前のページは収まる分だけ外す。side panel が外した前のページは `omitted` に数えない。
 
 #### PDF の取り方
 
@@ -130,7 +130,7 @@ claude の `system`（`init`）を受けたら、stderr に 1 行出す。tools 
 - 30 秒で返らなければ打ち切り、fetch を abort して `fetch-failed`（detail `no response within 30 seconds`）にする。body を読み終えるまでを 30 秒に含める。fetch が abort に応えなくても、その終わりを待たない。
 - 止めるボタンか「新しい Chat」で質問を止めたら、fetch を abort し、その終わりを待たずに読むのをやめる（`ChatStore` が `readPage` に渡す `signal`）。止めた後も PDF を読み続けて memory と帯域を使わないため。
 - status が ok でなければ `fetch-failed`（detail `HTTP <status>`）。先頭が `%PDF-` でない応答も `fetch-failed`（detail `the response is not a PDF`）にする。ログインが要る PDF は、ログインのページの HTML が 200 で返りうる。
-- body は上限まで読んでやめる。上限は、body の上限から、PDF を除いた input（`question` と `history`）を `JSON.stringify` した UTF-8 の bytes と 1MiB を引いた値で、`chat-store.ts` が `readPage` に渡す。`Content-Length` が上限を超えていれば body を読まずに cancel し、読んでいる途中で超えても cancel して、どちらも bytes を送らずに `too-large` にする。50MB を超える PDF は、履歴を含めた body が上限に収まらない PDF として読む。上限に収まった bytes は、送る前の大きさの確かめ（上）でもう一度、page の `url` と `title` を含めて比べる。
+- body は上限まで読んでやめる。上限は、body の上限から、PDF を除いた input（`question` と、前のページの本文・選択範囲・スクリーンショットを外した `history`）を `JSON.stringify` した UTF-8 の bytes と 1MiB を引いた値で、`chat-store.ts` が `readPage` に渡す。`Content-Length` が上限を超えていれば body を読まずに cancel し、読んでいる途中で超えても cancel して、どちらも bytes を送らずに `too-large` にする。50MB を超える PDF は、履歴を含めた body が上限に収まらない PDF として読む。上限に収まった bytes は、送る前の大きさの確かめ（上）でもう一度、page の `url` と `title` を含めて比べる。
 - PDF の選択範囲は送らない。viewer の frame には注入できず、top frame の `getSelection()` は viewer の中の選択を返さない。
 - 取れた bytes は `{ kind: 'pdf', pdf: File }` で送る。pdf.js は Chrome Extension に同梱しない（本文にするのは Backend）。
 - 扱わないもの: HTML のページに `<embed>` や `<iframe>` で埋めた PDF（top frame の HTML だけを読む）、画像だけの PDF の OCR。
@@ -314,7 +314,7 @@ side panel は `ORPCError`（`@orpc/client`）の `code` で分け、`data` は 
 ### Backend の不在の帯（`src/ui/reach.ts`）
 
 - side panel を開いた時の `chat.prepare` が `TypeError` で届かなかったら、入力欄の上に帯「monica の desktop が起動していません」を出す。`chat.ask` が `TypeError` で失敗したときも出す。
-- 帯が出ている間は、5 秒おきと、side panel の window が `focus` を受けた時に `chat.prepare` で確かめ直す。届いたら（error の応答も届いたと数える）帯を消し、確かめ直しを止める。`chat.ask` に応答が届いた時も消す。
+- 帯が出ている間は、5 秒おきと、side panel の window が `focus` を受けた時に `chat.prepare` で確かめ直す。届いたら（error の応答も届いたと数える）帯を消し、確かめ直しを止める。`chat.ask` に応答が届いた時も消す。5 秒おきと `focus` の `chat.prepare` は重なりうるので、後から始めた `chat.prepare` か `chat.ask` の結果が先に届いたら、前の `chat.prepare` の結果は捨てる。
 - 帯は待たずに出す。帯を出している間しか定期的に呼ばないので、notes の画面のように bun --watch の再起動（約 100ms）で帯がちらつくことは無い。
 - 帯が出ている間も送るボタンは押せる。Backend が居ない間も Chat は終わらない（ADR-0031、GLOSSARY の Chat）。
 

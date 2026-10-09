@@ -63,11 +63,18 @@ class FakeAnswer implements AsyncIterable<ChatEvent> {
 class FakeClient implements ChatClient {
   prepared = 0
   prepareError: unknown
+  /** 在れば、prepare はここに足した返事を test が返すまで返らない。 */
+  heldPrepares: PromiseWithResolvers<void>[] | undefined
   askError: unknown
   readonly asked: { input: AskInput; signal: AbortSignal; answer: FakeAnswer }[] = []
 
   async prepare(): Promise<void> {
     this.prepared++
+    if (this.heldPrepares) {
+      const reply = Promise.withResolvers<void>()
+      this.heldPrepares.push(reply)
+      return reply.promise
+    }
     if (this.prepareError) throw this.prepareError
   }
 
@@ -178,10 +185,10 @@ test('a question carries the Current Page at the time it was sent and grows its 
 })
 
 // Backend が本文にした Page Snapshot を返したとおりに履歴へ入れる。
-async function answerWith(client: FakeClient, text: string) {
+async function answerWith(client: FakeClient, text: string, page?: PageSnapshot) {
   await settled()
   const { answer, input } = latest(client)
-  answer.snapshot(snapshotAt(input.page.url!, input.page.title!))
+  answer.snapshot(page ?? snapshotAt(input.page.url!, input.page.title!))
   answer.text(text)
   answer.end()
   await settled()
@@ -418,6 +425,69 @@ test('a question whose PDF keeps the request 1MiB below the body limit goes with
   await settled()
 
   expect(client.asked[0]!.input.page.content).toEqual({ kind: 'pdf', pdf })
+})
+
+/** 本文が body の上限の半分ある Page Snapshot。2 つで上限を超える。 */
+const halfLimit = (url: string, title: string): PageSnapshot => ({
+  url,
+  title,
+  content: {
+    kind: 'text',
+    source: 'html',
+    text: 'x'.repeat(MAX_ASK_BODY_BYTES / 2),
+    truncated: false,
+  },
+  selection: { text: 'x', truncated: false },
+})
+
+const tooLarge = (url: string, title: string): PageSnapshot => ({
+  url,
+  title,
+  content: { kind: 'unreadable', reason: 'too-large' },
+})
+
+// 長い Chat では履歴だけで上限を超えうる。Backend が字数の上限で落とすのと同じく、Current Page より先に古いページを外す。
+test('a question whose history would take the request past the body limit goes without the pages of the oldest questions, as too large to read, and keeps its own page', async () => {
+  const { client, store, showPage } = openChat()
+
+  showPage(pageAt('https://a.example/', 'A'))
+  store.toggleScreenshot()
+  store.ask('First?')
+  await answerWith(client, 'One.', halfLimit('https://a.example/', 'A'))
+  showPage(pageAt('https://b.example/', 'B'))
+  store.toggleScreenshot()
+  store.ask('Second?')
+  await answerWith(client, 'Two.', halfLimit('https://b.example/', 'B'))
+  showPage(pageAt('https://c.example/', 'C'))
+  store.ask('Third?')
+  await settled()
+
+  const { page, history } = latest(client).input
+  expect(history).toEqual([
+    { question: 'First?', page: tooLarge('https://a.example/', 'A'), answer: 'One.' },
+    {
+      question: 'Second?',
+      page: { ...halfLimit('https://b.example/', 'B'), screenshot: SHOT },
+      answer: 'Two.',
+    },
+  ])
+  expect(page).toEqual(pageAt('https://c.example/', 'C'))
+})
+
+test('a PDF may take the room of the pages of earlier questions, which then go as too large to read', async () => {
+  const { client, store, showPage, pdfLimits } = openChat()
+  const pdf = pdfOf(MAX_ASK_BODY_BYTES - MARGIN - 1024)
+
+  store.ask('First?')
+  await answerWith(client, 'One.', halfLimit('https://a.example/', 'A'))
+  showPage(pageAt('https://big.example/a.pdf', 'Big', { content: { kind: 'pdf', pdf } }))
+  store.ask('Second?')
+  await settled()
+
+  const { page, history } = latest(client).input
+  expect(pdfLimits[1]).toBeGreaterThan(pdf.size)
+  expect(page.content).toEqual({ kind: 'pdf', pdf })
+  expect(history[0]!.page).toEqual(tooLarge('https://a.example/', 'A'))
 })
 
 async function noticeFor(page: PageSnapshot, omitted?: SnapshotEvent['omitted']) {
@@ -1089,6 +1159,43 @@ test('a Backend that answers with an error has been reached and takes down the b
 
   client.prepareError = new ORPCError('INTERNAL_SERVER_ERROR')
   interval.tick()
+  await settled()
+
+  expect(store.snapshot().unreachable).toBe(false)
+})
+
+test('an earlier ask of the Backend that fails after a later one answered leaves the banner down', async () => {
+  const interval = captureInterval()
+  const client = new FakeClient()
+  client.prepareError = unreachable()
+  const { store, focus } = openChat(client)
+  await settled()
+
+  const replies: PromiseWithResolvers<void>[] = []
+  client.heldPrepares = replies
+  interval.tick()
+  focus.dispatchEvent(new Event('focus'))
+  replies[1]!.resolve()
+  await settled()
+  replies[0]!.reject(unreachable())
+  await settled()
+
+  expect(store.snapshot().unreachable).toBe(false)
+})
+
+test('an ask of the Backend that fails after a later question reached it leaves the banner down', async () => {
+  const interval = captureInterval()
+  const client = new FakeClient()
+  client.prepareError = unreachable()
+  const { store } = openChat(client)
+  await settled()
+
+  const replies: PromiseWithResolvers<void>[] = []
+  client.heldPrepares = replies
+  interval.tick()
+  store.ask('Hello?')
+  await settled()
+  replies[0]!.reject(unreachable())
   await settled()
 
   expect(store.snapshot().unreachable).toBe(false)

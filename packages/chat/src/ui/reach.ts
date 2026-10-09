@@ -6,9 +6,9 @@ export type Reach = {
   unreachable: () => boolean
   /** probe を呼び、届かなければ帯を出して確かめ直しを始める。 */
   check: () => void
-  /** Backend に届かなかった。 */
+  /** Backend に届かなかった。それまでに始めた probe の結果は捨てる。 */
   failed: () => void
-  /** Backend に届いた。error の応答でも届いている。 */
+  /** Backend に届いた。error の応答でも届いている。それまでに始めた probe の結果は捨てる。 */
   reached: () => void
   /** 確かめ直しを止め、この後に返る probe の結果も捨てる。 */
   dispose: () => void
@@ -26,6 +26,8 @@ export function watchReach(
   let unreachable = false
   let disposed = false
   let timer: ReturnType<typeof setInterval> | undefined
+  // 5 秒おきと focus の probe が重なりうるので、後から始めた probe か質問の結果が先に届いたら、前の probe の結果は捨てる。
+  let latest = 0
 
   const stopChecking = () => {
     clearInterval(timer)
@@ -34,7 +36,12 @@ export function watchReach(
   }
 
   function check() {
-    probe().then(reached, (error: unknown) => (isUnreachable(error) ? failed() : reached()))
+    const id = ++latest
+    const fresh = () => id === latest
+    probe().then(
+      () => fresh() && reached(),
+      (error: unknown) => fresh() && (isUnreachable(error) ? failed() : reached()),
+    )
   }
 
   function failed() {
@@ -55,8 +62,14 @@ export function watchReach(
   return {
     unreachable: () => unreachable,
     check,
-    failed,
-    reached,
+    failed() {
+      latest++
+      failed()
+    },
+    reached() {
+      latest++
+      reached()
+    },
     dispose() {
       disposed = true
       stopChecking()
