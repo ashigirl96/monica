@@ -5,8 +5,10 @@ import type { RunButtonRequest, RunButtonsReply, RunFromButtonReply } from './ru
 // github.com のどの画面にも注入され、GitHub は画面を client 側で移るので、一覧かは走査のたびに URL で見る。
 const ISSUES_PATH = /^\/([^/]+)\/([^/]+)\/issues(?:\/(\d+))?\/?$/
 const TITLE_LINK = 'a[data-testid="issue-listitem-title-link"]'
+// class 名の末尾は GitHub の build ごとに変わる hash なので、前の部分で当てる。
+const METADATA = '[class*="MetadataContainer-module__container"]'
 
-const buttons = new WeakMap<HTMLAnchorElement, HTMLElement>()
+const buttons = new WeakMap<HTMLAnchorElement, HTMLElement[]>()
 
 const LABELS: Record<RunButton['run'], string> = { new: 'Run', resume: '再開', running: '実行中' }
 
@@ -52,7 +54,7 @@ async function scan() {
     const ref = refOf(link, repo)
     // GitHub が行の要素を使い回して別の Issue を描いたら、前のボタンを外して決め直す。
     if (!ref || link.dataset.monicaRef === ref) continue
-    buttons.get(link)?.remove()
+    for (const element of buttons.get(link) ?? []) element.remove()
     link.dataset.monicaRef = ref
     asked.set(ref, [...(asked.get(ref) ?? []), link])
   }
@@ -69,24 +71,30 @@ async function scan() {
     if (!button) continue
     for (const link of asked.get(ref) ?? []) {
       if (link.dataset.monicaRef !== ref || !link.isConnected) continue
-      const runButton = runButtonFor(ref, button.run)
-      buttons.set(link, runButton)
-      link.after(runButton)
+      const { cell, reason } = runButtonFor(ref, button.run)
+      buttons.set(link, [cell, reason])
+      link.after(reason)
+      const metadata = link.closest('li')?.querySelector(METADATA)
+      if (metadata) metadata.append(cell)
+      else reason.before(cell)
     }
   }
 }
 
-function runButtonFor(ref: string, run: RunButton['run']): HTMLElement {
-  const wrapper = document.createElement('span')
-  wrapper.style.cssText = 'display:inline-flex;align-items:center;gap:6px;margin-left:8px'
+function runButtonFor(
+  ref: string,
+  run: RunButton['run'],
+): { cell: HTMLElement; reason: HTMLElement } {
+  const cell = document.createElement('span')
+  cell.style.cssText = 'display:inline-flex;align-items:center;margin-left:8px'
   const button = document.createElement('button')
   button.type = 'button'
-  button.className = 'btn btn-sm'
+  button.className = 'btn btn-sm btn-primary'
   button.textContent = LABELS[run]
   button.disabled = run === 'running'
   button.dataset.monicaRunButton = ref
   const reason = document.createElement('span')
-  reason.style.cssText = 'color:var(--fgColor-danger, #d1242f);font-size:12px'
+  reason.style.cssText = 'color:var(--fgColor-danger, #d1242f);font-size:12px;margin-left:8px'
   button.addEventListener('click', async (event) => {
     // 行は Issue への link なので、押しても画面を移らせない。
     event.preventDefault()
@@ -102,8 +110,8 @@ function runButtonFor(ref: string, run: RunButton['run']): HTMLElement {
     button.textContent = LABELS[run]
     reason.textContent = reply ? reply.reason : 'Monica was reloaded; reload this page'
   })
-  wrapper.append(button, reason)
-  return wrapper
+  cell.append(button)
+  return { cell, reason }
 }
 
 let pending: ReturnType<typeof setTimeout> | undefined
