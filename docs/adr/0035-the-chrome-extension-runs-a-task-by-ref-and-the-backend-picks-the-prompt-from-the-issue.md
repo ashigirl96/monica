@@ -16,7 +16,7 @@ GitHub の Issues の一覧から Run を起こしたい。ADR-0034 は Chrome E
 | `wayfinder:map` | `/wayfinder <n>` |
 | `wayfinder:*` の子 | `/wayfinder <map> <n>` |
 
-新しい Run を起こす Issue のうち、open な Blocker がある Issue、`ready-for-human`・`needs-info`、子が全部 closed の spec、親の無い `wayfinder:*` の子、live な Run を持つ spec の子には、ボタンを出さない。
+新しい Run を起こす Issue のうち、closed な Issue、open な Blocker がある Issue、`ready-for-human`・`needs-info`、子が全部 closed の spec、親の無い `wayfinder:*` の子には、ボタンを出さない。live な Run を持つ spec の子には、新しい Run だけでなく resume のボタンも出さない。spec の Run が子を実装している間に子の Run を起こすと、resume でも同じ子に 2 つの agent が動くため。CLI の `run` も同じ規則で断る（ADR-0024）。
 
 ## Considered Options
 
