@@ -67,34 +67,58 @@ async function scan() {
     }
     return
   }
-  for (const { ref, button } of reply.buttons) {
-    if (!button) continue
+  for (const { ref, button, reason } of reply.buttons) {
+    if (!button && !reason) continue
     for (const link of asked.get(ref) ?? []) {
       if (link.dataset.monicaRef !== ref || !link.isConnected) continue
-      const { cell, reason } = runButtonFor(ref, button.run)
-      buttons.set(link, [cell, reason])
-      link.after(reason)
-      const metadata = link.closest('li')?.querySelector(METADATA)
-      if (metadata) metadata.append(cell)
-      else reason.before(cell)
+      if (button) {
+        const { cell, refusal } = runButtonFor(ref, button.run)
+        buttons.set(link, [cell, refusal])
+        link.after(refusal)
+        placeCell(link, cell)
+      } else if (reason) {
+        const cell = disabledRunButtonFor(ref, reason)
+        buttons.set(link, [cell])
+        placeCell(link, cell)
+      }
     }
   }
 }
 
-function runButtonFor(
-  ref: string,
-  run: RunButton['run'],
-): { cell: HTMLElement; reason: HTMLElement } {
+function placeCell(link: HTMLAnchorElement, cell: HTMLElement) {
+  const metadata = link.closest('li')?.querySelector(METADATA)
+  if (metadata) metadata.append(cell)
+  else link.after(cell)
+}
+
+function buttonCell(ref: string): { cell: HTMLElement; button: HTMLButtonElement } {
   const cell = document.createElement('span')
   cell.style.cssText = 'display:inline-flex;align-items:center;margin-left:8px'
   const button = document.createElement('button')
   button.type = 'button'
   button.className = 'btn btn-sm btn-primary'
+  button.dataset.monicaRunButton = ref
+  cell.append(button)
+  return { cell, button }
+}
+
+function disabledRunButtonFor(ref: string, reason: string): HTMLElement {
+  const { cell, button } = buttonCell(ref)
+  button.textContent = LABELS.new
+  button.disabled = true
+  button.title = reason
+  return cell
+}
+
+function runButtonFor(
+  ref: string,
+  run: RunButton['run'],
+): { cell: HTMLElement; refusal: HTMLElement } {
+  const { cell, button } = buttonCell(ref)
   button.textContent = LABELS[run]
   button.disabled = run === 'running'
-  button.dataset.monicaRunButton = ref
-  const reason = document.createElement('span')
-  reason.style.cssText = 'color:var(--fgColor-danger, #d1242f);font-size:12px;margin-left:8px'
+  const refusal = document.createElement('span')
+  refusal.style.cssText = 'color:var(--fgColor-danger, #d1242f);font-size:12px;margin-left:8px'
   button.addEventListener('click', async (event) => {
     // 行は Issue への link なので、押しても画面を移らせない。
     event.preventDefault()
@@ -103,15 +127,14 @@ function runButtonFor(
     if (!event.isTrusted || button.disabled) return
     button.disabled = true
     button.textContent = LABELS.running
-    reason.textContent = ''
+    refusal.textContent = ''
     const reply = await send<RunFromButtonReply>({ type: 'monica.runFromButton', ref })
     if (reply?.ran) return
     button.disabled = false
     button.textContent = LABELS[run]
-    reason.textContent = reply ? reply.reason : 'Monica was reloaded; reload this page'
+    refusal.textContent = reply ? reply.reason : 'Monica was reloaded; reload this page'
   })
-  cell.append(button)
-  return { cell, reason }
+  return { cell, refusal }
 }
 
 let pending: ReturnType<typeof setTimeout> | undefined

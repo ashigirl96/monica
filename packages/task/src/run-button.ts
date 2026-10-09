@@ -123,14 +123,12 @@ export async function runButtons(deps: SyncDeps, refs: string[]): Promise<RunBut
   return {
     buttons: asked.map(({ ref, parsed }) => {
       const issue = parsed && issues.get(key(parsed))
-      if (!issue) return { ref, button: null }
+      if (!issue) return { ref, button: null, reason: null }
       const seen = seenOf(deps.db, issue)
       const verdict = verdictOf(seen)
-      return {
-        ref,
-        button:
-          verdict.type === 'button' ? { kind: verdict.kind, run: seen.task?.run ?? 'new' } : null,
-      }
+      return verdict.type === 'button'
+        ? { ref, button: { kind: verdict.kind, run: seen.task?.run ?? 'new' }, reason: null }
+        : { ref, button: null, reason: verdict.message }
     }),
   }
 }
