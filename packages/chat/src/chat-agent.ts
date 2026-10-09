@@ -176,6 +176,7 @@ export function createChatAgent(deps: { home: string; claudePath?: string }): Ch
       // 本文への変換は数百 ms で、spare から答えれば claude を並べて起こす得は小さいので、変換を先に済ませる。
       const snapshot = await snapshotOf(page, history)
       const { content, omitted } = askContent(question, snapshot, history)
+      // contract の snapshot の page は screenshot を持たないので、oRPC の output の検証が落とす。
       const event: SnapshotEvent = { type: 'snapshot', page: snapshot, omitted }
       const { prompt, end } = singleTurn(userMessage(content))
       const claimed = spare

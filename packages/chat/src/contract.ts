@@ -16,6 +16,19 @@ export const UnreadableSchema = z.object({
   detail: z.string().optional(),
 })
 
+const screenshot = {
+  screenshot: z
+    .base64()
+    .optional()
+    .describe(
+      'the visible part of the Browser Tab, taken when the question was sent, as JPEG in base64 without the data: prefix',
+    ),
+  screenshotFailed: z
+    .object({ reason: z.string() })
+    .optional()
+    .describe('the user asked for a screenshot but it could not be taken'),
+}
+
 // chrome:// などの Browser Tab では side panel から見えず、file:// のページもあるので、url と title の形を検めない。
 export const PageSchema = z.object({
   url: z.string().optional(),
@@ -30,6 +43,7 @@ export const PageSchema = z.object({
     }),
     UnreadableSchema,
   ]),
+  ...screenshot,
 })
 
 const CutTextSchema = z.object({ text: z.string(), truncated: z.boolean() })
@@ -38,6 +52,7 @@ export const PageSnapshotSchema = z.object({
   url: z.string().optional(),
   title: z.string().optional(),
   selection: CutTextSchema.optional(),
+  ...screenshot,
   content: z
     .discriminatedUnion('kind', [
       CutTextSchema.extend({ kind: z.literal('text') }),
@@ -73,7 +88,10 @@ export const AskInputSchema = z.object({
 export const ChatEventSchema = z.discriminatedUnion('type', [
   z.object({
     type: z.literal('snapshot'),
-    page: PageSnapshotSchema.describe('the page as the Backend read it, to keep in history'),
+    // 数百 KB の文字列を往復させないよう、スクリーンショットは返さず、side panel が自分の撮ったものを足す。
+    page: PageSnapshotSchema.omit({ screenshot: true }).describe(
+      'the page as the Backend read it, to keep in history with the screenshot that was sent',
+    ),
     omitted: z
       .object({ pages: z.number().int(), turns: z.number().int() })
       .describe('how many earlier pages and earlier questions were left out to stay in the limit'),

@@ -21,18 +21,29 @@ export type ChatEntry = {
   status: 'waiting' | 'answering' | 'answered' | 'failed'
   /** 読めなかった・切り詰めた・渡していないことを、質問の吹き出しの下に出す 1 行。 */
   notice?: string
+  /** 質問に添えたスクリーンショットの JPEG の base64。吹き出しに縮小を出す。 */
+  screenshot?: string
 }
 
 // oRPC が input を包む分の余白。
 const BODY_MARGIN_BYTES = 1024 * 1024
 
-/** body の上限を超える input は、今のページの HTML と選択範囲を外し、大きすぎて読めなかったことにする。履歴は削らない。 */
+/**
+ * body の上限を超える input は、今のページの HTML と選択範囲を外し、大きすぎて読めなかったことにする。履歴は削らない。
+ * ユーザーが添えると決めたスクリーンショットは残す。
+ */
 function withinBodyLimit(input: AskInput): AskInput {
   const bytes = new TextEncoder().encode(JSON.stringify(input)).byteLength
   if (bytes + BODY_MARGIN_BYTES <= MAX_ASK_BODY_BYTES) return input
+  const { url, title, screenshot, screenshotFailed } = input.page
   return {
     ...input,
-    page: { ...addressOf(input.page), content: { kind: 'unreadable', reason: 'too-large' } },
+    page: {
+      ...addressOf({ url, title }),
+      content: { kind: 'unreadable', reason: 'too-large' },
+      ...(screenshot !== undefined && { screenshot }),
+      ...(screenshotFailed && { screenshotFailed }),
+    },
   }
 }
 
@@ -40,16 +51,25 @@ function addressOf({ url, title }: Pick<PageSnapshot, 'url' | 'title'>) {
   return { ...(url !== undefined && { url }), ...(title !== undefined && { title }) }
 }
 
-export type ChatSnapshot = { entries: readonly ChatEntry[]; answering: boolean }
+export type ChatSnapshot = {
+  entries: readonly ChatEntry[]
+  answering: boolean
+  /** スクリーンショットのボタンが押されていて、次に送る質問に添える。 */
+  withScreenshot: boolean
+}
+
+/** 送る時に Current Page を読む。screenshot なら、その Browser Tab の表示領域も撮る。 */
+export type ReadPage = (options: { screenshot: boolean }) => Promise<Page>
 
 /** side panel の Chat。document の memory にだけあり、どこにも残さない（ADR-0030・0031）。 */
 export type ChatStore = {
   snapshot: () => ChatSnapshot
   subscribe: (listener: () => void) => () => void
   /** side panel を開いた時に呼ぶ。質問はそれぞれ、送る時に readPage で読んだ Current Page について訊く。 */
-  open: (readPage: () => Promise<Page>) => void
-  /** 開く前と答えている間は送らずに false を返す。 */
+  open: (readPage: ReadPage) => void
+  /** 開く前と答えている間は送らずに false を返す。送ったらスクリーンショットのボタンを外す。 */
   ask: (question: string) => boolean
+  toggleScreenshot: () => void
   /** 今の Chat を終える。答えの途中なら、その stream を abort する。 */
   startNewChat: () => void
 }
@@ -58,14 +78,15 @@ export function createChatStore(client: ChatClient): ChatStore {
   let entries: readonly ChatEntry[] = []
   let history: readonly Turn[] = []
   let answering: AbortController | undefined
-  let snapshot: ChatSnapshot = { entries, answering: false }
-  let readPage: (() => Promise<Page>) | undefined
+  let withScreenshot = false
+  let snapshot: ChatSnapshot = { entries, answering: false, withScreenshot }
+  let readPage: ReadPage | undefined
   let nextId = 0
   const listeners = new Set<() => void>()
 
   const publish = (next: readonly ChatEntry[]) => {
     entries = next
-    snapshot = { entries, answering: answering !== undefined }
+    snapshot = { entries, answering: answering !== undefined, withScreenshot }
     for (const listener of listeners) listener()
   }
   const patch = (id: number, change: Partial<ChatEntry>) =>
@@ -76,22 +97,25 @@ export function createChatStore(client: ChatClient): ChatStore {
     id: number,
     question: string,
     controller: AbortController,
-    read: () => Promise<Page>,
+    reading: Promise<Page>,
   ) => {
     const live = () => answering === controller
     try {
-      const page = await read()
+      const page = await reading
       if (!live()) return
+      // Backend はスクリーンショットを送り返さないので、送ったものを履歴に足して次の質問から送り直す。
+      const sent = page.screenshot === undefined ? {} : { screenshot: page.screenshot }
+      if (page.screenshot !== undefined) patch(id, sent)
       const events = await client.ask(withinBodyLimit({ question, page, history: [...history] }), {
         signal: controller.signal,
       })
       let text = ''
       // Backend は Chat を持たないので、本文にした Page Snapshot を返してもらい、次の質問から送り直す（ADR-0031）。
-      let turnPage: PageSnapshot = addressOf(page)
+      let turnPage: PageSnapshot = { ...addressOf(page), ...sent }
       for await (const event of events) {
         if (!live()) return
         if (event.type === 'snapshot') {
-          turnPage = event.page
+          turnPage = { ...event.page, ...sent }
           const notice = noticeOf(event)
           if (notice) patch(id, { notice })
           continue
@@ -126,14 +150,22 @@ export function createChatStore(client: ChatClient): ChatStore {
       const controller = new AbortController()
       answering = controller
       const id = nextId++
+      // captureVisibleTab は送る操作の user gesture の中で呼ばないと quota にかかるので、await を挟まずに読み始める。
+      const reading = readPage({ screenshot: withScreenshot })
+      withScreenshot = false
       publish([...entries, { id, question, answer: '', status: 'waiting' }])
-      void answer(id, question, controller, readPage)
+      void answer(id, question, controller, reading)
       return true
+    },
+    toggleScreenshot() {
+      withScreenshot = !withScreenshot
+      publish(entries)
     },
     startNewChat() {
       answering?.abort()
       answering = undefined
       history = []
+      withScreenshot = false
       publish([])
     },
   }
