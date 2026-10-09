@@ -56,15 +56,15 @@
   - Chat の本文への変換（linkedom と defuddle。`docs/packages/chat.md` の「Page Snapshot」）で、Backend は 74,924,658 byte から 80,604,786 byte に 5,680,128 byte（約 5.7MB）増えた。compile した Backend でも変換は動き、`snapshot` の本文は `bun run` の Backend と同じになった。
   - PDF の本文（pdfjs-dist の Worker の entrypoint と `cmaps` の `--asset`）で、Backend は 80,604,786 byte から 89,124,978 byte に 8,520,192 byte（約 8.5MB）増えた。compile した Backend でも日本語の PDF の `snapshot` の本文は `bun run` の Backend と同じになった。
   - HTML の本文を Worker に移した（`html-worker.ts` の entrypoint）後の Backend は 89,191,026 byte。compile した Backend でも HTML の `snapshot` の本文は `bun run` の Backend と同じで、div を 3,000 段入れ子にしたページを本文にしている間も `chat.prepare` は 2ms で返った。
-- `bun run install-app`（`scripts/install-app.ts`）は、build した `.app` を一時の場所に `cp -R` し、Chat の claude と Chrome Extension を写して、codesign と quarantine の解除を済ませる。そのあと起きている Monica を終了させ、`/Applications` の `.app` を入れ替える。起動はしない。
+- `bun run install-app`（`scripts/install-app.ts`）は、まず `scripts/build.ts` を流す。bundle だけを入れ替えると、手元の変更より古い build が黙って入るため。次に build した `.app` を一時の場所に `cp -R` し、Chat の claude と Chrome Extension を写して、codesign と quarantine の解除を済ませる。そのあと起きている Monica を終了させ、`/Applications` の `.app` を入れ替える。最後に `open` で起こし、`~/.monica/backend.json` の token（起動のたびに変わる。pid は再利用されうる）が入れる前と変わり、その port の `/health` が答えるまで最大 30 秒待つ。
   - 署名する前の `.app` を開かせないよう、一時の場所で署名してから置く。
   - claude は `scripts/bundled-claude.ts` の `bundledClaude()` が解く。`packages/chat` から SDK を解き、その場所から platform package（`@anthropic-ai/claude-agent-sdk-<platform>-<arch>`）の `claude` を解く。bun の isolated linker では root から SDK を解けず、`packages/chat` から platform package も直には解けないため。SDK も自分の場所から同じ名前を解くので、dev の Backend が使う claude と同じ file になる。PATH の `~/.local/bin/claude` は使わない（ADR-0032）。これを `cp` で `Contents/MacOS/claude` に写す。`.app` は約 236MB 増える。
   - Chrome Extension は `apps/extension/dist/production` を `cp -R` で `Contents/Resources/extension` に写す。ユーザーはそこを一度だけ Brave に読み込み、`install-app` の後は reload する（`docs/packages/extension.md` の「release の読み込み方」）。
-  - build した `.app`、`apps/extension/dist/production/manifest.json`、claude の path のどれかが無ければ、何も写さず Monica も終了させずに 1 行出して exit 1 する。足りないまま入れ替えて、Monica を起こせなくしないため。
+  - build した `.app`、`apps/extension/dist/production/manifest.json`、claude の path のどれかが build の後に無ければ、何も写さず Monica も終了させずに 1 行出して exit 1 する。足りないまま入れ替えて、Monica を起こせなくしないため。
   - 写しと署名は Monica を終了させる前に済ませ、終了させた後は `/Applications` の入れ替えだけを行う。claude の写しの分だけ、Monica が止まっている時間を延ばさないため。
-  - `--stage <dir>` を付けると、写しと署名まで済ませた `.app` を `<dir>/Monica.app` に置いて抜ける。Monica を終了させず、`/Applications` にも触れない。入れ替える前の確かめが install-app と同じ code を通る（`release-app` skill）。
+  - `--stage <dir>` を付けると、build と写しと署名まで済ませた `.app` を `<dir>/Monica.app` に置いて抜ける。Monica を終了させず、`/Applications` にも触れない。入れ替える前の確かめが install-app と同じ code を通る（`release-notifications` skill の「Chat の claude と Chrome Extension」）。
   - Tab の shell と claude は ptyd が持ち続けるので、終了させても切れない。
-  - Native Messaging の host の manifest の path（`/Applications/Monica.app/Contents/MacOS/monica`）は入れ替えの前後で変わらないので、install-app は manifest に触れない。入れ替えている間に side panel が問い合わせると host が見つからず、帯が出て 5 秒おきに確かめ直す。
+  - Native Messaging の host の manifest の path（`/Applications/Monica.app/Contents/MacOS/monica`）は入れ替えの前後で変わらないので、install-app は manifest に触れない。起こした Shell が起動のたびに書き直す。入れ替えている間に side panel が問い合わせると host が見つからず、帯が出て 5 秒おきに確かめ直す。
   - codesign の identity は Keychain Access で作った自己署名の `Monica`。ad-hoc と違い、build をまたいで署名の同一性が保たれる。`--deep` は付けない。付けると claude の Anthropic の署名（`Developer ID Application: Anthropic PBC`）が Monica のものに置き換わる。付けなければ外側の署名は `Contents/MacOS/claude` を Anthropic の designated requirement で記録する（ADR-0032）。
 - 署名と notarization（hardenedRuntime 下の Bun の JIT entitlements。Bun の binary は Backend と CLI の 2 つ）は配布を始めるときに決める。そのときも claude と Bun の binary を `--deep` で一括に署名し直さない。`--deep --options runtime` では entitlements の無い hardened runtime になり、Backend も claude も `SharedArrayBuffer is not defined` で起きない（ADR-0032、#268）。
 

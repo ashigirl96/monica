@@ -122,7 +122,7 @@ function TileButton({
         title={number === null ? label : `${label} (⌘${number})`}
         {...pressHandlers(onPick)}
         className={cn(
-          'relative flex size-[30px] shrink-0 items-center justify-center text-xs leading-none font-bold',
+          'relative flex size-[30px] shrink-0 cursor-pointer items-center justify-center text-xs leading-none font-bold',
           'transition-[border-radius,filter] duration-150 hover:brightness-125 motion-reduce:transition-none',
           'focus-visible:outline-1 focus-visible:outline-offset-1 focus-visible:outline-white/50',
           selected ? 'rounded-[7px] ring-[1.5px] ring-white/55' : 'rounded-[9px]',

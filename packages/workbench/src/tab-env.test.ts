@@ -148,7 +148,11 @@ test.each([
     args,
   )
 
-  const settings = ['--settings', join(home, 'shell/claude/settings.json')]
+  const settings = [
+    '--settings',
+    join(home, 'shell/claude/settings.json'),
+    '--permission-mode=bypassPermissions',
+  ]
   expect(result.stdout.trimEnd().split('\n')).toEqual([...(hooked ? settings : []), ...args])
 })
 
@@ -178,6 +182,7 @@ test('the claude wrapper reaches the real claude past another wrapper that hands
   expect(result.stdout.trimEnd().split('\n')).toEqual([
     '--settings',
     join(home, 'shell/claude/settings.json'),
+    '--permission-mode=bypassPermissions',
     '--print',
     'hi',
   ])

@@ -30,6 +30,7 @@ ptyd は shell を常に `--login` で起こすので、zsh は `.zshenv` → `.
 - PATH から自分と同じファイルでない `claude` を探して exec する。無ければ stderr に 1 行出して exit 127 で終わる。
 - PATH に別の wrapper（他の home の monica、旧 Monica）があると、どちらも PATH の先頭の `claude` へ戻すので exec が巡回する。wrapper は exec した `claude` を env の `MONICA_CLAUDE_TRAIL`（pid と path の列）に残し、同じ pid で戻ってきたら、それを飛ばして次を探し、`--settings` も足し直さない。exec は pid を変えないので、claude の子に漏れた値とは見分けられる。
 - `MONICA_TERMINAL_SESSION_ID` があり、`CLAUDECODE` が無いときだけ `--settings $MONICA_HOME/shell/claude/settings.json` を足す。`CLAUDECODE` があるのは agent の Bash tool から起こした入れ子の claude で、hook を付けると同じ Terminal Session の SessionStart が親の Agent Session を superseded にする（ADR-0008）。
+- `--settings` を足すときは `--permission-mode=bypassPermissions` も足し、Tab の claude を許可の確認なしで動かす。足さない条件は `--settings` と同じ。
 - 最初の引数が claude の subcommand（`mcp`、`doctor`、`update` など。claude 2.1.288 の `--help` の Commands）なら `--settings` を足さない。claude は `--settings` の後ろの subcommand を prompt として読み、後ろに置くと `unknown option` で落ちる。最初の引数が prompt（`claude "fix the bug"`）なら足す。
 - `--session-id` は足さない。Run は Bench の Tab に居る Agent Session から生まれる（ADR-0005）。
 - `claude` を絶対パスで呼ぶと wrapper を通らず、その Agent Session は観測されない。

@@ -100,7 +100,7 @@ const CLAUDE_SUBCOMMANDS = [
 // 同じ pid（exec は pid を変えない）で戻ってきたら試した claude を飛ばし、settings も足し直さない。
 function claudeWrapper(home: string): string {
   return `#!/bin/bash
-# monica の claude wrapper。PATH にある次の claude を exec し、Tab で起こした claude にだけ hook を付ける。
+# monica の claude wrapper。PATH にある次の claude を exec し、Tab で起こした claude にだけ hook と bypassPermissions を付ける。
 trail=""
 [[ "\${MONICA_CLAUDE_TRAIL%%:*}" == "$$" ]] && trail="\${MONICA_CLAUDE_TRAIL#*:}"
 real=""
@@ -126,7 +126,7 @@ hooked=""
 case "\${1:-}" in
   ${CLAUDE_SUBCOMMANDS.join('|')}) hooked="" ;;
 esac
-[[ -n "$hooked" ]] && set -- --settings ${shellQuote(settingsOf(home))} "$@"
+[[ -n "$hooked" ]] && set -- --settings ${shellQuote(settingsOf(home))} --permission-mode=bypassPermissions "$@"
 export MONICA_CLAUDE_TRAIL="$$:\${trail:+$trail:}$real"
 exec "$real" "$@"
 `

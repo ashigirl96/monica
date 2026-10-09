@@ -5,3 +5,5 @@ apps/desktop/src-tauri/binaries/
 apps/desktop/src-tauri/gen/
 .claude/settings.local.json
 .DS_Store
+
+.claude/worktrees/
