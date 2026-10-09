@@ -16,13 +16,16 @@ const READ_TIMEOUT_MS = 10_000
 /** ボタンを決める材料。Issue は GitHub の今の答えで、Task は track 済みのときだけある。 */
 type Seen = {
   issue: GitHubIssue
-  task: { closed: boolean; run: RunButton['run'] } | null
+  task: { closed: boolean; run: RunState } | null
   /** 親が spec で live な Run を持つとき、その親。 */
   runningSpec: IssueRef | null
 }
 
+type RunState = Exclude<RunButton['run'], 'reopen'>
+
 type Verdict =
   | { type: 'button'; kind: PromptKind }
+  | { type: 'reopen'; message: string }
   | { type: 'blocked'; message: string; blockers: string[] }
   | { type: 'none'; message: string }
 
@@ -52,7 +55,7 @@ const rules: ((seen: Seen) => Verdict | undefined)[] = [
     issue.state === 'closed' ? noButton(`${formatRef(issue)} is a closed Issue`) : undefined,
   ({ issue, task }) =>
     task?.closed
-      ? noButton(`${formatRef(issue)} is a closed Task; reopen it to run it`)
+      ? { type: 'reopen', message: `${formatRef(issue)} is a closed Task; reopen it to run it` }
       : undefined,
   ({ issue }) => {
     const blockers = issue.blockers.filter((b) => b.state === 'open').map(formatRef)
@@ -126,9 +129,14 @@ export async function runButtons(deps: SyncDeps, refs: string[]): Promise<RunBut
       if (!issue) return { ref, button: null, reason: null }
       const seen = seenOf(deps.db, issue)
       const verdict = verdictOf(seen)
-      return verdict.type === 'button'
-        ? { ref, button: { kind: verdict.kind, run: seen.task?.run ?? 'new' }, reason: null }
-        : { ref, button: null, reason: verdict.message }
+      switch (verdict.type) {
+        case 'button':
+          return { ref, button: { kind: verdict.kind, run: seen.task?.run ?? 'new' }, reason: null }
+        case 'reopen':
+          return { ref, button: { run: 'reopen' as const }, reason: null }
+        default:
+          return { ref, button: null, reason: verdict.message }
+      }
     }),
   }
 }
@@ -154,6 +162,7 @@ export async function runFromButton(
   switch (verdict.type) {
     case 'blocked':
       throw errors.BLOCKED({ message: verdict.message, data: { blockers: verdict.blockers } })
+    case 'reopen':
     case 'none':
       throw refused(verdict.message)
   }
@@ -193,7 +202,7 @@ const liveRunCount = (db: Pick<Db, 'select'>, taskIssueId: number) =>
 function runOf(
   db: Db,
   { issue: { id }, bench }: NonNullable<ReturnType<typeof taskIfTracked>>,
-): RunButton['run'] {
+): RunState {
   if (!bench) return 'new'
   if (liveRunCount(db, id) > 0) return 'running'
   return resumableRunOf(db, id, bench) ? 'resume' : 'new'

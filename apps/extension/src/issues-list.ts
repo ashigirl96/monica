@@ -1,6 +1,6 @@
 import type { RunButton } from '@monica/task/contract'
 
-import type { RunButtonRequest, RunButtonsReply, RunFromButtonReply } from './run-button-relay.ts'
+import type { PressReply, RunButtonRequest, RunButtonsReply } from './run-button-relay.ts'
 
 // github.com のどの画面にも注入され、GitHub は画面を client 側で移るので、一覧かは走査のたびに URL で見る。
 const ISSUES_PATH = /^\/([^/]+)\/([^/]+)\/issues(?:\/(\d+))?\/?$/
@@ -10,7 +10,12 @@ const METADATA = '[class*="MetadataContainer-module__container"]'
 
 const buttons = new WeakMap<HTMLAnchorElement, HTMLElement[]>()
 
-const LABELS: Record<RunButton['run'], string> = { new: 'Run', resume: '再開', running: '実行中' }
+const LABELS: Record<RunButton['run'], string> = {
+  new: 'Run',
+  resume: 'Resume',
+  running: 'Running',
+  reopen: 'Reopen',
+}
 
 /** Issues の一覧なら number が無く、Issue の画面なら number がある。 */
 function issuesPathOf(pathname: string): { repo: string; number: string | undefined } | null {
@@ -72,7 +77,7 @@ async function scan() {
     for (const link of asked.get(ref) ?? []) {
       if (link.dataset.monicaRef !== ref || !link.isConnected) continue
       if (button) {
-        const { cell, refusal } = runButtonFor(ref, button.run)
+        const { cell, refusal } = runButtonFor(link, ref, button.run)
         buttons.set(link, [cell, refusal])
         link.after(refusal)
         placeCell(link, cell)
@@ -115,7 +120,15 @@ function disabledRunButtonFor(ref: string, reason: string): HTMLElement {
   return cell
 }
 
+/** ボタンを外し、次の走査で Backend に決め直させる。 */
+function redecide(link: HTMLAnchorElement) {
+  for (const element of buttons.get(link) ?? []) element.remove()
+  delete link.dataset.monicaRef
+  scheduleScan()
+}
+
 function runButtonFor(
+  link: HTMLAnchorElement,
   ref: string,
   run: RunButton['run'],
 ): { cell: HTMLElement; refusal: HTMLElement } {
@@ -131,10 +144,16 @@ function runButtonFor(
     // GitHub のページの script が .click() で押した run は通さない。
     if (!event.isTrusted || button.disabled) return
     button.disabled = true
-    button.textContent = LABELS.running
+    button.textContent = run === 'reopen' ? 'Reopening' : LABELS.running
     refusal.textContent = ''
-    const reply = await send<RunFromButtonReply>({ type: 'monica.runFromButton', ref })
-    if (reply?.ran) return
+    const reply = await send<PressReply>({
+      type: run === 'reopen' ? 'monica.reopenFromButton' : 'monica.runFromButton',
+      ref,
+    })
+    if (reply?.done) {
+      if (run === 'reopen') redecide(link)
+      return
+    }
     button.disabled = false
     button.textContent = LABELS[run]
     refusal.textContent = reply ? reply.reason : 'Monica was reloaded; reload this page'

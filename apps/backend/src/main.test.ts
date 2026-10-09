@@ -160,7 +160,7 @@ test('the Chrome Extension token in backend.json opens only chat and the two Run
   expect((await viaToken(viaExtensionToken, 'chat/ask', INVALID_QUESTION)).status).toBe(400)
   expect((await viaToken({ port: backend.port }, 'chat/ask', INVALID_QUESTION)).status).toBe(401)
   // 不正な input は handler の前で 400 になるので、本物の GitHub に届かずに口に載っているかを見られる。
-  for (const path of ['task/runButtons', 'task/runFromButton']) {
+  for (const path of ['task/runButtons', 'task/runFromButton', 'task/reopen']) {
     expect([path, (await viaToken(viaExtensionToken, path, { ref: 1, refs: 1 })).status]).toEqual([
       path,
       400,
