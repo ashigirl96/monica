@@ -9,7 +9,8 @@ export type RunButtonRequest =
   | { type: 'monica.runButtons'; refs: string[] }
   | { type: 'monica.runFromButton'; ref: string }
 
-export type RunButtonsReply = RunButtonsOutput
+/** null なら Backend に届かなかった。 */
+export type RunButtonsReply = RunButtonsOutput | null
 
 export type RunFromButtonReply = { ran: true } | { ran: false; reason: string }
 
@@ -28,12 +29,12 @@ export function relayRunButton(
   return runFromButton(client, message.ref)
 }
 
-// Backend に届かない（host が無い・Backend が居ない・古い token）なら、押しても届かないボタンを出さない。
+// host が無い・Backend が居ない・古い token は、どれも desktop を起こせば直るので、まとめて null にする。
 async function tellButtons(client: Client, refs: string[]): Promise<RunButtonsReply> {
   try {
     return await client.task.runButtons({ refs })
   } catch {
-    return { buttons: refs.map((ref) => ({ ref, button: null })) }
+    return null
   }
 }
 

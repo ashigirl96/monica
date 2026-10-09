@@ -32,9 +32,9 @@ const manifest = defineManifest(({ mode }) => ({
   action: { default_icon: ICONS },
   background: { service_worker: 'src/background.ts', type: 'module' },
   side_panel: { default_path: 'src/sidepanel/index.html' },
-  // GitHub の Issues の一覧の行に Run ボタンを差し込む（ADR-0035）。GitHub は repo の中を client 側で移り、そこでは注入されないので、
-  // repo の画面すべてに注入し、一覧かは script が URL で見る。
-  content_scripts: [{ matches: ['https://github.com/*/*'], js: ['src/issues-list.ts'] }],
+  // GitHub の Issues の一覧の行に Run ボタンを差し込む（ADR-0035）。GitHub は `/` や `/issues` からも client 側で移り、そこでは注入されないので、
+  // github.com の画面すべてに注入し、一覧かは script が URL で見る。
+  content_scripts: [{ matches: ['https://github.com/*'], js: ['src/issues-list.ts'] }],
   // scripting は、質問を送った時に Current Page の HTML と選択範囲を読む。
   // nativeMessaging は、Backend の token の口の port と Chrome Extension の token を host から引く（ADR-0034）。
   permissions: ['sidePanel', 'scripting', 'nativeMessaging'],

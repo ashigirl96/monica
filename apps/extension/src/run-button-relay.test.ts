@@ -132,13 +132,13 @@ test.each([
   ['the Backend is not running', () => ({ error: 'not-running' })],
   ['the Backend no longer takes the token', (port: number) => ({ port, token: 'stale' })],
   ['nothing listens on the port', () => ({ port: 1, token: TOKEN })],
-])('every ref gets no button when %s', async (_, reply) => {
+])('the relay tells the Backend is out of reach when %s', async (_, reply) => {
   const backend = fakeBackend()
   nativeHost(reply(backend.port))
 
-  expect(await relayRunButton(HOST, { type: 'monica.runButtons', refs: ['acme/app#12'] })).toEqual({
-    buttons: [{ ref: 'acme/app#12', button: null }],
-  })
+  expect(
+    await relayRunButton(HOST, { type: 'monica.runButtons', refs: ['acme/app#12'] }),
+  ).toBeNull()
 })
 
 test('the relay leaves a message that is not for it to other listeners', async () => {

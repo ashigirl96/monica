@@ -2,25 +2,34 @@ import type { RunButton } from '@monica/task/contract'
 
 import type { RunButtonRequest, RunButtonsReply, RunFromButtonReply } from './run-button-relay.ts'
 
-// repo の画面すべてに注入され、GitHub は画面を client 側で移るので、一覧かは走査のたびに URL で見る。
-const ISSUES_LIST = /^\/([^/]+)\/([^/]+)\/issues\/?$/
+// github.com のどの画面にも注入され、GitHub は画面を client 側で移るので、一覧かは走査のたびに URL で見る。
+const ISSUES_PATH = /^\/([^/]+)\/([^/]+)\/issues(?:\/(\d+))?\/?$/
 const TITLE_LINK = 'a[data-testid="issue-listitem-title-link"]'
 
 const buttons = new WeakMap<HTMLAnchorElement, HTMLElement>()
 
 const LABELS: Record<RunButton['run'], string> = { new: 'Run', resume: '再開', running: '実行中' }
 
+/** Issues の一覧なら number が無く、Issue の画面なら number がある。 */
+function issuesPathOf(pathname: string): { repo: string; number: string | undefined } | null {
+  const match = ISSUES_PATH.exec(pathname)
+  if (!match) return null
+  const [, owner, name, number] = match
+  return { repo: `${owner}/${name}`, number }
+}
+
 function listedRepo(): string | null {
-  const [, owner, name] = ISSUES_LIST.exec(location.pathname) ?? []
-  return owner && name ? `${owner}/${name}` : null
+  const path = issuesPathOf(location.pathname)
+  return path && path.number === undefined ? path.repo : null
 }
 
 function refOf(link: HTMLAnchorElement, repo: string): string | null {
   const url = new URL(link.href, location.href)
-  const [, owner, name, number] = /^\/([^/]+)\/([^/]+)\/issues\/(\d+)$/.exec(url.pathname) ?? []
-  if (url.origin !== location.origin || `${owner}/${name}`.toLowerCase() !== repo.toLowerCase())
-    return null
-  return `${owner}/${name}#${number}`
+  if (url.origin !== location.origin) return null
+  const path = issuesPathOf(url.pathname)
+  if (!path || path.number === undefined) return null
+  if (path.repo.toLowerCase() !== repo.toLowerCase()) return null
+  return `${path.repo}#${path.number}`
 }
 
 async function send<T>(request: RunButtonRequest): Promise<T | null> {
@@ -32,9 +41,12 @@ async function send<T>(request: RunButtonRequest): Promise<T | null> {
   }
 }
 
+// Backend に届かなかったら、desktop を起こして画面に戻る（focus）まで問い直さない。DOM の変化のたびに host を起こさないため。
+let backendOutOfReach = false
+
 async function scan() {
   const repo = listedRepo()
-  if (!repo) return
+  if (!repo || backendOutOfReach) return
   const asked = new Map<string, HTMLAnchorElement[]>()
   for (const link of document.querySelectorAll<HTMLAnchorElement>(TITLE_LINK)) {
     const ref = refOf(link, repo)
@@ -46,7 +58,14 @@ async function scan() {
   }
   if (asked.size === 0) return
   const reply = await send<RunButtonsReply>({ type: 'monica.runButtons', refs: [...asked.keys()] })
-  for (const { ref, button } of reply?.buttons ?? []) {
+  if (!reply) {
+    backendOutOfReach = true
+    for (const [ref, links] of asked) {
+      for (const link of links) if (link.dataset.monicaRef === ref) delete link.dataset.monicaRef
+    }
+    return
+  }
+  for (const { ref, button } of reply.buttons) {
     if (!button) continue
     for (const link of asked.get(ref) ?? []) {
       if (link.dataset.monicaRef !== ref || !link.isConnected) continue
@@ -81,7 +100,7 @@ function runButtonFor(ref: string, run: RunButton['run']): HTMLElement {
     if (reply?.ran) return
     button.disabled = false
     button.textContent = LABELS[run]
-    reason.textContent = reply ? reply.reason : 'the monica desktop is not running'
+    reason.textContent = reply ? reply.reason : 'Monica was reloaded; reload this page'
   })
   wrapper.append(button, reason)
   return wrapper
@@ -93,8 +112,16 @@ function scheduleScan() {
   pending = setTimeout(() => void scan(), 150)
 }
 
+function retryBackend() {
+  if (document.visibilityState !== 'visible') return
+  backendOutOfReach = false
+  scheduleScan()
+}
+
 new MutationObserver(scheduleScan).observe(document.documentElement, {
   childList: true,
   subtree: true,
 })
+window.addEventListener('focus', retryBackend)
+document.addEventListener('visibilitychange', retryBackend)
 scheduleScan()
