@@ -20,7 +20,7 @@ export type Readers = { htmlWorker: URL; pdfWorker: URL; cMaps: string }
 
 /**
  * given に無いものは、packages/chat の Worker の module と、node_modules の pdfjs-dist の cMap にする。
- * compile した Backend はどれも解けないので、同梱したものを渡す。bun の isolated linker では pdfjs-dist を packages/chat からしか解けない。
+ * compile した binary の中ではどれも解けない。bun の isolated linker では pdfjs-dist を packages/chat からしか解けない。
  */
 export function defaultReaders(given: Partial<Readers> = {}): Readers {
   return {

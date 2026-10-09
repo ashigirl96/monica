@@ -115,14 +115,14 @@ claude の `system`（`init`）を受けたら、stderr に 1 行出す。tools 
 
 - 読むのは、送る時に `tabs.query({ active: true, windowId })` で取り直した Browser Tab（下の「Current Page の追い方」）。`url` と `title` もその Browser Tab のものにし、見出しと揃える。
 - `chrome.scripting.executeScript` に `target: { tabId }`・`func`・`injectImmediately: true` だけを渡す。`frameIds` も `allFrames` も渡さず top frame だけを読み、world は既定の ISOLATED のままにしてページの CSP を受けない。
-- 3 秒で返らなければ打ち切って `timeout` にする。`view-source:`、`alert()` の最中、frozen のタブでは返らず、`injectImmediately` が無いと body が終わらないページでも返らない。
+- 3 秒で返らなければ打ち切って `timeout` にする。`view-source:`、`alert()` の最中、frozen の Browser Tab では返らず、`injectImmediately` が無いと body が終わらないページでも返らない。
 - 注入する関数（`readDocument`）は `{ contentType, html, selection }` を返す自己完結した関数で、module の他の関数も import も参照しない。`func` は文字列にして送られ、build の minify で名前が変わった helper も届かないため。
   - `document.contentType` が `application/pdf` なら、HTML と選択範囲を読まずに返し、下の「PDF の取り方」に進む。PDF viewer の main frame は `contentType` が `application/pdf` で body が空、viewer は closed shadow root の中の OOPIF にあり、`executeScript` は viewer の frame に注入しない。URL の拡張子は当てにならず、HEAD を投げると request が 1 つ増えるので、`contentType` で見分ける。
   - shadow root は `document.documentElement` から要素を順に辿り、`chrome.dom.openOrClosedShadowRoot` で closed のものまで、見つけた root の中にも潜って集める。`html` は `document.documentElement.getHTML({ shadowRoots })` で、shadow root は `<template shadowrootmode>` として書き出される。
   - 選択範囲は top frame の `getSelection().toString()`。activeElement が textarea か、`type` が `text`・`search`・`url`・`tel` の input なら、その `selectionStart`・`selectionEnd` で読む。別の場所を選んだ後も古い値が残るので、focus のある欄だけを読む。それ以外の input（`password` など）に focus があれば読まない。空なら `selection` を送らない。
 - `executeScript` が reject したら `restricted` にし、`detail` に error の message を入れる。
 - 送る時に見出しが出していた Current Page の URL と title（`CurrentPageWatch.shown()`）を、読んだページと並べて `ChatStore` に返す。読み終える前に止めた質問の履歴に入れる（下の「失敗」の「再試行と履歴」）。
-- 送る前に、input を `JSON.stringify` した UTF-8 の bytes に、PDF の bytes と 1MiB（oRPC の包みの分）を足して `MAX_ASK_BODY_BYTES` と比べる。File は `JSON.stringify` で `{}` になるので、PDF の大きさは `size` で足す。超えたら今のページの `html`・`pdf`・`selection` を外して `too-large` にする（`chat-store.ts`）。履歴は削らない。
+- 送る前に、input を `JSON.stringify` した UTF-8 の bytes に、PDF の bytes と 1MiB（oRPC の包みの分）を足して `MAX_ASK_BODY_BYTES` と比べる。File は `JSON.stringify` で `{}` になるので、PDF の大きさは `size` で足す。超えたら Current Page の `html`・`pdf`・`selection` を外して `too-large` にする（`chat-store.ts`）。履歴は削らない。
 
 #### PDF の取り方
 
@@ -199,7 +199,7 @@ snapshot      { type: 'snapshot', page: PageSnapshot から screenshot を除い
 
 - 前の問答、前のページの本文と選択範囲とスクリーンショット、今の質問と Page Snapshot の字の和を 20 万字（`MAX_ASK_CHARS`）に収める。スクリーンショットは 1 枚を 1,500 字と数える。URL、title、Backend が足す見出しの文は数えない。
 - 超えたら、古い turn のページ（本文と選択範囲とスクリーンショット）から 1 つずつ落とす。1 ページを `document` と `image` の組で渡す形を崩さないよう、同じ質問のページの本文とスクリーンショットはまとめて落とす。それでも超えたら、古い turn の問答を 1 つずつ落とす。落としたスクリーンショットは `omitted.pages` に数え、別の知らせは足さない。
-- 今の質問と Page Snapshot は落とさない。今のページが `same` で指す turn も、ページと問答のどちらも落とさない。今のページの本文がそこにしか無いため。今の分だけで 20 万字を超えても、そのまま送る。
+- 今の質問と Page Snapshot は落とさない。Current Page の Page Snapshot が `same` で指す turn も、ページと問答のどちらも落とさない。Current Page の本文がそこにしか無いため。今の分だけで 20 万字を超えても、そのまま送る。
 
 ### prompt の block（`src/page/prompt.ts`）
 
@@ -369,7 +369,7 @@ side panel は `ORPCError`（`@orpc/client`）の `code` で分け、`data` は 
 - claude の場所に何も無い場面は、`createChatAgent` に一時 directory の無い path を渡して作る。
 - 起こした claude は、テストの process の子のうち生きているもの（`ps` の ppid と stat）で数える。SDK は呼び出しの中で同期に spawn するので、`ask` と `prepare` が返った直後に数えれば、起こしていないことも確かめられる。
 - 5 分の時限は、`setTimeout` を `spyOn` で捕まえ、300000ms の callback を手で呼ぶ。
-- テストは偽の claude が居なくなるのを待ってから home を消す（`docs/packages/dev-loop.md` の「検査と CI」）。
+- テストは偽の claude が居なくなるのを待ってから home を消す（`docs/packages/dev-loop.md` の「検査と CI」）。`ChatAgent` を自分で作るテストは自分の子を数え、Backend の process を起こすテストは `@monica/chat/testing` の `untilFakeClaudesExit(dir)` で、wrapper を書いた dir を command line に持つ process が居なくなるのを待つ。`stop()` も Backend の終了も SIGKILL を送るだけで、居なくなるのを待たないため。
 
 ## 実機で確かめたこと
 
@@ -393,7 +393,7 @@ SDK 0.3.293 と同梱の claude 2.1.293 で、dev の Backend を `env -i`（`HO
 
 部品は fluid-functionalism（MIT、`fluid/LICENSE`）の commit `bf9ece4` の registry から、`packages/chat/src/ui/fluid/` に写した。upstream を追う仕組みは持たない。
 
-- 写したのは 14 ファイル: `chat-message.tsx`、`input-message.tsx`、`thinking-indicator.tsx`、`button.tsx`（Base UI 版）、`hooks/use-touch-primary.tsx`、`lib/` の `utils.ts`・`springs.ts`・`font-weight.ts`・`shape-context.tsx`・`size-context.tsx`・`type-scale.ts`・`icon-context.tsx`・`surface-classes.ts`・`surface-context.tsx`。CSS は `fluid/typeset.css`（`.typeset`）と `fluid/shimmer.css`（`.shimmer-text` と keyframes）を、本家の `app/globals.css` から写した。
+- 写したのは 14 ファイル: `chat-message.tsx`、`input-message.tsx`、`thinking-indicator.tsx`、`button.tsx`（Base UI 版）、`hooks/use-touch-primary.tsx`、`lib/` の `utils.ts`・`springs.ts`・`font-weight.ts`・`shape-context.tsx`・`size-context.tsx`・`type-scale.ts`・`icon-context.tsx`・`surface-classes.ts`・`surface-context.tsx`。CSS は `fluid/typeset.css`（`.typeset`）と `fluid/shimmer.css`（`.shimmer-text` と keyframes）を、fluid-functionalism の `app/globals.css` から写した。
 - 写さないもの: Tooltip、use-fluid-hover、fluid-hover-highlight、popup、file-thumbnail。Button の loading の spinner の keyframes も、使わないので写さない。
 - 写すときの直し:
   - `"use client"` を消し、import を拡張子付きの相対 path にし、oxfmt を当てた。
@@ -430,13 +430,13 @@ React に依らない `createChatStore(client)` が Chat を持ち、`ChatApp` �
 
 - Chat は side panel の document の memory にだけあり、window ごとに 1 つ。「新しい Chat」を押すか side panel を閉じると終わり、どこにも残さない。Backend が居なくなっても終わらない（ADR-0030・0031）。
 - `open(readPage, focus)` は side panel を開いた時に `ChatApp` の effect が 1 回呼び、`chat.prepare` を呼んで spare を起こさせる。届かなければ帯を出す（上の「失敗」の「Backend の不在の帯」）。`focus` は `ChatApp` が渡す `window` で、帯の間はその `focus` の event でも確かめ直す。返す関数で確かめ直しを止める。dev の StrictMode で 2 回呼ばれても、Backend が spare を 1 つに保つので害は無い。
-- `ask` は、送る時に `readPage({ screenshot, maxPdfBytes, signal })` で Current Page を読み直して `page` に入れ、答え終えた問答を古い順に `history` に入れて `chat.ask` を呼ぶ。`readPage` は await を挟まずに呼び、送る操作の user gesture の中で撮り始める。`ChatApp` が渡す `readPage` は `read-current-page.ts` の `readCurrentPage` で、撮り始めてから Browser Tab を取り直して `read-page.ts` で読む（上の「Page Snapshot」）。`maxPdfBytes` は PDF を読む上限（上の「PDF の取り方」）で、今のページのスクリーンショットは読むのと並べて撮るので数えず、送る前の大きさの確かめが数える。答えている間は送らずに false を返し、スクリーンショットのボタンも外さない。答えの途中で Current Page が替わっても、delta はその質問の答えに足す。
+- `ask` は、送る時に `readPage({ screenshot, maxPdfBytes, signal })` で Current Page を読み直して `page` に入れ、答え終えた問答を古い順に `history` に入れて `chat.ask` を呼ぶ。`readPage` は await を挟まずに呼び、送る操作の user gesture の中で撮り始める。`ChatApp` が渡す `readPage` は `read-current-page.ts` の `readCurrentPage` で、撮り始めてから Browser Tab を取り直して `read-page.ts` で読む（上の「Page Snapshot」）。`maxPdfBytes` は PDF を読む上限（上の「PDF の取り方」）で、Current Page のスクリーンショットは読むのと並べて撮るので数えず、送る前の大きさの確かめが数える。答えている間は送らずに false を返し、スクリーンショットのボタンも外さない。答えの途中で Current Page が替わっても、delta はその質問の答えに足す。
 - 送った input は、答えが返るか次の質問を送るまで持ち、`retry` が `readPage` を呼ばずにそのまま送り直す。`stop` は stream を abort し、止めた印を付けて履歴に入れる（上の「失敗」の「再試行と履歴」）。
 - `snapshot()` の `withScreenshot` がボタンの状態で、`toggleScreenshot` が切り替える。`ask` が送ったら外す。
 - 送ったスクリーンショットは、読み終えた時に質問の entry の `screenshot` に入れて縮小を出す。
 - 届いた `snapshot` の `page` に送ったスクリーンショットを足して、その問答の turn の `page` として履歴に入れ、`snapshot` から作った知らせを質問の entry の `notice` に入れる。
 - `startNewChat` は流れている stream を `signal` で abort し、問答と履歴を空にし、スクリーンショットのボタンを外す。abort の後に届いた delta は描かない。Backend は abort でその claude を止める。
-- client の型 `ChatClient` は、side panel が呼ぶ `prepare` と `ask` だけの形。ブラウザの口への oRPC の client の `chat` がそのまま入り、テストは偽の client を渡す。
+- client の型 `ChatClient` は contract から導いた `ContractRouterClient<typeof contract>`（note の ui の `client.ts` と同じ形、ADR-0002）。ブラウザの口への oRPC の client の `chat` がそのまま入り、テストは偽の client を渡す。
 
 ### Current Page の追い方（`current-page.ts`）
 
@@ -460,7 +460,7 @@ React に依らない `createChatStore(client)` が Chat を持ち、`ChatApp` �
 - `current-page.test.ts` は `fake-chrome.ts` の偽の `chrome.tabs` で確かめる。偽物は `globalThis.chrome` に置いてテストの後に外し、`query` の `active`・`windowId`・`currentWindow` を本物と同じく絞る。chrome:// へ移ったときの url も title も無い `onUpdated` も出せる。
 - `read-page.test.ts` は同じ偽物の `chrome.scripting.executeScript` で確かめる。偽物は注入された関数を走らせず、`readings` に置いた結果を返すか、reject するか、返らない。省いた `contentType` は `text/html` になる。渡された injection は `injections` に残る。注入する関数そのもの（shadow root と選択範囲）は DOM が要るので、実機で確かめる。3 秒と 30 秒の打ち切りは `setTimeout` を `spyOn` して callback を手で呼ぶ。PDF の fetch は `fetch` を `spyOn` した偽物で、読まれた chunk の数を数える body を返す。打ち切りと止める操作は、`signal` にも応えずに返らない偽物で確かめる（`CODING_STANDARDS.md` の「テスト」）。`signal` で reject する偽物では、fetch の終わりを待つ実装でも通る。
 - `read-current-page.test.ts` は同じ偽物の `chrome.tabs.captureVisibleTab` と、偽の `createImageBitmap`・`OffscreenCanvas`・`devicePixelRatio` で、撮る時機・大きさと形式・撮れないとき・読めずに撮れたときを確かめる。偽の `captureVisibleTab` は `screenshots` に置いた大きさの偽の PNG を返すか、reject するか、返らない。呼ばれた引数は `captures` に残る。偽の canvas は画像を描かず、書き出した形式と quality と大きさを JSON にした Blob を返す。本物の縮小は bun test に canvas が無いので実機で確かめ、大きさの計算（`shrunkSize`）は `screenshot.test.ts` が純関数として確かめる。撮るのの 3 秒の打ち切りは、`executeScript` の 3 秒の timer と混ざらないよう、`screenshot.test.ts` が `takeScreenshot` を直に呼んで確かめる。
-- `chat-store.test.ts` は偽の client で確かめる。偽の答えの stream は `signal` に応えず、test が流した delta をそのまま渡すので、abort の後に届いた delta を描かないことを確かめられる。偽の `readPage` は渡された `{ screenshot }` と PDF の上限と `signal` を記録し、`ask` が返る前に呼ばれたかと、再試行が読み直さないことと、止めたら読むのをやめさせたかを見られる。読み終えない `page` も返せる。
+- `chat-store.test.ts` は偽の client で確かめる。偽の答えの stream は `signal` に応えず、test が流した delta をそのまま渡すので、abort の後に届いた delta を描かないことを確かめられる。RPCLink の client と同じく、`@orpc/client` の `AsyncIteratorClass` で返す。偽の `readPage` は渡された `{ screenshot }` と PDF の上限と `signal` を記録し、`ask` が返る前に呼ばれたかと、再試行が読み直さないことと、止めたら読むのをやめさせたかを見られる。読み終えない `page` も返せる。
   - 偽の client は、Backend の宣言した error を `@orpc/client` の `ORPCError`（`defined: true`、contract の `askErrors` の status と message）で、届かないことを `TypeError` で投げ分ける。ui の entry は server を import できないので、router を in-process で呼べないため。
   - 失敗の文言は store の entry の `failure` で確かめる。時刻の期待値は local の `Date` から作り、時刻帯に依らせない。
   - 帯の 5 秒おきの確かめ直しは `setInterval` を `spyOn` で捕まえて callback を手で呼び、focus は `open` に渡した `EventTarget` に `focus` の event を出す。

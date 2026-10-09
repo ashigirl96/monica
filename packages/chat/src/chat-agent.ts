@@ -14,9 +14,10 @@ import {
   startup,
   type WarmQuery,
 } from '@anthropic-ai/claude-agent-sdk'
+import type { z } from 'zod'
 
 import { type Claude, claudeOptions, stderrTail } from './claude.ts'
-import type { AskInput, ChatEvent, SnapshotEvent } from './contract.ts'
+import type { askErrors, AskInput, ChatEvent, SnapshotEvent } from './contract.ts'
 import { askContent } from './page/prompt.ts'
 import { defaultReaders, type Readers, snapshotOf } from './page/snapshot.ts'
 import { singleTurn, userMessage } from './prompt.ts'
@@ -33,11 +34,11 @@ const NOT_AUTHENTICATED_ERRORS: SDKAssistantMessageError[] = [
   'verification_required',
 ]
 
-/** claude が答えを返せなかった理由。server の handler が chat.ask の `.errors()` の typed error にする。 */
+/** claude が答えを返せなかった理由。chat.ask の `.errors()` で宣言した code と data。 */
 export type Failure =
   | { code: 'NOT_AUTHENTICATED' }
-  | { code: 'USAGE_LIMIT'; data: { rateLimitType: string; resetsAt: number } }
-  | { code: 'AGENT_FAILED'; data: { detail: string } }
+  | { code: 'USAGE_LIMIT'; data: z.infer<typeof askErrors.USAGE_LIMIT.data> }
+  | { code: 'AGENT_FAILED'; data: z.infer<typeof askErrors.AGENT_FAILED.data> }
 
 export class ChatFailure extends Error {
   readonly failure: Failure

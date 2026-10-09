@@ -60,7 +60,7 @@ Browser Tab は agent-browser（下の節）で動かし、side panel の見出�
 
 - headed の窓を撮るときは、上の command に `--headed` を足して Brave を起こし（`bun run extension` の headed の Brave には CDP の port が無い）、`MONICA_HOME=<home> bun scripts/extension-panel.ts open` で side panel を開く。窓は desktop-dev skill の「窓の枠」と同じく、Brave の main process の pid の窓の CGWindowID を取って `screencapture -x -o -l<id>` で撮る。main process は `pgrep -f "^/Applications/Brave Browser.app/Contents/MacOS/Brave Browser .*<home>/dev-brave"` で引く。
 
-`Extensions.triggerAction` が使えないときは、拡張の page を Browser Tab で開き、そこから `chrome.sidePanel.open` を user gesture 付きで呼ぶ。Current Page が拡張の page に変わるので、Current Page を見る確かめには `open` を使う。dev の ID は `docs/packages/extension.md` にある。
+`Extensions.triggerAction` が使えないときは、Chrome Extension の page を Browser Tab で開き、そこから `chrome.sidePanel.open` を user gesture 付きで呼ぶ。Current Page が Chrome Extension の page に変わるので、Current Page を見る確かめには `open` を使う。dev の ID は `docs/packages/extension.md` にある。
 
 ```bash
 MONICA_HOME=${TMPDIR%/}/monica-<名前> bun -e '
@@ -76,7 +76,7 @@ cdp.close();'
 ### agent-browser
 
 - `--session <固有の名前> --cdp <port>` で、同じ Brave の Web ページを操作できる。port は `head -1 $MONICA_HOME/dev-brave/DevToolsActivePort`。
-- `tab list` には、自分で開いていない拡張の page と side panel が出ない。side panel は `extension-panel.ts` で見る。
+- `tab list` には、自分で開いていない Chrome Extension の page と side panel が出ない。side panel は `extension-panel.ts` で見る。
 - `eval` には user gesture が付かないので、`sidePanel.open()` が拒まれる。
 - `close` は Brave を止めない。止めるのは下の `dev:kill`。
 

@@ -151,7 +151,7 @@ function ChatBody({ store }: { store: ChatStore }) {
   )
 }
 
-/** side panel の Chat の画面。client はブラウザの口への chat の client。 */
+/** side panel の Chat の画面。 */
 export function ChatApp({ client }: { client: ChatClient }) {
   const [page, setPage] = useState<CurrentPage>()
   const [store] = useState(() => createChatStore(client))

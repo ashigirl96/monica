@@ -20,7 +20,7 @@ type Block =
     }
   | { type: 'image'; source: { type: 'base64'; media_type: 'image/jpeg'; data: string } }
 
-type Record =
+type ClaudeRecord =
   | { pid: number; kind: 'start'; argv: string[]; env: { [key: string]: string }; cwd: string }
   | { pid: number; kind: 'initialize'; request: { [key: string]: unknown } }
   | { pid: number; kind: 'user'; content: Block[] }
@@ -71,7 +71,7 @@ function startChat(
     readFileSync(recordPath, 'utf8')
       .split('\n')
       .filter(Boolean)
-      .map((line) => JSON.parse(line) as Record)
+      .map((line) => JSON.parse(line) as ClaudeRecord)
   // 偽の claude が居なくなるのを待ってから home を消す（docs/packages/dev-loop.md の「検査と CI」）。
   cleanups.push(async () => {
     // spare の 5 分の時限も消す。
@@ -130,7 +130,7 @@ async function answerOf(answer: AsyncIterable<ChatEvent>): Promise<string> {
   return text
 }
 
-const userContent = (records: Record[]) =>
+const userContent = (records: ClaudeRecord[]) =>
   records.filter((r) => r.kind === 'user').flatMap(({ content }) => content)
 
 test('claude reads the text of the page as a document, apart from the question', async () => {
@@ -312,7 +312,7 @@ test('claude gets only USER and HOME from the Backend, the five added keys and t
   expect(start.cwd).toBe(realpathSync(join(home, 'chat')))
 })
 
-const userText = (records: Record[]) =>
+const userText = (records: ClaudeRecord[]) =>
   userContent(records)
     .map((block) => (block.type === 'text' ? block.text : `[document] ${block.source.data}`))
     .join('\n')
@@ -433,7 +433,7 @@ test('a question about a page that could not be read is answered too, and its sn
 // HOLD の偽の claude は stdin の EOF と SIGTERM では抜けないので、居なくなれば SIGKILL で終わっている。
 const HELD: AskInput = { ...QUESTION, question: 'HOLD on, what is 1+1?' }
 
-function answeringPids(records: Record[]): number[] {
+function answeringPids(records: ClaudeRecord[]): number[] {
   return records.filter((r) => r.kind === 'user').map(({ pid }) => pid)
 }
 
@@ -463,7 +463,7 @@ test('leaving the answer before the result kills the claude that answers', async
 type Client = ReturnType<typeof startChat>['client']
 
 // 答えの途中で止まった claude を n 個持たせる。
-async function holdAnswers(client: Client, records: () => Record[], n: number) {
+async function holdAnswers(client: Client, records: () => ClaudeRecord[], n: number) {
   const before = answeringPids(records()).length
   for (let i = 0; i < n; i++) {
     const answer = await client.ask(HELD)
@@ -486,7 +486,7 @@ test('a fifth question while four claudes answer is refused as CHAT_BUSY without
   expect(claudes().toSorted((a, b) => a - b)).toEqual(held.toSorted((a, b) => a - b))
 })
 
-const spares = (records: Record[]) => {
+const spares = (records: ClaudeRecord[]) => {
   const answering = new Set(answeringPids(records))
   return records
     .filter((r) => r.kind === 'initialize' && !answering.has(r.pid))
@@ -508,7 +508,7 @@ test('the fourth question while three claudes answer goes to the spare, and prep
   expect(claudes()).toHaveLength(4)
 })
 
-const kindsOf = (records: Record[], pid: number) =>
+const kindsOf = (records: ClaudeRecord[], pid: number) =>
   records.filter((r) => r.pid === pid).map(({ kind }) => kind)
 
 test('prepare starts one spare that the next question goes to, and answering starts the next spare', async () => {

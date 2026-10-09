@@ -19,6 +19,22 @@ export type FakeScenario =
 /** 偽の claude の rate_limit_event が持つ resetsAt（unix 秒）。 */
 export const FAKE_RESETS_AT = 1_800_000_000
 
+/**
+ * dir に書いた偽の claude（wrapper の sh と、exec した後の bun）が、すべて居なくなるまで待つ。
+ * 居るうちに dir を消すと、Bun の rmSync は走査の途中で黙って止まり、dir を残す。
+ */
+export async function untilFakeClaudesExit(dir: string): Promise<void> {
+  for (;;) {
+    const ps = Bun.spawnSync(['/bin/ps', '-A', '-ww', '-o', 'stat=,command='], { env: {} })
+    const alive = ps.stdout
+      .toString()
+      .split('\n')
+      .some((line) => line.includes(dir) && !line.trim().startsWith('Z'))
+    if (!alive) return
+    await Bun.sleep(10)
+  }
+}
+
 // claude の env には PATH が無く、SDK は .ts の path を bun の名前で起こすので、拡張子の無い wrapper から絶対 path で起こす。
 export function writeFakeClaude(
   dir: string,

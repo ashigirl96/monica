@@ -1,8 +1,9 @@
 import { ORPCError } from '@orpc/client'
+import type { ContractRouterClient } from '@orpc/contract'
 
 import {
   type AskInput,
-  type ChatEvent,
+  type contract,
   MAX_ASK_BODY_BYTES,
   type Page,
   type PageSnapshot,
@@ -13,11 +14,7 @@ import { type Failure, failureOf, isUnreachable, retryingLine, usageLine } from 
 import { noticeOf } from './notice.ts'
 import { type Reach, watchReach } from './reach.ts'
 
-/** side panel が呼ぶ分の chat の client。ブラウザの口への oRPC の client の chat がそのまま入る。 */
-export type ChatClient = {
-  prepare(): Promise<unknown>
-  ask(input: AskInput, options: { signal: AbortSignal }): Promise<AsyncIterable<ChatEvent>>
-}
+export type ChatClient = ContractRouterClient<typeof contract>
 
 export type ChatEntry = {
   id: number

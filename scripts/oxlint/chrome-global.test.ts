@@ -7,15 +7,10 @@ import { lintProbes } from './lint-probes'
 const repo = join(import.meta.dir, '../..')
 const probe = 'export const id = chrome.runtime.id\n'
 
-// chat の ui は Chrome Extension の side panel でだけ動く（ADR-0029）。chat の package がまだ無くても例外の path を見る。
-const domains = [
-  ...new Set([
-    ...readdirSync(join(repo, 'packages'), { withFileTypes: true })
-      .filter((entry) => entry.isDirectory())
-      .map((entry) => entry.name),
-    'chat',
-  ]),
-]
+const domains = readdirSync(join(repo, 'packages'), { withFileTypes: true })
+  .filter((entry) => entry.isDirectory())
+  .map((entry) => entry.name)
+// chat の ui は Chrome Extension の side panel でだけ動く（ADR-0029）。
 const allowed = ['apps/extension/src/probe.ts', 'packages/chat/src/ui/probe.ts']
 const refused = [
   'apps/web/src/probe.ts',

@@ -35,7 +35,7 @@ Backend の stdout は Shell 宛ての JSON 行専用で、log は stderr に出
 - Host は `monica.localhost:<port>`・`localhost:<port>`・`127.0.0.1:<port>`（host 名は `@monica/note/contract` の `NOTES_HOSTNAMES`）の完全一致だけを通し、ほかは 403 で断る（DNS rebinding）。
 - GET 以外の request は、`Sec-Fetch-Site: same-origin`（`Sec-Fetch-Mode` は見ない）か、`Sec-Fetch-Site: none` と `Sec-Fetch-Mode: cors` の組だけを通し、ほかは 403 で断る（CSRF）。`same-site` は site が port を見ないので、`localhost` の別の port の app からの request も含む。
   - `none` と `cors` の組は、Chrome Extension が host_permissions に書いた loopback の host へ送る fetch に付き、web ページの fetch には作れない（ADR-0028）。`none` を `cors` と組のときだけ通すのは、user が起こす navigation にも `none` が付くので、mode が `navigate` の POST を外すため。
-  - Origin の拡張 ID は照合しない。拡張の page と service worker は Origin を書き換えられ、他の拡張も偽れる見込みで守りにならないため（ADR-0028）。
+  - Origin の Chrome Extension の ID は照合しない。Chrome Extension の page と service worker は Origin を書き換えられ、他のブラウザ拡張も偽れる見込みで守りにならないため（ADR-0028）。
   - CORS の header は返さない。Chrome Extension の fetch は host_permissions に書いた host には CORS を受けず、preflight も出ない。
 - 載せるもの:
   - `/rpc` の `{ note, chat }` の router。context は `{ db, noteLedger, chatAgent }`。workbench・task・job は載せない。`openTab` の `input` は shell に打鍵されるので、token の無い口では任意のコマンドになる。

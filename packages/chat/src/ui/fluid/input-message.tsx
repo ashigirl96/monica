@@ -170,8 +170,8 @@ const InputMessage = forwardRef<HTMLDivElement, InputMessageProps>(
       return () => ro.disconnect()
     }, [resizeTextarea])
 
-    // Answering has no queue to send into, so the Stop control stands in
-    // for Send and Enter sends nothing until the answer ends.
+    // While an answer streams there is nowhere to send another question, so
+    // the Stop control stands in for Send and Enter sends nothing.
     const stopping = streaming && onStop !== undefined
     const trimmed = value.trim()
     const canSend = !disabled && trimmed.length > 0 && !stopping

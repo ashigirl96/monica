@@ -1,17 +1,13 @@
-import { resolve } from 'node:path'
-
 import { crx, defineManifest } from '@crxjs/vite-plugin'
 import tailwindcss from '@tailwindcss/vite'
 import react from '@vitejs/plugin-react'
 import { defineConfig } from 'vite'
 
 import {
-  DEFAULT_HOME,
   RELEASE_BROWSER_PORT,
-  RELEASE_HOME,
+  devHome,
   devInstance,
   extensionDevOutput,
-  isReleaseHome,
 } from '../../scripts/dev-instance.ts'
 
 // key は公開鍵の DER の base64 で、ID を固定する（ADR-0029）。ID と鍵の作り方は docs/packages/extension.md にある。
@@ -42,7 +38,7 @@ const manifest = defineManifest(({ mode }) => ({
   },
 }))
 
-// side panel が呼ぶブラウザの口の port を焼き込む。apps/extension/src/sidepanel/browser-port.d.ts が型を宣言する。
+// Chrome Extension は env を読めないので、ブラウザの口の port を bundle に焼き込む。
 const browserPort = (port: number) => ({ __MONICA_BROWSER_PORT__: JSON.stringify(port) })
 
 export default defineConfig(({ command, mode }) => {
@@ -54,12 +50,7 @@ export default defineConfig(({ command, mode }) => {
       build: { outDir: `dist/${mode}` },
     }
   }
-  const home = resolve(process.env.MONICA_HOME || DEFAULT_HOME)
-  if (isReleaseHome(home)) {
-    throw new Error(
-      `MONICA_HOME が release の home（${RELEASE_HOME}）です。dev の home を渡してください`,
-    )
-  }
+  const home = devHome()
   // dev の出力に port が焼き込まれるので、空いている別の port に移らない。
   const { extensionPort, browserPort: devBrowserPort } = devInstance(home)
   return {

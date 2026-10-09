@@ -1,9 +1,6 @@
-import type { SDKUserMessage } from '@anthropic-ai/claude-agent-sdk'
-
 import type { PageSnapshot, Turn, Unreadable } from '../contract.ts'
+import type { Block } from '../prompt.ts'
 import { cut, MAX_PAGE_CHARS } from './snapshot.ts'
-
-export type Block = Exclude<SDKUserMessage['message']['content'], string>[number]
 
 // API は document の title を 1〜500 字、context を 1 字以上とする。
 const MAX_TITLE_CHARS = 500
@@ -40,7 +37,10 @@ const UNREADABLE: Record<Unreadable['reason'], string> = {
   unparsable: 'its HTML or PDF could not be turned into text',
 }
 
-const hasText = (page: PageSnapshot) => page.content?.kind === 'text' && page.content.text !== ''
+type PageText = Extract<NonNullable<PageSnapshot['content']>, { kind: 'text' }>
+
+const hasText = (content: PageSnapshot['content']): content is PageText =>
+  content?.kind === 'text' && content.text !== ''
 
 function contentNote({ content }: PageSnapshot): string[] {
   switch (content?.kind) {
@@ -83,7 +83,7 @@ function screenshotNote({ screenshot, screenshotFailed }: PageSnapshot): string[
 
 function leftOutNote(page: PageSnapshot): string[] {
   const parts = [
-    ...(hasText(page) ? ['text'] : []),
+    ...(hasText(page.content) ? ['text'] : []),
     ...(page.screenshot === undefined ? [] : ['screenshot']),
     ...(page.selection ? ['selection'] : []),
   ]
@@ -115,7 +115,7 @@ function turnBlocks(
   const { content, selection, screenshot, title, url } = page
   if (pageLeftOut) return [{ type: 'text', text: heading(n, question, page, true) }]
   return [
-    ...(content?.kind === 'text' && content.text !== '' ? [document(content, title, url)] : []),
+    ...(hasText(content) ? [document(content, title, url)] : []),
     ...(screenshot === undefined ? [] : [image(screenshot)]),
     ...(selection ? [document(selection, title ? `Selection: ${title}` : 'Selection', url)] : []),
     { type: 'text', text: heading(n, question, page, false) },
@@ -141,7 +141,7 @@ function pageChars({ content, selection, screenshot }: PageSnapshot): number {
 }
 
 // 古い turn のページから 1 つずつ落とし、それでも超えたら古い turn の問答を落とす。
-// 今の分と、今のページが same で指す turn は落とさない。今のページの本文がそこにしか無いため。
+// 今の分と、Current Page の Page Snapshot が same で指す turn は落とさない。Current Page の本文がそこにしか無いため。
 function leaveOut(question: string, page: PageSnapshot, history: readonly Turn[]) {
   const kept = page.content?.kind === 'same' ? page.content.turn : undefined
   let total =
@@ -170,7 +170,7 @@ function leaveOut(question: string, page: PageSnapshot, history: readonly Turn[]
 }
 
 /**
- * 前の問答と今の質問を、古い順に turn ごとに本文の document、選択範囲の document、見出しと質問の text、答えの text の順に並べる。
+ * 前の問答と今の質問を、古い順に turn ごとに本文の document、スクリーンショットの image、選択範囲の document、見出しと質問の text、答えの text の順に並べる。
  * 今の turn は答えの手前で終えるので、何も落とさなければ n 問目の並びは n+1 問目の並びの頭と一致する。
  */
 export function askContent(

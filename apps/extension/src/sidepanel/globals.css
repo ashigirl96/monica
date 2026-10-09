@@ -68,10 +68,6 @@
      self-contained when installed into projects without the variable. */
   --focus-ring: #6b97ff;
 
-  /* ── Alpha checkerboard (color-picker swatches) ── */
-  --checker-a: light-dark(#bbbbbb, #1f1f1f);
-  --checker-b: light-dark(#ffffff, #2a2a2a);
-
   /* ── Surface-relative interactive overlays (work on any elevation) ──
      --overlay is the *tint direction* triplet — black for light surfaces,
      white for dark. Components consume it as rgb(var(--overlay) / α), so it
@@ -350,77 +346,6 @@ body {
   --text-micro--line-height: var(--lh-micro);
 }
 
-/* Site chrome: follows the size shortcut through <html data-size>. Each
-   role brings its whole-pixel line height; a leading-* utility on the
-   same element still wins, since it sets --tw-leading. */
-:root {
-  --fs-site-display: 22px;
-  --lh-site-display: 28px;
-  --fs-site-title: 16px;
-  --lh-site-title: 22px;
-  --fs-site-subtitle: 14px;
-  --lh-site-subtitle: 20px;
-  --fs-site-body: 13px;
-  --lh-site-body: 20px;
-  --fs-site-caption: 12px;
-  --lh-site-caption: 16px;
-  --fs-site-micro: 11px;
-  --lh-site-micro: 14px;
-}
-
-@media (min-width: 640px) {
-  :root {
-    --fs-site-display: 28px;
-    --lh-site-display: 34px;
-  }
-}
-
-html[data-size="compact"] {
-  --fs-site-display: 20px;
-  --lh-site-display: 26px;
-  --fs-site-title: 15px;
-  --lh-site-title: 20px;
-  --fs-site-subtitle: 13px;
-  --lh-site-subtitle: 18px;
-  --fs-site-body: 12px;
-  --lh-site-body: 18px;
-  --fs-site-caption: 11px;
-  --lh-site-caption: 14px;
-  --fs-site-micro: 10px;
-  --lh-site-micro: 12px;
-}
-
-@media (min-width: 640px) {
-  html[data-size="compact"] {
-    --fs-site-display: 24px;
-    --lh-site-display: 30px;
-  }
-}
-
-@utility text-site-display {
-  font-size: var(--fs-site-display, 28px);
-  line-height: var(--tw-leading, var(--lh-site-display, 34px));
-}
-@utility text-site-title {
-  font-size: var(--fs-site-title, 16px);
-  line-height: var(--tw-leading, var(--lh-site-title, 22px));
-}
-@utility text-site-subtitle {
-  font-size: var(--fs-site-subtitle, 14px);
-  line-height: var(--tw-leading, var(--lh-site-subtitle, 20px));
-}
-@utility text-site-body {
-  font-size: var(--fs-site-body, 13px);
-  line-height: var(--tw-leading, var(--lh-site-body, 20px));
-}
-@utility text-site-caption {
-  font-size: var(--fs-site-caption, 12px);
-  line-height: var(--tw-leading, var(--lh-site-caption, 16px));
-}
-@utility text-site-micro {
-  font-size: var(--fs-site-micro, 11px);
-  line-height: var(--tw-leading, var(--lh-site-micro, 14px));
-}
 /* </generated:type-scale> */
 
 /* Focus fallback — natively focusable elements no component styles (scroll

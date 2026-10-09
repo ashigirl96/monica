@@ -1,6 +1,6 @@
 import { afterEach, expect, spyOn, test } from 'bun:test'
 
-import { ORPCError } from '@orpc/client'
+import { AsyncIteratorClass, ORPCError } from '@orpc/client'
 
 import {
   askErrors,
@@ -71,14 +71,18 @@ class FakeClient implements ChatClient {
     if (this.prepareError) throw this.prepareError
   }
 
-  async ask(
-    input: AskInput,
-    { signal }: { signal: AbortSignal },
-  ): Promise<AsyncIterable<ChatEvent>> {
+  async ask(input: AskInput, options?: { signal?: AbortSignal }) {
     if (this.askError) throw this.askError
     const answer = new FakeAnswer()
-    this.asked.push({ input, signal, answer })
-    return answer
+    this.asked.push({ input, signal: options!.signal!, answer })
+    const events = answer[Symbol.asyncIterator]()
+    // RPCLink の client と同じく、oRPC の event iterator で返す。
+    return new AsyncIteratorClass(
+      () => events.next(),
+      async () => {
+        await events.return(undefined)
+      },
+    )
   }
 }
 
@@ -338,7 +342,7 @@ test('an answer that came without a Page Snapshot keeps only the URL and title o
   ])
 })
 
-// body の上限を超えた request は 413 で失敗するので、今のページの中身だけを外して質問は届ける。
+// body の上限を超えた request は 413 で失敗するので、Current Page の中身だけを外して質問は届ける。
 test('a question whose request would pass the body limit goes without the HTML and selection of its page, as too large to read', async () => {
   const { client, store, showPage } = openChat()
   const html = 'x'.repeat(MAX_ASK_BODY_BYTES - 512 * 1024)

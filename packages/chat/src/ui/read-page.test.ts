@@ -76,7 +76,7 @@ test('a page the browser refuses to run the script in cannot be read, with the e
   })
 })
 
-// view-source:、alert() の最中、frozen のタブで executeScript は返らない。
+// view-source:、alert() の最中、frozen の Browser Tab で executeScript は返らない。
 test('a page that does not answer the script within 3 seconds cannot be read', async () => {
   install()
   fake.readings.set(10, 'hang')

@@ -1,6 +1,7 @@
 import type { SDKUserMessage } from '@anthropic-ai/claude-agent-sdk'
 
-import type { Block } from './page/prompt.ts'
+/** claude に渡す user message の content の 1 つ。 */
+export type Block = Exclude<SDKUserMessage['message']['content'], string>[number]
 
 export const SYSTEM_PROMPT = `You answer questions from the user about the web pages they read in their browser.
 
