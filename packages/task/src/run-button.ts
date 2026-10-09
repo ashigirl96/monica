@@ -16,12 +16,12 @@ const READ_TIMEOUT_MS = 10_000
 /** ボタンを決める材料。Issue は GitHub の今の答えで、Task は track 済みのときだけある。 */
 type Seen = {
   issue: GitHubIssue
-  task: { closed: boolean; run: RunState } | null
+  task: { closed: boolean; run: ButtonRun } | null
   /** 親が spec で live な Run を持つとき、その親。 */
   runningSpec: IssueRef | null
 }
 
-type RunState = Exclude<RunButton['run'], 'reopen'>
+type ButtonRun = Exclude<RunButton['run'], 'reopen'>
 
 type Verdict =
   | { type: 'button'; kind: PromptKind }
@@ -202,7 +202,7 @@ const liveRunCount = (db: Pick<Db, 'select'>, taskIssueId: number) =>
 function runOf(
   db: Db,
   { issue: { id }, bench }: NonNullable<ReturnType<typeof taskIfTracked>>,
-): RunState {
+): ButtonRun {
   if (!bench) return 'new'
   if (liveRunCount(db, id) > 0) return 'running'
   return resumableRunOf(db, id, bench) ? 'resume' : 'new'

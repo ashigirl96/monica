@@ -1,6 +1,6 @@
 # Backend の組み立て（apps/backend）
 
-`apps/backend` は domain の package を組み立てて Backend の process にする。組み立ては `src/main.ts`、ブラウザの口は `src/browser-listener.ts`。Backend の生死と Shell との約束は ADR-0007、ptyd は ADR-0011、ブラウザの口は ADR-0017 と ADR-0028、token の口の chat と Chrome Extension の token は ADR-0034、その token で通る task の 2 つの procedure は ADR-0035 にある。
+`apps/backend` は domain の package を組み立てて Backend の process にする。組み立ては `src/main.ts`、ブラウザの口は `src/browser-listener.ts`。Backend の生死と Shell との約束は ADR-0007、ptyd は ADR-0011、ブラウザの口は ADR-0017 と ADR-0028、token の口の chat と Chrome Extension の token は ADR-0034、その token で通る task の procedure（`runButtons`・`runFromButton`・`reopen`）は ADR-0035 にある。
 
 ## PATH と spawn の env
 
@@ -31,7 +31,7 @@ Backend の stdout は Shell 宛ての JSON 行専用で、log は stderr に出
 Backend は起動ごとに `crypto.randomUUID()` で 2 つの token を作り、`backend.json` に `{ port, token, extensionToken, pid, startedAt }` で書く（mode 0600、ADR-0007）。stdout の endpoint 行は今どおり `{ port, token }` だけを持つ。
 
 - `token`（全権）: webview と CLI が使う。workbench・task・job・chat のすべてを通す。
-- `extensionToken`: Native Messaging の host が Chrome Extension に渡す（`docs/packages/cli.md` の「Native Messaging の host」、ADR-0034）。この token の request は、chat の router と task の `runButtons`・`runFromButton`・`reopen` だけを持つ別の RPCHandler に通す。path の書き方（`/rpc/chat/../workbench/…` など）で workbench や `task.run` に届くことは無い。この handler に当たらない path には 401 を返す。Chrome Extension で script が動いても、任意の prompt を打つ `task.run` や shell に打鍵する `workbench.openTab` に届かせないため（ADR-0017・0035）。task の 3 つは prompt を受け取らず、prompt は Backend が Issue から決める（`docs/packages/task-ledger.md` の「Run ボタン」）。
+- `extensionToken`: Native Messaging の host が Chrome Extension に渡す（`docs/packages/cli.md` の「Native Messaging の host」、ADR-0034）。この token の request は、chat の router と task の `runButtons`・`runFromButton`・`reopen` だけを持つ別の RPCHandler に通す。path の書き方（`/rpc/chat/../workbench/…` など）で workbench や `task.run` に届くことは無い。この handler に当たらない path には 401 を返す。Chrome Extension で script が動いても、任意の prompt を打つ `task.run` や shell に打鍵する `workbench.openTab` に届かせないため（ADR-0017・0035）。task のこれらは prompt を受け取らず、prompt は Backend が Issue から決める（`docs/packages/task-ledger.md` の「Run ボタン」）。
 - どちらも hono の `bearerAuth` の `verifyToken` で `timingSafeEqual` で比べ、当たった token の handler を context の変数に置く。どちらでもなければ `WWW-Authenticate` 付きの 401 を返す。Chrome Extension はこの 401（client では `ORPCError` の `UNAUTHORIZED`）を、古い Chrome Extension の token として「desktop に届かない」に数える（`docs/packages/chat.md` の「失敗」）。
 - `maxRequestBodySize` は `@monica/chat/contract` の `MAX_ASK_BODY_BYTES`（50MB）。質問に添えるページの本文とスクリーンショットと PDF を受けるための上限で、超えた body は oRPC に届く前に 413 で断られる。workbench・task・job の input には File が無く、どれもこれより小さいので、口全体に掛ける。
 
@@ -56,6 +56,6 @@ Backend は起動ごとに `crypto.randomUUID()` で 2 つの token を作り、
 ## テスト
 
 - 組み立て（`src/main.ts`）は、Shell と同じく process として起こし、fake の ptyd の home を渡して確かめる。token の口とブラウザの口に同じ path を投げ、口ごとに載る procedure を見る。chat は不正な input を送り、token の口の 400 とブラウザの口の 404 で見る。不正な input は handler の前で断られるので、claude を起こさない。
-- 2 つの token は、`backend.json` から Chrome Extension の token を読み、全権の token・Chrome Extension の token・token 無しで chat と task の 2 つの procedure と workbench・`task.run`・task のほかの procedure・job を呼んで、通る組と 401 の組を見る。`backend.json` の mode 0600 もここで見る。
+- 2 つの token は、`backend.json` から Chrome Extension の token を読み、全権の token・Chrome Extension の token・token 無しで chat と task の `runButtons`・`runFromButton`・`reopen` と workbench・`task.run`・task のほかの procedure・job を呼んで、通る組と 401 の組を見る。`backend.json` の mode 0600 もここで見る。
 - `MONICA_CLAUDE_PATH` は、`@monica/chat/testing` の `writeFakeClaude` が書いた偽の claude を渡して起こし、Chrome Extension の token で呼んだ token の口の `chat.ask` がその答えを返すことで見る。この Backend には `USER` を渡さない。渡し忘れて node_modules の本物の claude を起こしても、keychain の login を読めずに API を呼ばないため（ADR-0033）。body の上限の 413、上限より 1MiB 小さい PDF の File が RPCLink の multipart で `chat.ask` に届くこと、答えの途中の失敗が宣言した error で届くことも、同じく process の Backend の token の口で見る。
 - ブラウザの口の照合と SPA と画像の GET は `listenBrowser` を直に呼んで確かめる。

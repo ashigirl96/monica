@@ -30,5 +30,5 @@ open な Blocker がある Issue、`ready-for-human`・`needs-info`、子が全�
 - Track していない Issue は Sync の対象でないので、ボタンを決めるときは Track せずに GitHub から引く。run したときに ADR-0024 のとおり Track する。
 - run は確認を挟まない。止めたいときは Tab を閉じ、Bench の最後の Tab で Task を close する（ADR-0012）。
 - ボタンは Task の状態を映す。live な Run があれば押せず、終わった Run があれば resume になると示す。resume では ADR-0024 のとおり `/tackle` を送らない。
-- closed な Task には reopen のボタンを出し、押すと Task を reopen するだけで Run は起こさない。そのため Chrome Extension の token で通る task の procedure に `reopen` を足し、3 つにする。`reopen` も ref だけを受け取り prompt を受け取らないので、shell に届かない。
+- closed な Task には reopen のボタンを出し、押すと Task を reopen するだけで Run は起こさない。そのため Chrome Extension の token で通る task の procedure に `reopen` を足す。`reopen` も ref だけを受け取り prompt を受け取らないので、shell に届かない。
 - 守らないもの: GitHub のページの script が Chrome Extension の差し込んだボタンを押すこと。content script は `isTrusted` のクリックだけを通すが、Issue のラベルを書ける人は prompt の種類を選べる。

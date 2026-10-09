@@ -127,14 +127,14 @@ test('the relay runs the ref alone and tells whether the Backend ran it or why i
   nativeHost({ port: backend.port, token: TOKEN })
 
   expect(await relayRunButton(HOST, { type: 'monica.runFromButton', ref: 'acme/app#12' })).toEqual({
-    done: true,
+    accepted: true,
   })
   expect(await relayRunButton(HOST, { type: 'monica.runFromButton', ref: 'acme/app#13' })).toEqual({
-    done: false,
+    accepted: false,
     reason: 'acme/app#13 has no label that picks a prompt',
   })
   expect(await relayRunButton(HOST, { type: 'monica.runFromButton', ref: 'acme/app#14' })).toEqual({
-    done: false,
+    accepted: false,
     reason: 'a live Run',
   })
   expect(backend.calls.map(({ input }) => input)).toEqual([
@@ -150,10 +150,10 @@ test('the relay reopens the ref alone and tells whether the Backend reopened it 
 
   expect(
     await relayRunButton(HOST, { type: 'monica.reopenFromButton', ref: 'acme/app#12' }),
-  ).toEqual({ done: true })
+  ).toEqual({ accepted: true })
   expect(
     await relayRunButton(HOST, { type: 'monica.reopenFromButton', ref: 'acme/app#13' }),
-  ).toEqual({ done: false, reason: 'acme/app#13 is already open' })
+  ).toEqual({ accepted: false, reason: 'acme/app#13 is already open' })
   expect(backend.calls).toEqual([
     { path: 'reopen', input: { ref: 'acme/app#12' } },
     { path: 'reopen', input: { ref: 'acme/app#13' } },

@@ -13,8 +13,7 @@ export type RunButtonRequest =
 /** null なら Backend に届かなかった。 */
 export type RunButtonsReply = RunButtonsOutput | null
 
-/** ボタンを押した答え。断られたら理由を持つ。 */
-export type PressReply = { done: true } | { done: false; reason: string }
+export type PressReply = { accepted: true } | { accepted: false; reason: string }
 
 type Client = ContractRouterClient<{
   task: Pick<typeof taskContract, 'runButtons' | 'runFromButton' | 'reopen'>
@@ -49,10 +48,10 @@ async function tellButtons(client: Client, refs: string[]): Promise<RunButtonsRe
 async function press(call: () => Promise<unknown>): Promise<PressReply> {
   try {
     await call()
-    return { done: true }
+    return { accepted: true }
   } catch (error) {
-    if (error instanceof ORPCError) return { done: false, reason: error.message }
-    return { done: false, reason: 'the monica desktop is not running' }
+    if (error instanceof ORPCError) return { accepted: false, reason: error.message }
+    return { accepted: false, reason: 'the monica desktop is not running' }
   }
 }
 

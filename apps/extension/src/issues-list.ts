@@ -17,6 +17,9 @@ const LABELS: Record<RunButton['run'], string> = {
   reopen: 'Reopen',
 }
 
+const RUN = { pressed: LABELS.running, type: 'monica.runFromButton' } as const
+const REOPEN = { pressed: 'Reopening', type: 'monica.reopenFromButton' } as const
+
 /** Issues の一覧なら number が無く、Issue の画面なら number がある。 */
 function issuesPathOf(pathname: string): { repo: string; number: string | undefined } | null {
   const match = ISSUES_PATH.exec(pathname)
@@ -120,7 +123,6 @@ function disabledRunButtonFor(ref: string, reason: string): HTMLElement {
   return cell
 }
 
-/** ボタンを外し、次の走査で Backend に決め直させる。 */
 function redecide(link: HTMLAnchorElement) {
   for (const element of buttons.get(link) ?? []) element.remove()
   delete link.dataset.monicaRef
@@ -144,14 +146,12 @@ function runButtonFor(
     // GitHub のページの script が .click() で押した run は通さない。
     if (!event.isTrusted || button.disabled) return
     button.disabled = true
-    button.textContent = run === 'reopen' ? 'Reopening' : LABELS.running
+    const press = run === 'reopen' ? REOPEN : RUN
+    button.textContent = press.pressed
     refusal.textContent = ''
-    const reply = await send<PressReply>({
-      type: run === 'reopen' ? 'monica.reopenFromButton' : 'monica.runFromButton',
-      ref,
-    })
-    if (reply?.done) {
-      if (run === 'reopen') redecide(link)
+    const reply = await send<PressReply>({ type: press.type, ref })
+    if (reply?.accepted) {
+      if (press === REOPEN) redecide(link)
       return
     }
     button.disabled = false
