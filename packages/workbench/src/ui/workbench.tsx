@@ -3,7 +3,7 @@ import { useAtomValue, useSetAtom, useStore } from 'jotai'
 import { lazy, Suspense, useEffect } from 'react'
 
 import { WorkbenchHeader } from './header.tsx'
-import { leaveJumpModeOnSwitch } from './jump-hints.ts'
+import { followKeys } from './keys.ts'
 import { followMetaHold } from './meta-hold.ts'
 import { followNotificationClicks } from './notification-click.ts'
 import { ResizeHandle } from './resize-handle.tsx'
@@ -76,7 +76,7 @@ export function Workbench({
   useEffect(() => followNotificationClicks(store), [store])
   useEffect(() => appendRunspacesJoiningTile(store), [store])
   useEffect(() => followMetaHold(store), [store])
-  useEffect(() => leaveJumpModeOnSwitch(store), [store])
+  useEffect(() => followKeys(store), [store])
   const setLastTabClosed = useSetAtom(lastTabClosedAtom)
   useEffect(
     () => setLastTabClosed(() => onLastTabClosed ?? null),

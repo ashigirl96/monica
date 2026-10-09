@@ -4,7 +4,7 @@ import { type ReactNode, useCallback, useRef } from 'react'
 import { baseName } from '../paths.ts'
 import { layoutAtom } from './backend-copy.ts'
 import { useImageDrop } from './image-drop.ts'
-import { jumpHintsActiveAtom, pendingCloseTabIdAtom } from './jump-hints.ts'
+import { jumpModeActiveAtom, pendingCloseTabIdAtom } from './keys.ts'
 import { activeRunspaceAtom, activeTerminalTabAtom } from './navigation.ts'
 import {
   closeTerminalTabAtom,
@@ -96,7 +96,7 @@ function EmptyRunspaceOverlay({ cwd }: { cwd: string }) {
 
 // 2 度目の d を待つ間は d 以外のキーが取り消しになり、一覧のキーは効かないので出さない。
 function JumpOverlay() {
-  const active = useAtomValue(jumpHintsActiveAtom)
+  const active = useAtomValue(jumpModeActiveAtom)
   const closing = useAtomValue(pendingCloseTabIdAtom) !== null
   if (!active) return null
 

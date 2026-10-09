@@ -7,7 +7,7 @@ import { AgentDotMark } from './agent-dot-mark.tsx'
 import { UNREAD_LABEL_STYLE } from './agent-dot.ts'
 import { agentDotOfTerminalSessionAtom, unreadOfTerminalSessionAtom } from './backend-copy.ts'
 import { JumpHint } from './jump-hint.tsx'
-import { jumpHintTargetsAtom, pendingCloseTabIdAtom } from './jump-hints.ts'
+import { jumpHintTargetsAtom, pendingCloseTabIdAtom } from './keys.ts'
 import { activateTerminalTabAtom, activeRunspaceAtom, activeTerminalTabAtom } from './navigation.ts'
 import {
   createTerminalTabAtom,

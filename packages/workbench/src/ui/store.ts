@@ -12,7 +12,6 @@ import {
   runspacesAtom,
   unreadOfTerminalSessionAtom,
 } from './backend-copy.ts'
-import { jumpHintsActiveAtom, pendingCloseTabIdAtom } from './jump-hints.ts'
 import {
   activateRunspaceAtom,
   activateTerminalTabAtom,
@@ -56,7 +55,7 @@ export function warnFailed(what: string, e: unknown): void {
 }
 
 // Backend が居ないと layout を変える操作は失敗するが、画面は塞がず toast で 1 行知らせる。
-function action<Args extends unknown[]>(
+export function action<Args extends unknown[]>(
   run: (get: Getter, set: Setter, ...args: Args) => Promise<void>,
 ) {
   return atom(null, async (get, set, ...args: Args) => {
@@ -329,32 +328,13 @@ export const closeTerminalTabAtom = action(async (get, set, tabId?: string) => {
 })
 
 // webview の一覧は合図の後に読み直すまで古く、起動の直後は空なので、閉じる前に Backend に聞く。
-async function hasLiveAgentSession(get: Getter, terminalSessionId: string): Promise<boolean> {
+export async function hasLiveAgentSession(
+  get: Getter,
+  terminalSessionId: string,
+): Promise<boolean> {
   const listed = await clientOf(get).agentSession.list()
   return listed.some((a) => a.terminalSessionId === terminalSessionId)
 }
-
-// d は c（新しい Tab）の隣のキーなので、claude の居る Tab は打ち損じで消さないよう 2 度目の d を待つ。
-export const closeTabFromJumpModeAtom = action(async (get, set) => {
-  const front = get(activeTerminalTabAtom)
-  const pending = get(pendingCloseTabIdAtom)
-  // 尋ねた Tab が shell の終了で先に閉じたら、手前に来た別の Tab は誰も確かめていない。
-  if (!front || front.pinned || (pending !== null && pending !== front.id)) {
-    set(jumpHintsActiveAtom, false)
-    return
-  }
-  if (pending !== front.id) {
-    const live = await hasLiveAgentSession(get, front.terminalSessionId)
-    // 聞く間にほかのキーや Tab の切り替えで jump モードを抜けていたら、その操作を優先する。
-    if (!get(jumpHintsActiveAtom)) return
-    if (live) {
-      set(pendingCloseTabIdAtom, front.id)
-      return
-    }
-  }
-  set(jumpHintsActiveAtom, false)
-  await set(closeTerminalTabAtom, front.id)
-})
 
 // 接続中の Tab は Exit で閉じるので、閉じ終わるまでの間も終わった印を出さない。
 const closingTabIdsAtom = atom<ReadonlySet<string>>(new Set<string>())

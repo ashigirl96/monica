@@ -7,7 +7,7 @@ import { createStore, type Store } from 'jotai'
 import { cleanUp, ghqCheckout, git, onCleanup, runspaceIn, setup, until } from '../testing.ts'
 import type { AgentDot } from './agent-dot.ts'
 import { layoutAtom } from './backend-copy.ts'
-import { jumpHintsActiveAtom, jumpHintTargetsAtom } from './jump-hints.ts'
+import { jumpHintTargetsAtom, keymap } from './keys.ts'
 import {
   activateRunspaceAtom,
   activateTerminalTabAtom,
@@ -519,7 +519,8 @@ test('jump hints number the Pinned rows and the rows shown under the selected Ti
   store.set(activateRunspaceAtom, listed.runspaceId)
   store.set(toggleSectionAtom, 'acme/app:bench')
 
-  store.set(jumpHintsActiveAtom, true)
+  const ctrlT = { key: 't', code: 'KeyT', meta: false, ctrl: true, alt: false, shift: false }
+  keymap.press(store, { ...ctrlT, repeat: false, editable: false })
 
   expect(store.get(jumpHintTargetsAtom).byRunspaceId).toEqual({
     [pinned.runspaceId]: '1',

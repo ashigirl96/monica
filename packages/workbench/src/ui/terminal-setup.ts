@@ -72,15 +72,13 @@ export function onTerminalData(
 }
 
 export function buildKeyEventHandler(
-  isJumpHintsActive: () => boolean,
+  takenByWorkbench: (e: KeyboardEvent) => boolean,
   onZoom: (delta: 1 | -1) => void,
   onSelectAll: () => void,
 ): (e: KeyboardEvent) => boolean {
   return (e: KeyboardEvent) => {
-    if (isJumpHintsActive()) return false
+    if (takenByWorkbench(e)) return false
     if (e.altKey) return false
-    if (e.ctrlKey && e.key === 't') return false
-    if (e.ctrlKey && e.key === 'Tab') return false
     if (e.metaKey && e.type === 'keydown') {
       if (e.key === '=' || e.key === '+') {
         e.preventDefault()

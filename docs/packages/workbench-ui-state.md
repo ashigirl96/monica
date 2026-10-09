@@ -1,6 +1,6 @@
 # Workbench の UI 状態と sidebar と status dot
 
-Workbench Ledger に載せない Workbench の画面の状態と、sidebar の Rail、Agent Session の状態と未読の見せ方。どれも `packages/workbench/src/ui` に置く。キーの割り当ては `apps/desktop/src/use-shortcuts.ts` と、jump モード（Ctrl+T の後）の `packages/workbench/src/ui/jump-mode.ts` にある。
+Workbench Ledger に載せない Workbench の画面の状態と、sidebar の Rail、Agent Session の状態と未読の見せ方。どれも `packages/workbench/src/ui` に置く。キーの割り当てと Jump Mode（Ctrl+T の後）は `packages/workbench/src/ui/keys.ts` に閉じる。`Workbench` が window の keydown と、Jump Mode の間の pointerdown（capture）を拾い、入口はキーの事実（key・code・修飾キー・repeat・入力欄の中か）を受ける。Jump Mode の外の binding は 1 つの表にし、xterm に渡さないキーも同じ表から決める（`docs/packages/desktop.md`）。Jump Mode の状態と 2 度目の d の待ちは module の外に書く口を持たず、抜けるのは選ぶ・取り消す・クリック・表示する Tab が替わるときだけ。
 
 ## UI 状態
 
@@ -33,8 +33,8 @@ Workbench Ledger に載せない Workbench の画面の状態と、sidebar の R
 - 選んだ Tile が無くなっていれば active な Runspace の Tile を、それも無ければ先頭の Tile を出す。
 - Tile とセクションの見出しは、押しても端末から focus を外さない（mousedown の既定の動作を止める）。見出しと、active な Runspace の Tile や Runspace の無い Tile は表示する Tab を変えないので、押した後もそのまま Tab の claude に打てるようにするため。押した後に focus を戻す形にしないのは、一度 blur すると xterm が focus を知らせる mode（DECSET 1004）を立てた app に focus out と in を送るため。別の Runspace を開く Tile と行は、その Runspace を active にして端末に focus を戻す。
 - Tile とセクションの見出しは、click ではなく mousedown で動く（行と Tab が pointerdown で動くのと同じく、押した時に動く）。WKWebView は trackpad の tap（tap-to-click）を up、down の順で届けるので、各 tap の up は 1 つ前の tap の down と組になり、click は 2 つの tap の位置の共通の祖先に飛んで、押した button には届かないため。click で動くのは、キーボード（Enter・Space）の click（`detail` が 0）だけにする。
-- key で巡る（⌥J / ⌥K）のと jump hint は、画面に見えている行（Pinned と、選んだ Tile の開いたセクション）を上から順に扱い、畳んだセクションの行は飛ばす。active な行が見えていないとき（畳んだセクションにあるときや、Runspace の無い Tile を押してほかの Tile が出ているとき）は、下へは先頭の行から、上へは末尾の行から巡る。別の Repo の Tile へは Tile を押すか ⌘ の数字で移り、巡っても Tile をまたがない（Repo の Tile が 9 を超えると、10 番目からの Repo の Tile へはキーで移れない）。jump hint の番号は表示している画面の行と Tab に振ったものなので、表示する Tab が替わったら（通知のクリック、Tab が閉じて隣の Tab へ移る、Tab が別の Runspace へ移るなど）jump モードを抜ける。
-- Runspace の並べ替え（drag と jump モードの ⇧J / ⇧K）は同じセクションの中に限る。Workbench Ledger の並びは 1 本なので、セクションをまたいで動かしても見た目の位置にならないため。key で下へ動かすときは、自分を下の行の位置へ動かさず、下の行を自分の位置へ動かす。Tile の順はセクションの先頭の行の位置で決まるので、間にある別の Repo の Runspace を越えると Tile の順が入れ替わるため。
+- key で巡る（⌥J / ⌥K）のと jump hint は、画面に見えている行（Pinned と、選んだ Tile の開いたセクション）を上から順に扱い、畳んだセクションの行は飛ばす。active な行が見えていないとき（畳んだセクションにあるときや、Runspace の無い Tile を押してほかの Tile が出ているとき）は、下へは先頭の行から、上へは末尾の行から巡る。別の Repo の Tile へは Tile を押すか ⌘ の数字で移り、巡っても Tile をまたがない（Repo の Tile が 9 を超えると、10 番目からの Repo の Tile へはキーで移れない）。jump hint の番号は表示している画面の行と Tab に振ったものなので、表示する Tab が替わったら（通知のクリック、Tab が閉じて隣の Tab へ移る、Tab が別の Runspace へ移るなど）Jump Mode を抜ける。
+- Runspace の並べ替え（drag と Jump Mode の ⇧J / ⇧K）は同じセクションの中に限る。Workbench Ledger の並びは 1 本なので、セクションをまたいで動かしても見た目の位置にならないため。key で下へ動かすときは、自分を下の行の位置へ動かさず、下の行を自分の位置へ動かす。Tile の順はセクションの先頭の行の位置で決まるので、間にある別の Repo の Runspace を越えると Tile の順が入れ替わるため。
 
 ### 行
 
