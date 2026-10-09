@@ -2,7 +2,7 @@ import { afterEach, expect, mock, test } from 'bun:test'
 import { mkdirSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 
-import { startFakePtyd } from '@monica/workbench/testing'
+import { startFakePtyd, writeFakeExecutable } from '@monica/workbench/testing'
 
 import { bench, issue, run } from './schema.ts'
 import { cleanUp, failure, onCleanup, setup } from './testing.ts'
@@ -73,7 +73,7 @@ async function argvTypedInto(fixture: Fixture, terminalSessionId: string): Promi
   if (write?.op !== 'write') throw new Error('nothing was typed')
   const bin = join(fixture.home, 'argv')
   mkdirSync(bin, { recursive: true })
-  writeFileSync(join(bin, 'claude'), `#!/bin/sh\nprintf '%s\\0' "$@"\n`, { mode: 0o755 })
+  writeFakeExecutable(join(bin, 'claude'), `printf '%s\\0' "$@"`)
   const shell = Bun.spawnSync(['/bin/sh', '-c', write.data.replace(/\r$/, '')], {
     env: { PATH: bin },
   })

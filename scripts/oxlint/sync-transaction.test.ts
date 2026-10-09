@@ -1,6 +1,8 @@
-import { expect, test } from 'bun:test'
+import { afterAll, expect, test } from 'bun:test'
 
-import { lintProbes } from './lint-probes'
+import { cleanUpLintProbes, lintProbes } from './lint-probes'
+
+afterAll(cleanUpLintProbes)
 
 const probes = {
   'packages/task/src/transaction.ts': 'db.transaction(async (tx) => tx)\n',

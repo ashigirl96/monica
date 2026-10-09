@@ -45,8 +45,8 @@ async function benchOf({ client }: Pick<Fixture, 'client'>) {
   return bench!
 }
 
-async function until(done: () => boolean) {
-  for (let i = 0; i < 200; i++) {
+async function until(done: () => boolean, ms: number) {
+  for (let i = 0; i < ms / 25; i++) {
     if (done()) return
     await Bun.sleep(25)
   }
@@ -98,7 +98,8 @@ test('a Bench still preparing is not closed', async () => {
   )
   const { client, cwd } = fixture
   const running = client.run({ ref })
-  await until(() => existsSync(join(cwd, '.started')))
+  // checkout した setup.sh の初回の exec は負荷の下で macOS の検査に数秒待たされるので、テストの timeout より先に切れる長さで待つ。
+  await until(() => existsSync(join(cwd, '.started')), 15_000)
   const { runspaceId, setupState } = await benchOf(fixture)
   expect(setupState).toBe('preparing')
 
@@ -108,7 +109,7 @@ test('a Bench still preparing is not closed', async () => {
   writeFileSync(join(cwd, '.release'), '')
   await running
   expect(await client.bench.list()).toMatchObject([{ runspaceId, setupState: 'ready' }])
-})
+}, 20_000)
 
 test('a second call while the close runs, or after the Bench is gone, closes nothing more', async () => {
   const fixture = await tracked()

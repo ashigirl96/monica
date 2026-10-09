@@ -6,6 +6,8 @@ import type { Socket } from 'bun'
 
 import { PROTOCOL_VERSION, type RequestOp, type ServerMessage, type SessionInfo } from './ptyd.ts'
 
+export { writeFakeExecutable } from './fake-executable.ts'
+
 type Frame = RequestOp & { id?: number }
 type Connection = { decoder: TextDecoder; buffered: string }
 type Waiter = { match: (op: RequestOp) => boolean; resolve: (op: RequestOp) => void }

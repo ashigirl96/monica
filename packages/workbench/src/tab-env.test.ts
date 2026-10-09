@@ -1,6 +1,5 @@
 import { afterEach, expect, test } from 'bun:test'
 import {
-  chmodSync,
   mkdirSync,
   mkdtempSync,
   readFileSync,
@@ -12,6 +11,7 @@ import {
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
+import { writeFakeExecutable } from './fake-executable.ts'
 import { cleanUp, onCleanup, setup } from './testing.ts'
 
 afterEach(cleanUp)
@@ -20,11 +20,6 @@ function scratchDir(): string {
   const dir = mkdtempSync(join(tmpdir(), 'monica-user-'))
   onCleanup(() => rmSync(dir, { recursive: true, force: true }))
   return dir
-}
-
-function writeExecutable(path: string, body: string) {
-  writeFileSync(path, body)
-  chmodSync(path, 0o755)
 }
 
 async function run(argv: string[], env: Record<string, string>) {
@@ -115,7 +110,7 @@ async function claudeThroughWrapper(
 
 function realClaude(): string {
   const dir = scratchDir()
-  writeExecutable(join(dir, 'claude'), '#!/bin/sh\nprintf "%s\\n" "$@"\n')
+  writeFakeExecutable(join(dir, 'claude'), 'printf "%s\\n" "$@"')
   return dir
 }
 
@@ -160,15 +155,13 @@ test('the claude wrapper reaches the real claude past another wrapper that hands
   const home = await startedHome()
   const real = realClaude()
   const other = scratchDir()
-  writeExecutable(
+  writeFakeExecutable(
     join(other, 'claude'),
     [
-      '#!/bin/bash',
       'self="$(cd "$(dirname "$0")" && pwd)"',
       'IFS=:',
-      'for dir in $PATH; do [[ "$dir" == "$self" ]] && continue; [[ -x "$dir/claude" ]] && exec "$dir/claude" "$@"; done',
+      'for dir in $PATH; do [ "$dir" = "$self" ] && continue; [ -x "$dir/claude" ] && exec "$dir/claude" "$@"; done',
       'exit 127',
-      '',
     ].join('\n'),
   )
 

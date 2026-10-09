@@ -1,7 +1,9 @@
 import { afterEach, expect, test } from 'bun:test'
-import { chmodSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
+import { mkdtempSync, realpathSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+
+import { writeFakeExecutable } from '@monica/workbench/testing'
 
 import { loginShellPath } from './login-shell-path.ts'
 
@@ -16,8 +18,7 @@ function fakeShell(script: string) {
   const dir = realpathSync(mkdtempSync(join(tmpdir(), 'monica-shell-')))
   dirs.push(dir)
   const shell = join(dir, 'zsh')
-  writeFileSync(shell, `#!/bin/sh\n${script}\n`)
-  chmodSync(shell, 0o755)
+  writeFakeExecutable(shell, script)
   return { dir, shell }
 }
 

@@ -1,4 +1,4 @@
-import { chmodSync, writeFileSync } from 'node:fs'
+import { rmSync, symlinkSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 
 /** 偽の claude の場面。answer のほかは、research で本物の claude が流した失敗の並びを真似る。 */
@@ -36,6 +36,7 @@ export async function untilFakeClaudesExit(dir: string): Promise<void> {
 }
 
 // claude の env には PATH が無く、SDK は .ts の path を bun の名前で起こすので、拡張子の無い wrapper から絶対 path で起こす。
+// macOS は新しく書いた実行 file を初めて exec するたびに検査を挟むので、wrapper は repo の 1 つを symlink で指し、起こし方は隣の file に書く。
 export function writeFakeClaude(
   dir: string,
   recordPath: string,
@@ -43,10 +44,9 @@ export function writeFakeClaude(
 ): string {
   writeFileSync(recordPath, '')
   const claudePath = join(dir, 'claude')
-  writeFileSync(
-    claudePath,
-    `#!/bin/sh\nexec "${process.execPath}" "${join(import.meta.dir, 'fake-claude.ts')}" "${recordPath}" ${scenario} "$@"\n`,
-  )
-  chmodSync(claudePath, 0o755)
+  const args = [process.execPath, join(import.meta.dir, 'fake-claude.ts'), recordPath, scenario]
+  writeFileSync(`${claudePath}.args`, `${args.join('\n')}\n`)
+  rmSync(claudePath, { force: true })
+  symlinkSync(join(import.meta.dir, 'fake-claude.sh'), claudePath)
   return claudePath
 }

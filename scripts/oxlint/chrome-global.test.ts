@@ -1,8 +1,10 @@
-import { expect, test } from 'bun:test'
+import { afterAll, expect, test } from 'bun:test'
 import { readdirSync } from 'node:fs'
 import { join } from 'node:path'
 
-import { lintProbes } from './lint-probes'
+import { cleanUpLintProbes, lintProbes } from './lint-probes'
+
+afterAll(cleanUpLintProbes)
 
 const repo = join(import.meta.dir, '../..')
 const probe = 'export const id = chrome.runtime.id\n'

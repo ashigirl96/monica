@@ -1,7 +1,9 @@
 import { afterEach, expect, test } from 'bun:test'
-import { chmodSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+
+import { writeFakeExecutable } from '@monica/workbench/testing'
 
 import { ghAuthToken } from './github.ts'
 
@@ -16,8 +18,7 @@ afterEach(() => {
 function fakeGh(script: string) {
   const dir = mkdtempSync(join(tmpdir(), 'monica-gh-'))
   dirs.push(dir)
-  writeFileSync(join(dir, 'gh'), `#!/bin/sh\n${script}\n`)
-  chmodSync(join(dir, 'gh'), 0o755)
+  writeFakeExecutable(join(dir, 'gh'), script)
   process.env.PATH = `${dir}:${path}`
 }
 

@@ -5,7 +5,8 @@ import { join } from 'node:path'
 // 共有の tmpdir には他の run の残りも混ざるので、この run の残りだけを見るために空の TMPDIR を渡す。
 // ptyd の socket の path は 104 byte が上限なので、名前は短くする。
 const dir = mkdtempSync(join(tmpdir(), 'monica-t-'))
-const test = Bun.spawn([process.execPath, 'test', '--pass-with-no-tests'], {
+// bunfig.toml の [test] は parallel を黙って無視するので、引数で渡す。
+const test = Bun.spawn([process.execPath, 'test', '--pass-with-no-tests', '--parallel=8'], {
   env: { ...process.env, TMPDIR: dir },
   stdout: 'inherit',
   stderr: 'inherit',

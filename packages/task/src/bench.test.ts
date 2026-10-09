@@ -90,7 +90,7 @@ test('the Bench is listed while it prepares, and a second run waits for the same
 })
 
 test('run checks out a branch issue-n that already exists, without cloning a Repo that is cloned', async () => {
-  const { ghq, client, cwd } = await tracked()
+  const { ghq, client, cwd } = await tracked(null)
   ghq.clone('acme/app')
   const checkout = ghq.checkout('acme/app')
   git(checkout, 'switch', '--quiet', '-c', 'issue-12')
@@ -247,7 +247,7 @@ test("run --in-place opens the Bench on the Repo's checkout, cloning it, and run
 })
 
 test('run --in-place refuses a Bench that is a worktree', async () => {
-  const { client } = await tracked()
+  const { client } = await tracked(null)
   await client.run({ ref })
 
   const error = await failure(client.run({ ref, inPlace: true }))
@@ -256,7 +256,7 @@ test('run --in-place refuses a Bench that is a worktree', async () => {
 })
 
 test("run warns and starts from the local origin's default branch when it cannot fetch", async () => {
-  const { ghq, client, cwd } = await tracked()
+  const { ghq, client, cwd } = await tracked(null)
   ghq.clone('acme/app')
   const checkout = ghq.checkout('acme/app')
   git(checkout, 'remote', 'set-url', 'origin', join(checkout, 'gone'))
@@ -268,7 +268,7 @@ test("run warns and starts from the local origin's default branch when it cannot
 })
 
 test('run asks origin for its default branch when the checkout does not know it', async () => {
-  const { ghq, client, cwd } = await tracked()
+  const { ghq, client, cwd } = await tracked(null)
   ghq.clone('acme/app')
   git(ghq.checkout('acme/app'), 'symbolic-ref', '--delete', 'refs/remotes/origin/HEAD')
 
@@ -278,7 +278,7 @@ test('run asks origin for its default branch when the checkout does not know it'
 })
 
 test('run refuses a closed Task before it syncs, pointing to reopen rather than tracking it again', async () => {
-  const { db, client, github } = await tracked()
+  const { db, client, github } = await tracked(null)
   db.update(task).set({ closedAt: new Date() }).run()
   const sent = github.requests.length
 
