@@ -2,7 +2,7 @@ import { afterEach, expect, mock, test } from 'bun:test'
 import { mkdirSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 
-import { task } from './schema.ts'
+import { issue, task } from './schema.ts'
 import { cleanUp, failure, setup } from './testing.ts'
 
 afterEach(() => {
@@ -376,6 +376,17 @@ test('a Task whose repo was renamed before any sync still gets its resume button
   const output = await fixture.client.runFromButton({ ref: renamed })
   expect((await typedInto(fixture, output.terminalSessionId)).at(-1)).toMatchObject({
     data: "claude --resume 's-1'\r",
+  })
+})
+
+test('an Issue that GitHub now gives another node ID under the same name and number does not take the button state of the Task tracked there', async () => {
+  const fixture = withRepo()
+  const end = await liveRun(fixture, ['needs-triage'])
+  await end()
+  fixture.db.update(issue).set({ nodeId: 'an-issue-of-the-repo-that-had-this-name' }).run()
+
+  expect(await fixture.client.runButtons({ refs: [ref] })).toEqual({
+    buttons: [{ ref, button: { kind: 'triage', run: 'new' } }],
   })
 })
 

@@ -1,5 +1,5 @@
 import type { Db, Tx } from '@monica/workbench/server'
-import { and, asc, eq, inArray, ne, or, sql } from 'drizzle-orm'
+import { and, asc, eq, inArray, isNull, ne, or, sql } from 'drizzle-orm'
 import { alias, type SQLiteColumn } from 'drizzle-orm/sqlite-core'
 
 import type { GitHubIssue, GitHubPullRequest, LinkedIssue } from './github.ts'
@@ -15,9 +15,9 @@ export function isIssue({ repo, number }: IssueRef) {
   return and(isRepo(issue.repo, repo), eq(issue.number, number))
 }
 
-// repo の改名の後、sync が写しを直すまでは行の repo が旧名のままなので、node ID でも引き当てる。
+// repo の改名の後は sync まで行の repo が旧名なので node ID で引く。名前と番号で引くのは node ID を持たない行だけで、別の node ID の行は別の issue。
 export function isLinkedIssue({ nodeId, repo, number }: LinkedIssue) {
-  return or(eq(issue.nodeId, nodeId), isIssue({ repo, number }))
+  return or(eq(issue.nodeId, nodeId), and(isNull(issue.nodeId), isIssue({ repo, number })))
 }
 
 export function openBlockersOf(db: Db, issueIds: number[]) {
