@@ -1,4 +1,4 @@
-import { afterEach, expect, test } from 'bun:test'
+import { afterEach, expect, setDefaultTimeout, test } from 'bun:test'
 import { readFileSync, statSync } from 'node:fs'
 import { join } from 'node:path'
 
@@ -10,6 +10,9 @@ import { RPCLink } from '@orpc/client/fetch'
 import type { ContractRouterClient } from '@orpc/contract'
 
 import { freePort } from './testing.ts'
+
+// 負荷の下では `bun main.ts` の起動が既定の 5 秒を越えることがある。
+setDefaultTimeout(20_000)
 
 const cleanups: (() => unknown)[] = []
 afterEach(async () => {
@@ -144,10 +147,10 @@ test('the token listener carries workbench, task, job and chat but not note, and
   expect((await viaBrowser('chat/ask', INVALID_QUESTION)).status).toBe(404)
   expect((await viaBrowser('note/essay/create')).status).toBe(200)
   expect((await viaToken(backend, 'note/essay/create')).status).toBe(404)
-}, 20_000)
+})
 
 // Chrome Extension で script が動いても、任意の prompt を打つ task.run や shell に打鍵する workbench.openTab には届かせない（ADR-0017・0034・0035）。
-test('the Chrome Extension token in backend.json opens only chat and the two Run button procedures of task on the token listener, the full token opens everything, and no token opens nothing', async () => {
+test('the Chrome Extension token in backend.json opens only chat and the Run Button procedures of task on the token listener, the full token opens everything, and no token opens nothing', async () => {
   const backend = await startBackend(freePort())
   const endpoint = endpointFile(backend.home)
   const viaExtensionToken = { port: backend.port, token: endpoint.extensionToken }
@@ -160,7 +163,7 @@ test('the Chrome Extension token in backend.json opens only chat and the two Run
   expect((await viaToken(viaExtensionToken, 'chat/ask', INVALID_QUESTION)).status).toBe(400)
   expect((await viaToken({ port: backend.port }, 'chat/ask', INVALID_QUESTION)).status).toBe(401)
   // 不正な input は handler の前で 400 になるので、本物の GitHub に届かずに口に載っているかを見られる。
-  for (const path of ['task/runButtons', 'task/runFromButton']) {
+  for (const path of ['task/runButtons', 'task/runFromButton', 'task/reopenFromButton']) {
     expect([path, (await viaToken(viaExtensionToken, path, { ref: 1, refs: 1 })).status]).toEqual([
       path,
       400,
@@ -174,7 +177,7 @@ test('the Chrome Extension token in backend.json opens only chat and the two Run
     expect([path, (await viaToken({ port: backend.port }, path)).status]).toEqual([path, 401])
     expect([path, (await viaToken(backend, path)).status]).toEqual([path, 200])
   }
-}, 20_000)
+})
 
 test('the Backend answers chat.ask with the claude that MONICA_CLAUDE_PATH names', async () => {
   const backend = await startBackend(freePort(), fakeClaude('answer'))
@@ -188,7 +191,7 @@ test('the Backend answers chat.ask with the claude that MONICA_CLAUDE_PATH names
     if (event.type === 'text') answer += event.text
 
   expect(answer).toBe('Two is the answer.')
-}, 20_000)
+})
 
 // 1 つの質問に添えるページの本文とスクリーンショットを受けられる上限で、それを超える body は読まずに断る。
 test('a body larger than the limit for a question is refused with 413', async () => {
@@ -205,7 +208,7 @@ test('a body larger than the limit for a question is refused with 413', async ()
   expect((await ask(MAX_ASK_BODY_BYTES + 1)).status).toBe(413)
   // 上限の内側の壊れた body は oRPC まで届く。
   expect((await ask(1024)).status).toBe(400)
-}, 20_000)
+})
 
 // side panel は body が上限から 1MiB の余白を残すまで PDF を送る。RPCLink は File を multipart の別の part で送る。
 test('a PDF 1MiB under the body limit goes through RPCLink to chat.ask, and bytes that are no PDF come back as unparsable', async () => {
@@ -226,7 +229,7 @@ test('a PDF 1MiB under the body limit goes through RPCLink to chat.ask, and byte
     type: 'snapshot',
     page: { content: { kind: 'unreadable', reason: 'unparsable' } },
   })
-}, 20_000)
+})
 
 // 答えの途中の失敗は、流した text の後に、宣言した error の code と data で Chrome Extension に届く。
 test('a failure after some text of the answer reaches an RPCLink client after that text as the declared error with its data', async () => {
@@ -255,7 +258,7 @@ test('a failure after some text of the answer reaches an RPCLink client after th
     defined: true,
     data: { detail: expect.stringContaining('output token maximum') },
   })
-}, 20_000)
+})
 
 // 新しい Tab の claude が turn を終え、手空きの通知が出る。
 async function waitInANewTab(backend: Awaited<ReturnType<typeof startBackend>>) {
@@ -292,7 +295,7 @@ test('the Backend tells the Shell the unread Terminal Sessions before its endpoi
     type: 'unread',
     terminalSessionIds: [terminalSessionId],
   })
-}, 20_000)
+})
 
 test('the Backend tells the Shell to post a notification that carries the Terminal Session of the wait', async () => {
   const backend = await startBackend(freePort())
@@ -300,7 +303,7 @@ test('the Backend tells the Shell to post a notification that carries the Termin
   const terminalSessionId = await waitInANewTab(backend)
 
   expect(await nextOf(backend, 'notify')).toMatchObject({ type: 'notify', terminalSessionId })
-}, 20_000)
+})
 
 test('the Backend hands the Job Ledger the system Jobs of task and note', async () => {
   const response = await viaToken(await startBackend(freePort()), 'job/list')
@@ -311,4 +314,4 @@ test('the Backend hands the Job Ledger the system Jobs of task and note', async 
     'task.setup-log-cleanup',
     'note.image-cleanup',
   ])
-}, 20_000)
+})

@@ -52,6 +52,31 @@ async function until<T>(read: () => T | undefined): Promise<T> {
   }
 }
 
+// 本文への変換は Worker に request を渡すときに 30 秒の timer を仕掛けるので、その数を渡した request の数として待つ。
+function workerRequests(): (count: number) => Promise<void> {
+  const realSetTimeout = globalThis.setTimeout
+  let requests = 0
+  const waiters: { count: number; resolve: () => void }[] = []
+  const spy = spyOn(globalThis, 'setTimeout').mockImplementation(((
+    handler: () => void,
+    ms?: number,
+  ) => {
+    if (ms === 30_000) {
+      requests++
+      for (const waiter of waiters.filter((w) => requests >= w.count)) {
+        waiters.splice(waiters.indexOf(waiter), 1)
+        waiter.resolve()
+      }
+    }
+    return realSetTimeout(handler, ms)
+  }) as typeof setTimeout)
+  cleanups.push(() => spy.mockRestore())
+  return (count) =>
+    requests >= count
+      ? Promise.resolve()
+      : new Promise((resolve) => waiters.push({ count, resolve }))
+}
+
 function startChat(
   scenario?: FakeScenario,
   { claudeAt, htmlWorker }: { claudeAt?: (home: string) => string; htmlWorker?: URL } = {},
@@ -210,6 +235,7 @@ const DEEP_HTML = `<body>${'<div>'.repeat(3000)}deep${'</div>'.repeat(3000)}</bo
 
 test('while a page whose DOM nests 3,000 deep turns into text, the Backend answers its other calls at once', async () => {
   const { client } = startChat()
+  const requested = workerRequests()
   const controller = new AbortController()
   const asking = client.ask(
     { ...QUESTION, page: { ...QUESTION.page, content: { kind: 'html', html: DEEP_HTML } } },
@@ -221,7 +247,7 @@ test('while a page whose DOM nests 3,000 deep turns into text, the Backend answe
   )
 
   const started = performance.now()
-  await Bun.sleep(500)
+  await requested(1)
   await client.prepare()
   const waited = performance.now() - started
   const converting = await Promise.race([outcome, Bun.sleep(0).then(() => 'converting')])
@@ -439,18 +465,6 @@ function answeringPids(records: ClaudeRecord[]): number[] {
 
 const gone = (pid: number) => until(() => (liveChildren().includes(pid) ? undefined : true))
 
-test('aborting the call while claude answers kills that claude', async () => {
-  const { client, records } = startChat()
-  const controller = new AbortController()
-
-  for await (const event of await client.ask(HELD, { signal: controller.signal })) {
-    if (event.type === 'text') controller.abort()
-  }
-
-  const [pid] = answeringPids(records())
-  await gone(pid!)
-})
-
 test('leaving the answer before the result kills the claude that answers', async () => {
   const { client, records } = startChat()
 
@@ -490,11 +504,12 @@ test('a fifth question while four pages are being turned into text is refused as
   const { client, claudes } = startChat(undefined, {
     htmlWorker: new URL('./page/fixtures/silent-worker.ts', import.meta.url),
   })
+  const requested = workerRequests()
   const controller = new AbortController()
   const reading = Array.from({ length: 4 }, () =>
     client.ask(QUESTION, { signal: controller.signal }).catch(() => {}),
   )
-  await Bun.sleep(100)
+  await requested(4)
 
   const busy = client.ask(QUESTION)
 
@@ -550,11 +565,14 @@ test('prepare starts one spare that the next question goes to, and answering sta
 test('an aborted answer starts no spare', async () => {
   const { client, records, claudes } = startChat()
   const controller = new AbortController()
+  const events: ChatEvent[] = []
 
   for await (const event of await client.ask(HELD, { signal: controller.signal })) {
+    events.push(event)
     if (event.type === 'text') controller.abort()
   }
 
+  expect(kinds(events)).toEqual(['snapshot', 'text'])
   await gone(answeringPids(records())[0]!)
   expect(claudes()).toEqual([])
 })
@@ -771,19 +789,6 @@ test('an answer whose claude the Backend kills on exit closes without an error',
   for await (const event of answer) {
     events.push(event)
     if (event.type === 'text') chatAgent.stop()
-  }
-
-  expect(kinds(events)).toEqual(['snapshot', 'text'])
-})
-
-test('an aborted answer closes without an error', async () => {
-  const { client } = startChat()
-  const controller = new AbortController()
-  const events: ChatEvent[] = []
-
-  for await (const event of await client.ask(HELD, { signal: controller.signal })) {
-    events.push(event)
-    if (event.type === 'text') controller.abort()
   }
 
   expect(kinds(events)).toEqual(['snapshot', 'text'])

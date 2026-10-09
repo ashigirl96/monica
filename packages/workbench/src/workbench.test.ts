@@ -3,11 +3,10 @@ import { afterEach, expect, expectTypeOf, test } from 'bun:test'
 import { eq } from 'drizzle-orm'
 
 import type { WorkbenchChange } from './contract.ts'
-import { startFakePtyd } from './fake-ptyd.ts'
 import type { SessionInfo } from './ptyd.ts'
 import { runspace, tab as tabTable, terminalSession } from './schema.ts'
 import type { Db, WorkbenchLedger } from './server.ts'
-import { cleanUp, onCleanup, setup } from './testing.ts'
+import { cleanUp, onCleanup, restartPtyd, setup } from './testing.ts'
 
 afterEach(cleanUp)
 
@@ -195,10 +194,7 @@ test('while ptyd is gone the Backend keeps retrying, then reconciles against the
   await workbenchLedger.start()
 
   const reconciled = nextChange(workbenchLedger, 'reconciled')
-  ptyd.stop()
-  await Bun.sleep(50)
-  const revived = startFakePtyd(home)
-  onCleanup(() => revived.stop())
+  await restartPtyd(home, ptyd)
   await reconciled
 
   expect(rowOf(db, 'ts-a')?.status).toBe('lost')
@@ -235,7 +231,6 @@ test('a ptyd that drops the connection mid-handshake leaves a single connection 
   ptyd.dropNextList = true
 
   await workbenchLedger.start()
-  await Bun.sleep(100)
 
   expect(ptyd.connections).toBe(1)
 })

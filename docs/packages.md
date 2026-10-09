@@ -141,11 +141,14 @@ package ごとに in-memory の SQLite に自分の migration を当てる（tas
 - workbench の ptyd は `packages/workbench/src/fake-ptyd.ts` に差し替える。fake は `$home/ptyd.sock` で NDJSON を話し、List の中身を台本にし、Exit を押し込み、届いた Reap と Terminate を記録する。本物の ptyd は CI の ts job に無く、Exit と Created の競合も決まった順で起こせないため。home は `mkdtemp(tmpdir())` で短くする（socket の path の上限は 104 byte）。fake と home の helper は `@monica/workbench/testing` から他の package にも出す。
   - op が届かないことを `receivedAll(…)` が空で確かめるときは、後から送る別の op（Tab を開いた Create など）が届くのを待ってから読む。ptyd は 1 本の接続で順に受けるので、後の op が届けば先に送られた op も届いている。すぐに読むと、transaction の後に送る op が届く前の空を見て、送ってしまう変異も通す。
 - task と CLI のテストの Workbench Ledger も、fake の ptyd の home で `createWorkbenchLedger` を組む（`ptydPath` は存在しない path）。Workbench Ledger の method は差し替えず、transaction で `openTab` → commit の後に workbench が送る Create と Write を、本物の protocol で通す。procedure と Workbench Ledger の method は ptyd を待たずに返るので、ptyd に届いた Create・Write・Terminate は fake の `received` か `receivedAtLeast` で待ってから確かめ、Terminal Session が starting を抜けるのは `untilSettled` で待つ。Tab と Runspace は Workbench Ledger の method か workbench の router で開き、Agent Session は hook で作る。workbench の table に直に書かない。
-- await の間の競合は、await の途中で止めて決まった順で起こす。sync の途中は fake GitHub の `hold()`、git の ref の更新（`branch -D` など）の途中は checkout の `.git/hooks/reference-transaction` が file を待つ script、ptyd の応答の途中は fake の ptyd の `holdNext(op)` で止める（`close.test.ts`）。
+- await の間の競合は、await の途中で止めて決まった順で起こす。sync の途中は fake GitHub の `hold()`、git の ref の更新（`branch -D` など）の途中は checkout の `.git/hooks/reference-transaction` が file を待つ script、ptyd の応答の途中は fake の ptyd の `holdNext(op)` で止める（`close-race.test.ts`）。
   - 止められるのは await の途中だけ。procedure が待たない副作用（commit の後に workbench が送る Terminate など）を止めても、procedure の中の窓は止まらない。close は commit から予約を外すまでに await を持たないので、その窓は procedure からは作れない。
   - 同じ Task の sync は 1 本に合流するので、`hold()` は後から来た run・close・reopen の sync も止める。1 本だけを止めるときは `setTimeout` を spy し、合流した呼び手の打ち切り（`SYNC_BEFORE_COMMAND_TIMEOUT_MS`）を手で起こして写しで進ませる。
 - system の Job を足すときは、並びを出す domain のテストに、`systemJobs(<d>Ledger)` から名前で取り出した `run` を最小の場面で呼ぶテストを 1 本足し、Ledger の method に届くことを見る（`note.image-cleanup`、`task.setup-log-cleanup`）。method の規則のテストは method を直に呼ぶ。`run` が別の method を呼んでも、型も Job Ledger のテストも捕まえないため。
 - 一定の間隔で走る処理は、`setInterval` を `spyOn` で捕まえ、間隔を確かめてから callback を手で呼ぶ。決まった時間の打ち切りは、`setTimeout` を `spyOn` してその callback を捕まえ、手で呼ぶ。Bun の `jest.useFakeTimers()` は `Bun.sleep` と `setTimeout` も止め、一部の timer だけを偽にできないので、HTTP の応答を待つテストが進まなくなる。
+  - 本番が `Date.now()` の締め切りと短い sleep の loop で待つもの（setup と Job の SIGTERM から SIGKILL までの猶予）は、待ち始めた印を見てから `setSystemTime` で時計を進める。猶予の手前まで進めた時点でまだ待っていることも確かめ、値を検出できるようにする。最後に `setSystemTime()` で戻す。
+  - 子の process の timer はテストの process から spy できないので、子を `bun --preload <テスト用の file>` で起こし、preload で差し替える（hook の `AbortSignal.timeout`、`apps/cli/src/hook.test.ts`）。
+  - 偽の GitHub に request が届くのは、`requests` を poll せず `received(count)` を await する。固定の sleep でも待たない。
 - 終わった行のように procedure に出ない行は、`@monica/<d>/schema` の table を SELECT して確かめてよい。他の domain が読むのと同じ面だから。
 
 ## contract の規約

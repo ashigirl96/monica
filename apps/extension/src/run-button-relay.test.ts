@@ -14,10 +14,14 @@ afterEach(() => {
 const HOST = 'com.ashigirl96.monica_dev'
 const TOKEN = 'extension-token'
 
-/** token の口の task の 2 つ。違う token には hono の bearerAuth と同じく 401 を返す。届いた呼び出しを残す。 */
+/** token の口の task の 3 つ。違う token には hono の bearerAuth と同じく 401 を返す。届いた呼び出しを残す。 */
 function fakeBackend() {
   const calls: { path: string; input: unknown }[] = []
-  const os = implement({ runButtons: contract.runButtons, runFromButton: contract.runFromButton })
+  const os = implement({
+    runButtons: contract.runButtons,
+    runFromButton: contract.runFromButton,
+    reopenFromButton: contract.reopenFromButton,
+  })
   const handler = new RPCHandler({
     task: os.router({
       runButtons: os.runButtons.handler(({ input }) => {
@@ -51,6 +55,13 @@ function fakeBackend() {
           terminalSessionId: 'ts-1',
           resumed: null,
         }
+      }),
+      reopenFromButton: os.reopenFromButton.handler(({ input }) => {
+        calls.push({ path: 'reopenFromButton', input })
+        if (input.ref.endsWith('#13')) {
+          throw new ORPCError('BAD_REQUEST', { message: `${input.ref} is not a closed Task` })
+        }
+        return { ref: input.ref, title: 'Ship it', warnings: [] }
       }),
     }),
   })
@@ -116,20 +127,36 @@ test('the relay runs the ref alone and tells whether the Backend ran it or why i
   nativeHost({ port: backend.port, token: TOKEN })
 
   expect(await relayRunButton(HOST, { type: 'monica.runFromButton', ref: 'acme/app#12' })).toEqual({
-    ran: true,
+    accepted: true,
   })
   expect(await relayRunButton(HOST, { type: 'monica.runFromButton', ref: 'acme/app#13' })).toEqual({
-    ran: false,
+    accepted: false,
     reason: 'acme/app#13 has no label that picks a prompt',
   })
   expect(await relayRunButton(HOST, { type: 'monica.runFromButton', ref: 'acme/app#14' })).toEqual({
-    ran: false,
+    accepted: false,
     reason: 'a live Run',
   })
   expect(backend.calls.map(({ input }) => input)).toEqual([
     { ref: 'acme/app#12' },
     { ref: 'acme/app#13' },
     { ref: 'acme/app#14' },
+  ])
+})
+
+test('the relay reopens the ref alone and tells whether the Backend reopened it or why it refused', async () => {
+  const backend = fakeBackend()
+  nativeHost({ port: backend.port, token: TOKEN })
+
+  expect(
+    await relayRunButton(HOST, { type: 'monica.reopenFromButton', ref: 'acme/app#12' }),
+  ).toEqual({ accepted: true })
+  expect(
+    await relayRunButton(HOST, { type: 'monica.reopenFromButton', ref: 'acme/app#13' }),
+  ).toEqual({ accepted: false, reason: 'acme/app#13 is not a closed Task' })
+  expect(backend.calls).toEqual([
+    { path: 'reopenFromButton', input: { ref: 'acme/app#12' } },
+    { path: 'reopenFromButton', input: { ref: 'acme/app#13' } },
   ])
 })
 

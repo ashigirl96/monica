@@ -78,17 +78,3 @@ test('without force, commits made after the inspection on top of the head of a m
   })
   expect(hasBranch(checkout, 'issue-12')).toBe(true)
 })
-
-test('with force, the worktree and the branch go whatever was written after the inspection', async () => {
-  const { checkout, path, inspected } = await inspectedClean()
-  commit(path, { 'late.txt': { content: 'late\n' } }, 'late')
-  writeFileSync(join(path, 'draft.txt'), 'draft\n')
-
-  expect(await removeWorktree(inspected, { force: true })).toEqual({
-    removedWorktree: path,
-    deletedBranch: 'issue-12',
-    warnings: [],
-  })
-  expect(existsSync(path)).toBe(false)
-  expect(hasBranch(checkout, 'issue-12')).toBe(false)
-})

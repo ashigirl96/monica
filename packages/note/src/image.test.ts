@@ -1,5 +1,5 @@
 import { Database } from 'bun:sqlite'
-import { afterEach, expect, test } from 'bun:test'
+import { afterEach, expect, spyOn, test } from 'bun:test'
 import {
   existsSync,
   mkdirSync,
@@ -20,8 +20,6 @@ import { drizzle } from 'drizzle-orm/bun-sqlite'
 import { migrate } from 'drizzle-orm/bun-sqlite/migrator'
 
 import { IMAGE_URL_PREFIX } from './contract.ts'
-import { importImage } from './image.ts'
-import { internals } from './note.ts'
 import { idNumber } from './row.ts'
 import { note } from './schema.ts'
 import { createNoteLedger, migrations, router, systemJobs } from './server.ts'
@@ -210,10 +208,40 @@ test('an image that runs past 20MB is refused as too large, and the site stops b
 
 const never = new Promise<never>(() => {})
 
+function captureTimeouts() {
+  const timeouts: { ms: number; fire: () => void }[] = []
+  const spy = spyOn(AbortSignal, 'timeout').mockImplementation((ms: number) => {
+    const controller = new AbortController()
+    timeouts.push({
+      ms,
+      fire: () => controller.abort(new DOMException('The operation timed out.', 'TimeoutError')),
+    })
+    return controller.signal
+  })
+  cleanups.push(() => spy.mockRestore())
+  return timeouts
+}
+
+// 画像の header が届いたことは client の側でしか分からないので、fetch の応答を待つ。
+function responded(): Promise<void> {
+  const realFetch = globalThis.fetch
+  const { promise, resolve } = Promise.withResolvers<void>()
+  const spy = spyOn(globalThis, 'fetch').mockImplementation((async (
+    ...args: Parameters<typeof fetch>
+  ) => {
+    const response = await realFetch(...args)
+    resolve()
+    return response
+  }) as typeof fetch)
+  cleanups.push(() => spy.mockRestore())
+  return promise
+}
+
 test.each([
-  ['does not start answering', () => never],
+  ['does not start answering', 'request', () => never],
   [
     'stops in the middle of the image',
+    'response',
     () =>
       new Response(
         new ReadableStream({
@@ -224,24 +252,38 @@ test.each([
         }),
       ),
   ],
-])('an import from a site that %s is given up at its timeout', async (_, answer) => {
-  const { noteLedger, images } = setup()
-  const site = serve(answer)
+] as const)(
+  'an import from a site that %s is given up after 10 seconds',
+  async (_, stage, answer) => {
+    const { client, images } = setup()
+    const timeouts = captureTimeouts()
+    const arrived = Promise.withResolvers<void>()
+    const site = serve(() => {
+      arrived.resolve()
+      return answer()
+    })
+    const fetched = responded()
 
-  const startedAt = Date.now()
-  const refused = await failure(importImage(internals(noteLedger), site('/slow.png'), 100))
+    const refused = failure(client.image.import({ url: site('/slow.png') }))
+    await (stage === 'request' ? arrived.promise : fetched)
+    timeouts[0]!.fire()
 
-  expect(refused.code).toBe('GATEWAY_TIMEOUT')
-  expect(Date.now() - startedAt).toBeLessThan(2000)
-  expect(placedIn(images)).toEqual([])
-})
+    expect((await refused).code).toBe('GATEWAY_TIMEOUT')
+    expect(timeouts.map((timeout) => timeout.ms)).toEqual([10_000])
+    expect(placedIn(images)).toEqual([])
+  },
+)
 
 test('stopping the Note Ledger gives up an import that is still fetching', async () => {
   const { client, noteLedger } = setup()
-  const site = serve(() => never)
+  const arrived = Promise.withResolvers<void>()
+  const site = serve(() => {
+    arrived.resolve()
+    return never
+  })
 
   const importing = failure(client.image.import({ url: site('/slow.png') }))
-  await Bun.sleep(50)
+  await arrived.promise
   const stoppedAt = Date.now()
   noteLedger.stop()
 

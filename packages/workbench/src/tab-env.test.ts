@@ -1,4 +1,4 @@
-import { afterEach, expect, test } from 'bun:test'
+import { afterAll, afterEach, expect, test } from 'bun:test'
 import {
   mkdirSync,
   mkdtempSync,
@@ -99,6 +99,24 @@ test.skipIf(!Bun.which('zsh'))(
   },
 )
 
+const wrapperCleanups: (() => void)[] = []
+afterAll(() => {
+  for (const cleanup of wrapperCleanups.splice(0).toReversed()) cleanup()
+})
+let wrapperHome: Promise<string> | undefined
+
+// 本番が書く wrapper は新しい実行 file なので、初回 exec の検査を 1 回で済ませるよう home を使い回す。
+function sharedWrapperHome(): Promise<string> {
+  wrapperHome ??= (async () => {
+    const { home, workbenchLedger } = setup({
+      register: (cleanup) => wrapperCleanups.push(cleanup),
+    })
+    await workbenchLedger.start()
+    return home
+  })()
+  return wrapperHome
+}
+
 async function claudeThroughWrapper(
   home: string,
   path: string,
@@ -133,7 +151,7 @@ test.each([
   ],
   ['a claude outside any Tab gets none', {}, ['--print', 'hi'], false],
 ])('the claude wrapper runs the next claude on PATH: %s', async (_name, env, args, hooked) => {
-  const home = await startedHome()
+  const home = await sharedWrapperHome()
   const real = realClaude()
 
   const result = await claudeThroughWrapper(
@@ -152,7 +170,7 @@ test.each([
 })
 
 test('the claude wrapper reaches the real claude past another wrapper that hands back to the first claude on PATH', async () => {
-  const home = await startedHome()
+  const home = await sharedWrapperHome()
   const real = realClaude()
   const other = scratchDir()
   writeFakeExecutable(

@@ -12,7 +12,6 @@ const ref = 'acme/app#12'
 
 async function withBench({ start }: { start: boolean }) {
   const fixture = setup()
-  fixture.ghq.origin('acme/app', {})
   if (start) fixture.taskLedger.start()
   return { ...fixture, benchRunspace: await fixture.openBench(ref) }
 }

@@ -63,10 +63,15 @@ const prompt = {
   prompt: 'hi',
 }
 
-async function hook(home: string, payload: object, env: Record<string, string> = {}) {
+async function hook(
+  home: string,
+  payload: object,
+  env: Record<string, string> = {},
+  preload: string[] = [],
+) {
   const startedAt = performance.now()
   const child = Bun.spawn(
-    ['bun', join(import.meta.dir, 'main.ts'), 'workbench', 'hook', 'claude'],
+    ['bun', ...preload, join(import.meta.dir, 'main.ts'), 'workbench', 'hook', 'claude'],
     {
       env: { PATH: process.env.PATH!, MONICA_HOME: home, ...env },
       stdin: new Blob([JSON.stringify(payload)]),
@@ -141,6 +146,7 @@ test('without a Backend, or with one that fails or refuses, the hook exits 0 at 
 
 test('a Backend that does not answer is given up after 2 seconds and the hook exits 0', async () => {
   const home = monicaHome()
+  const timeouts = join(home, 'timeouts')
   const hung = Bun.serve({
     hostname: '127.0.0.1',
     port: 0,
@@ -149,9 +155,11 @@ test('a Backend that does not answer is given up after 2 seconds and the hook ex
   cleanups.push(() => hung.stop(true))
   writeEndpoint(home, hung.port!)
 
-  const result = await hook(home, prompt, inTab)
+  const result = await hook(home, prompt, { ...inTab, MONICA_TEST_TIMEOUTS_LOG: timeouts }, [
+    '--preload',
+    join(import.meta.dir, 'abort-timeouts.preload.ts'),
+  ])
 
   expect(result).toMatchObject({ code: 0, stdout: '' })
-  expect(result.elapsedMs).toBeGreaterThan(1900)
-  expect(result.elapsedMs).toBeLessThan(3000)
+  expect(readFileSync(timeouts, 'utf8')).toBe('2000\n')
 })
