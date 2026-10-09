@@ -1,4 +1,4 @@
-import { afterEach, expect, test } from 'bun:test'
+import { afterEach, expect, mock, spyOn, test } from 'bun:test'
 
 import { ORPCError } from '@orpc/server'
 import { asc, eq } from 'drizzle-orm'
@@ -9,7 +9,10 @@ import { syncTask } from './sync.ts'
 import { internals } from './task.ts'
 import { cleanUp, setup } from './testing.ts'
 
-afterEach(cleanUp)
+afterEach(() => {
+  mock.restore()
+  cleanUp()
+})
 
 type Fixture = ReturnType<typeof setup>
 
@@ -89,7 +92,7 @@ test('sync links a Task to the pull requests headed by the branch issue-n of its
   const fixture = setup()
   const { github, client } = fixture
   fixture.ghq.origin('acme/app')
-  await fixture.openBench('acme/app#1')
+  await fixture.openBench('acme/app#1', 'Ship it', { worktree: true })
   github.pullRequest('acme/app#20', { title: 'Fix it', headRef: 'issue-1' })
   github.pullRequest('acme/app#21', { title: 'First try', headRef: 'issue-1', state: 'closed' })
   github.pullRequest('acme/lib#3', { title: 'Fix it in lib', headRef: 'fix-app' })
@@ -138,7 +141,7 @@ test('a Task with no worktree Bench has no pull request linked by branch, so the
   const fixture = setup()
   const { github, client } = fixture
   fixture.ghq.origin('acme/app')
-  await fixture.openBench('acme/app#1')
+  await fixture.openBench('acme/app#1', 'Ship it', { worktree: true })
   github.pullRequest('acme/app#20', { title: 'Fix it', headRef: 'issue-1', state: 'merged' })
   await client.sync({})
   await client.close({ ref: 'acme/app#1', force: true })
@@ -152,7 +155,7 @@ test('a branch GitHub answers null for keeps its links, while the closing refere
   const fixture = setup()
   const { github, client } = fixture
   fixture.ghq.origin('acme/app')
-  await fixture.openBench('acme/app#1')
+  await fixture.openBench('acme/app#1', 'Ship it', { worktree: true })
   github.pullRequest('acme/app#20', { title: 'Fix it', headRef: 'issue-1' })
   github.issue('acme/app#1', { title: 'One', closingPullRequests: ['acme/app#20'] })
   await client.sync({})
@@ -443,7 +446,7 @@ test('a sync asked for while the same sync runs waits for the running one', asyn
 
   const first = fixture.client.sync({})
   const second = fixture.client.sync({})
-  await Bun.sleep(50)
+  await fixture.github.received(1)
   release()
 
   expect(await Promise.all([first, second])).toEqual([
@@ -459,15 +462,21 @@ test('a sync that joins a running one gives up at its own timeout', async () => 
   const deps = internals(fixture.taskLedger)
   const ref = { repo: 'acme/app', number: 1 }
   const release = fixture.github.hold()
+  const realSetTimeout = globalThis.setTimeout
+  let giveUp: (() => void) | undefined
+  spyOn(globalThis, 'setTimeout').mockImplementation(((callback: () => void, ms?: number) => {
+    if (ms !== 50) return realSetTimeout(callback, ms)
+    giveUp = callback
+    return realSetTimeout(() => {}, 0)
+  }) as typeof setTimeout)
 
   const running = syncTask(deps, ref, 30_000)
-  const startedAt = Date.now()
-  const joined = await syncTask(deps, ref, 50)
-  const waited = Date.now() - startedAt
+  const joining = syncTask(deps, ref, 50)
+  giveUp!()
+  const joined = await joining
   release()
 
   expect(joined).toEqual({ synced: 0, missing: [], failures: ['timed out after 0.05s'] })
-  expect(waited).toBeLessThan(1000)
   expect(await running).toEqual({ synced: 1, missing: [], failures: [] })
   expect(fixture.github.requests).toHaveLength(1)
 })

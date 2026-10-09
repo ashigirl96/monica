@@ -5,10 +5,9 @@ import { join } from 'node:path'
 import { eq } from 'drizzle-orm'
 
 import type { WorkbenchChange } from './contract.ts'
-import { startFakePtyd } from './fake-ptyd.ts'
 import { agentSession, terminalSession } from './schema.ts'
 import type { Db } from './server.ts'
-import { cleanUp, onCleanup, setup, stderrLines } from './testing.ts'
+import { cleanUp, onCleanup, restartPtyd, setup, stderrLines } from './testing.ts'
 
 afterEach(cleanUp)
 
@@ -639,10 +638,7 @@ test('reconnecting to ptyd signals each Agent Session the reconcile ends', async
     })
   })
 
-  ptyd.stop()
-  await Bun.sleep(50)
-  const revived = startFakePtyd(home)
-  onCleanup(() => revived.stop())
+  await restartPtyd(home, ptyd)
   await reconciled
 
   expect(await client.agentSession.list()).toEqual([])
@@ -665,11 +661,7 @@ test('reconnecting to ptyd while the Backend keeps running leaves a running Agen
     })
   })
 
-  ptyd.stop()
-  await Bun.sleep(50)
-  const revived = startFakePtyd(home)
-  onCleanup(() => revived.stop())
-  revived.sessions.push(...ptyd.sessions)
+  await restartPtyd(home, ptyd, (revived) => revived.sessions.push(...ptyd.sessions))
   await reconciled
 
   expect(await client.agentSession.list()).toEqual([

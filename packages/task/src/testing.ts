@@ -1,5 +1,5 @@
 import { Database } from 'bun:sqlite'
-import { mkdtempSync, rmSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
@@ -85,10 +85,16 @@ export function setup() {
     return boot()
   }
 
-  async function openBench(ref: string, title = 'Ship it'): Promise<string> {
+  // in-place の Bench は checkout が在れば git を呼ばない。
+  async function openBench(
+    ref: string,
+    title = 'Ship it',
+    { worktree = false } = {},
+  ): Promise<string> {
     github.issue(ref, { title })
     await booted.client.track({ ref })
-    await booted.client.run({ ref })
+    if (!worktree) mkdirSync(ghq.checkout(parseRef(ref).repo), { recursive: true })
+    await booted.client.run({ ref, inPlace: !worktree })
     return db
       .select({ runspaceId: bench.runspaceId })
       .from(bench)

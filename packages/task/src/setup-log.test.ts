@@ -26,13 +26,14 @@ function writeLog(home: string, path: string, daysAgo: number): string {
   return log
 }
 
+// 残すかは Bench の型で分かれないので、git を呼ばない in-place の Bench を開き、log は手で書く。
 async function benched() {
   const fixture = setup()
-  fixture.ghq.origin('acme/app', {})
   fixture.github.issue(ref, { title: 'Ship it' })
   await fixture.client.track({ ref })
-  await fixture.client.run({ ref })
-  return { ...fixture, log: join(fixture.home, 'logs/setup/acme/app/issue-12.log') }
+  mkdirSync(fixture.ghq.checkout('acme/app'), { recursive: true })
+  await fixture.client.run({ ref, inPlace: true })
+  return { ...fixture, log: writeLog(fixture.home, 'acme/app/issue-12.log', 0) }
 }
 
 test('the setup log of a closed Task goes 14 days after it was last written, and so do the directories it leaves empty', async () => {

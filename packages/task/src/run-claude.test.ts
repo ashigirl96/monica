@@ -1,4 +1,4 @@
-import { afterEach, expect, mock, test } from 'bun:test'
+import { afterEach, expect, mock, setSystemTime, test } from 'bun:test'
 import { mkdirSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 
@@ -9,6 +9,7 @@ import { cleanUp, failure, onCleanup, setup } from './testing.ts'
 
 afterEach(() => {
   mock.restore()
+  setSystemTime()
   cleanUp()
 })
 
@@ -17,16 +18,16 @@ const blocker = 'acme/lib#3'
 
 type Fixture = ReturnType<typeof untracked>
 
-function untracked({ blockedBy = [] as string[] } = {}) {
+function untracked({ blockedBy = [] as string[], origin = true } = {}) {
   const fixture = setup()
-  fixture.ghq.origin('acme/app', {})
+  if (origin) fixture.ghq.origin('acme/app', {})
   for (const upstream of blockedBy) fixture.github.issue(upstream, { title: 'Upstream fix' })
   fixture.github.issue(ref, { title: 'Ship it', blockedBy })
   return { ...fixture, cwd: join(fixture.home, 'worktrees/acme/app/issue-12') }
 }
 
-async function tracked({ blockedBy = [] as string[] } = {}) {
-  const fixture = untracked({ blockedBy })
+async function tracked({ blockedBy = [] as string[], origin = true } = {}) {
+  const fixture = untracked({ blockedBy, origin })
   await fixture.client.track({ ref })
   return fixture
 }
@@ -115,16 +116,6 @@ test('run opens a new Tab at the end of the Bench, starts its shell at 24x80 and
   ])
 })
 
-test('run types the prompt given in place of /tackle', async () => {
-  const fixture = await tracked()
-
-  const output = await fixture.client.run({ ref, prompt: 'fix the bug' })
-
-  expect((await typedInto(fixture, output.terminalSessionId)).at(-1)).toMatchObject({
-    data: "claude 'fix the bug'\r",
-  })
-})
-
 test("a prompt with ' in it reaches claude as one argument, with nothing in it expanded", async () => {
   const fixture = await tracked()
   const prompt = "fix 'run' so it doesn't expand $HOME or `id`"
@@ -142,7 +133,7 @@ test.each([
   ['a prompt with Ctrl-C', 'fix\u0003', 'control'],
   ['a prompt starting with -', '--help', 'option'],
 ])('run refuses %s with BAD_REQUEST before it tracks the Issue', async (_, prompt, reason) => {
-  const fixture = untracked()
+  const fixture = untracked({ origin: false })
 
   const error = await failure(fixture.client.run({ ref, prompt }))
 
@@ -180,7 +171,7 @@ test.each([
 )
 
 test("run asked by a repo's old name for an untracked Issue tracks it under the new name and starts claude", async () => {
-  const fixture = untracked()
+  const fixture = untracked({ origin: false })
   fixture.github.renameRepo('acme/app', 'acme/renamed')
   fixture.ghq.origin('acme/renamed')
 
@@ -194,7 +185,7 @@ test("run asked by a repo's old name for an untracked Issue tracks it under the 
 })
 
 test('run refuses an untracked Issue with an open Blocker, and the Issue stays tracked', async () => {
-  const fixture = untracked({ blockedBy: [blocker] })
+  const fixture = untracked({ blockedBy: [blocker], origin: false })
 
   const error = await failure(fixture.client.run({ ref }))
 
@@ -204,7 +195,7 @@ test('run refuses an untracked Issue with an open Blocker, and the Issue stays t
 })
 
 test('run refuses a ref GitHub does not return with NOT_FOUND, and neither tracks nor copies it', async () => {
-  const fixture = untracked()
+  const fixture = untracked({ origin: false })
 
   const error = await failure(fixture.client.run({ ref: 'acme/app#99' }))
 
@@ -230,17 +221,6 @@ test('run returns while ptyd cannot be reached, leaving its Tab starting; once p
     { op: 'create', session_id: output.terminalSessionId },
     { op: 'write', session_id: output.terminalSessionId, data: "claude '/tackle'\r" },
   ])
-})
-
-test('the claude run started becomes a Run of the Task, waiting idle', async () => {
-  const fixture = await tracked()
-  fixture.taskLedger.start()
-  const { terminalSessionId } = await fixture.client.run({ ref })
-
-  await fixture.hook(terminalSessionId, 's-1', 'SessionStart', { source: 'startup' })
-
-  expect(runsOf(fixture)).toEqual([{ agentSessionId: 's-1' }])
-  expect(await stateOf(fixture)).toMatchObject({ state: 'waiting', reason: 'idle' })
 })
 
 test("run resumes the claude of the last Run once it has ended, sending it no /tackle, in a new Tab in that claude's cwd, and makes no new Run", async () => {
@@ -340,12 +320,15 @@ test('run resumes the Run whose claude was active last, even when another began 
   const first = await fixture.client.run({ ref })
   const second = await fixture.openTab(fixture.db.select().from(bench).get()!.runspaceId)
   const fields = (sessionId: string) => ({ transcript_path: transcriptOf(fixture, sessionId) })
+  const t0 = Date.now()
+  setSystemTime(t0)
   await fixture.hook(first.terminalSessionId, 's-1', 'SessionStart', fields('s-1'))
-  await Bun.sleep(5)
+  setSystemTime(t0 + 1000)
   await fixture.hook(second, 's-2', 'SessionStart', fields('s-2'))
   await fixture.hook(second, 's-2', 'SessionEnd', fields('s-2'))
-  await Bun.sleep(5)
+  setSystemTime(t0 + 2000)
   await fixture.hook(first.terminalSessionId, 's-1', 'SessionEnd', fields('s-1'))
+  setSystemTime()
 
   const output = await fixture.client.run({ ref })
 
@@ -367,7 +350,7 @@ test('run refuses a Task with a live Run, naming its Agent Session and state, an
 })
 
 test('run refuses a Task whose Issue has an open Blocker, naming it, before it opens the Bench', async () => {
-  const fixture = await tracked({ blockedBy: [blocker] })
+  const fixture = await tracked({ blockedBy: [blocker], origin: false })
 
   const error = await failure(fixture.client.run({ ref }))
 
@@ -431,7 +414,7 @@ test('when GitHub cannot be reached, run judges the gate on the copy and warns h
 })
 
 test('when GitHub cannot be reached, an open Blocker in the copy still holds the Task', async () => {
-  const fixture = await tracked({ blockedBy: [blocker] })
+  const fixture = await tracked({ blockedBy: [blocker], origin: false })
   fixture.github.issue(blocker, { title: 'Upstream fix', state: 'closed' })
   fixture.github.logOut()
 

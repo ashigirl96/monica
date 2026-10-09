@@ -1,4 +1,4 @@
-import { afterEach, expect, mock, spyOn, test } from 'bun:test'
+import { afterEach, expect, mock, setSystemTime, spyOn, test } from 'bun:test'
 import { existsSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 
@@ -10,6 +10,7 @@ import { cleanUp, failure, setup } from './testing.ts'
 
 afterEach(() => {
   mock.restore()
+  setSystemTime()
   cleanUp()
 })
 
@@ -69,23 +70,28 @@ test("run makes a worktree on a new branch issue-n from origin's default branch,
 })
 
 test('the Bench is listed while it prepares, and a second run waits for the same preparation', async () => {
-  const { db, client, cwd } = await tracked(
-    '#!/bin/sh\necho attempt >> .attempts\nwhile [ ! -e .release ]; do sleep 0.02; done\n',
-  )
+  const { db, ghq, client, cwd } = await tracked(null)
+  const root = await ghq.client.root()
+  const asked = Promise.withResolvers<void>()
+  const answer = Promise.withResolvers<string>()
+  const roots = spyOn(ghq.client, 'root').mockImplementation(() => {
+    asked.resolve()
+    return answer.promise
+  })
 
   const first = client.run({ ref })
-  await until(() => existsSync(join(cwd, '.attempts')))
+  await asked.promise
 
   expect(await client.bench.list()).toMatchObject([{ ref, setupState: 'preparing' }])
   expect(db.select().from(runspace).all()).toMatchObject([{ cwd, owned: true }])
   expect((await client.list({})).tasks).toMatchObject([{ displayState: { state: 'preparing' } }])
 
   const second = client.run({ ref })
-  writeFileSync(join(cwd, '.release'), '')
+  answer.resolve(root)
 
   expect(await first).toMatchObject({ benchCreated: true })
   expect(await second).toMatchObject({ cwd, benchCreated: false })
-  expect(attempts(cwd)).toBe(1)
+  expect(roots).toHaveBeenCalledTimes(1)
   expect(await client.bench.list()).toMatchObject([{ setupState: 'ready' }])
 })
 
@@ -102,13 +108,6 @@ test('run checks out a branch issue-n that already exists, without cloning a Rep
   expect(ghq.gets).toEqual([])
   expect(git(cwd, 'rev-parse', '--abbrev-ref', 'HEAD')).toBe('issue-12')
   expect(git(cwd, 'rev-parse', 'HEAD')).toBe(started)
-})
-
-test('a Repo without a setup script gets a ready Bench', async () => {
-  const { client, cwd } = await tracked(null)
-
-  expect(await client.run({ ref })).toMatchObject({ cwd, benchCreated: true })
-  expect(await client.bench.list()).toMatchObject([{ setupState: 'ready' }])
 })
 
 test.each([
@@ -144,6 +143,21 @@ test('a setup still running after 600 seconds fails, its process group getting S
     ].join('\n'),
   )
   const { client, cwd } = fixture
+  const realSleep = Bun.sleep
+  let loops = 0
+  const looped: { count: number; resolve: () => void }[] = []
+  spyOn(Bun, 'sleep').mockImplementation(async (ms) => {
+    if (ms === 50) {
+      loops++
+      for (const waiter of looped.filter((w) => loops >= w.count)) waiter.resolve()
+    }
+    return realSleep(ms)
+  })
+  const graceLoops = (more: number) => {
+    const { promise, resolve } = Promise.withResolvers<void>()
+    looped.push({ count: loops + more, resolve })
+    return promise
+  }
   const realSetTimeout = globalThis.setTimeout
   let fireTimeout: (() => void) | undefined
   spyOn(globalThis, 'setTimeout').mockImplementation(((callback: () => void, ms?: number) => {
@@ -160,12 +174,19 @@ test('a setup still running after 600 seconds fails, its process group getting S
       fireTimeout !== undefined,
   )
   const stubborn = Number(readFileSync(join(cwd, '.stubborn'), 'utf8'))
+  // 猶予は Date.now() の締め切りで待つので、SIGTERM の前に時計を止め、猶予の残りを手で進める。
+  const t0 = Date.now()
+  setSystemTime(t0)
   fireTimeout!()
+  await until(() => existsSync(join(cwd, '.cleaned')))
+  setSystemTime(t0 + 1_999)
+  await graceLoops(2)
+  expect(isAlive(stubborn)).toBe(true)
+  setSystemTime(t0 + 2_000)
   const error = await running
 
   expect(error.code).toBe('PRECONDITION_FAILED')
   expect(error.message).toContain('timed out after 600s')
-  expect(existsSync(join(cwd, '.cleaned'))).toBe(true)
   await until(() => !isAlive(stubborn))
   expect(await client.bench.list()).toMatchObject([{ setupState: 'failed' }])
 })

@@ -55,19 +55,18 @@ export const IMPORT_TIMEOUT_MS = 10_000
 
 export type ImageDeps = { dir: string; stopped: AbortSignal }
 
-export async function importImage(
-  deps: ImageDeps,
-  url: string,
-  timeoutMs: number,
-): Promise<{ url: string }> {
+export async function importImage(deps: ImageDeps, url: string): Promise<{ url: string }> {
   let bytes: Uint8Array
   try {
-    bytes = await fetchImage(url, AbortSignal.any([AbortSignal.timeout(timeoutMs), deps.stopped]))
+    bytes = await fetchImage(
+      url,
+      AbortSignal.any([AbortSignal.timeout(IMPORT_TIMEOUT_MS), deps.stopped]),
+    )
   } catch (error) {
     if (error instanceof ORPCError) throw error
     if (error instanceof DOMException && error.name === 'TimeoutError') {
       throw new ORPCError('GATEWAY_TIMEOUT', {
-        message: `the image did not arrive within ${timeoutMs / 1000}s`,
+        message: `the image did not arrive within ${IMPORT_TIMEOUT_MS / 1000}s`,
       })
     }
     throw new ORPCError('BAD_GATEWAY', { message: `could not fetch the image: ${error}` })
