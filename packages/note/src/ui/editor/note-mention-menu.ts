@@ -7,6 +7,11 @@ import { noteIdOfPath } from '../routes.ts'
 import { BLOCKS_MIME, pastedUrl } from './clipboard.ts'
 import { getBlockContext } from './context.ts'
 import { noteMentionMenuKey, slashKey } from './menu-keys.ts'
+import type {
+  NoteMentionItem,
+  NoteMentionMenuActiveState,
+  NoteMentionMenuState,
+} from './menu-keys.ts'
 import {
   createMenuOverlay,
   handleMenuNavKey,
@@ -16,27 +21,7 @@ import {
 } from './menu-overlay.ts'
 import { nodes } from './schema.ts'
 
-export type NoteMentionItem = {
-  id: string
-  displayName: string
-  /** dropdown のサブラベル（ノート本文の先頭行） */
-  preview: string | null
-}
-
 export type SearchNoteMentions = (query: string) => Promise<NoteMentionItem[]>
-
-export type NoteMentionMenuActiveState = {
-  active: true
-  /** 最初の `[` の位置 */
-  pos: number
-  query: string
-  index: number
-  /** 検索結果。query より遅れて到着するので loadedQuery で鮮度を判定する */
-  items: NoteMentionItem[]
-  loadedQuery: string | null
-}
-
-export type NoteMentionMenuState = { active: false } | NoteMentionMenuActiveState
 
 type NoteMentionMenuMeta =
   | { type: 'open'; pos: number }

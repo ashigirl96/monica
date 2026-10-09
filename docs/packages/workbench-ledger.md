@@ -67,7 +67,7 @@ createWorkbenchLedger(deps: {
 - `openTab(tx, { runspaceId, cwd?, size?, input? }) → { tabId, terminalSessionId }` は、`starting` の Terminal Session の行と Tab を書き、shell を自分で埋める。Create は transaction の後に workbench が送り、通ったら `input` を Write する。`size` を省けば 24×80 で起こし、表示されていない Tab の shell は attach の resize で追いつく。ptyd は attach していない接続からの Write も通すので、webview が Tab を表示していなくても打てる。Create をまだ送っていない行は reconcile で lost にならないので、呼び手は reconcile を待たない（ADR-0015）。
 - `moveTab(tx, tabId, runspaceId)` は Tab を Runspace の末尾へ移す（`tab.move` と同じ規則）。
 
-Terminal Session の行の状態機械、Create をまだ送っていない集合、transaction の後の Create・Write・Terminate、張り直し（`tab.respawn` と pin）は `packages/workbench/src/terminal-session.ts` に集め、layout の module が使う。
+Terminal Session の行の状態機械、Create をまだ送っていない集合、transaction の後の Create・Write・Terminate、張り直し（`tab.respawn` と pin）は `packages/workbench/src/terminal-session.ts` に集め、layout の module が使う。どの status を生きているとみなすか（`LIVE`・`isLive`）は、agent-session の module も使うので `terminal-session-status.ts` に置く。
 
 ## Runspace と Tab
 

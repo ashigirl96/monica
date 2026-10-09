@@ -1,17 +1,10 @@
 import type { Node as PMNode } from 'prosemirror-model'
-import type {
-  EditorView,
-  NodeView,
-  NodeViewConstructor,
-  ViewMutationRecord,
-} from 'prosemirror-view'
+import type { EditorView, NodeView, ViewMutationRecord } from 'prosemirror-view'
 
 import { foldTransaction } from './commands.ts'
 import { isCollapsedContainer, isFoldableContent, isFoldedContent } from './folding.ts'
 import { imageUploadKey, requestImageRetry } from './image-upload.ts'
 import { nodes, noteHref } from './schema.ts'
-import { SyncedBlockView } from './synced-block.ts'
-import type { OnOpenBlock, ResolveBlock } from './synced-block.ts'
 
 type GetPos = () => number | undefined
 
@@ -44,7 +37,7 @@ function disclosureButton(className: string, onClick: () => void): HTMLButtonEle
 
 // blockContainer NodeView。折りたたみ ▾ は heading / callout のときだけ
 // contenteditable=false で contentDOM の外に置く（既存 toggle は ToggleView が持つ）。
-class ContainerView implements NodeView {
+export class ContainerView implements NodeView {
   private node: PMNode
   private view: EditorView
   private getPos: GetPos
@@ -146,7 +139,7 @@ class ContainerView implements NodeView {
 }
 
 // todo checkbox は contenteditable=false、クリックで checked を更新。
-class TodoView implements NodeView {
+export class TodoView implements NodeView {
   private node: PMNode
   dom: HTMLElement
   contentDOM: HTMLElement
@@ -197,7 +190,7 @@ class TodoView implements NodeView {
   }
 }
 
-class ToggleView implements NodeView {
+export class ToggleView implements NodeView {
   private node: PMNode
   dom: HTMLElement
   contentDOM: HTMLElement
@@ -260,7 +253,7 @@ const CODE_LANGUAGES = [
   'markdown',
 ]
 
-class CodeBlockView implements NodeView {
+export class CodeBlockView implements NodeView {
   private node: PMNode
   dom: HTMLElement
   contentDOM: HTMLElement
@@ -337,7 +330,7 @@ class CodeBlockView implements NodeView {
   }
 }
 
-class DividerView implements NodeView {
+export class DividerView implements NodeView {
   dom: HTMLElement
 
   constructor() {
@@ -420,12 +413,17 @@ export type NoteMentionInfo = { displayName: string }
 export type ResolveNoteMention = (noteId: string) => Promise<NoteMentionInfo | null>
 export type OnNoteMentionClick = (noteId: string) => void
 
-class NoteMentionView implements NodeView {
+export type NoteMentionOptions = {
+  resolveNoteMention?: ResolveNoteMention
+  onNoteMentionClick?: OnNoteMentionClick
+}
+
+export class NoteMentionView implements NodeView {
   private node: PMNode
   dom: HTMLElement
   private destroyed = false
 
-  constructor(node: PMNode, opts: EditorNodeViewOptions) {
+  constructor(node: PMNode, opts: NoteMentionOptions) {
     this.node = node
     const noteId = node.attrs.noteId as string
     const href = noteHref(noteId)
@@ -695,32 +693,5 @@ export class ImageView implements NodeView {
 
   destroy(): void {
     this.closeLightbox?.()
-  }
-}
-
-export type EditorNodeViewOptions = {
-  resolveNoteMention?: ResolveNoteMention
-  onNoteMentionClick?: OnNoteMentionClick
-  /** 現在編集中の note。synced block の同一ノート内参照を live doc から解決する。 */
-  noteId?: string
-  resolveBlock?: ResolveBlock
-  onOpenBlock?: OnOpenBlock
-}
-
-export function editorNodeViews(
-  opts: EditorNodeViewOptions = {},
-  syncedRegistry: Set<SyncedBlockView> = new Set(),
-): Record<string, NodeViewConstructor> {
-  return {
-    blockContainer: (node, view, getPos) => new ContainerView(node, view, getPos),
-    todo: (node, view, getPos) => new TodoView(node, view, getPos),
-    toggle: (node, view, getPos) => new ToggleView(node, view, getPos),
-    codeBlock: (node, view, getPos) => new CodeBlockView(node, view, getPos),
-    divider: () => new DividerView(),
-    linkMention: (node) => new LinkMentionView(node),
-    noteMention: (node) => new NoteMentionView(node, opts),
-    bookmark: (node) => new BookmarkView(node),
-    image: (node, view, getPos) => new ImageView(node, view, getPos),
-    syncedBlock: (node, view) => new SyncedBlockView(node, view, opts, syncedRegistry),
   }
 }

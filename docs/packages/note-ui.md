@@ -45,7 +45,7 @@ notes の ui は旧 Monica の `web/` と `shared/` を移して作る。
 ### node 型と plugin を減らせない理由
 
 - `create-editor.ts` の `docFromJSON` は、`Node.fromJSON` か `check()` に失敗した本文を、例外の message を付けた失敗として返す。画面はその Note をエディタで開かず、読み取り専用で出す（「読めない本文」）。node 型か mark が 1 つでも欠けたエディタでは、それを含む保存済みの本文を編集できなくなる。
-- module どうしが循環して import している（`node-views` と `synced-block`、`note-mention-menu` と `clipboard` など）ので、一部の plugin だけを外して持ち込むこともできない。
+- plugin の module が別の plugin の module に依存している（`clipboard` は `link-menu` と `paste-menu` に、`note-mention-menu` は `clipboard` に依存する）ので、一部の plugin だけを外して持ち込むこともできない。NodeView は `editor-node-views.ts` の `editorNodeViews` がすべてを登録する。
 - 機能を止めたいときは、`BlockEditor` の props を渡さない。`fetchLinkMetadata`・`searchNoteMentions`・`resolveNoteMention`・`resolveBlock`・`uploadImage`・`renderMarkdown`・`parseMarkdown` は、渡さなければその機能が無効になる（`block-editor.tsx`、`create-editor.ts`、`synced-block.ts`）。`NoteBlockEditor` は今この 7 つをすべて渡し、ほかに Note Mention と Synced Block の `onNoteMentionClick`・`noteId`・`onOpenBlock` と、画像の取り込みの `importExternalImage` を渡す。props の有無は mount 時に固定され、差し替えは `key` を変えた再 mount で行う。
 - 画像の props は `notes/editor-support.ts` の `imageCallbacks` が作る。どちらも `image.upload` と `image.import` を呼び、失敗は null にする。エディタは upload の失敗を再試行のボタンで、取り込みの失敗を外部 URL のままで見せ、理由では分岐しない。
 - `fetchLinkMetadata` は note の `linkMetadata` を呼ぶ。link-menu は呼び出しの失敗を値の無い OGP として扱う（旧 Monica と同じ）。そのため、取れなかった URL は既定の URL のままなら普通の link、「Mention」を選べば URL を title にした favicon の無い `linkMention`、「Bookmark」を選べば URL だけの `bookmark` になる。

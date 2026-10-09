@@ -2,7 +2,7 @@ import { ORPCError } from '@orpc/server'
 import { eq } from 'drizzle-orm'
 
 import type { Note } from './contract.ts'
-import type { Db } from './note.ts'
+import type { Db } from './db.ts'
 import { idNumber, KINDS, toNote, undeletedNote } from './row.ts'
 import { note } from './schema.ts'
 

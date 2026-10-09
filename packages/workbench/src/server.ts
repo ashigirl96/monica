@@ -9,12 +9,13 @@ import { openInEditor, resolveEditorPaths } from './editor.ts'
 import { asTab, readLayout } from './layout.ts'
 import { repoOf } from './repo.ts'
 import { tab, terminalSession } from './schema.ts'
-import { LIVE } from './terminal-session.ts'
+import { LIVE } from './terminal-session-status.ts'
 import { agentSessionsOf, layoutWritesOf, type WorkbenchContext } from './workbench.ts'
 
 export { migrations } from '../migrations/index.ts'
 export { inheritableEnv } from './ptyd.ts'
-export { createWorkbenchLedger, type Db, type Tx, type WorkbenchLedger } from './workbench.ts'
+export type { Db, Tx } from './db.ts'
+export { createWorkbenchLedger, type WorkbenchLedger } from './workbench.ts'
 
 const os = implement(contract).$context<WorkbenchContext>()
 

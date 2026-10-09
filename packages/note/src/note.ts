@@ -1,12 +1,9 @@
 import { join } from 'node:path'
 
-import type { BunSQLiteDatabase } from 'drizzle-orm/bun-sqlite'
-
+import type { Db } from './db.ts'
 import { defaultGhq, type Ghq } from './ghq.ts'
 import { cleanImages, type ImageDeps, serveImage } from './image.ts'
 import { repoCandidates } from './repo.ts'
-
-export type Db = BunSQLiteDatabase
 
 export type NoteLedger = {
   start(): void

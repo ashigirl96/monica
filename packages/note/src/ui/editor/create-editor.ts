@@ -15,6 +15,7 @@ import {
   codeExitCaretPlugin,
   placeholderPlugin,
 } from './decorations.ts'
+import { editorNodeViews } from './editor-node-views.ts'
 import { imageUploadPlugin } from './image-upload.ts'
 import type { ImportExternalImage, UploadImage } from './image-upload.ts'
 import { editorInputRules } from './input-rules.ts'
@@ -23,7 +24,6 @@ import { linkClickPlugin } from './link-click.ts'
 import { linkMenuPlugin } from './link-menu.ts'
 import type { FetchLinkMetadata } from './link-menu.ts'
 import type { OnNoteMentionClick, ResolveNoteMention } from './node-views.ts'
-import { editorNodeViews } from './node-views.ts'
 import { normalizerPlugin } from './normalizer.ts'
 import { noteMentionMenuPlugin } from './note-mention-menu.ts'
 import type { SearchNoteMentions } from './note-mention-menu.ts'

@@ -1,20 +1,15 @@
 import { and, eq, inArray } from 'drizzle-orm'
 
 import type { AgentSessions } from './agent-session.ts'
-import type { TerminalSession, WorkbenchChange } from './contract.ts'
+import type { WorkbenchChange } from './contract.ts'
+import type { Db, Tx } from './db.ts'
 import { shouldRespawn } from './pin.ts'
 import type { PtydClient, SessionInfo } from './ptyd.ts'
 import { tab, terminalSession } from './schema.ts'
 import { tabEnv } from './tab-env.ts'
-import type { Db, Tx } from './workbench.ts'
+import { isLive, LIVE } from './terminal-session-status.ts'
 
 export type Size = { rows: number; cols: number }
-
-export const LIVE = ['starting', 'running'] as const
-
-export function isLive(status: TerminalSession['status']): boolean {
-  return (LIVE as readonly string[]).includes(status)
-}
 
 // 画面に出ていない Tab の shell は決まった大きさで起こし、attach の resize で追いつかせる。
 const DEFAULT_SIZE: Size = { rows: 24, cols: 80 }

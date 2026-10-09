@@ -3,13 +3,13 @@ import { and, eq, getTableColumns, ne } from 'drizzle-orm'
 
 import { readAgentSessionTitle } from './agent-session-title.ts'
 import type { AgentSession, ListedAgentSession, WorkbenchChange } from './contract.ts'
+import type { Db, Tx } from './db.ts'
 import { decodeHook } from './hook-decoder.ts'
 import { shortPath } from './paths.ts'
 import { agentSession, terminalSession } from './schema.ts'
-import { isLive } from './terminal-session.ts'
+import { isLive } from './terminal-session-status.ts'
 import { notificationFor, supersede, takesOverTerminal, transition } from './transition.ts'
 import { isUnread } from './unread.ts'
-import type { Db, NotificationDeps, Tx } from './workbench.ts'
 
 const notEnded = ne(agentSession.state, 'ended')
 
@@ -21,6 +21,11 @@ export function listAgentSessions(db: Db): ListedAgentSession[] {
     .orderBy(agentSession.firstSeenAt)
     .all()
     .map((row) => ({ ...row, unread: isUnread(row) }))
+}
+
+export type NotificationDeps = {
+  notify: (n: { title: string; body: string; terminalSessionId: string }) => void
+  nameAgentSession: (db: Db, agentSessionId: string) => string | null
 }
 
 export type AgentSessions = ReturnType<typeof createAgentSessions>

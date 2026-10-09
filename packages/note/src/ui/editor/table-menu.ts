@@ -3,6 +3,7 @@ import type { Command } from 'prosemirror-state'
 import type { EditorView } from 'prosemirror-view'
 
 import { linkMenuKey, noteMentionMenuKey, pasteMenuKey, tableMenuKey } from './menu-keys.ts'
+import type { TableMenuState } from './menu-keys.ts'
 import {
   createMenuOverlay,
   handleMenuNavKey,
@@ -21,10 +22,6 @@ import { getTableCellContext } from './table.ts'
 
 // セル右クリックで開く行・列の操作メニュー。slash menu は table 内で開かない
 // （applyItem の replaceWith が表全体を置換してしまう）ので、表の構造編集はここが唯一の入口。
-
-export type TableMenuState =
-  | { active: false }
-  | { active: true; x: number; y: number; index: number }
 
 type TableMenuMeta =
   | { type: 'open'; x: number; y: number }

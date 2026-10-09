@@ -4,6 +4,7 @@ import type { EditorState, Transaction } from 'prosemirror-state'
 import type { EditorView } from 'prosemirror-view'
 
 import { pasteMenuKey } from './menu-keys.ts'
+import type { PasteMenuActiveState, PasteMenuState } from './menu-keys.ts'
 import {
   createMenuOverlay,
   handleMenuNavKey,
@@ -12,22 +13,6 @@ import {
 } from './menu-overlay.ts'
 import { onlyWritesBlockIds } from './normalizer.ts'
 import { createContainer, nodes } from './schema.ts'
-
-// Notion の paste メニュー同様、↑↓で選んだ表現を doc に即時反映（ライブプレビュー）し、
-// Enter は「表示中の状態をそのまま確定」する。メニュー表示中の doc 変更は preview
-// 経由（set meta 同梱）で行い、それ以外の doc 変更は id を振るだけのものを除いて
-// 「そのまま確定」として閉じる。
-export type PasteMenuActiveState = {
-  active: true
-  /** 挿入 range の先頭。start より前は触らないので全遷移を通じて安定アンカー。 */
-  start: number
-  /** 0 = Paste（plain）, 1 = Paste and sync */
-  index: number
-  plain: PMNode[]
-  synced: PMNode[]
-}
-
-export type PasteMenuState = { active: false } | PasteMenuActiveState
 
 type PasteMenuMeta =
   | { type: 'open'; start: number; plain: PMNode[]; synced: PMNode[] }
@@ -169,6 +154,10 @@ class PasteMenuView {
   }
 }
 
+// Notion の paste メニュー同様、↑↓で選んだ表現を doc に即時反映（ライブプレビュー）し、
+// Enter は「表示中の状態をそのまま確定」する。メニュー表示中の doc 変更は preview
+// 経由（set meta 同梱）で行い、それ以外の doc 変更は id を振るだけのものを除いて
+// 「そのまま確定」として閉じる。
 export function pasteMenuPlugin(): Plugin<PasteMenuState> {
   return new Plugin<PasteMenuState>({
     key: pasteMenuKey,

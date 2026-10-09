@@ -4,9 +4,10 @@ import { ORPCError } from '@orpc/server'
 import { and, eq, notInArray } from 'drizzle-orm'
 
 import type { Layout, Tab, WorkbenchChange } from './contract.ts'
+import type { Db, Tx } from './db.ts'
 import { runspace, tab, terminalSession } from './schema.ts'
-import { isLive, type Size, type TerminalSessions } from './terminal-session.ts'
-import type { Db, Tx } from './workbench.ts'
+import { isLive } from './terminal-session-status.ts'
+import type { Size, TerminalSessions } from './terminal-session.ts'
 
 export function readLayout(db: Db): Layout {
   const tabs = db.select().from(tab).orderBy(tab.sortOrder).all()

@@ -1,9 +1,10 @@
 import { implement } from '@orpc/server'
 
 import { contract } from './contract.ts'
+import type { Db } from './db.ts'
 import { IMPORT_TIMEOUT_MS, importImage, uploadImage } from './image.ts'
 import { readLinkMetadata } from './link-metadata.ts'
-import { type Db, internals, type NoteLedger } from './note.ts'
+import { internals, type NoteLedger } from './note.ts'
 import {
   createEssay,
   createRepoNote,
