@@ -3,7 +3,7 @@ import { desc, isNull } from 'drizzle-orm'
 
 import { type Block, blockById } from './body/index.ts'
 import { type NoteMentionCandidate, NoteIdSchema } from './contract.ts'
-import type { Db } from './note.ts'
+import type { Db } from './db.ts'
 import { displayNameOf, noteId, type NoteRow, undeletedNote } from './row.ts'
 import { note } from './schema.ts'
 

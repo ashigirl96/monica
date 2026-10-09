@@ -3,7 +3,7 @@ import { eq } from 'drizzle-orm'
 
 import { preview } from './body/index.ts'
 import type { Doc, EssayStatus, Note, saveErrors } from './contract.ts'
-import type { Db } from './note.ts'
+import type { Db } from './db.ts'
 import { KINDS, toNote, undeletedNote } from './row.ts'
 import { note } from './schema.ts'
 

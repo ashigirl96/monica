@@ -6,7 +6,7 @@ import { ORPCError } from '@orpc/server'
 
 import { imageReferences } from './body/index.ts'
 import { IMAGE_URL_PREFIX } from './contract.ts'
-import type { Db } from './note.ts'
+import type { Db } from './db.ts'
 import { note } from './schema.ts'
 
 const MAX_IMAGE_BYTES = 20 * 1024 * 1024

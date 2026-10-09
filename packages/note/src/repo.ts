@@ -1,8 +1,8 @@
 import { and, asc, desc, eq, isNotNull, isNull, lt, max, or, sql } from 'drizzle-orm'
 
 import { RepoSchema, type RepoNotesCursor, type RepoNotesPage } from './contract.ts'
+import type { Db } from './db.ts'
 import type { Ghq } from './ghq.ts'
-import type { Db } from './note.ts'
 import { idNumber, isRepo, noteId } from './row.ts'
 import { note } from './schema.ts'
 

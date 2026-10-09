@@ -9,9 +9,10 @@ import { drizzle } from 'drizzle-orm/bun-sqlite'
 import { migrate } from 'drizzle-orm/bun-sqlite/migrator'
 import type { Atom, Store } from 'jotai'
 
+import type { NotificationDeps } from './agent-session.ts'
 import { startFakePtyd, tempHome, untilSettled } from './fake-ptyd.ts'
 import { createWorkbenchLedger, migrations, router } from './server.ts'
-import type { NotificationDeps, Unread } from './workbench.ts'
+import type { Unread } from './unread.ts'
 
 const cleanups: (() => void)[] = []
 

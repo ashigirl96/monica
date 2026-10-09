@@ -6,9 +6,9 @@ import { EditorState, Selection } from 'prosemirror-state'
 
 import { BLOCKS_MIME, clipboardPlugin, serializeBlocksPayload } from './clipboard.ts'
 import { pasteMenuKey } from './menu-keys.ts'
+import type { PasteMenuActiveState } from './menu-keys.ts'
 import { normalizerPlugin } from './normalizer.ts'
 import { buildSyncedContainer, pasteMenuPlugin, previewPasteTransaction } from './paste-menu.ts'
-import type { PasteMenuActiveState } from './paste-menu.ts'
 import { createContainer, nodes, reissueIds, schema } from './schema.ts'
 import { beyondBlockIds, block, docOf, para, paste, todo } from './test-fixtures.ts'
 

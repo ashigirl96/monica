@@ -13,6 +13,8 @@
     "monica/atom-deferred-get": "error",
     // jsx: react-jsx では JSX を書く file が React を import しなくてよい。
     "react/react-in-jsx-scope": "off",
+    // 指定しないと oxlint は import type だけでできた循環を見逃す。
+    "import/no-cycle": ["error", { "ignoreTypes": false }],
     // 名前の _ だけで判断するので、xterm の _core のような外が決めた名前にも当たる。
     "eslint/no-underscore-dangle": "off",
     // @monica/chat の html-worker と pdf-worker は、compiled binary の Worker の entrypoint（apps/backend/src/*-worker.ts）が読むだけで動く。

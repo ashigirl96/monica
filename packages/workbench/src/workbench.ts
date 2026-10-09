@@ -1,18 +1,16 @@
 import { userInfo } from 'node:os'
 
 import { EventPublisher } from '@orpc/server'
-import type { BunSQLiteDatabase } from 'drizzle-orm/bun-sqlite'
 
-import { type AgentSessions, createAgentSessions } from './agent-session.ts'
+import { type AgentSessions, createAgentSessions, type NotificationDeps } from './agent-session.ts'
 import type { WorkbenchChange } from './contract.ts'
+import type { Db, Tx } from './db.ts'
 import { createLayoutWrites, type LayoutWrites } from './layout.ts'
 import { openDaemon, type PtydClient } from './ptyd.ts'
 import { writeTabFiles } from './tab-env.ts'
 import { createTerminalSessions, type Size } from './terminal-session.ts'
-import { followUnread } from './unread.ts'
+import { followUnread, type Unread } from './unread.ts'
 
-export type Db = BunSQLiteDatabase
-export type Tx = Parameters<Parameters<Db['transaction']>[0]>[0]
 export type WorkbenchContext = { db: Db; workbenchLedger: WorkbenchLedger }
 
 export type WorkbenchLedger = {
@@ -29,14 +27,6 @@ export type WorkbenchLedger = {
   /** 消した Tab の Terminal Session は transaction の後に終わらせる。 */
   removeRunspace(tx: Tx, id: string, options?: { spare?: string[] }): void
 }
-
-export type NotificationDeps = {
-  notify: (n: { title: string; body: string; terminalSessionId: string }) => void
-  nameAgentSession: (db: Db, agentSessionId: string) => string | null
-}
-
-/** start() で 1 回、以降は未読の Agent Session が居る Terminal Session の集合が変わるたびに呼ぶ。 */
-export type Unread = (terminalSessionIds: string[]) => void
 
 type Internals = {
   layoutWrites: LayoutWrites

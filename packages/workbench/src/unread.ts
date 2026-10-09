@@ -2,8 +2,8 @@ import type { EventPublisher } from '@orpc/server'
 import { ne } from 'drizzle-orm'
 
 import type { AgentSession, WorkbenchChange } from './contract.ts'
+import type { Db } from './db.ts'
 import { agentSession } from './schema.ts'
-import type { Db, Unread } from './workbench.ts'
 
 export function isUnread(row: Pick<AgentSession, 'notifiedAt' | 'seenAt'>): boolean {
   return row.notifiedAt !== null && row.seenAt === null
@@ -28,6 +28,9 @@ function unreadTerminalSessions(db: Db): string[] {
 function sameIds(a: string[], b: string[]): boolean {
   return a.length === b.length && a.every((id, i) => id === b[i])
 }
+
+/** followUnread を呼んだ時に 1 回、以降は未読の Agent Session が居る Terminal Session の集合が変わるたびに呼ぶ。 */
+export type Unread = (terminalSessionIds: string[]) => void
 
 export function followUnread(deps: {
   db: Db

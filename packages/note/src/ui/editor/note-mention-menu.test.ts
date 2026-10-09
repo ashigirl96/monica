@@ -6,7 +6,7 @@ import { EditorState, TextSelection } from 'prosemirror-state'
 import type { Plugin } from 'prosemirror-state'
 
 import { noteMentionMenuKey } from './menu-keys.ts'
-import type { NoteMentionItem, NoteMentionMenuActiveState } from './note-mention-menu.ts'
+import type { NoteMentionItem, NoteMentionMenuActiveState } from './menu-keys.ts'
 import {
   freshItems,
   insertNoteMentionTransaction,

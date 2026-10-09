@@ -5,6 +5,7 @@ import type { EditorView } from 'prosemirror-view'
 import { appendEmptyParagraphAfter, inlineToPlainText } from './commands.ts'
 import { getBlockContext } from './context.ts'
 import { noteMentionMenuKey, slashKey } from './menu-keys.ts'
+import type { SlashState } from './menu-keys.ts'
 import {
   createMenuOverlay,
   handleMenuNavKey,
@@ -14,10 +15,6 @@ import {
 } from './menu-overlay.ts'
 import { nodes } from './schema.ts'
 import { createTableContent } from './table.ts'
-
-export type SlashState =
-  | { active: false }
-  | { active: true; pos: number; query: string; index: number }
 
 type SlashMeta = { type: 'open'; pos: number } | { type: 'close' } | { type: 'nav'; index: number }
 

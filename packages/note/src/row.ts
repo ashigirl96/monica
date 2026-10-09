@@ -2,7 +2,7 @@ import { ORPCError } from '@orpc/server'
 import { and, eq, isNull, sql } from 'drizzle-orm'
 
 import { displayName, type EssaySummary, type Note } from './contract.ts'
-import type { Db } from './note.ts'
+import type { Db } from './db.ts'
 import { note } from './schema.ts'
 
 export type NoteRow = typeof note.$inferSelect

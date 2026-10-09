@@ -7,39 +7,12 @@ import type { LinkMetadata } from '../../contract.ts'
 import { appendEmptyParagraphAfter } from './commands.ts'
 import { getBlockContext } from './context.ts'
 import { linkMenuKey } from './menu-keys.ts'
+import type { LinkMenuActiveState, LinkMenuState, PreviewKind } from './menu-keys.ts'
 import { createMenuOverlay, menuItemButton, positionMenuAt } from './menu-overlay.ts'
 import { onlyWritesBlockIds } from './normalizer.ts'
 import { createContainer, nodes, schema } from './schema.ts'
 
 export type FetchLinkMetadata = (url: string) => Promise<LinkMetadata | null>
-
-type PreviewKind = 'url' | 'mention' | 'bookmark'
-
-// Notion の paste メニュー同様、↑↓で選んだ表現を doc に即時反映（ライブプレビュー）し、
-// Enter は「表示中の状態をそのまま確定」するだけにする。メニュー表示中の doc 変更は
-// すべて previewTransaction 経由（set meta 同梱）で行い、それ以外の doc 変更は
-// id を振るだけのものを除いて「そのまま確定」として閉じる。
-export type LinkMenuActiveState = {
-  active: true
-  from: number
-  url: string
-  index: number
-  /** doc に反映済みの表現 */
-  preview: PreviewKind
-  /** 現 preview が期待する selection.head。ずれたら外部操作とみなして確定クローズ */
-  caret: number
-  /** bookmark preview 時の bookmark node 位置 */
-  bookmarkPos: number | null
-  /** URL 単独段落を bookmark 化した際に追加した空 paragraph container の位置 */
-  extraParaPos: number | null
-  /** OGP metadata。未取得の間は URL だけの placeholder で preview する */
-  meta: LinkMetadata | null
-  metaDone: boolean
-  /** Enter 済みで metadata 待ち。到着後に attrs を差し替えて閉じる */
-  confirmPending: boolean
-}
-
-export type LinkMenuState = { active: false } | LinkMenuActiveState
 
 type LinkMenuMeta =
   | { type: 'open'; from: number; url: string }
@@ -315,6 +288,10 @@ class LinkMenuView {
   }
 }
 
+// Notion の paste メニュー同様、↑↓で選んだ表現を doc に即時反映（ライブプレビュー）し、
+// Enter は「表示中の状態をそのまま確定」するだけにする。メニュー表示中の doc 変更は
+// すべて previewTransaction 経由（set meta 同梱）で行い、それ以外の doc 変更は
+// id を振るだけのものを除いて「そのまま確定」として閉じる。
 export function linkMenuPlugin(fetchLinkMetadata: FetchLinkMetadata): Plugin<LinkMenuState> {
   return new Plugin<LinkMenuState>({
     key: linkMenuKey,
