@@ -124,12 +124,14 @@ export const RunButtonsOutputSchema = z.object({
   buttons: z.array(
     z.object({
       ref: z.string().describe('the ref as asked'),
-      button: RunButtonSchema.nullable().describe('null when the Issue gets no Run button'),
+      button: RunButtonSchema.nullable().describe(
+        'null when the Run Button is refused by a rule or the Issue could not be read from GitHub',
+      ),
       reason: z
         .string()
         .nullable()
         .describe(
-          'why the Issue gets no Run button, or null when it gets one or could not be read from GitHub',
+          'why a rule refuses the Run Button, shown on an unpressable one, or null when a rule does not refuse it or the Issue could not be read from GitHub',
         ),
     }),
   ),
@@ -263,7 +265,7 @@ export const contract = {
   runFromButton: meta
     .meta({
       description:
-        'Run the Task of an Issue with the prompt its Run button has now, reading the Issue from GitHub anew, or refuse with PRECONDITION_FAILED and the reason when it gets no Run button',
+        'Run the Task of an Issue with the prompt its Run Button has now, reading the Issue from GitHub anew, or refuse with PRECONDITION_FAILED and the reason when a rule refuses its Run Button',
     })
     .errors(runErrors)
     .input(z.object({ ref }))

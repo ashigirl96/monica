@@ -170,6 +170,10 @@ _Avoid_: 会話（単独では Agent Session の会話と紛れる）, session, 
 質問を送った時に Current Page から読み取った、そのページの URL・title・本文・選択範囲と、添えたならスクリーンショット。質問 1 つに 1 つある。読めなかったときは、読めなかったことと、その理由を持つ。
 _Avoid_: ページの情報, page context, capture（スクリーンショットの撮影と紛れる）
 
+**Run Button**:
+Chrome Extension が GitHub の Issues の一覧の行に差し込む、その Issue の Task の Run を起こすボタン。出すか、どの prompt で起こすか、押せない理由は、Backend が GitHub の今の Issue と Task Ledger から決める。状態は、新しい Run を起こす（`Run`）、終了した Run を resume する（再開）、live な Run があり押せない（実行中）、規則が断り押せない（closed な Issue や open な Blocker などの理由を tooltip に出す）のどれか。GitHub から読めなかった Issue には出さない。
+_Avoid_: Run（単独ではボタンを指さない）, 押せない Run（押せない状態の Run Button）
+
 ### Process
 
 **Shell**:
