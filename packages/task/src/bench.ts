@@ -7,7 +7,6 @@ import type { Subprocess } from 'bun'
 import { asc, eq } from 'drizzle-orm'
 
 import type { BenchItem, TaskChange } from './contract.ts'
-import { findOpenTask } from './open-task.ts'
 import {
   branchOf,
   checkoutOf,
@@ -18,6 +17,7 @@ import {
   worktreeOf,
 } from './prepare.ts'
 import { formatRef } from './ref.ts'
+import type { Prepared, Reservations } from './reservation.ts'
 import { bench, issue } from './schema.ts'
 
 export type BenchDeps = {
@@ -27,13 +27,10 @@ export type BenchDeps = {
   ghq: Ghq
   publish: (change: TaskChange) => void
   stopped: AbortSignal
-  preparations: Map<number, Promise<Prepared>>
   setups: Set<Subprocess>
-  /** close の途中の Task。git を待つ間に、準備や Tab が片付ける Bench に入らないようにする。 */
-  closing: Set<number>
+  reservations: Reservations
 }
 
-type Prepared = { warnings: string[] } | { error: string }
 export type Bench = typeof bench.$inferSelect
 export type Issue = typeof issue.$inferSelect
 
@@ -65,12 +62,6 @@ export async function prepareBench(
     })
   }
   return { bench: opened.bench, created: opened.created, warnings: prepared.warnings }
-}
-
-export function refuseClosing(deps: Pick<BenchDeps, 'closing'>, taskIssueId: number, ref: string) {
-  if (deps.closing.has(taskIssueId)) {
-    throw new ORPCError('CONFLICT', { message: `${ref} is being closed` })
-  }
 }
 
 export function refuseInPlace(row: Bench, inPlace: boolean | undefined, ref: string) {
@@ -109,10 +100,8 @@ function openBench(
   forIssue: Issue,
   { cwd, mode }: Pick<Bench, 'cwd' | 'mode'>,
 ): { bench: Bench; created: boolean } {
-  const opened = deps.db.transaction((tx) => {
-    // ghq root を待つ間に close が走り終えていれば、Task はもう閉じている。
-    findOpenTask(tx, eq(issue.id, forIssue.id), formatRef(forIssue))
-    refuseClosing(deps, forIssue.id, formatRef(forIssue))
+  // ghq root を待つ間に close が走り終えていれば、Task はもう閉じている。
+  const opened = deps.reservations.writeOpenTask(forIssue.id, formatRef(forIssue), (tx) => {
     const existing = tx.select().from(bench).where(eq(bench.taskIssueId, forIssue.id)).get()
     if (existing) return { bench: existing, created: false }
     return {
@@ -153,7 +142,7 @@ export function insertBench(
 
 // 準備中の Bench に来た run は同じ準備を待つ。呼び手が切れても準備は Backend の中で続く。
 function preparation(deps: BenchDeps, row: Bench, forIssue: Issue): Promise<Prepared> {
-  const running = deps.preparations.get(row.taskIssueId)
+  const running = deps.reservations.preparation(row.taskIssueId)
   if (running) return running
   if (row.setupState === 'ready') return Promise.resolve({ warnings: [] })
   if (row.setupState === 'failed') {
@@ -164,11 +153,7 @@ function preparation(deps: BenchDeps, row: Bench, forIssue: Issue): Promise<Prep
       .run()
     deps.publish({ type: 'task', ref: formatRef(forIssue) })
   }
-  const started = prepareAndRecord(deps, row, forIssue).finally(() =>
-    deps.preparations.delete(row.taskIssueId),
-  )
-  deps.preparations.set(row.taskIssueId, started)
-  return started
+  return deps.reservations.prepare(row.taskIssueId, () => prepareAndRecord(deps, row, forIssue))
 }
 
 async function prepareAndRecord(deps: BenchDeps, row: Bench, forIssue: Issue): Promise<Prepared> {

@@ -5,6 +5,7 @@ import { type BenchDeps, failInterruptedPreparations } from './bench.ts'
 import type { BackgroundSyncError, TaskChange } from './contract.ts'
 import { defaultGitHub, type GitHub } from './github.ts'
 import { defaultGhq, type Ghq, killSetups } from './prepare.ts'
+import { createReservations } from './reservation.ts'
 import { applyRunInvariant, type RunOrigin, refOfRunTask } from './run.ts'
 import { sweepSetupLogs } from './setup-log.ts'
 import { SYNC_TIMEOUT_MS, type SyncDeps, syncOpenTasks } from './sync.ts'
@@ -65,9 +66,8 @@ export function createTaskLedger(deps: {
     ghq,
     publish: syncDeps.publish,
     stopped: stopped.signal,
-    preparations: new Map(),
     setups: new Set(),
-    closing: new Set(),
+    reservations: createReservations(db),
   }
   let backgroundSyncError: BackgroundSyncError | null = null
   let unsubscribe: (() => void) | undefined

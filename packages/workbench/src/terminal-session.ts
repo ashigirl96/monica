@@ -72,6 +72,7 @@ export function createTerminalSessions(deps: {
       .returning()
       .get()
     if (!bound) throw new Error(`no Tab ${target.id}`)
+    publish({ type: 'layout' })
     return bound
   }
 
@@ -176,18 +177,17 @@ export function createTerminalSessions(deps: {
   // id を省くと pin された Tab をすべて見る。Exit の記録と張り直しの間で Backend が止まった分も拾うため。
   function respawnPinnedTabs(endedIds?: string[]) {
     try {
-      const respawned = db.transaction((tx) =>
-        tx
+      db.transaction((tx) => {
+        const rows = tx
           .select()
           .from(terminalSession)
           .leftJoin(tab, eq(tab.terminalSessionId, terminalSession.id))
           .where(endedIds ? inArray(terminalSession.id, endedIds) : eq(tab.pinned, true))
           .all()
-          .flatMap((row) =>
-            row.tab && shouldRespawn(row.terminal_session, row.tab) ? [rebind(tx, row.tab)] : [],
-          ),
-      )
-      if (respawned.length > 0) publish({ type: 'layout' })
+        for (const row of rows) {
+          if (row.tab && shouldRespawn(row.terminal_session, row.tab)) rebind(tx, row.tab)
+        }
+      })
     } catch (error) {
       console.error(`[workbench] respawning pinned Tabs failed: ${error}`)
     }

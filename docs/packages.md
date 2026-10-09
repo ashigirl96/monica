@@ -131,7 +131,7 @@ export function create<D>Ledger(deps: { db: Db; home: string; ... }): <D>Ledger;
 - 依存の向きの下流（workbench）が上流（task）の値を要るときは、上流の server が関数を出し、Backend の組み立てが下流の deps に渡す。workbench の通知の呼び名は、task の `nameAgentSession` をこの形で受ける。
 - **event は「変わった」の合図**で、購読側は payload を信じず DB を読み直す。bun:sqlite の transaction は同期なので、tx の中で publish しても購読側が動くのは commit 後の microtask になる。rollback されても読み直すだけで害が無いので、commit 後に publish する仕組みは作らない。
 - workbench の router を in-process client（`createRouterClient`）で呼ぶ形は採らない。oRPC の呼び出しは async で、drizzle の bun:sqlite の transaction に async 関数を渡すと throw しても rollback されないため（ADR-0009）。
-- transaction に async 関数を渡さない。lint の `monica/sync-transaction` が、関数式と、同じ file で定義した async 関数を名前で渡す形を止める。
+- transaction に async 関数を渡さない。lint の `monica/sync-transaction` が、関数式と、同じ file で定義した async 関数を名前で渡す形を止める。transaction を開いて最後の引数を中で呼ぶ task の `writeOpenTask` と `writeClosedTask` も同じく見る（`scripts/oxlint/sync-transaction.test.ts`）。
 
 ## テスト
 
@@ -141,6 +141,8 @@ package ごとに in-memory の SQLite に自分の migration を当てる（tas
   - op が届かないことを `receivedAll(…)` が空で確かめるときは、後から送る別の op（Tab を開いた Create など）が届くのを待ってから読む。ptyd は 1 本の接続で順に受けるので、後の op が届けば先に送られた op も届いている。すぐに読むと、transaction の後に送る op が届く前の空を見て、送ってしまう変異も通す。
 - task と CLI のテストの Workbench Ledger も、fake の ptyd の home で `createWorkbenchLedger` を組む（`ptydPath` は存在しない path）。Workbench Ledger の method は差し替えず、transaction で `openTab` → commit の後に workbench が送る Create と Write を、本物の protocol で通す。procedure と Workbench Ledger の method は ptyd を待たずに返るので、ptyd に届いた Create・Write・Terminate は fake の `received` か `receivedAtLeast` で待ってから確かめ、Terminal Session が starting を抜けるのは `untilSettled` で待つ。Tab と Runspace は Workbench Ledger の method か workbench の router で開き、Agent Session は hook で作る。workbench の table に直に書かない。
 - await の間の競合は、await の途中で止めて決まった順で起こす。sync の途中は fake GitHub の `hold()`、git の ref の更新（`branch -D` など）の途中は checkout の `.git/hooks/reference-transaction` が file を待つ script、ptyd の応答の途中は fake の ptyd の `holdNext(op)` で止める（`close.test.ts`）。
+  - 止められるのは await の途中だけ。procedure が待たない副作用（commit の後に workbench が送る Terminate など）を止めても、procedure の中の窓は止まらない。close は commit から予約を外すまでに await を持たないので、その窓は procedure からは作れない。
+  - 同じ Task の sync は 1 本に合流するので、`hold()` は後から来た run・close・reopen の sync も止める。1 本だけを止めるときは `setTimeout` を spy し、合流した呼び手の打ち切り（`SYNC_BEFORE_COMMAND_TIMEOUT_MS`）を手で起こして写しで進ませる。
 - system の Job を足すときは、並びを出す domain のテストに、`systemJobs(<d>Ledger)` から名前で取り出した `run` を最小の場面で呼ぶテストを 1 本足し、Ledger の method に届くことを見る（`note.image-cleanup`、`task.setup-log-cleanup`）。method の規則のテストは method を直に呼ぶ。`run` が別の method を呼んでも、型も Job Ledger のテストも捕まえないため。
 - 一定の間隔で走る処理は、`setInterval` を `spyOn` で捕まえ、間隔を確かめてから callback を手で呼ぶ。決まった時間の打ち切りは、`setTimeout` を `spyOn` してその callback を捕まえ、手で呼ぶ。Bun の `jest.useFakeTimers()` は `Bun.sleep` と `setTimeout` も止め、一部の timer だけを偽にできないので、HTTP の応答を待つテストが進まなくなる。
 - 終わった行のように procedure に出ない行は、`@monica/<d>/schema` の table を SELECT して確かめてよい。他の domain が読むのと同じ面だから。

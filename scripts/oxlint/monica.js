@@ -21,6 +21,9 @@ function isFunction(node) {
   return node?.type === 'ArrowFunctionExpression' || node?.type === 'FunctionExpression'
 }
 
+// task の reservation の method は transaction を開いて最後の引数を中で呼ぶので、transaction と同じく async 関数を受けてはいけない。
+const TRANSACTION_CALLBACK_LAST = new Set(['writeOpenTask', 'writeClosedTask'])
+
 function isAsyncFunction(node) {
   return isFunction(node) && node.async
 }
@@ -114,8 +117,14 @@ export default {
           },
           CallExpression(node) {
             const { callee } = node
-            if (callee.type !== 'MemberExpression' || callee.property.name !== 'transaction') return
-            const [callback] = node.arguments
+            if (callee.type !== 'MemberExpression') return
+            const { name } = callee.property
+            const callback =
+              name === 'transaction'
+                ? node.arguments[0]
+                : TRANSACTION_CALLBACK_LAST.has(name)
+                  ? node.arguments.at(-1)
+                  : undefined
             if (isAsyncFunction(callback)) report(node)
             else if (callback?.type === 'Identifier')
               passedByName.push({ node, name: callback.name })
