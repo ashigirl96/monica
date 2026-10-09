@@ -1,6 +1,8 @@
+import { dirname, join } from 'node:path'
+
 import type { Page, PageSnapshot, Turn } from '../contract.ts'
-import { pageText } from './extract.ts'
-import { bundledPdfReader, type PdfReader, pdfText } from './pdf.ts'
+import { htmlText } from './html.ts'
+import { pdfText } from './pdf.ts'
 
 /** 本文と選択範囲の上限。字は JS の文字列の length で数える。 */
 export const MAX_PAGE_CHARS = 100_000
@@ -13,22 +15,40 @@ export function cut(text: string, max: number): { text: string; truncated: boole
   return { text: text.slice(0, end), truncated: true }
 }
 
-export type ReadOptions = { pdf?: PdfReader; signal?: AbortSignal }
+/** HTML と PDF を本文にする Worker の module と、pdf.js の cMap の folder。 */
+export type Readers = { htmlWorker: URL; pdfWorker: URL; cMaps: string }
+
+/**
+ * given に無いものは、packages/chat の Worker の module と、node_modules の pdfjs-dist の cMap にする。
+ * compile した Backend はどれも解けないので、同梱したものを渡す。bun の isolated linker では pdfjs-dist を packages/chat からしか解けない。
+ */
+export function defaultReaders(given: Partial<Readers> = {}): Readers {
+  return {
+    htmlWorker: given.htmlWorker ?? new URL('../html-worker.ts', import.meta.url),
+    pdfWorker: given.pdfWorker ?? new URL('../pdf-worker.ts', import.meta.url),
+    cMaps:
+      given.cMaps ??
+      join(dirname(Bun.resolveSync('pdfjs-dist/package.json', import.meta.dir)), 'cmaps'),
+  }
+}
+
+export type ReadOptions = { readers?: Readers; signal?: AbortSignal }
 
 async function contentOf(
   content: Page['content'],
   url: string | undefined,
-  { pdf, signal }: ReadOptions,
+  { readers = defaultReaders(), signal }: ReadOptions,
 ): Promise<NonNullable<PageSnapshot['content']>> {
   if (content.kind === 'unreadable') return content
   try {
     const read =
       content.kind === 'html'
-        ? await pageText(content.html, url)
-        : await pdfText(content.pdf, pdf ?? bundledPdfReader(), {
-            maxChars: MAX_PAGE_CHARS,
-            signal,
-          })
+        ? await htmlText(content.html, url, readers.htmlWorker, { signal })
+        : await pdfText(
+            content.pdf,
+            { worker: readers.pdfWorker, cMaps: readers.cMaps },
+            { maxChars: MAX_PAGE_CHARS, signal },
+          )
     return { kind: 'text', source: content.kind, ...cut(read, MAX_PAGE_CHARS) }
   } catch (error) {
     if (signal?.aborted) throw error

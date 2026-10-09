@@ -4,7 +4,6 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
 import { createRouterClient } from '@orpc/server'
-import * as defuddle from 'defuddle/node'
 
 import type { AskInput, ChatEvent } from './contract.ts'
 import { testPdf } from './page/test-pdf.ts'
@@ -53,14 +52,21 @@ async function until<T>(read: () => T | undefined): Promise<T> {
   }
 }
 
-function startChat(scenario?: FakeScenario, claudeAt?: (home: string) => string) {
+function startChat(
+  scenario?: FakeScenario,
+  { claudeAt, htmlWorker }: { claudeAt?: (home: string) => string; htmlWorker?: URL } = {},
+) {
   const others = new Set(liveChildren())
   // ChatAgent が起こした偽の claude。
   const claudes = () => liveChildren().filter((pid) => !others.has(pid))
   const home = mkdtempSync(join(tmpdir(), 'monica-chat-'))
   const recordPath = join(home, 'claude.jsonl')
   const fakeClaude = writeFakeClaude(home, recordPath, scenario)
-  const chatAgent = createChatAgent({ home, claudePath: claudeAt?.(home) ?? fakeClaude })
+  const chatAgent = createChatAgent({
+    home,
+    claudePath: claudeAt?.(home) ?? fakeClaude,
+    htmlWorker,
+  })
   const records = () =>
     readFileSync(recordPath, 'utf8')
       .split('\n')
@@ -179,9 +185,9 @@ test('a screenshot that could not be taken leaves the text of the page to claude
 })
 
 test('a page whose HTML could not be turned into text is still answered, after a snapshot that says so', async () => {
-  const failing = spyOn(defuddle, 'Defuddle').mockRejectedValue(new Error('the parser broke'))
-  cleanups.push(() => failing.mockRestore())
-  const { client, records } = startChat()
+  const { client, records } = startChat('answer', {
+    htmlWorker: new URL('./page/fixtures/failing-worker.ts', import.meta.url),
+  })
 
   const events = []
   for await (const event of await client.ask(QUESTION)) events.push(event)
@@ -197,6 +203,33 @@ test('a page whose HTML could not be turned into text is still answered, after a
   })
   expect(events.slice(1).map((event) => event.type)).toEqual(['text', 'text', 'text'])
   expect(userContent(records()).map(({ type }) => type)).toEqual(['text'])
+})
+
+// div を 3,000 段入れ子にしたページは、本文にするのに 1 分を超える。
+const DEEP_HTML = `<body>${'<div>'.repeat(3000)}deep${'</div>'.repeat(3000)}</body>`
+
+test('while a page whose DOM nests 3,000 deep turns into text, the Backend answers its other calls at once', async () => {
+  const { client } = startChat()
+  const controller = new AbortController()
+  const asking = client.ask(
+    { ...QUESTION, page: { ...QUESTION.page, content: { kind: 'html', html: DEEP_HTML } } },
+    { signal: controller.signal },
+  )
+  const outcome = asking.then(
+    () => 'answered',
+    () => 'failed',
+  )
+
+  const started = performance.now()
+  await Bun.sleep(500)
+  await client.prepare()
+  const waited = performance.now() - started
+  const converting = await Promise.race([outcome, Bun.sleep(0).then(() => 'converting')])
+  controller.abort()
+  await outcome
+
+  expect(converting).toBe('converting')
+  expect(waited).toBeLessThan(1000)
 })
 
 const pairs = (argv: string[]) => argv.map((arg, i) => [arg, argv[i + 1]])
@@ -648,7 +681,7 @@ test('a claude that exits at once ends the answer as AGENT_FAILED with the error
 })
 
 test('a claude that is not where the Backend looks ends the answer as AGENT_FAILED with the error', async () => {
-  const { client } = startChat('answer', (home) => join(home, 'no-claude'))
+  const { client } = startChat('answer', { claudeAt: (home) => join(home, 'no-claude') })
 
   const { error } = await outcomeOf(client.ask(QUESTION))
 

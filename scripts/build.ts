@@ -29,7 +29,11 @@ const cMaps = join(
 // Backend は --asset の folder を basename で引く（apps/web/dist は dist、pdfjs-dist/cmaps は cmaps）。
 const assets = [...migrations, 'apps/web/dist', cMaps]
 // compile した binary の Worker は build の entrypoint に要る。main.ts の隣に置くと、main.ts の import.meta.url から同じ相対 path で引ける。
-const backendEntrypoints = ['apps/backend/src/main.ts', 'apps/backend/src/pdf-worker.ts']
+const backendEntrypoints = [
+  'apps/backend/src/main.ts',
+  'apps/backend/src/html-worker.ts',
+  'apps/backend/src/pdf-worker.ts',
+]
 
 mkdirSync(binaries, { recursive: true })
 await $`cargo build --release -p monica-ptyd`.cwd(repo)

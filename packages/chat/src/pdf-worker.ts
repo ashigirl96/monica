@@ -1,9 +1,8 @@
 import { getDocument } from 'pdfjs-dist'
 import * as pdfjsWorker from 'pdfjs-dist/build/pdf.worker.mjs'
 
-import type { PdfReply, PdfRequest } from './page/pdf.ts'
-
-declare const self: Worker
+import type { PdfRequest } from './page/pdf.ts'
+import { replyWithText } from './page/worker.ts'
 
 // Bun では pdf.js が main thread の fake worker で動き、./pdf.worker.mjs を動的に import する。compile した binary ではその import が解けない。
 Object.assign(globalThis, { pdfjsWorker })
@@ -30,14 +29,4 @@ async function textOf({ bytes, cMaps, maxChars }: PdfRequest): Promise<string> {
   return text
 }
 
-// top-level の await を置くと、それより後に足した listener は最初の message を取りこぼす。
-self.addEventListener('message', async ({ data }: MessageEvent<PdfRequest>) => {
-  let reply: PdfReply
-  try {
-    reply = { text: await textOf(data) }
-  } catch (error) {
-    reply = { error: (error as Error).message }
-  }
-  // oxlint-disable-next-line unicorn/require-post-message-target-origin -- Worker の postMessage は targetOrigin を取らない。
-  self.postMessage(reply)
-})
+replyWithText(textOf)

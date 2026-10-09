@@ -4,8 +4,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
 import type { Page } from '../contract.ts'
-import { bundledPdfReader } from './pdf.ts'
-import { snapshotOf } from './snapshot.ts'
+import { defaultReaders, snapshotOf } from './snapshot.ts'
 import { type TestPdfPage, testPdf } from './test-pdf.ts'
 
 const cleanups: (() => void)[] = []
@@ -57,7 +56,7 @@ test('without the cMaps, the Japanese of a PDF in a CID font that it does not em
   cleanups.push(() => rmSync(empty, { recursive: true, force: true }))
 
   const { content } = await snapshotOf(pdfPage([JAPANESE]), [], {
-    pdf: { ...bundledPdfReader(), cMaps: empty },
+    readers: defaultReaders({ cMaps: empty }),
   })
 
   expect(content).toMatchObject({ kind: 'text', text: '' })
@@ -118,11 +117,15 @@ test('bytes that start as a PDF but are broken are unparsable', async () => {
   expect(content).toMatchObject({ kind: 'unreadable', reason: 'unparsable' })
 })
 
-test('a PDF that takes more than 30 seconds to read is unparsable', async () => {
+test('a PDF that takes more than 30 seconds to read is unparsable, without waiting for its Worker', async () => {
   const setTimeoutSpy = spyOn(globalThis, 'setTimeout')
   cleanups.push(() => setTimeoutSpy.mockRestore())
 
-  const reading = snapshotOf(pdfPage([LONG('a')]), [])
+  const reading = snapshotOf(pdfPage([LONG('a')]), [], {
+    readers: defaultReaders({
+      pdfWorker: new URL('./fixtures/silent-worker.ts', import.meta.url),
+    }),
+  })
   const limit = await until(() => setTimeoutSpy.mock.calls.find(([, ms]) => ms === 30_000))
   limit[0]()
 

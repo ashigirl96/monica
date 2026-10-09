@@ -1,9 +1,22 @@
-import { expect, test } from 'bun:test'
+import { afterEach, expect, spyOn, test } from 'bun:test'
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 
 import type { Page, PageSnapshot } from '../contract.ts'
-import { snapshotOf } from './snapshot.ts'
+import { defaultReaders, snapshotOf } from './snapshot.ts'
+
+const cleanups: (() => void)[] = []
+afterEach(() => {
+  for (const cleanup of cleanups.splice(0)) cleanup()
+})
+
+async function until<T>(read: () => T | undefined): Promise<T> {
+  for (;;) {
+    const value = read()
+    if (value !== undefined) return value
+    await Bun.sleep(1)
+  }
+}
 
 const fixture = (name: string) => readFileSync(join(import.meta.dir, 'fixtures', name), 'utf8')
 
@@ -165,4 +178,23 @@ test('raw HTML left in the Markdown loses the a tags and the iframe, video and a
   ]) {
     expect(text).not.toContain(leftover)
   }
+})
+
+test('a page that takes more than 30 seconds to turn into text is unparsable, without waiting for its Worker', async () => {
+  const setTimeoutSpy = spyOn(globalThis, 'setTimeout')
+  cleanups.push(() => setTimeoutSpy.mockRestore())
+
+  const reading = snapshotOf(ARTICLE, [], {
+    readers: defaultReaders({
+      htmlWorker: new URL('./fixtures/silent-worker.ts', import.meta.url),
+    }),
+  })
+  const limit = await until(() => setTimeoutSpy.mock.calls.find(([, ms]) => ms === 30_000))
+  limit[0]()
+
+  expect((await reading).content).toEqual({
+    kind: 'unreadable',
+    reason: 'unparsable',
+    detail: 'turning the HTML into text took more than 30 seconds',
+  })
 })
