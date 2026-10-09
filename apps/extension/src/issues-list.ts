@@ -105,8 +105,13 @@ function buttonCell(ref: string): { cell: HTMLElement; button: HTMLButtonElement
 function disabledRunButtonFor(ref: string, reason: string): HTMLElement {
   const { cell, button } = buttonCell(ref)
   button.textContent = LABELS.new
-  button.disabled = true
+  // disabled の button は focus できず、title の理由がキーボードと支援技術に届かない。
+  button.setAttribute('aria-disabled', 'true')
   button.title = reason
+  button.addEventListener('click', (event) => {
+    event.preventDefault()
+    event.stopPropagation()
+  })
   return cell
 }
 
