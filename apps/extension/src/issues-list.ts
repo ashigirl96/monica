@@ -115,6 +115,12 @@ function disabledRunButtonFor(ref: string, reason: string): HTMLElement {
   return cell
 }
 
+const VIEWPORT_MARGIN = 8
+
+function clamp(value: number, min: number, max: number): number {
+  return Math.max(min, Math.min(value, max))
+}
+
 let lastTooltipId = 0
 let hideShownTooltip: (() => void) | undefined
 const showTooltipOf = new WeakMap<Element, () => void>()
@@ -127,7 +133,7 @@ function tooltipFor(button: HTMLButtonElement, text: string): HTMLElement {
   tooltip.textContent = text
   tooltip.hidden = true
   tooltip.style.cssText =
-    'position:fixed;z-index:2147483647;max-width:320px;padding:4px 8px;border-radius:6px;font-size:12px;line-height:1.5;white-space:normal;pointer-events:none;color:var(--fgColor-onEmphasis, #fff);background:var(--bgColor-emphasis, #25292e)'
+    'position:fixed;top:0;left:0;z-index:2147483647;max-width:min(320px, calc(100vw - 16px));padding:4px 8px;border-radius:6px;font-size:12px;line-height:1.5;white-space:normal;pointer-events:none;color:var(--fgColor-onEmphasis, #fff);background:var(--bgColor-emphasis, #25292e)'
   button.setAttribute('aria-describedby', tooltip.id)
 
   function dismissOnEscape(event: KeyboardEvent) {
@@ -143,13 +149,18 @@ function tooltipFor(button: HTMLButtonElement, text: string): HTMLElement {
   function show() {
     if (hideShownTooltip !== hide) hideShownTooltip?.()
     hideShownTooltip = hide
-    const rect = button.getBoundingClientRect()
-    const viewport = document.documentElement
-    tooltip.style.right = `${viewport.clientWidth - rect.right}px`
+    // 前に置いた left が残ると、その右の幅で折り返した大きさを測ってしまう。
+    tooltip.style.left = '0px'
     tooltip.hidden = false
-    const height = tooltip.offsetHeight
+    const rect = button.getBoundingClientRect()
+    const { clientWidth, clientHeight } = document.documentElement
+    const { offsetWidth: width, offsetHeight: height } = tooltip
     const below = rect.bottom + 4
-    tooltip.style.top = `${below + height > viewport.clientHeight ? rect.top - 4 - height : below}px`
+    const above = rect.top - 4 - height
+    const top =
+      below + height <= clientHeight - VIEWPORT_MARGIN || above < VIEWPORT_MARGIN ? below : above
+    tooltip.style.left = `${clamp(rect.right - width, VIEWPORT_MARGIN, clientWidth - VIEWPORT_MARGIN - width)}px`
+    tooltip.style.top = `${clamp(top, VIEWPORT_MARGIN, clientHeight - VIEWPORT_MARGIN - height)}px`
     window.addEventListener('scroll', hide, true)
     document.addEventListener('keydown', dismissOnEscape, true)
   }
