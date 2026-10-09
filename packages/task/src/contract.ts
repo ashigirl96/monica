@@ -105,6 +105,29 @@ export const runErrors = {
   },
 }
 
+export const PromptKindSchema = z
+  .enum(['tackle'])
+  .describe('what the Run is started with; tackle leaves the prompt out for /tackle')
+
+export const RunButtonSchema = z.object({ kind: PromptKindSchema })
+
+export const RunButtonsOutputSchema = z.object({
+  buttons: z.array(
+    z.object({
+      ref: z.string().describe('the ref as asked'),
+      button: RunButtonSchema.nullable().describe('null when the Issue gets no Run button'),
+    }),
+  ),
+})
+
+export const runFromButtonErrors = {
+  ...runErrors,
+  NO_RUN_BUTTON: {
+    status: 409,
+    message: 'the Issue gets no Run button',
+  },
+}
+
 export const CurrentOutputSchema = z.object({
   ref: z.string(),
   title: z.string(),
@@ -165,6 +188,9 @@ export type TrackOutput = z.infer<typeof TrackOutputSchema>
 export type SyncOutput = z.infer<typeof SyncOutputSchema>
 export type ListOutput = z.infer<typeof ListOutputSchema>
 export type RunOutput = z.infer<typeof RunOutputSchema>
+export type PromptKind = z.infer<typeof PromptKindSchema>
+export type RunButton = z.infer<typeof RunButtonSchema>
+export type RunButtonsOutput = z.infer<typeof RunButtonsOutputSchema>
 export type CurrentOutput = z.infer<typeof CurrentOutputSchema>
 export type AttachOutput = z.infer<typeof AttachOutputSchema>
 export type CloseRefusal = z.infer<typeof CloseRefusalSchema>
@@ -219,6 +245,21 @@ export const contract = {
           .describe('start a new Run even when the Issue has open Blockers'),
       }),
     )
+    .output(RunOutputSchema),
+  runButtons: meta
+    .meta({
+      description:
+        'Tell for each Issue whether it gets a Run button and with what prompt, reading the Issues from GitHub without tracking them',
+    })
+    .input(z.object({ refs: z.array(z.string()).max(100) }))
+    .output(RunButtonsOutputSchema),
+  runFromButton: meta
+    .meta({
+      description:
+        'Run the Task of an Issue with the prompt its Run button has now, reading the Issue from GitHub anew, or refuse when it gets no Run button',
+    })
+    .errors(runFromButtonErrors)
+    .input(z.object({ ref }))
     .output(RunOutputSchema),
   current: meta
     .meta({ description: 'Show the Task of the Tab this runs in', cli: true })

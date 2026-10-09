@@ -81,7 +81,7 @@ async function startBackend(browserPort: number, envOf: (home: string) => Env = 
 
 type Backend = Awaited<ReturnType<typeof startBackend>>
 
-function endpointFile(home: string): { port: number; token: string; chatToken: string } {
+function endpointFile(home: string): { port: number; token: string; extensionToken: string } {
   return JSON.parse(readFileSync(join(home, 'backend.json'), 'utf8'))
 }
 
@@ -100,12 +100,12 @@ function viaToken(
   })
 }
 
-/** Chrome Extension と同じく、backend.json の chat の token で token の口を呼ぶ。 */
+/** Chrome Extension と同じく、backend.json の Chrome Extension の token で token の口を呼ぶ。 */
 function chatClient(backend: Backend): ContractRouterClient<{ chat: typeof chatContract }> {
   return createORPCClient(
     new RPCLink({
       url: `http://127.0.0.1:${backend.port}/rpc`,
-      headers: { authorization: `Bearer ${endpointFile(backend.home).chatToken}` },
+      headers: { authorization: `Bearer ${endpointFile(backend.home).extensionToken}` },
     }),
   )
 }
@@ -146,21 +146,31 @@ test('the token listener carries workbench, task, job and chat but not note, and
   expect((await viaToken(backend, 'note/essay/create')).status).toBe(404)
 }, 20_000)
 
-// Chrome Extension の side panel で script が動いても、shell に打鍵する workbench.openTab には届かせない（ADR-0017・0034）。
-test('the chat token in backend.json opens only chat on the token listener, the full token opens everything, and no token opens nothing', async () => {
+// Chrome Extension で script が動いても、任意の prompt を打つ task.run や shell に打鍵する workbench.openTab には届かせない（ADR-0017・0034・0035）。
+test('the Chrome Extension token in backend.json opens only chat and the two Run button procedures of task on the token listener, the full token opens everything, and no token opens nothing', async () => {
   const backend = await startBackend(freePort())
   const endpoint = endpointFile(backend.home)
-  const viaChatToken = { port: backend.port, token: endpoint.chatToken }
+  const viaExtensionToken = { port: backend.port, token: endpoint.extensionToken }
 
   expect(statSync(join(backend.home, 'backend.json')).mode & 0o777).toBe(0o600)
   expect(endpoint).toMatchObject({ port: backend.port, token: backend.token })
-  expect(endpoint.chatToken).toEqual(expect.any(String))
-  expect(endpoint.chatToken).not.toBe(backend.token)
+  expect(endpoint.extensionToken).toEqual(expect.any(String))
+  expect(endpoint.extensionToken).not.toBe(backend.token)
 
-  expect((await viaToken(viaChatToken, 'chat/ask', INVALID_QUESTION)).status).toBe(400)
+  expect((await viaToken(viaExtensionToken, 'chat/ask', INVALID_QUESTION)).status).toBe(400)
   expect((await viaToken({ port: backend.port }, 'chat/ask', INVALID_QUESTION)).status).toBe(401)
+  // 不正な input は handler の前で 400 になるので、本物の GitHub に届かずに口に載っているかを見られる。
+  for (const path of ['task/runButtons', 'task/runFromButton']) {
+    expect([path, (await viaToken(viaExtensionToken, path, { ref: 1, refs: 1 })).status]).toEqual([
+      path,
+      400,
+    ])
+    expect([path, (await viaToken({ port: backend.port }, path)).status]).toEqual([path, 401])
+  }
+  expect((await viaToken(viaExtensionToken, 'task/run', { ref: '' })).status).toBe(401)
+  expect((await viaToken(backend, 'task/run', { ref: 1 })).status).toBe(400)
   for (const path of ['workbench/layout/get', 'task/list', 'job/list']) {
-    expect([path, (await viaToken(viaChatToken, path)).status]).toEqual([path, 401])
+    expect([path, (await viaToken(viaExtensionToken, path)).status]).toEqual([path, 401])
     expect([path, (await viaToken({ port: backend.port }, path)).status]).toEqual([path, 401])
     expect([path, (await viaToken(backend, path)).status]).toEqual([path, 200])
   }
@@ -183,12 +193,12 @@ test('the Backend answers chat.ask with the claude that MONICA_CLAUDE_PATH names
 // 1 つの質問に添えるページの本文とスクリーンショットを受けられる上限で、それを超える body は読まずに断る。
 test('a body larger than the limit for a question is refused with 413', async () => {
   const backend = await startBackend(freePort())
-  const { chatToken } = endpointFile(backend.home)
+  const { extensionToken } = endpointFile(backend.home)
 
   const ask = (bytes: number) =>
     fetch(`http://127.0.0.1:${backend.port}/rpc/chat/ask`, {
       method: 'POST',
-      headers: { authorization: `Bearer ${chatToken}`, 'content-type': 'application/json' },
+      headers: { authorization: `Bearer ${extensionToken}`, 'content-type': 'application/json' },
       body: new Uint8Array(bytes),
     })
 

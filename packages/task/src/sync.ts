@@ -204,7 +204,7 @@ function benchBranches(db: Db, repo: string, numbers: number[]): Map<number, str
   return new Map(rows.flatMap(({ number, branch }) => (branch === null ? [] : [[number, branch]])))
 }
 
-function byRepo(refs: IssueRef[]): [string, number[]][] {
+export function byRepo(refs: IssueRef[]): [string, number[]][] {
   const groups = new Map<string, [string, number[]]>()
   for (const { repo, number } of refs) {
     const key = repo.toLowerCase()

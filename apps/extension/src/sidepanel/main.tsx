@@ -9,7 +9,7 @@ import { createRoot } from 'react-dom/client'
 
 type Client = ContractRouterClient<{ chat: typeof chatContract }>
 
-// Backend の token の口を、Native Messaging の host が返す chat の token で呼ぶ（ADR-0034）。
+// Backend の token の口を、Native Messaging の host が返す Chrome Extension の token で呼ぶ（ADR-0034）。
 const client: Client = createORPCClient(new RPCLink(viaNativeHost(__MONICA_NATIVE_HOST__)))
 
 createRoot(document.getElementById('root')!).render(

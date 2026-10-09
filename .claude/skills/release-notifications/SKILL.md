@@ -68,14 +68,14 @@ dock() {
    ```
 
 3. 置いた `.app` の Backend を、`backend-headless` skill の「release の build の Backend」の形で起こす。env は `env -i` で絞り、`MONICA_HOME` は使い捨てにし、`MONICA_PTYD_PATH` と `MONICA_CLAUDE_PATH` は `$A/Contents/MacOS` の `monica-ptyd` と `claude` を指す。ブラウザの口の port は渡さなくてよい（Chat は token の口に載る）。`.app` そのものは起こさない。
-4. token の口へ、`backend.json` の chat の token で `chat.ask` を 1 回送る（Chrome Extension と同じ呼び方。ADR-0034）。port と chat の token は、置いた `.app` の CLI を host として起こして受け取ってもよい（`docs/packages/cli.md` の「Native Messaging の host」）。script を `apps/backend/` の下に置くと `@orpc/client` と `@monica/chat/contract` を解決できるので、終わったら消す。答えている間と答えた後に、Backend の子を `ps -A -o pid=,ppid=,command=` で読む。
+4. token の口へ、`backend.json` の Chrome Extension の token で `chat.ask` を 1 回送る（Chrome Extension と同じ呼び方。ADR-0034）。port と Chrome Extension の token は、置いた `.app` の CLI を host として起こして受け取ってもよい（`docs/packages/cli.md` の「Native Messaging の host」）。script を `apps/backend/` の下に置くと `@orpc/client` と `@monica/chat/contract` を解決できるので、終わったら消す。答えている間と答えた後に、Backend の子を `ps -A -o pid=,ppid=,command=` で読む。
 
    ```ts
-   const { port, chatToken } = await Bun.file(`${process.env.MONICA_HOME}/backend.json`).json()
+   const { port, extensionToken } = await Bun.file(`${process.env.MONICA_HOME}/backend.json`).json()
    const client: ContractRouterClient<{ chat: typeof contract }> = createORPCClient(
      new RPCLink({
        url: `http://127.0.0.1:${port}/rpc`,
-       headers: { authorization: `Bearer ${chatToken}` },
+       headers: { authorization: `Bearer ${extensionToken}` },
      }),
    )
    const answer = await client.chat.ask({

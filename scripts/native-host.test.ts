@@ -80,7 +80,12 @@ test('the dev host answers with the CLI of the worktree in MONICA_REPO, for the 
   mkdirSync(home)
   writeFileSync(
     join(home, 'backend.json'),
-    JSON.stringify({ port: 49152, token: 'full-token', chatToken: 'chat-token', pid: process.pid }),
+    JSON.stringify({
+      port: 49152,
+      token: 'full-token',
+      extensionToken: 'chat-token',
+      pid: process.pid,
+    }),
   )
 
   const host = Bun.spawn([hostPath, 'chrome-extension://jhcphbonbcemkjkhofopmhbfphenihoj/'], {

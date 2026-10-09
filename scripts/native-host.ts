@@ -33,7 +33,7 @@ export function writeDevNativeHost({
   const manifest = {
     name: DEV_NATIVE_HOST,
     description:
-      'Hands the Monica (dev) Chrome Extension the port and the chat token of the Backend',
+      'Hands the Monica (dev) Chrome Extension the port of the Backend and the token it calls with',
     path: hostPath,
     type: 'stdio',
     allowed_origins: [DEV_EXTENSION_ORIGIN],

@@ -50,7 +50,7 @@ function writeEndpoint(home: string, pid: number) {
   mkdirSync(home, { recursive: true })
   writeFileSync(
     join(home, 'backend.json'),
-    JSON.stringify({ port: 49152, token: 'full-token', chatToken: 'chat-token', pid }),
+    JSON.stringify({ port: 49152, token: 'full-token', extensionToken: 'chat-token', pid }),
   )
 }
 
@@ -60,7 +60,7 @@ async function deadPid(): Promise<number> {
   return child.pid
 }
 
-test('a Chrome Extension that asks the native host gets the port and the chat token of the live Backend of MONICA_HOME, and never the full token', async () => {
+test('a Chrome Extension that asks the native host gets the port and the Chrome Extension token of the live Backend of MONICA_HOME, and never the full token', async () => {
   const home = tempDir()
   writeEndpoint(home, process.pid)
 

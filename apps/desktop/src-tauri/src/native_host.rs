@@ -1,4 +1,4 @@
-//! Chrome Extension が Backend の port と chat の token を引く Native Messaging の host の manifest（ADR-0034）。
+//! Chrome Extension が Backend の port と自分の token を引く Native Messaging の host の manifest（ADR-0034）。
 
 use std::fs;
 use std::io;
@@ -38,7 +38,7 @@ fn write_manifest(dir: &Path, host: &Path) -> io::Result<()> {
 fn manifest_json(host: &Path) -> String {
     let manifest = serde_json::json!({
         "name": NAME,
-        "description": "Hands the Monica Chrome Extension the port and the chat token of the Backend",
+        "description": "Hands the Monica Chrome Extension the port of the Backend and the token it calls with",
         "path": host.to_string_lossy(),
         "type": "stdio",
         "allowed_origins": [RELEASE_ORIGIN],
@@ -81,7 +81,7 @@ mod tests {
             manifest,
             serde_json::json!({
                 "name": "com.ashigirl96.monica",
-                "description": "Hands the Monica Chrome Extension the port and the chat token of the Backend",
+                "description": "Hands the Monica Chrome Extension the port of the Backend and the token it calls with",
                 "path": HOST,
                 "type": "stdio",
                 "allowed_origins": ["chrome-extension://dnggfebiponjhdpjgmdfafaghpbkejop/"],
