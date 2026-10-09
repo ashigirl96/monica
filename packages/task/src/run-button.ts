@@ -24,7 +24,7 @@ const READ_TIMEOUT_MS = 10_000
 /** ボタンを決める材料。Issue は GitHub の今の答えで、Task は track 済みのときだけある。 */
 type Seen = {
   issue: GitHubIssue
-  task: { closed: boolean; run: ButtonRun } | null
+  task: { ref: string; closed: boolean; run: ButtonRun } | null
   /** 親が spec で live な Run を持つとき、その親。 */
   runningSpec: IssueRef | null
 }
@@ -33,7 +33,7 @@ type ButtonRun = Exclude<RunButton['run'], 'reopen'>
 
 type Verdict =
   | { type: 'button'; kind: PromptKind }
-  | { type: 'reopen'; message: string }
+  | { type: 'reopen'; message: string; taskRef: string }
   | { type: 'blocked'; message: string; blockers: string[] }
   | { type: 'none'; message: string }
 
@@ -63,7 +63,11 @@ const rules: ((seen: Seen) => Verdict | undefined)[] = [
     issue.state === 'closed' ? noButton(`${formatRef(issue)} is a closed Issue`) : undefined,
   ({ issue, task }) =>
     task?.closed
-      ? { type: 'reopen', message: `${formatRef(issue)} is a closed Task; reopen it to run it` }
+      ? {
+          type: 'reopen',
+          message: `${formatRef(issue)} is a closed Task; reopen it to run it`,
+          taskRef: task.ref,
+        }
       : undefined,
   ({ issue }) => {
     const blockers = issue.blockers.filter((b) => b.state === 'open').map(formatRef)
@@ -183,8 +187,9 @@ export async function reopenFromButton(
   const issue = await readIssue(deps, ref)
   const verdict = verdictOf(seenOf(deps.db, issue))
   switch (verdict.type) {
+    // Task Ledger の写しは次の sync まで repo の改名前の名前を持つので、頼まれた ref でなく node ID で引き当てた Task の ref で reopen する。
     case 'reopen':
-      return reopenTask(deps, { ref })
+      return reopenTask(deps, { ref: verdict.taskRef })
     case 'button':
       throw refused(`${formatRef(issue)} is not a closed Task`)
     default:
@@ -212,7 +217,13 @@ function seenOf(db: Db, issue: GitHubIssue): Seen {
   const { parent } = issue
   return {
     issue,
-    task: tracked ? { closed: tracked.task.closedAt !== null, run: runOf(db, tracked) } : null,
+    task: tracked
+      ? {
+          ref: formatRef(tracked.issue),
+          closed: tracked.task.closedAt !== null,
+          run: runOf(db, tracked),
+        }
+      : null,
     runningSpec: parent && isSpec(parent) && hasLiveRun(db, parent) ? parent : null,
   }
 }

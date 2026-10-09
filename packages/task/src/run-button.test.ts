@@ -149,6 +149,23 @@ test('reopening from a button reads the Issue anew and refuses a Task whose Issu
   expect((await client.list({ closed: true })).tasks.map((t) => t.ref)).toEqual([ref])
 })
 
+test('a closed Task whose repo was renamed before any sync gets its reopen button by the new name, and reopens from it', async () => {
+  const { github, client } = withRepo()
+  github.issue(ref, { title: 'Ship it', labels: ['ready-for-agent'] })
+  await client.track({ ref })
+  await client.close({ ref })
+  github.renameRepo('acme/app', 'acme/renamed')
+  const renamed = 'acme/renamed#12'
+
+  expect(await client.runButtons({ refs: [renamed] })).toEqual({
+    buttons: [{ ref: renamed, button: { run: 'reopen' }, reason: null }],
+  })
+  expect((await client.reopenFromButton({ ref: renamed })).ref).toBe(renamed)
+  expect(await client.runButtons({ refs: [renamed] })).toEqual({
+    buttons: [{ ref: renamed, button: { kind: 'tackle', run: 'new' }, reason: null }],
+  })
+})
+
 test('reopening from a button refuses an open Task', async () => {
   const { github, client } = withRepo()
   github.issue(ref, { title: 'Ship it', labels: ['ready-for-agent'] })
