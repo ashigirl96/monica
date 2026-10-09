@@ -36,7 +36,8 @@ export type SaveNote = (input: SaveInput, keepalive: boolean) => Promise<{ updat
 export class SaveQueue {
   #save: SaveNote
   #pending = new Map<string, NoteDraft>()
-  #discarded = new Set<string>()
+  // 送信を始めた時点と返った時点で数が違えば、その送信は消した Note への保存なので結果を捨てる。
+  #discards = new Map<string, number>()
   // id ごとの基準版。保存が返す updatedAt で前進させる
   #versions = new Map<string, Date>()
   // 送信中の draft。差し替え判定が in-flight な書き込みを見落とさないために要る
@@ -117,21 +118,15 @@ export class SaveQueue {
     this.#timer = setTimeout(() => void this.flush(), DEBOUNCE_MS)
   }
 
-  /** ノート削除時、その id 宛の pending と in-flight 失敗時の復元を無効化する */
+  /** ノート削除時、その id 宛の pending と、送信中の保存の失敗を捨てる。後の予約は普段どおり保存する。 */
   discard = (id: string): void => {
-    this.#discarded.add(id)
+    this.#discards.set(id, this.#discardCount(id) + 1)
     this.#pending.delete(id)
     this.#conflicted.delete(id)
     this.#labels.delete(id)
     this.#setConflicts(removeConflict(this.#conflicts, id))
     this.#setErrors(removeSaveError(this.#errors, id))
     if (this.#pending.size === 0) this.#clearTimer()
-  }
-
-  /** undo で復活した note の再試行を戻す。同じページに留まったまま復活すると
-   * discard の印が残り続け、以降その id の保存失敗が再試行されなくなるため。 */
-  resume = (id: string): void => {
-    this.#discarded.delete(id)
   }
 
   /** 競合解決で「サーバの最新を読む」を選んだときに、捨てる編集を落とす。
@@ -155,10 +150,13 @@ export class SaveQueue {
     const failures: Record<string, string> = {}
     await Promise.all(
       [...batch].map(([id, draft]) => {
+        const discards = this.#discardCount(id)
         this.#inflight.set(id, draft)
         return this.#send(id, draft, keepalive)
           .then((version) => this.setBase(id, version.updatedAt))
           .catch((e: unknown) => {
+            // 消した Note は競合にも未保存にも残さない。外で戻して開き直すと、古い draft が出るため。
+            if (this.#discardCount(id) !== discards) return
             if (e instanceof ORPCError && e.code === 'CONFLICT') {
               // 基準版が古いので同じ payload を投げ直しても永久に CONFLICT。pending へ戻して
               // リトライさせず、競合として保持したうえで通知とバナーに渡す。
@@ -168,7 +166,7 @@ export class SaveQueue {
               this.#setConflicts(upsertConflict(this.#conflicts, { id, label }))
               return
             }
-            if (!this.#discarded.has(id) && !this.#pending.has(id)) {
+            if (!this.#pending.has(id)) {
               this.#pending.set(id, draft)
             }
             failures[id] = e instanceof Error ? e.message : 'Failed to save'
@@ -180,6 +178,10 @@ export class SaveQueue {
     if (Object.keys(failures).length > 0 && this.#pending.size > 0 && this.#timer === null) {
       this.#timer = setTimeout(() => void this.flush(), RETRY_MS)
     }
+  }
+
+  #discardCount(id: string): number {
+    return this.#discards.get(id) ?? 0
   }
 
   async #send(id: string, draft: NoteDraft, keepalive: boolean): Promise<{ updatedAt: Date }> {

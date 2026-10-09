@@ -1,7 +1,9 @@
 import { expect, mock, test } from 'bun:test'
 
+import { ORPCError } from '@orpc/client'
+
 import type { Note } from '../../contract.ts'
-import { type RemovableKind, Removals } from './removals.ts'
+import { isNotFound, type RemovableKind, Removals } from './removals.ts'
 
 const at = new Date(2026, 9, 6, 12)
 
@@ -22,7 +24,6 @@ function setup(kind: RemovableKind, open: Note | null = null) {
     remove: mock((_id: string) => Promise.resolve()),
     restore: mock((id: string) => Promise.resolve(note(kind, id))),
     discard: mock((_id: string) => {}),
-    resume: mock((_id: string) => {}),
     forgetBody: mock((_id: string) => {}),
     openId: () => url,
   }
@@ -50,7 +51,6 @@ test('removing drops the saves still waiting and the cached body, and undo bring
   expect(deps.forgetBody.mock.calls).toEqual([['note-1'], ['note-2']])
   expect((await removals.undo())?.id).toBe('note-2')
   expect((await removals.undo())?.id).toBe('note-1')
-  expect(deps.resume.mock.calls).toEqual([['note-2'], ['note-1']])
   expect(await removals.undo()).toBeNull()
 })
 
@@ -213,7 +213,6 @@ test('an undo that fails goes back where it was, so the next undo tries it again
   restoring.reject(new Error('unreachable'))
 
   expect(await failed).toBeNull()
-  expect(deps.resume).not.toHaveBeenCalled()
   expect((await removals.undo())?.id).toBe('note-3')
   expect((await removals.undo())?.id).toBe('note-2')
   expect((await removals.undo())?.id).toBe('note-1')
@@ -250,4 +249,47 @@ test('an open Note of a kind the screen does not remove is left alone', async ()
     expect(deps.remove).not.toHaveBeenCalled()
     expect(editor.noteRef.current).toBe(open)
   }
+})
+
+test('a Note removed elsewhere drops its saves and cached body, is not saved to again, and the screen leaves it', () => {
+  const { removals, deps, editor, leave } = setup('essay', note('essay', 'note-1'))
+
+  removals.removedElsewhere('note-1', { editor, leave })
+
+  expect(deps.discard.mock.calls).toEqual([['note-1']])
+  expect(deps.forgetBody.mock.calls).toEqual([['note-1']])
+  expect(editor.noteRef.current).toBeNull()
+  expect(leave).toHaveBeenCalledTimes(1)
+  expect(deps.remove).not.toHaveBeenCalled()
+})
+
+test('a Note removed elsewhere is not pushed on the undo stack', async () => {
+  const { removals, deps, editor, leave } = setup('repo_note', note('repo_note', 'note-1'))
+  await removals.remove('note-0', { leave })
+
+  removals.removedElsewhere('note-1', { editor, leave })
+
+  expect((await removals.undo())?.id).toBe('note-0')
+  expect(await removals.undo()).toBeNull()
+  expect(deps.restore.mock.calls).toEqual([['note-0']])
+})
+
+test('the screen leaves a Note removed elsewhere only while the URL and the editor still point at it', () => {
+  const { removals, deps, editor, leave, browse } = setup('essay', note('essay', 'note-1'))
+  const other = note('essay', 'note-2')
+  browse('note-2')
+  editor.noteRef.current = other
+
+  removals.removedElsewhere('note-1', { editor, leave })
+
+  expect(deps.discard.mock.calls).toEqual([['note-1']])
+  expect(editor.noteRef.current).toBe(other)
+  expect(leave).not.toHaveBeenCalled()
+})
+
+test('only a NOT_FOUND answer from the Backend means the Note was removed', () => {
+  expect(isNotFound(new ORPCError('NOT_FOUND'))).toBe(true)
+  expect(isNotFound(new ORPCError('INTERNAL_SERVER_ERROR'))).toBe(false)
+  expect(isNotFound(new Error('NOT_FOUND'))).toBe(false)
+  expect(isNotFound(null)).toBe(false)
 })

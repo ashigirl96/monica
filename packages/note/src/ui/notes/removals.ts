@@ -1,3 +1,5 @@
+import { ORPCError } from '@orpc/client'
+
 import type { Note } from '../../contract.ts'
 
 export type RemovableKind = Extract<Note['kind'], 'essay' | 'repo_note'>
@@ -8,7 +10,6 @@ type RemovalDeps = {
   remove: (id: string) => Promise<void>
   restore: (id: string) => Promise<Note>
   discard: (id: string) => void
-  resume: (id: string) => void
   forgetBody: (id: string) => void
   /** URL が開いている Note の id。待つ間に移ることがあるので、待った後に読む。 */
   openId: () => string | null
@@ -53,6 +54,16 @@ export class Removals {
     return removed
   }
 
+  /** 外で消された Note の後始末。この画面で消したのではないので、取り消しの stack には積まない。 */
+  removedElsewhere(
+    id: string,
+    { editor, leave }: Pick<Screen, 'leave'> & { editor: Pick<Editor, 'noteRef'> },
+  ): void {
+    if (editor.noteRef.current?.id === id) editor.noteRef.current = null
+    this.#forget(id)
+    if (this.#deps.openId() === id) leave()
+  }
+
   /** 最後に消した Note を戻す。失敗したら stack に戻し、次の ⌥Z で試し直せるようにする。 */
   async undo(): Promise<Note | null> {
     const id = this.#removed.pop()
@@ -66,7 +77,6 @@ export class Removals {
       this.#removed.splice(index, 0, id)
       return null
     }
-    this.#deps.resume(id)
     return restored
   }
 
@@ -93,11 +103,15 @@ export class Removals {
     }
     // 往復の間にその Note を開いて打った分は、捨てずに戻した Note へ保存させる。
     if (this.#deps.hasUnsaved(id) && (await this.#putBack(id))) return false
+    this.#forget(id)
+    this.#removed.push(id)
+    return true
+  }
+
+  #forget(id: string) {
     // 予約が残ると保存が NOT_FOUND で再試行を繰り返し、本文の cache が残ると履歴で戻ったときに消した Note を開く。
     this.#deps.discard(id)
     this.#deps.forgetBody(id)
-    this.#removed.push(id)
-    return true
   }
 
   async #putBack(id: string): Promise<boolean> {
@@ -108,4 +122,9 @@ export class Removals {
       return false
     }
   }
+}
+
+/** 消されたとみなすのは Backend の答えだけ。ほかの失敗は届かなかっただけかもしれない。 */
+export function isNotFound(error: Error | null): boolean {
+  return error instanceof ORPCError && error.code === 'NOT_FOUND'
 }

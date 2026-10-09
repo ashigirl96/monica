@@ -62,7 +62,6 @@ export function useAutosave() {
     schedule: queue.schedule,
     flush: queue.flush,
     discard: queue.discard,
-    resume: queue.resume,
     dropPending: queue.dropPending,
     baseVersion: queue.baseVersion,
     setBase: queue.setBase,
