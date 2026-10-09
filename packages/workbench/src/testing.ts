@@ -82,6 +82,21 @@ export function until<T>(store: Store, atom: Atom<T>, done: (value: T) => boolea
   })
 }
 
+export function runspaceIn(
+  id: string,
+  cwd: string,
+  { owned = false, pinned = false, alsoIn = [] as string[] } = {},
+) {
+  const tabs = [cwd, ...alsoIn].map((tabCwd, i) => ({
+    id: `${id}.${i}`,
+    cwd: tabCwd,
+    sortOrder: i,
+    terminalSessionId: `ts-${id}.${i}`,
+    pinned: pinned && i === 0,
+  }))
+  return { id, cwd, sortOrder: 0, owned, tabs }
+}
+
 export function git(cwd: string, ...args: string[]) {
   const result = Bun.spawnSync(['git', '-C', cwd, ...args])
   if (!result.success) throw new Error(`git ${args.join(' ')}: ${result.stderr}`)
