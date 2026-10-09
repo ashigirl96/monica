@@ -38,7 +38,7 @@
 - externalBin を base の `tauri.conf.json` に書かないのは、tauri-build が cargo の build のたびに `binaries/` の存在を求め、`binaries/monica-ptyd-<triple>` で `target/<profile>/monica-ptyd` を上書きするため。base に書くと dev と CI の clippy にも `binaries/` が要り、空の placeholder は cargo が作った ptyd を潰す。
 - `--minify` は使わない。trpc-cli が class 名で instanceof を判定しており、名前が潰れると起動しない。`--bytecode` は top-level await があるので `--format=esm` が要る。
 - compiled binary は 1 つ約 70MB（Bun の runtime だけで約 60MB）あり、Backend と CLI で約 140MB になる。
-- `bun run install-app` は、まず `scripts/build.ts` を流す。bundle だけを入れ替えると、手元の変更より古い build が黙って入るため。次に起きている Monica を終了させ、`.app` を一時の場所にコピーして codesign と quarantine の解除を済ませてから `/Applications` に置く。署名する前の `.app` を開かせないため。Tab の shell と claude は ptyd が持ち続けるので、終了させても切れない。最後に `open` で起こし、`~/.monica/backend.json` の pid が入れる前と変わり、その port の `/health` が答えるまで最大 30 秒待つ。codesign の identity は Keychain Access で作った自己署名の `Monica`。ad-hoc と違い、build をまたいで署名の同一性が保たれる。
+- `bun run install-app` は、まず `scripts/build.ts` を流す。bundle だけを入れ替えると、手元の変更より古い build が黙って入るため。次に起きている Monica を終了させ、`.app` を一時の場所にコピーして codesign と quarantine の解除を済ませてから `/Applications` に置く。署名する前の `.app` を開かせないため。Tab の shell と claude は ptyd が持ち続けるので、終了させても切れない。最後に `open` で起こし、`~/.monica/backend.json` の token（起動のたびに変わる。pid は再利用されうる）が入れる前と変わり、その port の `/health` が答えるまで最大 30 秒待つ。codesign の identity は Keychain Access で作った自己署名の `Monica`。ad-hoc と違い、build をまたいで署名の同一性が保たれる。
 - 署名と notarization（hardenedRuntime 下の Bun の JIT entitlements。Bun の binary は Backend と CLI の 2 つ）は配布を始めるときに決める。
 
 ## 検査と CI
