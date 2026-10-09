@@ -24,7 +24,6 @@ function setup(kind: RemovableKind, open: Note | null = null) {
     remove: mock((_id: string) => Promise.resolve()),
     restore: mock((id: string) => Promise.resolve(note(kind, id))),
     discard: mock((_id: string) => {}),
-    resume: mock((_id: string) => {}),
     forgetBody: mock((_id: string) => {}),
     openId: () => url,
   }
@@ -52,7 +51,6 @@ test('removing drops the saves still waiting and the cached body, and undo bring
   expect(deps.forgetBody.mock.calls).toEqual([['note-1'], ['note-2']])
   expect((await removals.undo())?.id).toBe('note-2')
   expect((await removals.undo())?.id).toBe('note-1')
-  expect(deps.resume.mock.calls).toEqual([['note-2'], ['note-1']])
   expect(await removals.undo()).toBeNull()
 })
 
@@ -215,7 +213,6 @@ test('an undo that fails goes back where it was, so the next undo tries it again
   restoring.reject(new Error('unreachable'))
 
   expect(await failed).toBeNull()
-  expect(deps.resume).not.toHaveBeenCalled()
   expect((await removals.undo())?.id).toBe('note-3')
   expect((await removals.undo())?.id).toBe('note-2')
   expect((await removals.undo())?.id).toBe('note-1')

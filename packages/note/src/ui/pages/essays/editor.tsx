@@ -101,6 +101,11 @@ export function EssayEditorPage({ id }: { id: string }) {
   const groups = useMemo(() => splitEssaysByStatus(essays), [essays])
   // ⌥K/J と削除の後の送り先
   const cycleIds = useMemo(() => (groups?.[tab] ?? []).map((s) => s.id), [groups, tab])
+  // focus で一覧の取り直しが Essay の取り直しより先に返ると、外で消された Essay は並びから消えている。
+  const listedCycleRef = useRef<{ tab: EssayStatus; ids: string[] } | null>(null)
+  useEffect(() => {
+    if (cycleIds.includes(id)) listedCycleRef.current = { tab, ids: cycleIds }
+  }, [cycleIds, id, tab])
 
   const selectEssay = useCallback(
     (essayId: string) => {
@@ -140,10 +145,10 @@ export function EssayEditorPage({ id }: { id: string }) {
   }, [client, flush, seedNote, invalidateEssays])
 
   const leaveEssay = useCallback(
-    (targetId: string) => {
+    (targetId: string, ids: string[] = cycleIds) => {
       // 表示中のタブにあった Essay はタブの次へ送って書く流れを切らない。タブの外の Essay は
       // 送り先が画面に見えていないので一覧へ帰す
-      const next = cycleIds.includes(targetId) ? cycleSelect(cycleIds, targetId, 1) : undefined
+      const next = ids.includes(targetId) ? cycleSelect(ids, targetId, 1) : undefined
       navigate(next !== undefined && next !== targetId ? essayPath(next) : ESSAYS_PATH, {
         replace: true,
       })
@@ -166,8 +171,10 @@ export function EssayEditorPage({ id }: { id: string }) {
   const goneId = note?.kind === 'essay' && isNotFound(noteQuery.error) ? id : null
   useEffect(() => {
     if (goneId === null) return
-    removals.removedElsewhere(goneId, { editor: { noteRef }, leave: () => leaveEssay(goneId) })
-  }, [goneId, removals, leaveEssay])
+    const listed = listedCycleRef.current
+    const ids = listed?.tab === tab ? listed.ids : cycleIds
+    removals.removedElsewhere(goneId, { editor: { noteRef }, leave: () => leaveEssay(goneId, ids) })
+  }, [goneId, removals, leaveEssay, tab, cycleIds])
 
   const undoDelete = useCallback(async () => {
     const restored = await removals.undo()

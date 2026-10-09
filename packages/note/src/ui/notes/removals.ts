@@ -10,7 +10,6 @@ type RemovalDeps = {
   remove: (id: string) => Promise<void>
   restore: (id: string) => Promise<Note>
   discard: (id: string) => void
-  resume: (id: string) => void
   forgetBody: (id: string) => void
   /** URL が開いている Note の id。待つ間に移ることがあるので、待った後に読む。 */
   openId: () => string | null
@@ -78,7 +77,6 @@ export class Removals {
       this.#removed.splice(index, 0, id)
       return null
     }
-    this.#deps.resume(id)
     return restored
   }
 

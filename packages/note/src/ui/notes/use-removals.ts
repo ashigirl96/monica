@@ -9,7 +9,7 @@ import { type RemovableKind, Removals } from './removals.ts'
 /** 呼んだ component の寿命の間だけ持つ `Removals`。取り消しの stack も一緒に捨てる。 */
 export function useRemovals(kind: RemovableKind): Removals {
   const client = useNoteClient()
-  const { flush, hasUnsaved, discard, resume } = useAutosaveContext()
+  const { flush, hasUnsaved, discard } = useAutosaveContext()
   const forgetBody = useForgetNote()
   const [removals] = useState(
     () =>
@@ -19,7 +19,6 @@ export function useRemovals(kind: RemovableKind): Removals {
         remove: (id) => client.remove({ id }),
         restore: (id) => client.restore({ id }),
         discard,
-        resume,
         forgetBody,
         // navigate は URL をその場で書き換えるが、prop と effect で写した ref は描画の後まで前の Note を指す。
         openId: () => openNoteIdOfPath(window.location.pathname),
