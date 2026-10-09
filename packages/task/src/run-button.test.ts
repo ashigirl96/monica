@@ -398,17 +398,17 @@ test('running from a button fails without tracking when GitHub cannot be read', 
   expect(fixture.db.select().from(task).all()).toEqual([])
 })
 
-async function claudeStarted(fixture: Fixture, terminalSessionId: string) {
-  const transcript = join(fixture.home, 'transcripts', 's-1.jsonl')
+async function claudeStarted(fixture: Fixture, terminalSessionId: string, sessionId = 's-1') {
+  const transcript = join(fixture.home, 'transcripts', `${sessionId}.jsonl`)
   mkdirSync(dirname(transcript), { recursive: true })
   writeFileSync(transcript, '{}\n')
   const fields = {
     cwd: join(fixture.home, 'worktrees/acme/app/issue-12'),
     transcript_path: transcript,
   }
-  await fixture.hook(terminalSessionId, 's-1', 'SessionStart', { source: 'startup', ...fields })
+  await fixture.hook(terminalSessionId, sessionId, 'SessionStart', { source: 'startup', ...fields })
   return async () =>
-    fixture.hook(terminalSessionId, 's-1', 'SessionEnd', {
+    fixture.hook(terminalSessionId, sessionId, 'SessionEnd', {
       reason: 'prompt_input_exit',
       ...fields,
     })
@@ -445,6 +445,113 @@ test('an Issue whose Task has an ended Run gets a resume button, and running fro
   expect(output.resumed).toBe('s-1')
   expect((await typedInto(fixture, output.terminalSessionId)).at(-1)).toMatchObject({
     data: "claude --resume 's-1'\r",
+  })
+})
+
+function blockOnGitHub(fixture: Fixture) {
+  fixture.github.issue('acme/lib#3', { title: 'Upstream fix' })
+  fixture.github.issue(ref, {
+    title: 'Ship it',
+    labels: ['ready-for-agent'],
+    blockedBy: ['acme/lib#3'],
+  })
+}
+
+test('an Issue with an open Blocker whose Task has a live Run gets a running button', async () => {
+  const fixture = setup()
+  await liveRun(fixture)
+  blockOnGitHub(fixture)
+
+  expect(await fixture.client.runButtons({ refs: [ref] })).toEqual({
+    buttons: [{ ref, button: { kind: 'tackle', run: 'running' }, reason: null }],
+  })
+})
+
+test('an Issue with an open Blocker whose Task has an ended Run gets a resume button, and running from it resumes claude sending no prompt', async () => {
+  const fixture = setup()
+  const end = await liveRun(fixture)
+  await end()
+  blockOnGitHub(fixture)
+
+  expect(await fixture.client.runButtons({ refs: [ref] })).toEqual({
+    buttons: [{ ref, button: { kind: 'tackle', run: 'resume' }, reason: null }],
+  })
+  const requested = fixture.github.requests.length
+  const output = await fixture.client.runFromButton({ ref })
+  // 押した時に Issue を引き直す 1 本だけで、resume は sync しない。
+  expect(fixture.github.requests).toHaveLength(requested + 1)
+  expect((await typedInto(fixture, output.terminalSessionId)).at(-1)).toMatchObject({
+    data: "claude --resume 's-1'\r",
+  })
+})
+
+test('a closed Issue whose open Task has a live Run gets a running button, and one with an ended Run gets a resume button', async () => {
+  const fixture = setup()
+  const end = await liveRun(fixture)
+  fixture.github.issue(ref, { title: 'Ship it', state: 'closed', labels: ['ready-for-agent'] })
+
+  expect(await fixture.client.runButtons({ refs: [ref] })).toEqual({
+    buttons: [{ ref, button: { kind: 'tackle', run: 'running' }, reason: null }],
+  })
+  await end()
+  expect(await fixture.client.runButtons({ refs: [ref] })).toEqual({
+    buttons: [{ ref, button: { kind: 'tackle', run: 'resume' }, reason: null }],
+  })
+})
+
+test('an Issue whose labels pick no prompt gets a resume button without a kind once its Task has an ended Run', async () => {
+  const fixture = setup()
+  const end = await liveRun(fixture, ['ready-for-human'])
+  await end()
+
+  expect(await fixture.client.runButtons({ refs: [ref] })).toEqual({
+    buttons: [{ ref, button: { run: 'resume' }, reason: null }],
+  })
+})
+
+const subIssue = 'acme/app#13'
+
+// spec と子の Task を同じ checkout の in-place の Bench で run し、spec の claude だけを起動させる。
+async function specAndChild(fixture: Fixture) {
+  fixture.github.issue(ref, { title: 'Spec it', labels: ['ready-for-agent'] })
+  fixture.github.issue(subIssue, { title: 'Part', labels: ['ready-for-agent'], parent: ref })
+  fixture.taskLedger.start()
+  mkdirSync(fixture.ghq.checkout('acme/app'), { recursive: true })
+  const childRun = await fixture.client.run({ ref: subIssue, inPlace: true })
+  const endChild = await claudeStarted(fixture, childRun.terminalSessionId, 's-part')
+  const specRun = await fixture.client.run({ ref, inPlace: true })
+  return { endChild, startSpec: () => claudeStarted(fixture, specRun.terminalSessionId, 's-spec') }
+}
+
+test('a sub-issue with an ended Run gets no button while its spec has a live Run, and running from it is refused', async () => {
+  const fixture = setup()
+  const { endChild, startSpec } = await specAndChild(fixture)
+  await endChild()
+  await startSpec()
+
+  expect(await fixture.client.runButtons({ refs: [subIssue] })).toEqual({
+    buttons: [
+      {
+        ref: subIssue,
+        button: null,
+        reason: `${subIssue} is under ${ref}, a spec with a live Run`,
+      },
+    ],
+  })
+  const refused = await failure(fixture.client.runFromButton({ ref: subIssue }))
+  expect([refused.code, refused.message]).toEqual([
+    'PRECONDITION_FAILED',
+    `${subIssue} is under ${ref}, a spec with a live Run`,
+  ])
+})
+
+test('a sub-issue with a live Run gets a running button while its spec has a live Run', async () => {
+  const fixture = setup()
+  const { startSpec } = await specAndChild(fixture)
+  await startSpec()
+
+  expect(await fixture.client.runButtons({ refs: [subIssue] })).toEqual({
+    buttons: [{ ref: subIssue, button: { kind: 'tackle', run: 'running' }, reason: null }],
   })
 })
 
