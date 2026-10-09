@@ -166,6 +166,30 @@ test('a closed Task whose repo was renamed before any sync gets its reopen butto
   })
 })
 
+test('reopening from a button refuses a Task whose Issue is closed between the button and the sync of reopen, leaving it closed', async () => {
+  const fixture = withRepo()
+  fixture.github.issue(ref, { title: 'Ship it', labels: ['ready-for-agent'] })
+  await fixture.client.track({ ref })
+  await fixture.client.close({ ref })
+
+  const releaseRead = fixture.github.hold()
+  const before = fixture.github.requests.length
+  const reopening = failure(fixture.client.reopenFromButton({ ref }))
+  await until(() => fixture.github.requests.length > before)
+  releaseRead()
+  const releaseSync = fixture.github.hold()
+  await until(() => fixture.github.requests.length > before + 1)
+  fixture.github.issue(ref, { title: 'Ship it', state: 'closed', labels: ['ready-for-agent'] })
+  releaseSync()
+
+  const refusal = await reopening
+  expect([refusal.code, refusal.message]).toEqual([
+    'PRECONDITION_FAILED',
+    `${ref} is a closed Issue`,
+  ])
+  expect((await fixture.client.list({ closed: true })).tasks.map((t) => t.ref)).toEqual([ref])
+})
+
 test('reopening from a button refuses an open Task', async () => {
   const { github, client } = withRepo()
   github.issue(ref, { title: 'Ship it', labels: ['ready-for-agent'] })

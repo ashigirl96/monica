@@ -189,7 +189,16 @@ export async function reopenFromButton(
   switch (verdict.type) {
     // Task Ledger の写しは次の sync まで repo の改名前の名前を持つので、頼まれた ref でなく node ID で引き当てた Task の ref で reopen する。
     case 'reopen':
-      return reopenTask(deps, { ref: verdict.taskRef })
+      return reopenTask(
+        deps,
+        { ref: verdict.taskRef },
+        {
+          // reopen の sync が判定の後に closed になった Issue を写すので、写しで見直す。
+          recheck({ issue: copied }) {
+            if (copied.state === 'closed') throw refused(`${formatRef(copied)} is a closed Issue`)
+          },
+        },
+      )
     case 'button':
       throw refused(`${formatRef(issue)} is not a closed Task`)
     default:
