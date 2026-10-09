@@ -3,8 +3,8 @@ import { ORPCError, type ORPCErrorConstructorMap } from '@orpc/server'
 
 import type { BenchDeps } from './bench.ts'
 import type { PromptKind, RunButton, RunButtonsOutput, RunOutput, runErrors } from './contract.ts'
-import { isIssue } from './copy.ts'
-import { type GitHubIssue, oneLine } from './github.ts'
+import { isLinkedIssue } from './copy.ts'
+import { type GitHubIssue, type LinkedIssue, oneLine } from './github.ts'
 import { taskIfTracked } from './open-task.ts'
 import { formatRef, type IssueRef, parseRef } from './ref.ts'
 import { resumableRunOf, runTask } from './run-claude.ts'
@@ -124,7 +124,7 @@ export async function runButtons(deps: SyncDeps, refs: string[]): Promise<RunBut
     buttons: asked.map(({ ref, parsed }) => {
       const issue = parsed && issues.get(key(parsed))
       if (!issue) return { ref, button: null }
-      const seen = seenOf(deps.db, parsed, issue)
+      const seen = seenOf(deps.db, issue)
       const verdict = verdictOf(seen)
       return {
         ref,
@@ -151,7 +151,7 @@ export async function runFromButton(
     }
     throw new ORPCError('NOT_FOUND', { message: `GitHub did not return ${formatRef(parsed)}` })
   }
-  const seen = seenOf(deps.db, parsed, issue)
+  const seen = seenOf(deps.db, issue)
   const verdict = verdictOf(seen)
   switch (verdict.type) {
     case 'blocked':
@@ -172,8 +172,8 @@ export async function runFromButton(
 
 const refused = (message: string) => new ORPCError('PRECONDITION_FAILED', { message })
 
-function seenOf(db: Db, ref: IssueRef, issue: GitHubIssue): Seen {
-  const tracked = taskIfTracked(db, isIssue(ref))
+function seenOf(db: Db, issue: GitHubIssue): Seen {
+  const tracked = taskIfTracked(db, isLinkedIssue(issue))
   const { parent } = issue
   return {
     issue,
@@ -182,8 +182,8 @@ function seenOf(db: Db, ref: IssueRef, issue: GitHubIssue): Seen {
   }
 }
 
-function hasLiveRun(db: Pick<Db, 'select'>, ref: IssueRef): boolean {
-  const tracked = taskIfTracked(db, isIssue(ref))
+function hasLiveRun(db: Pick<Db, 'select'>, linked: LinkedIssue): boolean {
+  const tracked = taskIfTracked(db, isLinkedIssue(linked))
   return tracked !== undefined && liveRunCount(db, tracked.issue.id) > 0
 }
 

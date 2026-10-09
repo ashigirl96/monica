@@ -15,6 +15,11 @@ export function isIssue({ repo, number }: IssueRef) {
   return and(isRepo(issue.repo, repo), eq(issue.number, number))
 }
 
+// repo の改名の後、sync が写しを直すまでは行の repo が旧名のままなので、node ID でも引き当てる。
+export function isLinkedIssue({ nodeId, repo, number }: LinkedIssue) {
+  return or(eq(issue.nodeId, nodeId), isIssue({ repo, number }))
+}
+
 export function openBlockersOf(db: Db, issueIds: number[]) {
   const blocker = alias(issue, 'blocker')
   return db

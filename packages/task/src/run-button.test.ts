@@ -363,6 +363,22 @@ test('running from the resume button of a triage Issue resumes claude without th
   })
 })
 
+test('a Task whose repo was renamed before any sync still gets its resume button by the new name, and resumes claude without the prompt', async () => {
+  const fixture = withRepo()
+  const end = await liveRun(fixture, ['needs-triage'])
+  await end()
+  fixture.github.renameRepo('acme/app', 'acme/renamed')
+  const renamed = 'acme/renamed#12'
+
+  expect(await fixture.client.runButtons({ refs: [renamed] })).toEqual({
+    buttons: [{ ref: renamed, button: { kind: 'triage', run: 'resume' } }],
+  })
+  const output = await fixture.client.runFromButton({ ref: renamed })
+  expect((await typedInto(fixture, output.terminalSessionId)).at(-1)).toMatchObject({
+    data: "claude --resume 's-1'\r",
+  })
+})
+
 test('a Task whose Bench was closed and reopened gets a button for a new Run, not a resume', async () => {
   const fixture = withRepo()
   const end = await liveRun(fixture)
