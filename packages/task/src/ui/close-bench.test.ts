@@ -45,7 +45,7 @@ async function benchOf({ client }: Pick<Fixture, 'client'>) {
   return bench!
 }
 
-async function until(done: () => boolean, ms = 5_000) {
+async function until(done: () => boolean, ms: number) {
   for (let i = 0; i < ms / 25; i++) {
     if (done()) return
     await Bun.sleep(25)
