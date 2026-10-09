@@ -332,6 +332,7 @@ side panel は `ORPCError`（`@orpc/client`）の `code` で分け、`data` は 
   - 答えが流れ始めてから止めるを押すと「止めました」が出て、3 秒後も答えは増えず、Backend を親に持つ claude は無かった。
   - 答えが流れ始めてから Backend の stdin を閉じると、途中までの答えと「答えが途中で切れました」、再試行のボタン、帯が出た。stream の途中で Backend が居なくなっても `TypeError` になる。
 - side panel の target で、Backend の居ない口への `fetch` は `TypeError: Failed to fetch` で reject した（headless の Brave の side panel そのもので `extension-panel.ts eval` で評価した）。
+- side panel の page を Browser Tab で開いて、本文を送り終えない PDF（navigation には PDF を返し、fetch には `%PDF-` の頭だけを送って止まる URL）で送り、読み終える前に止めるを押すと、配る側でその fetch の request が abort された。「新しい Chat」でも同じだった。止めた後に別のページで送ると、body の `history[0]` は `{ question, page: { url, title }, answer: '（ユーザーが途中で止めた）' }` で、`url` と `title` は送った時の見出しの PDF のものだった。
 - 再試行は、スクリーンショットも PDF も取り直さない。headless の Brave の side panel で、Backend を止めて PDF の Browser Tab でスクリーンショットを添えて送り、Backend を起こして再試行すると、送り直した body は multipart の boundary を除いて最初の body と同じで、PDF の URL への fetch も起きなかった。
 
 ### 確かめていないこと
