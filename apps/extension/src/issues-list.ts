@@ -105,14 +105,63 @@ function buttonCell(ref: string): { cell: HTMLElement; button: HTMLButtonElement
 function disabledRunButtonFor(ref: string, reason: string): HTMLElement {
   const { cell, button } = buttonCell(ref)
   button.textContent = LABELS.new
-  // disabled の button は focus できず、title の理由がキーボードと支援技術に届かない。
+  // disabled の button は focus できず、理由がキーボードと支援技術に届かない。
   button.setAttribute('aria-disabled', 'true')
-  button.title = reason
   button.addEventListener('click', (event) => {
     event.preventDefault()
     event.stopPropagation()
   })
+  cell.append(tooltipFor(button, reason))
   return cell
+}
+
+let lastTooltipId = 0
+let hideShownTooltip: (() => void) | undefined
+
+// macOS の Chromium は窓が key でないと title の tooltip を描かないので、自前で出す。
+function tooltipFor(button: HTMLButtonElement, text: string): HTMLElement {
+  const tooltip = document.createElement('span')
+  tooltip.id = `monica-run-tooltip-${++lastTooltipId}`
+  tooltip.setAttribute('role', 'tooltip')
+  tooltip.textContent = text
+  tooltip.hidden = true
+  tooltip.style.cssText =
+    'position:fixed;z-index:2147483647;max-width:320px;padding:4px 8px;border-radius:6px;font-size:12px;line-height:1.5;white-space:normal;pointer-events:none;color:var(--fgColor-onEmphasis, #fff);background:var(--bgColor-emphasis, #25292e)'
+  button.setAttribute('aria-describedby', tooltip.id)
+
+  function dismissOnEscape(event: KeyboardEvent) {
+    if (event.key === 'Escape') hide()
+  }
+  // fixed の tooltip はスクロールで button から離れるので、スクロールしたら消す。
+  function hide() {
+    tooltip.hidden = true
+    window.removeEventListener('scroll', hide, true)
+    document.removeEventListener('keydown', dismissOnEscape, true)
+    if (hideShownTooltip === hide) hideShownTooltip = undefined
+  }
+  function show() {
+    if (hideShownTooltip !== hide) hideShownTooltip?.()
+    hideShownTooltip = hide
+    const rect = button.getBoundingClientRect()
+    const viewport = document.documentElement
+    tooltip.style.right = `${viewport.clientWidth - rect.right}px`
+    tooltip.hidden = false
+    const height = tooltip.offsetHeight
+    const below = rect.bottom + 4
+    tooltip.style.top = `${below + height > viewport.clientHeight ? rect.top - 4 - height : below}px`
+    window.addEventListener('scroll', hide, true)
+    document.addEventListener('keydown', dismissOnEscape, true)
+  }
+  button.addEventListener('mouseenter', show)
+  button.addEventListener('focus', show)
+  // hover と focus の片方が残っているあいだは出したままにする。
+  button.addEventListener('mouseleave', () => {
+    if (document.activeElement !== button) hide()
+  })
+  button.addEventListener('blur', () => {
+    if (!button.matches(':hover')) hide()
+  })
+  return tooltip
 }
 
 function runButtonFor(
