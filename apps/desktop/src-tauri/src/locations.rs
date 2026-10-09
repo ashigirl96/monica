@@ -39,8 +39,13 @@ pub fn ptyd() -> PathBuf {
 }
 
 /// dev の port は `scripts/desktop.ts` が env に入れ、Backend は Shell の env からそのまま継ぐ。
-pub fn notes_port() -> Option<&'static str> {
+pub fn browser_port() -> Option<&'static str> {
     (!cfg!(debug_assertions)).then_some("19380")
+}
+
+/// dev の Backend は渡されなければ、SDK が node_modules から解く、lockfile で SDK と揃った claude を使う（ADR-0032）。
+pub fn claude() -> Option<PathBuf> {
+    (!cfg!(debug_assertions)).then(|| bundled_binary("claude"))
 }
 
 pub fn cli() -> Option<PathBuf> {
@@ -52,6 +57,21 @@ pub fn cli() -> Option<PathBuf> {
 /// dev の desktop が張ると release の CLI を dev のもので上書きするので、release だけが返す。
 pub fn user_cli_link() -> Option<PathBuf> {
     (!cfg!(debug_assertions)).then(|| user_home().join(".local/bin/monica"))
+}
+
+pub struct NativeHost {
+    pub manifest_dir: PathBuf,
+    pub host: PathBuf,
+}
+
+/// Brave は user-data-dir に依らず Google Chrome の場所の manifest だけを読む。
+/// dev の manifest は `bun run extension` が書くので、debug の Shell は release の host を dev の CLI で上書きしないよう返さない。
+pub fn native_host() -> Option<NativeHost> {
+    (!cfg!(debug_assertions)).then(|| NativeHost {
+        manifest_dir: user_home()
+            .join("Library/Application Support/Google/Chrome/NativeMessagingHosts"),
+        host: bundled_binary("monica"),
+    })
 }
 
 fn bundled_binary(name: &str) -> PathBuf {

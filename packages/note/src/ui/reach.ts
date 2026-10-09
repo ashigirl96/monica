@@ -2,7 +2,7 @@
 const NOTICE_AFTER_MS = 1000
 const PROBE_EVERY_MS = 1000
 
-/** notes の口に request が届いているか。link が request ごとに reached か failed を知らせる。 */
+/** ブラウザの口に request が届いているか。link が request ごとに reached か failed を知らせる。 */
 export class Reach {
   #failingSince: number | null = null
   #recoveries = 0

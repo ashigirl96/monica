@@ -3,6 +3,7 @@
   "private": true,
   "type": "module",
   "dependencies": {
+    "@monica/chat": "workspace:*",
     "@monica/job": "workspace:*",
     "@monica/note": "workspace:*",
     "@monica/task": "workspace:*",
