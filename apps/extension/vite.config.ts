@@ -16,12 +16,20 @@ const DEV = {
   key: 'MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAtH8oUl7mUkzcANrl/ZmduZ/cPvMmzl+dInEsA3kX+9f94ulc0vnCL0sirzttz2fbz+hZnDzX9vohsqI/LoVHpvSgMOrtbRWYqK34dqcYGgTjEhwZN350FE/f9p5JkULNKyfDcCzzyOukIiw5scRC1WMZM7GjXNchi9NH13gkNz32EII61r02rGZ8jw9w/YILCC+GpWO2umtKSum/f/r9598SallGjuXfFDg1c7fwl9X+6Ew5FIBYKxiRGfnXQUpq4WvH59AXMrAoxpyK6zaHuTOAsArIWBaj3fB4qaafaMEW9DWGjhWqm4+QkvEBZsHAW5wkgiAT3b1o0dTbrP3f6QIDAQAB',
 }
 
+const ICONS = {
+  16: 'icons/16.png',
+  32: 'icons/32.png',
+  48: 'icons/48.png',
+  128: 'icons/128.png',
+}
+
 // key を outDir と同じ mode で選ぶので、dev の出力に release の key が入らない。
 const manifest = defineManifest(({ mode }) => ({
   manifest_version: 3,
   ...(mode === 'production' ? RELEASE : DEV),
   version: '0.1.0',
-  action: {},
+  icons: ICONS,
+  action: { default_icon: ICONS },
   background: { service_worker: 'src/background.ts', type: 'module' },
   side_panel: { default_path: 'src/sidepanel/index.html' },
   // scripting は、質問を送った時に Current Page の HTML と選択範囲を読む。
