@@ -13,8 +13,11 @@ import type { Ghq } from './prepare.ts'
 
 export type Files = Record<string, { content: string; mode?: number }>
 
+// auto maintenance は git が返った後も裏で .git/objects/maintenance.lock を作っては消し、snapshot の走査と競合する。
 export function git(cwd: string, ...args: string[]): string {
-  const result = Bun.spawnSync(['git', '-C', cwd, ...args], { env: process.env })
+  const result = Bun.spawnSync(['git', '-C', cwd, '-c', 'maintenance.auto=false', ...args], {
+    env: process.env,
+  })
   if (!result.success) throw new Error(`git ${args.join(' ')}: ${result.stderr}`)
   return result.stdout.toString().trim()
 }
