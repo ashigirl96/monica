@@ -117,6 +117,7 @@ function disabledRunButtonFor(ref: string, reason: string): HTMLElement {
 
 let lastTooltipId = 0
 let hideShownTooltip: (() => void) | undefined
+const showTooltipOf = new WeakMap<Element, () => void>()
 
 // macOS の Chromium は窓が key でないと title の tooltip を描かないので、自前で出す。
 function tooltipFor(button: HTMLButtonElement, text: string): HTMLElement {
@@ -152,11 +153,16 @@ function tooltipFor(button: HTMLButtonElement, text: string): HTMLElement {
     window.addEventListener('scroll', hide, true)
     document.addEventListener('keydown', dismissOnEscape, true)
   }
+  showTooltipOf.set(button, show)
   button.addEventListener('mouseenter', show)
   button.addEventListener('focus', show)
   // hover と focus の片方が残っているあいだは出したままにする。
   button.addEventListener('mouseleave', () => {
-    if (document.activeElement !== button) hide()
+    if (document.activeElement === button) return
+    hide()
+    // hover で隠した、focus 中の別の Run の tooltip を出し直す。
+    const focused = document.activeElement
+    if (focused) showTooltipOf.get(focused)?.()
   })
   button.addEventListener('blur', () => {
     if (!button.matches(':hover')) hide()
