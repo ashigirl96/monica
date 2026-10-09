@@ -23,6 +23,14 @@ type Verdict = { kind: PromptKind } | { refusal: Refusal }
 
 const noButton = (message: string): Verdict => ({ refusal: { code: 'NO_RUN_BUTTON', message } })
 
+const STATE_LABELS = ['needs-triage', 'ready-for-agent', 'ready-for-human', 'needs-info', 'wontfix']
+
+const isWayfinderLabel = (label: string) => label.startsWith('wayfinder:')
+
+const isStateLabel = (label: string) => STATE_LABELS.includes(label) || isWayfinderLabel(label)
+
+const isMap = (issue: GitHubIssue) => issue.labels.includes('wayfinder:map')
+
 // 上から順に当て、最初に決まった答えを使う。種類やボタンを出さない条件は、行を足して増やす。
 const rules: ((seen: Seen) => Verdict | undefined)[] = [
   ({ issue }) =>
@@ -42,7 +50,18 @@ const rules: ((seen: Seen) => Verdict | undefined)[] = [
       },
     }
   },
+  ({ issue }) => (isMap(issue) ? { kind: 'wayfinder' } : undefined),
+  ({ issue }) => {
+    if (!issue.labels.some(isWayfinderLabel)) return undefined
+    return issue.parent
+      ? { kind: 'wayfinder' }
+      : noButton(`${formatRef(issue)} is a wayfinder Issue with no map above it`)
+  },
   ({ issue }) => (issue.labels.includes('ready-for-agent') ? { kind: 'tackle' } : undefined),
+  ({ issue }) =>
+    issue.labels.includes('needs-triage') || !issue.labels.some(isStateLabel)
+      ? { kind: 'triage' }
+      : undefined,
 ]
 
 function verdictOf(seen: Seen): Verdict {
@@ -54,10 +73,16 @@ function verdictOf(seen: Seen): Verdict {
 }
 
 // tackle は prompt を渡さず、run の既定（新しい Run なら /tackle、resume なら何も送らない）に任せる。
-function promptOf(kind: PromptKind, _issue: GitHubIssue): string | undefined {
+function promptOf(kind: PromptKind, issue: GitHubIssue): string | undefined {
   switch (kind) {
     case 'tackle':
       return undefined
+    case 'triage':
+      return `/triage #${issue.number}`
+    case 'wayfinder':
+      return isMap(issue) || !issue.parent
+        ? `/wayfinder ${issue.number}`
+        : `/wayfinder ${issue.parent.number} ${issue.number}`
   }
 }
 

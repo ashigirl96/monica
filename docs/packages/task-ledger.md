@@ -109,8 +109,8 @@ createTaskLedger(deps: {
 Chrome Extension が GitHub の Issues の一覧に差し込む Run ボタンを決め、押されたら run する（ADR-0035）。どちらも prompt を受け取らず、Backend が Issue から prompt を決める。Backend は Chrome Extension の token でこの 2 つだけを通す（`docs/packages/backend.md` の「token の口の 2 つの token」）。CLI には出さない。
 
 - `runButtons` は ref ごとに、ボタンが無ければ `null`、あれば prompt の種類 `kind` を返す。ref は頼まれた文字列のまま返す。Issue は Track せずに GitHub の GraphQL（sync と同じ一括の query）から 10 秒まで引き、写しにも書かない。ref の形が違う、GitHub が返さない、repo ごと失敗した、`gh auth token` が失敗した Issue はボタン無しにする。
-- 判定は `run-button.ts` の規則の並びを上から当て、最初に決まったものを使う。種類と、ボタンを出さない条件は、行を足して増やす。今の並びは、closed な Issue、closed な Task、open な Blocker（GitHub の答えで見る）、`ready-for-agent` なら `tackle`、どれにも当たらなければボタン無し。
-- `kind` から prompt を作る。`tackle` は prompt を渡さず、`run` の既定（新しい Run なら `/tackle`、resume なら何も送らない）に任せる。
+- 判定は `run-button.ts` の規則の並びを上から当て、最初に決まったものを使う。種類と、ボタンを出さない条件は、行を足して増やす。今の並びは、closed な Issue、closed な Task、open な Blocker（GitHub の答えで見る）、`wayfinder:map` なら `wayfinder`、他の `wayfinder:*` は親があれば `wayfinder`・無ければボタン無し、`ready-for-agent` なら `tackle`、`needs-triage` か state のラベル（`needs-triage`・`ready-for-agent`・`ready-for-human`・`needs-info`・`wontfix`・`wayfinder:*`）が無ければ `triage`、どれにも当たらなければボタン無し。`ready-for-human`・`needs-info`・`wontfix` は最後に落ちてボタン無しになる。`wayfinder:map` は sub-issue を持っても spec にしない。
+- `kind` から prompt を作る。`tackle` は prompt を渡さず、`run` の既定（新しい Run なら `/tackle`、resume なら何も送らない）に任せる。`triage` は `/triage #<n>`、`wayfinder` は map なら `/wayfinder <n>`、map の子なら親の番号を足して `/wayfinder <map> <n>` を送る。子の Task と Bench は子の Issue に付く。
 - `runFromButton` は ref 1 つを受け、GitHub から Issue を引き直して同じ判定をやり直す。ボタンが無ければ、open な Blocker なら `BLOCKED`、それ以外は `NO_RUN_BUTTON` で断り、Track しない。ボタンがあれば、その prompt で `run` と同じ手順に渡す（Track・Bench の準備・Tab を開いて claude を打つ。live な Run の `CONFLICT` も同じ）。GitHub に届かなければ `BAD_GATEWAY`、返らなければ `NOT_FOUND` で断る。
 
 ## close と reopen

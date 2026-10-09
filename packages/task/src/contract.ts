@@ -106,8 +106,10 @@ export const runErrors = {
 }
 
 export const PromptKindSchema = z
-  .enum(['tackle'])
-  .describe('what the Run is started with; tackle leaves the prompt out for /tackle')
+  .enum(['tackle', 'triage', 'wayfinder'])
+  .describe(
+    'what the Run is started with; tackle leaves the prompt out for /tackle, triage sends /triage #<n>, and wayfinder sends /wayfinder <n> for a map or /wayfinder <map> <n> for an Issue under one',
+  )
 
 export const RunButtonSchema = z.object({ kind: PromptKindSchema })
 
