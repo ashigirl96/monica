@@ -2,13 +2,15 @@ import type { RunButton } from '@monica/task/contract'
 
 import type { PressReply, RunButtonRequest, RunButtonsReply } from './run-button-relay.ts'
 
-// github.com のどの画面にも注入され、GitHub は画面を client 側で移るので、一覧かは走査のたびに URL で見る。
+// github.com のどの画面にも注入され、GitHub は画面を client 側で移るので、一覧か Issue の画面かは走査のたびに URL で見る。
 const ISSUES_PATH = /^\/([^/]+)\/([^/]+)\/issues(?:\/(\d+))?\/?$/
 const TITLE_LINK = 'a[data-testid="issue-listitem-title-link"]'
 // class 名の末尾は GitHub の build ごとに変わる hash なので、前の部分で当てる。
 const METADATA = '[class*="MetadataContainer-module__container"]'
+// header は幅でどちらかを CSS で隠す New issue の container を 2 つ持つので、両方に差し込む。
+const HEADER_ACTIONS = '[data-testid="issue-header"] [class*="HeaderMenu-module__buttonContainer"]'
 
-const buttons = new WeakMap<HTMLAnchorElement, HTMLElement[]>()
+const buttons = new WeakMap<HTMLElement, HTMLElement[]>()
 
 const LABELS: Record<RunButton['run'], string> = {
   new: 'Run',
@@ -28,9 +30,50 @@ function issuesPathOf(pathname: string): { repo: string; number: string | undefi
   return { repo: `${owner}/${name}`, number }
 }
 
-function listedRepo(): string | null {
+type Layout = {
+  buttonClass: string
+  margin: 'margin-left' | 'margin-right'
+  place(host: HTMLElement, cell: HTMLElement, refusal?: HTMLElement): void
+}
+
+const LIST_ROW: Layout = {
+  buttonClass: 'btn btn-sm btn-primary',
+  margin: 'margin-left',
+  place(titleLink, cell, refusal) {
+    if (refusal) titleLink.after(refusal)
+    const metadata = titleLink.closest('li')?.querySelector(METADATA)
+    if (metadata) metadata.append(cell)
+    else titleLink.after(cell)
+  },
+}
+
+const ISSUE_HEADER: Layout = {
+  // New issue と同じ高さにする。
+  buttonClass: 'btn btn-primary',
+  margin: 'margin-right',
+  // New issue を header の右端に残す。
+  place(newIssueContainer, cell, refusal) {
+    newIssueContainer.prepend(...(refusal ? [refusal, cell] : [cell]))
+  },
+}
+
+type Slot = { host: HTMLElement; ref: string; layout: Layout }
+
+function slotsOnPage(): Slot[] {
   const path = issuesPathOf(location.pathname)
-  return path && path.number === undefined ? path.repo : null
+  if (!path) return []
+  if (path.number !== undefined) {
+    const ref = `${path.repo}#${path.number}`
+    return [...document.querySelectorAll<HTMLElement>(HEADER_ACTIONS)].map((host) => ({
+      host,
+      ref,
+      layout: ISSUE_HEADER,
+    }))
+  }
+  return [...document.querySelectorAll<HTMLAnchorElement>(TITLE_LINK)].flatMap((host) => {
+    const ref = refOf(host, path.repo)
+    return ref ? [{ host, ref, layout: LIST_ROW }] : []
+  })
 }
 
 function refOf(link: HTMLAnchorElement, repo: string): string | null {
@@ -55,63 +98,57 @@ async function send<T>(request: RunButtonRequest): Promise<T | null> {
 let backendOutOfReach = false
 
 async function scan() {
-  const repo = listedRepo()
-  if (!repo || backendOutOfReach) return
-  const asked = new Map<string, HTMLAnchorElement[]>()
-  for (const link of document.querySelectorAll<HTMLAnchorElement>(TITLE_LINK)) {
-    const ref = refOf(link, repo)
-    // GitHub が行の要素を使い回して別の Issue を描いたら、前のボタンを外して決め直す。
-    if (!ref || link.dataset.monicaRef === ref) continue
-    for (const element of buttons.get(link) ?? []) element.remove()
-    link.dataset.monicaRef = ref
-    asked.set(ref, [...(asked.get(ref) ?? []), link])
+  if (backendOutOfReach) return
+  const asked = new Map<string, Slot[]>()
+  for (const slot of slotsOnPage()) {
+    const { host, ref } = slot
+    // GitHub が要素を使い回して別の Issue を描いたら、前のボタンを外して決め直す。
+    if (host.dataset.monicaRef === ref) continue
+    for (const element of buttons.get(host) ?? []) element.remove()
+    host.dataset.monicaRef = ref
+    asked.set(ref, [...(asked.get(ref) ?? []), slot])
   }
   if (asked.size === 0) return
   const reply = await send<RunButtonsReply>({ type: 'monica.runButtons', refs: [...asked.keys()] })
   if (!reply) {
     backendOutOfReach = true
-    for (const [ref, links] of asked) {
-      for (const link of links) if (link.dataset.monicaRef === ref) delete link.dataset.monicaRef
+    for (const [ref, slots] of asked) {
+      for (const { host } of slots)
+        if (host.dataset.monicaRef === ref) delete host.dataset.monicaRef
     }
     return
   }
   for (const { ref, button, reason } of reply.buttons) {
     if (!button && !reason) continue
-    for (const link of asked.get(ref) ?? []) {
-      if (link.dataset.monicaRef !== ref || !link.isConnected) continue
+    for (const slot of asked.get(ref) ?? []) {
+      const { host, layout } = slot
+      if (host.dataset.monicaRef !== ref || !host.isConnected) continue
       if (button) {
-        const { cell, refusal } = runButtonFor(link, ref, button.run)
-        buttons.set(link, [cell, refusal])
-        link.after(refusal)
-        placeCell(link, cell)
+        const { cell, refusal } = runButtonFor(slot, button.run)
+        buttons.set(host, [cell, refusal])
+        layout.place(host, cell, refusal)
       } else if (reason) {
-        const cell = disabledRunButtonFor(ref, reason)
-        buttons.set(link, [cell])
-        placeCell(link, cell)
+        const cell = disabledRunButtonFor(slot, reason)
+        buttons.set(host, [cell])
+        layout.place(host, cell)
       }
     }
   }
 }
 
-function placeCell(link: HTMLAnchorElement, cell: HTMLElement) {
-  const metadata = link.closest('li')?.querySelector(METADATA)
-  if (metadata) metadata.append(cell)
-  else link.after(cell)
-}
-
-function buttonCell(ref: string): { cell: HTMLElement; button: HTMLButtonElement } {
+function buttonCell({ ref, layout }: Slot): { cell: HTMLElement; button: HTMLButtonElement } {
   const cell = document.createElement('span')
-  cell.style.cssText = 'display:inline-flex;align-items:center;margin-left:8px'
+  cell.style.cssText = `display:inline-flex;align-items:center;${layout.margin}:8px`
   const button = document.createElement('button')
   button.type = 'button'
-  button.className = 'btn btn-sm btn-primary'
+  button.className = layout.buttonClass
   button.dataset.monicaRunButton = ref
   cell.append(button)
   return { cell, button }
 }
 
-function disabledRunButtonFor(ref: string, reason: string): HTMLElement {
-  const { cell, button } = buttonCell(ref)
+function disabledRunButtonFor(slot: Slot, reason: string): HTMLElement {
+  const { cell, button } = buttonCell(slot)
   button.textContent = LABELS.new
   // disabled の button は focus できず、理由がキーボードと支援技術に届かない。
   button.setAttribute('aria-disabled', 'true')
@@ -189,24 +226,28 @@ function tooltipFor(button: HTMLButtonElement, text: string): HTMLElement {
   return tooltip
 }
 
-function redecide(link: HTMLAnchorElement) {
-  for (const element of buttons.get(link) ?? []) element.remove()
-  delete link.dataset.monicaRef
+// Issue の画面では隠れた側の container にも同じ ref のボタンがあるので、ref の付いた要素をすべて決め直す。
+function redecide(ref: string) {
+  for (const { host } of slotsOnPage()) {
+    if (host.dataset.monicaRef !== ref) continue
+    for (const element of buttons.get(host) ?? []) element.remove()
+    delete host.dataset.monicaRef
+  }
   scheduleScan()
 }
 
 function runButtonFor(
-  link: HTMLAnchorElement,
-  ref: string,
+  slot: Slot,
   run: RunButton['run'],
 ): { cell: HTMLElement; refusal: HTMLElement } {
-  const { cell, button } = buttonCell(ref)
+  const { ref, layout } = slot
+  const { cell, button } = buttonCell(slot)
   button.textContent = LABELS[run]
   button.disabled = run === 'running'
   const refusal = document.createElement('span')
-  refusal.style.cssText = 'color:var(--fgColor-danger, #d1242f);font-size:12px;margin-left:8px'
+  refusal.style.cssText = `align-self:center;color:var(--fgColor-danger, #d1242f);font-size:12px;${layout.margin}:8px`
   button.addEventListener('click', async (event) => {
-    // 行は Issue への link なので、押しても画面を移らせない。
+    // 一覧の行は Issue への link なので、押しても画面を移らせない。
     event.preventDefault()
     event.stopPropagation()
     // GitHub のページの script が .click() で押した run は通さない。
@@ -217,7 +258,7 @@ function runButtonFor(
     refusal.textContent = ''
     const reply = await send<PressReply>({ type: press.type, ref })
     if (reply?.accepted) {
-      if (press === REOPEN) redecide(link)
+      if (press === REOPEN) redecide(ref)
       return
     }
     button.disabled = false

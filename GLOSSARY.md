@@ -175,7 +175,7 @@ _Avoid_: 会話（単独では Agent Session の会話と紛れる）, session, 
 _Avoid_: ページの情報, page context, capture（スクリーンショットの撮影と紛れる）
 
 **Run Button**:
-Chrome Extension が GitHub の Issues の一覧の行に差し込む、その Issue の Task の Run を起こすボタン。Task が closed なら、Run の代わりに Task を reopen する。出すか、どの prompt で起こすか、押せない理由は、Backend が GitHub の今の Issue と Task Ledger から決める。状態は、新しい Run を起こす（`Run`）、終了した Run を resume する（`Resume`）、live な Run があり押せない（`Running`）、closed な Task を reopen するだけで Run は起こさない（`Reopen`）、規則が断り押せない（closed な Issue や open な Blocker などの理由を tooltip に出す）のどれか。closed な Issue と open な Blocker が止めるのは新しい Run だけで、live な Run や終了した Run があれば `Running` か `Resume` になる。押した時に Backend の決める状態が、画面に出ていた状態と違えば、何もせずに今の状態に描き直す。GitHub から読めなかった Issue には出さない。
+Chrome Extension が GitHub の Issues の一覧の行と Issue の画面の header に差し込む、その Issue の Task の Run を起こすボタン。Task が closed なら、Run の代わりに Task を reopen する。出すか、どの prompt で起こすか、押せない理由は、Backend が GitHub の今の Issue と Task Ledger から決める。状態は、新しい Run を起こす（`Run`）、終了した Run を resume する（`Resume`）、live な Run があり押せない（`Running`）、closed な Task を reopen するだけで Run は起こさない（`Reopen`）、規則が断り押せない（closed な Issue や open な Blocker などの理由を tooltip に出す）のどれか。closed な Issue と open な Blocker が止めるのは新しい Run だけで、live な Run や終了した Run があれば `Running` か `Resume` になる。押した時に Backend の決める状態が、画面に出ていた状態と違えば、何もせずに今の状態に描き直す。GitHub から読めなかった Issue には出さない。
 _Avoid_: Run（単独ではボタンを指さない）, 押せない Run（押せない状態の Run Button）
 
 ### Process

@@ -4,7 +4,7 @@ import { attach, connectCdp, evaluate } from './cdp'
 
 type TargetInfo = { targetId: string; type: string; url: string }
 
-const CONTENT_SCRIPT = resolve(import.meta.dir, '../apps/extension/src/issues-list.ts')
+const CONTENT_SCRIPT = resolve(import.meta.dir, '../apps/extension/src/issues-page.ts')
 
 // service worker と Backend の代わりに、どの ref にもボタンを出さず reason を返す。
 function fakeRuntime(reason: string): string {
