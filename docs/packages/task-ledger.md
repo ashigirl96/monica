@@ -107,7 +107,7 @@ createTaskLedger(deps: {
 
 ## Run ボタン
 
-Chrome Extension が GitHub の Issues の一覧に差し込む Run ボタンを決め、押されたら run する（ADR-0035）。どちらも prompt を受け取らず、Backend が Issue から prompt を決める。Reopen のボタンには `reopenFromButton` を呼ぶ。Backend は Chrome Extension の token でこの 3 つだけを通す（`docs/packages/backend.md` の「token の口の 2 つの token」）。CLI には出さない。
+Chrome Extension が GitHub の Issues の一覧と Issue の画面に差し込む Run ボタンを決め、押されたら run する（ADR-0035）。どちらも prompt を受け取らず、Backend が Issue から prompt を決める。Reopen のボタンには `reopenFromButton` を呼ぶ。Backend は Chrome Extension の token でこの 3 つだけを通す（`docs/packages/backend.md` の「token の口の 2 つの token」）。CLI には出さない。
 
 ボタンが押されて動く procedure は、汎用の procedure（`run`・`reopen`）を Chrome Extension に直接通さず、`*FromButton` に包む。包んだ procedure は 3 つのことを守る。押した時に GitHub から Issue を引き直して `runButtons` と同じ規則で判定をやり直す。Task は頼まれた ref でなく node ID で引き当てる（`run` には `nodeId` を、`reopen` には写しの ref を渡す）。汎用の procedure が中で sync するなら、その transaction の中で判定に使った状態を見直す（`recheck`）。表示から押すまでと、判定から書くまでの間に、Issue が closed になる・repo が改名される・spec の Run が起動するため。
 
