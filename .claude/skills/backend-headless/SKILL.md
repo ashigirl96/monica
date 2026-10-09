@@ -21,6 +21,7 @@ Backend を本物の ptyd に繋いで起こす。Shell の役（親として生
    - stdin は無名 pipe にする。Bun は fifo の EOF を拾わないので、fifo では stdin の EOF で抜ける振る舞いを確かめられない。
    - `.app` でだけ起きること（gh や ghq が見つからないなど）を確かめるときは、`env -i HOME=$HOME USER=$USER SHELL=/bin/zsh LANG=$LANG TMPDIR=$TMPDIR PATH=/usr/bin:/bin:/usr/sbin:/sbin` を前に付け、bun を絶対 path（`~/.bun/bin/bun`）で起こす。PATH が launchd の渡すものと同じになり、Backend が login shell から取った PATH が効いているかを見られる。
    - release の build の Backend（同梱した SPA や migrations）を確かめるときは、`bun run build` の後に `target/release/bundle/macos/Monica.app/Contents/MacOS/` の `monica-backend` を bun の代わりに起こし、同じ directory の `monica-ptyd` を `MONICA_PTYD_PATH` に渡す。`.app` そのものは起こさない。identifier が release と同じなので、single-instance が手元の release の窓に回すか、release が居なければ `~/.monica` で Backend を起こす。
+     - Chat も確かめるなら `MONICA_CLAUDE_PATH` に claude の場所を渡す。build した `.app` には claude が無い（`install-app` が写す）ので、`bun run install-app --stage <dir>` で置いた `<dir>/Monica.app` の `Contents/MacOS` の `monica-backend`・`monica-ptyd`・`claude` を使う（`release-notifications` skill の「Chat の claude と Chrome Extension」）。compile した Backend は node_modules の claude を解けないので、渡さないと Chat は答えられない。
    - monica の Tab・Claude Code の中（`env | grep -E '^(MONICA_|CLAUDECODE)'` が出る）から起こすときは、`env -i HOME="$HOME" USER="$USER" SHELL=/bin/zsh TERM=xterm-256color LANG="$LANG" TMPDIR="$TMPDIR" PATH="$(printf %s "$PATH" | tr : '\n' | grep -v -E '\.monica' | paste -sd: -)"` を前に付ける。PATH は `Application Support` のように空白を含む dir を持つことがあるので、引用を外すと `env` が残りを command と読んで落ちる。ptyd は Backend の env から `MONICA_*` と Claude Code の env を落として tab に渡す。ユーザーの Job は Backend の env をそのまま受けるので、外側の `MONICA_TERMINAL_SESSION_ID` や `CLAUDECODE` も Job に届く。
 
 4. tab の claude の hook を確かめるなら、起動した後に `ln -s $PWD/scripts/monica-dev ${TMPDIR%/}/monica-s2/bin/monica` を張る。hook の settings の command はこの path を指し、desktop では Shell が張る。
@@ -117,19 +118,19 @@ Backend を本物の ptyd に繋いで起こす。Shell の役（親として生
 
 ## notes の画面をブラウザで確かめる
 
-画面は `apps/web` の Vite が配り、`/rpc` と `/api/assets` を同じ home の Backend の notes の口へ proxy する。`bun run` の Backend の notes の口は SPA を配らないので、開くのは Vite の URL。
+画面は `apps/web` の Vite が配り、`/rpc` と `/api/assets` を同じ home の Backend のブラウザの口へ proxy する。`bun run` の Backend のブラウザの口は SPA を配らないので、開くのは Vite の URL。
 
-1. home を作ってから、notes の口と Vite の port を引く。`devInstance` は home の realpath から port を決めるので、home が無いうちに引くと `$TMPDIR` の `/var` と `/private/var` の違いで Vite と別の port になる。
+1. home を作ってから、ブラウザの口と Vite の port を引く。`devInstance` は home の realpath から port を決めるので、home が無いうちに引くと `$TMPDIR` の `/var` と `/private/var` の違いで Vite と別の port になる。
 
    ```bash
    mkdir -p ${TMPDIR%/}/monica-s2
    MONICA_HOME=${TMPDIR%/}/monica-s2 bun -e '
    const { devInstance } = await import(`${process.cwd()}/scripts/dev-instance.ts`);
-   const { notesPort, webPort } = devInstance(process.env.MONICA_HOME);
-   console.log(notesPort, webPort);'
+   const { browserPort, webPort } = devInstance(process.env.MONICA_HOME);
+   console.log(browserPort, webPort);'
    ```
 
-2. 「起こす」の 3 の command に `MONICA_NOTES_PORT=<notes の port>` を足して Backend を起こす。port が埋まっていると、`err.log` に `[backend] not serving notes on port …` が出て、口なしで起きる。
+2. 「起こす」の 3 の command に `MONICA_BROWSER_PORT=<ブラウザの口の port>` を足して Backend を起こす。port が埋まっていると、`err.log` に `[backend] no browser listener on port …` が出て、口なしで起きる。
 3. Bash の `run_in_background` で Vite を起こす。`web.log` に `Local:   http://localhost:<Vite の port>/` が出たら開ける。
 
    ```bash
@@ -147,11 +148,11 @@ Backend を本物の ptyd に繋いで起こす。Shell の役（親として生
 
    Backend に届かないときは、Vite が proxy の接続を応答なしで切り（release の口と同じく、画面には network error に見える）、`web.log` に `http proxy error` が出る。
 
-5. 確かめる Note は、notes の口に RPCLink を向けた script で入れる。router は `{ note }` の下にあり、GET 以外の request には `Sec-Fetch-Site: same-origin` が要る。script を `packages/note/` の下に置くと `@orpc/*` と `./src/contract.ts` を解決できるので、終わったら消す。
+5. 確かめる Note は、ブラウザの口に RPCLink を向けた script で入れる。router は `{ note }` の下にあり、GET 以外の request には `Sec-Fetch-Site: same-origin` か、`Sec-Fetch-Site: none` と `Sec-Fetch-Mode: cors` の組（Chrome Extension の fetch が付けるもの）が要る。script を `packages/note/` の下に置くと `@orpc/*` と `./src/contract.ts` を解決できるので、終わったら消す。
 
    ```ts
    const root: ContractRouterClient<{ note: typeof contract }> = createORPCClient(
-     new RPCLink({ url: `http://localhost:${notesPort}/rpc`, headers: { 'sec-fetch-site': 'same-origin' } }),
+     new RPCLink({ url: `http://localhost:${browserPort}/rpc`, headers: { 'sec-fetch-site': 'same-origin' } }),
    )
    const daily = await root.note.daily.open({ date: '2026-10-06' })
    ```

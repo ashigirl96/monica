@@ -1,4 +1,4 @@
-// notes の口は 127.0.0.1 と ::1 の同じ port で bind するので、port 0 は使えず、両方で空いている port を選ぶ。
+// ブラウザの口は 127.0.0.1 と ::1 の同じ port で bind するので、port 0 は使えず、両方で空いている port を選ぶ。
 export function freePort(): number {
   for (;;) {
     const v6 = Bun.serve({ hostname: '::1', port: 0, fetch: () => new Response() })

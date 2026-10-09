@@ -224,8 +224,11 @@ fn command(home: &Path) -> Command {
         .stderr(Stdio::inherit())
         // 端末の Ctrl-C を Backend が直接受けて backend.json を残したまま死なないよう、Shell の死は stdin の EOF で知らせる。
         .process_group(0);
-    if let Some(port) = locations::notes_port() {
-        command.env("MONICA_NOTES_PORT", port);
+    if let Some(port) = locations::browser_port() {
+        command.env("MONICA_BROWSER_PORT", port);
+    }
+    if let Some(claude) = locations::claude() {
+        command.env("MONICA_CLAUDE_PATH", claude);
     }
     command
 }

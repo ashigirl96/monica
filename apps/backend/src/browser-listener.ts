@@ -9,14 +9,14 @@ import { type Context, Hono } from 'hono'
 
 const IMMUTABLE = 'public, max-age=31536000, immutable'
 
-type NoteContext = InferRouterInitialContext<typeof noteRouter>
+type BrowserContext = InferRouterInitialContext<typeof noteRouter>
 
 type Deps = {
-  context: NoteContext
+  context: BrowserContext
   webDist: string
 }
 
-export function listenNotes(
+export function listenBrowser(
   port: string | undefined,
   { context, webDist }: Deps,
 ): { stop(): void } | null {
@@ -24,15 +24,13 @@ export function listenNotes(
   // DNS rebinding で別の名前から届いた request を止める。
   const hosts = new Set(NOTES_HOSTNAMES.map((name) => `${name}:${port}`))
   // openTab の input は shell に打鍵されるので、token の無い口に workbench・task・job を載せると任意のコマンドになる（ADR-0017）。
-  const handler = new RPCHandler(os.$context<NoteContext>().router({ note: noteRouter }))
+  // chat は Current Page を送るので、port を先に握った別の process に渡さないよう token の口に載せる（ADR-0034）。
+  const handler = new RPCHandler(os.$context<BrowserContext>().router({ note: noteRouter }))
 
   const app = new Hono()
   app.use('*', async (c, next) => {
     if (!hosts.has(c.req.header('host') ?? '')) return c.text('Forbidden', 403)
-    // token の代わりに CSRF を止め、port を見ない same-site は localhost の別の app からも付くので通さない。
-    if (c.req.method !== 'GET' && c.req.header('sec-fetch-site') !== 'same-origin') {
-      return c.text('Forbidden', 403)
-    }
+    if (c.req.method !== 'GET' && !fromSameOriginOrExtension(c)) return c.text('Forbidden', 403)
     return next()
   })
   app.use('/rpc/*', async (c) => {
@@ -48,11 +46,18 @@ export function listenNotes(
   const servers: Bun.Server<undefined>[] = []
   try {
     for (const hostname of ['127.0.0.1', '::1']) {
-      servers.push(Bun.serve({ hostname, port: Number(port), idleTimeout: 0, fetch: app.fetch }))
+      servers.push(
+        Bun.serve({
+          hostname,
+          port: Number(port),
+          idleTimeout: 0,
+          fetch: app.fetch,
+        }),
+      )
     }
   } catch (error) {
     for (const server of servers) void server.stop(true)
-    console.error(`[backend] not serving notes on port ${port}: ${(error as Error).message}`)
+    console.error(`[backend] no browser listener on port ${port}: ${(error as Error).message}`)
     return null
   }
   return {
@@ -60,6 +65,13 @@ export function listenNotes(
       for (const server of servers) void server.stop(true)
     },
   }
+}
+
+// token の代わりに CSRF を止める。port を見ない same-site は localhost の別の app からも付き、
+// none は user の navigation にも付くので、Chrome Extension の fetch が作る cors との組だけを通す（ADR-0028）。
+function fromSameOriginOrExtension(c: Context): boolean {
+  const site = c.req.header('sec-fetch-site')
+  return site === 'same-origin' || (site === 'none' && c.req.header('sec-fetch-mode') === 'cors')
 }
 
 // 配るのは build の出力に在る file だけなので、path を file system の path として解かない。

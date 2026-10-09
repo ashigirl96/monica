@@ -6,6 +6,8 @@ status: accepted
 
 ブラウザ拡張（`apps/extension`、map #254）の side panel のチャットは Backend を呼ぶ。拡張は `backend.json` を読めないので、ADR-0007 の token の口はそのままでは使えない。そこで ADR-0017 の notes の口を拡張にも開き、GET 以外の request で `Sec-Fetch-Site: same-origin`（apps/web）に加えて、`Sec-Fetch-Site: none` と `Sec-Fetch-Mode: cors` の組（拡張）を通す。拡張が host_permissions に書いた loopback の host へ送る request は、side panel・拡張の page・service worker のどれからでもこの組になり、web ページの fetch はこの組を作れない（#259）。守らないのは、loopback か `<all_urls>` の host permission を持つ他の拡張と、同じ Mac の他のユーザーと process（ADR-0017）。他の拡張は `none` を作れ、Origin も偽れる見込みだが、その拡張はログインしたままの claude.ai や GitHub のページをすでに読めるので、チャットと note を呼べるようになっても失うものは小さい。ADR-0017 の「token の無い口に、shell や command に届く procedure を載せない」は変えない。workbench・task・job は載せず、チャットの agent に持たせる tool も、token の無い口から起こしてよいものに限る。notes の口にはチャットの router も載るので、呼び名を「ブラウザの口」に改める。
 
+チャットがブラウザの口を token 無しで呼ぶ決定は ADR-0034 が置き換えた。release の 19380 を別の process が先に握ると、Current Page をその process に送ってしまうため。チャットは Native Messaging の host から受け取った chat だけの token で token の口を呼び、ブラウザの口から chat の router を降ろした。ブラウザの口の `none` と `cors` の組の照合は note のために残る。
+
 ## Considered Options
 
 - **Native Messaging で token を渡す**: 拡張が native host（CLI の binary を `chrome-extension://` の引数で起こしたもの）から `backend.json` の port と token を受け取り、token の口を bearer で呼ぶ。ブラウザが host manifest の `allowed_origins` で monica の拡張の ID だけに host を許すので、他の拡張は token を得られず、workbench・task・job も呼べる。代わりに host manifest を `~/Library/Application Support/Google/Chrome/NativeMessagingHosts/` に置く手順（Brave はここしか読まない）、dev の home ごとの host 名とそれを焼いた dev の拡張、Backend の再起動で token が変わったときの問い合わせ直しが要る。増える守りは他の拡張に対してだけで、その相手はすでにページを読める。この形はブラウザの口と両立するので、拡張から Run を起こしたくなったときに足す。
