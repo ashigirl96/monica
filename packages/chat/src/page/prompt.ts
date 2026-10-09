@@ -4,6 +4,8 @@ import { cut, MAX_PAGE_CHARS } from './snapshot.ts'
 
 // API は document の title を 1〜500 字、context を 1 字以上とする。
 const MAX_TITLE_CHARS = 500
+// ページは pushState と document.title で URL と title を好きな長さにできる。
+const MAX_URL_CHARS = 2_000
 const PAGE_LIMIT = `${MAX_PAGE_CHARS.toLocaleString('en')} characters`
 
 function document(
@@ -14,7 +16,7 @@ function document(
   return {
     type: 'document',
     source: { type: 'text', media_type: 'text/plain', data: text },
-    ...(title && { title: cut(title, MAX_TITLE_CHARS).text }),
+    ...(title && { title }),
     context: [
       `URL: ${url ?? 'unknown'}`,
       // PDF の本文は見出しや段落の構造を持たない。
@@ -127,10 +129,21 @@ const answerBlock = (n: number, answer: string): Block => ({
   text: `Your answer to question ${n}:\n<answer>\n${answer}\n</answer>`,
 })
 
-/** 1 回に送る前の問答・前のページ・今の Page Snapshot の字の和の上限。URL・title・見出しの文は数えない。 */
+/** 1 回に送る前の問答・前のページ・今の Page Snapshot の字の和の上限。見出しの決まった文は数えない。 */
 export const MAX_ASK_CHARS = 200_000
 /** スクリーンショット 1 枚を数える字数。CSS px の 1280×800 の JPEG が約 1,300 token になる。 */
 const SCREENSHOT_CHARS = 1_500
+
+const bounded = (page: PageSnapshot): PageSnapshot => ({
+  ...page,
+  ...(page.url !== undefined && { url: cut(page.url, MAX_URL_CHARS).text }),
+  ...(page.title !== undefined && { title: cut(page.title, MAX_TITLE_CHARS).text }),
+})
+
+// ページを落としても見出しに残るので、turn の問答の側に数える。
+const addressChars = ({ url, title }: PageSnapshot) => (url?.length ?? 0) + (title?.length ?? 0)
+
+const words = (turn: Turn) => turn.question.length + turn.answer.length + addressChars(turn.page)
 
 function pageChars({ content, selection, screenshot }: PageSnapshot): number {
   return (
@@ -146,11 +159,9 @@ function leaveOut(question: string, page: PageSnapshot, history: readonly Turn[]
   const kept = page.content?.kind === 'same' ? page.content.turn : undefined
   let total =
     question.length +
+    addressChars(page) +
     pageChars(page) +
-    history.reduce(
-      (sum, turn) => sum + turn.question.length + turn.answer.length + pageChars(turn.page),
-      0,
-    )
+    history.reduce((sum, turn) => sum + words(turn) + pageChars(turn.page), 0)
   const pages = new Set<number>()
   const turns = new Set<number>()
   history.forEach((turn, i) => {
@@ -164,7 +175,7 @@ function leaveOut(question: string, page: PageSnapshot, history: readonly Turn[]
     turns.add(i)
     // 問答ごと落とした turn のページは、問答の数に含めて 2 度数えない。
     pages.delete(i)
-    total -= turn.question.length + turn.answer.length
+    total -= words(turn)
   })
   return { pages, turns }
 }
@@ -175,9 +186,11 @@ function leaveOut(question: string, page: PageSnapshot, history: readonly Turn[]
  */
 export function askContent(
   question: string,
-  page: PageSnapshot,
-  history: readonly Turn[],
+  current: PageSnapshot,
+  sent: readonly Turn[],
 ): { content: Block[]; omitted: { pages: number; turns: number } } {
+  const page = bounded(current)
+  const history = sent.map((turn) => ({ ...turn, page: bounded(turn.page) }))
   const { pages, turns } = leaveOut(question, page, history)
   const opening: Block[] =
     turns.size > 0

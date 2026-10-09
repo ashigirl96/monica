@@ -125,6 +125,7 @@ export function createChatAgent(
   const readers = defaultReaders(deps)
   // 答えを閉じてから claude が抜けるまでもメモリを食うので、spawn した child の exit で外す。
   const claudes = new Set<Claude>()
+  let reading = 0
   // SIGKILL した claude について SDK が投げる error は、claude が自分で落ちたときと同じ文なので、止めたことを覚えておく。
   const killed = new WeakSet<Claude>()
   let spare: Spare | undefined
@@ -291,8 +292,11 @@ export function createChatAgent(
   internalsOf.set(chatAgent, {
     prepare,
     async ask({ question, page, history }, signal) {
+      // 変換の Worker は最長 30 秒 CPU と memory を使うので、claude と同じく同時の数を抑える。
+      if (reading >= MAX_CLAUDES) return undefined
+      reading++
       // 本文への変換は数百 ms で、spare から答えれば claude を並べて起こす得は小さいので、変換を先に済ませる。
-      const snapshot = await snapshotOf(page, history, { readers, signal })
+      const snapshot = await snapshotOf(page, history, { readers, signal }).finally(() => reading--)
       const { content, omitted } = askContent(question, snapshot, history)
       // contract の snapshot の page は screenshot を持たないので、oRPC の output の検証が落とす。
       const event: SnapshotEvent = { type: 'snapshot', page: snapshot, omitted }

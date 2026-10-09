@@ -486,6 +486,24 @@ test('a fifth question while four claudes answer is refused as CHAT_BUSY without
   expect(claudes().toSorted((a, b) => a - b)).toEqual(held.toSorted((a, b) => a - b))
 })
 
+test('a fifth question while four pages are being turned into text is refused as CHAT_BUSY without reading its page', async () => {
+  const { client, claudes } = startChat(undefined, {
+    htmlWorker: new URL('./page/fixtures/silent-worker.ts', import.meta.url),
+  })
+  const controller = new AbortController()
+  const reading = Array.from({ length: 4 }, () =>
+    client.ask(QUESTION, { signal: controller.signal }).catch(() => {}),
+  )
+  await Bun.sleep(100)
+
+  const busy = client.ask(QUESTION)
+
+  await expect(busy).rejects.toMatchObject({ code: 'CHAT_BUSY', status: 429 })
+  expect(claudes()).toEqual([])
+  controller.abort()
+  await Promise.all(reading)
+})
+
 const spares = (records: ClaudeRecord[]) => {
   const answering = new Set(answeringPids(records))
   return records

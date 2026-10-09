@@ -14,7 +14,7 @@ ask       { question, page: Page, history: { question, answer, page: PageSnapsho
 - 答えの間に `{ type: 'retry', attempt }`（API の再試行）と `{ type: 'usage', utilization, rateLimitType, resetsAt? }`（plan の使用量の警告）も流す。下の「失敗」にある。
 - `question` は 1 字以上。`page` と `PageSnapshot` の `url` と `title` は省略できるただの文字列で、形を検めない。`chrome://` などの Browser Tab では side panel から見えず、`file://` のページもあるため。
 - `history` は Chat の前の問答を古い順に並べたもの。turn ごとに、その質問の `snapshot` で返した `PageSnapshot` を持つ。Backend は Chat を持たず、送られた履歴をそのまま prompt にする（ADR-0031）。
-- `.errors()` で宣言するのは `CHAT_BUSY`・`NOT_AUTHENTICATED`・`USAGE_LIMIT`・`AGENT_FAILED`。`CHAT_BUSY`（status 429）は、claude を 4 つ持っているときの `ask` に、iterator を返す前に投げる。ほかの 3 つは下の「失敗」にある。
+- `.errors()` で宣言するのは `CHAT_BUSY`・`NOT_AUTHENTICATED`・`USAGE_LIMIT`・`AGENT_FAILED`。`CHAT_BUSY`（status 429）は、claude を 4 つ持っているときと、本文にしているページが 4 つあるときの `ask` に、iterator を返す前に投げる。本文にする Worker は 1 つ最長 30 秒 CPU と memory を使うため。ほかの 3 つは下の「失敗」にある。
 - `MAX_ASK_BODY_BYTES`（50MB）は、token の口が受ける body の上限。token の口の `Bun.serve` に `maxRequestBodySize` で渡し、超えた body には 413 が返る（`docs/packages/backend.md` の「token の口の 2 つの token」）。side panel は送る前に大きさを見て、超える分を「読めなかった」にするので、413 は side panel からは届かない。
 - PDF の bytes は `page.content` の `pdf`（`z.file()`）に入れる。RPCLink は input のどこにある `Blob` も multipart の別の part で送るので、base64 で膨らませない（note の画像の upload と同じ形）。
 - router は CLI に出さず、token の口に `{ workbench, task, job, chat }` で載せる。Chrome Extension は Native Messaging の host から受け取った chat の token で呼び、その token は chat の procedure だけを開く（下の「Backend の探し方」、ADR-0034）。ブラウザの口には載せない。change stream は持たない（ADR-0031）。
@@ -197,7 +197,7 @@ snapshot      { type: 'snapshot', page: PageSnapshot から screenshot を除い
 
 ### 全体の上限
 
-- 前の問答、前のページの本文と選択範囲とスクリーンショット、今の質問と Page Snapshot の字の和を 20 万字（`MAX_ASK_CHARS`）に収める。スクリーンショットは 1 枚を 1,500 字と数える。URL、title、Backend が足す見出しの文は数えない。
+- 前の問答、前のページの本文と選択範囲とスクリーンショット、今の質問と Page Snapshot の字の和を 20 万字（`MAX_ASK_CHARS`）に収める。スクリーンショットは 1 枚を 1,500 字と数える。URL と title は、ページが `pushState` と `document.title` で好きな長さにできるので、2,000 字と 500 字で切り詰めて数える。ページを落としても見出しに残るので、turn の問答の側に数える。Backend が足す見出しの決まった文は数えない。
 - 超えたら、古い turn のページ（本文と選択範囲とスクリーンショット）から 1 つずつ落とす。1 ページを `document` と `image` の組で渡す形を崩さないよう、同じ質問のページの本文とスクリーンショットはまとめて落とす。それでも超えたら、古い turn の問答を 1 つずつ落とす。落としたスクリーンショットは `omitted.pages` に数え、別の知らせは足さない。
 - 今の質問と Page Snapshot は落とさない。Current Page の Page Snapshot が `same` で指す turn も、ページと問答のどちらも落とさない。Current Page の本文がそこにしか無いため。今の分だけで 20 万字を超えても、そのまま送る。
 

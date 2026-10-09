@@ -131,15 +131,15 @@ test('over 200,000 characters, the pages of the oldest turns go first, and their
   expect(texts(content)[0]).toContain('Question text 1?')
 })
 
-// 質問 2 字、前の turn の質問 16 字と答え 9 字、前のページ 100,000 字と Current Page の n 字に、スクリーンショットが 2 枚。
+// 質問 2 字、前の turn の質問 16 字と答え 9 字、前のページ 100,000 字と Current Page の n 字、2 つのページの URL 32 字と title 10 字に、スクリーンショットが 2 枚。
 const omittedWithTwoScreenshots = (n: number) =>
   askContent('Q?', page(chars(n, 'c'), { screenshot: SHOT }), [
     turn(1, page(chars(100_000, 'a'), { screenshot: 'b25l' })),
   ]).omitted
 
 test('a screenshot counts as 1,500 characters', () => {
-  expect(omittedWithTwoScreenshots(96_973)).toEqual({ pages: 0, turns: 0 })
-  expect(omittedWithTwoScreenshots(96_974)).toEqual({ pages: 1, turns: 0 })
+  expect(omittedWithTwoScreenshots(96_889)).toEqual({ pages: 0, turns: 0 })
+  expect(omittedWithTwoScreenshots(96_890)).toEqual({ pages: 1, turns: 0 })
 })
 
 test('leaving out an earlier page leaves out its text and screenshot together, and its heading says so', () => {
@@ -211,6 +211,30 @@ test('the turn that the current page is the same as keeps its question and answe
   expect(dataOf(content)).toEqual(['a'])
   expect(all).toContain('Question text 1?')
   expect(all).not.toContain('Question text 2?')
+})
+
+// URL と title はページが pushState や document.title で好きな長さにできる。
+test('a URL goes cut to its first 2,000 characters and a title to its first 500, in the heading and the document', () => {
+  const url = `https://coast.example/${chars(10_000, 'u')}`
+  const long = page('Text.', { url, title: chars(10_000, 't') })
+
+  const { content } = askContent('Q?', long, [])
+
+  const [document] = documents(content)
+  const heading = texts(content).at(-1)!
+  expect(document).toMatchObject({ context: `URL: ${url.slice(0, 2_000)}` })
+  expect(heading).toContain(`URL: ${url.slice(0, 2_000)}\n`)
+  expect(heading).toContain(`Title: ${chars(500, 't')}\n`)
+})
+
+test('the URLs and titles of earlier turns count toward 200,000 characters', () => {
+  const history = Array.from({ length: 100 }, (_, i) =>
+    turn(i + 1, page('', { url: chars(5_000, 'u'), title: chars(5_000, 't') })),
+  )
+
+  const { omitted } = askContent('Q?', page('Text.'), history)
+
+  expect(omitted.turns).toBeGreaterThan(0)
 })
 
 test('the current question and page go whole even when they alone pass 200,000 characters', () => {
