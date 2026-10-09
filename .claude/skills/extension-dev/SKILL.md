@@ -34,7 +34,7 @@ MONICA_HOME=${TMPDIR%/}/monica-<名前> bun scripts/extension-panel.ts requests 
 - `eval '<js>'`: side panel で式を評価し、値を JSON で出す。user gesture 付きで評価し、Promise は待つ。例外は stderr に出して exit 1 する。worktree に隔離した agent では、worktree の guard が `eval` の語を見て command ごと止める。止められたら言い換えずに、確かめられなかったと報告する。
 - `screenshot <path>`: side panel を png で撮る。Read で見る。
 - `close`: 開いている side panel を、action を押して閉じる。× と同じく side panel の view を捨てる経路で、閉じたときの abort を確かめるのに使う。`open` と同じく最初の Browser Tab で押すので、window が 1 つのときに使う。
-- `requests <path>`: side panel の CDP の Network を有効にし、URL に path を含む request の url・method・body を 1 行の JSON で出す。side panel が閉じるか SIGINT・SIGTERM を受けるまで動くので、Bash の `run_in_background` で起こしてから side panel を操作する。有効にする前の request（開いた時の `chat.prepare`）は拾わない。
+- `requests <path>`: side panel の CDP の Network を有効にし、URL に path を含む request の url・method・body を 1 行の JSON で出す。side panel が閉じるか、Brave が止まって CDP の接続が切れる（`dev:kill` を含む）か、SIGINT・SIGTERM を受けるまで動くので、Bash の `run_in_background` で起こしてから side panel を操作する。有効にする前の request（開いた時の `chat.prepare`）は拾わない。
 - `apps/extension/src/sidepanel/` の編集は、開いたままの side panel に HMR で届く。`src/background.ts` を編集すると、CRXJS が Chrome Extension を reload する。reload の後に side panel を見るときは、もう一度 `open` を打つ。
 - `packages/chat/src/ui` の effect が張った listener（Current Page の追跡）は、HMR の後も前の module のまま残る。編集の後は `close` と `open` で side panel を開き直す。
 
@@ -60,7 +60,7 @@ Browser Tab は agent-browser（下の節）で動かし、side panel の見出�
 
 - headed の窓を撮るときは、上の command に `--headed` を足して Brave を起こし（`bun run extension` の headed の Brave には CDP の port が無い）、`MONICA_HOME=<home> bun scripts/extension-panel.ts open` で side panel を開く。窓は desktop-dev skill の「窓の枠」と同じく、Brave の main process の pid の窓の CGWindowID を取って `screencapture -x -o -l<id>` で撮る。main process は `pgrep -f "^/Applications/Brave Browser.app/Contents/MacOS/Brave Browser .*<home>/dev-brave"` で引く。
 
-`Extensions.triggerAction` が使えないときは、拡張の page を Browser Tab で開き、そこから `chrome.sidePanel.open` を user gesture 付きで呼ぶ。Current Page が拡張の page に変わるので、Current Page を見る確かめには `open` を使う。dev の ID は `docs/packages/extension.md` にある。
+`Extensions.triggerAction` が使えないときは、Chrome Extension の page を Browser Tab で開き、そこから `chrome.sidePanel.open` を user gesture 付きで呼ぶ。Current Page が Chrome Extension の page に変わるので、Current Page を見る確かめには `open` を使う。dev の ID は `docs/packages/extension.md` にある。
 
 ```bash
 MONICA_HOME=${TMPDIR%/}/monica-<名前> bun -e '
@@ -76,7 +76,7 @@ cdp.close();'
 ### agent-browser
 
 - `--session <固有の名前> --cdp <port>` で、同じ Brave の Web ページを操作できる。port は `head -1 $MONICA_HOME/dev-brave/DevToolsActivePort`。
-- `tab list` には、自分で開いていない拡張の page と side panel が出ない。side panel は `extension-panel.ts` で見る。
+- `tab list` には、自分で開いていない Chrome Extension の page と side panel が出ない。side panel は `extension-panel.ts` で見る。
 - `eval` には user gesture が付かないので、`sidePanel.open()` が拒まれる。
 - `close` は Brave を止めない。止めるのは下の `dev:kill`。
 

@@ -3,7 +3,7 @@ import { mkdirSync, mkdtempSync, rmSync, symlinkSync } from 'node:fs'
 import { homedir, tmpdir } from 'node:os'
 import { join } from 'node:path'
 
-import { devInstance, isReleaseHome } from './dev-instance'
+import { devHome, devInstance, isReleaseHome } from './dev-instance'
 
 const scratch = mkdtempSync(join(tmpdir(), 'dev-instance-'))
 afterAll(() => rmSync(scratch, { recursive: true, force: true }))
@@ -59,4 +59,9 @@ test('basename が同じでも場所が違う home は別の identifier にな�
 test('release の ~/.monica だけを release の home とし、名前が前方一致する dev の home は含めない', () => {
   expect(isReleaseHome(join(homedir(), '.monica'))).toBe(true)
   expect(isReleaseHome(join(homedir(), '.monica-dev'))).toBe(false)
+})
+
+test('dev の Vite は release の home を断り、home が無ければ ~/.monica-dev を使う', () => {
+  expect(() => devHome(join(homedir(), '.monica'))).toThrow('release の home')
+  expect(devHome('')).toBe(join(homedir(), '.monica-dev'))
 })

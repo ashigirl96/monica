@@ -31,11 +31,14 @@ function install() {
 
 const tabOf = (id: number) => fake.tabs.find((tab) => tab.id === id) as chrome.tabs.Tab
 
+const read = (id: number, signal = new AbortController().signal) =>
+  readPage(tabOf(id), { maxPdfBytes: LIMIT, signal })
+
 test('the page is read by a script in the top frame of the Browser Tab only, injected without waiting for the page to load', async () => {
   install()
   fake.readings.set(10, { html: '<body>Tide</body>', selection: '' })
 
-  await readPage(tabOf(10), LIMIT)
+  await read(10)
 
   expect(fake.injections).toEqual([
     { target: { tabId: 10 }, func: expect.any(Function), injectImmediately: true },
@@ -46,7 +49,7 @@ test('the HTML and the selection that the script returns go into the page with t
   install()
   fake.readings.set(10, { html: '<body>Tide</body>', selection: 'the splash zone' })
 
-  expect(await readPage(tabOf(10), LIMIT)).toEqual({
+  expect(await read(10)).toEqual({
     url: 'https://coast.example/tide-pools',
     title: 'Tide pools',
     selection: 'the splash zone',
@@ -58,7 +61,7 @@ test('an empty selection is left out', async () => {
   install()
   fake.readings.set(10, { html: '<body>Tide</body>', selection: '' })
 
-  expect(await readPage(tabOf(10), LIMIT)).not.toHaveProperty('selection')
+  expect(await read(10)).not.toHaveProperty('selection')
 })
 
 // chrome://・Web Store・ブラウザ拡張のページなどで executeScript は reject する。
@@ -66,20 +69,20 @@ test('a page the browser refuses to run the script in cannot be read, with the e
   install()
   fake.readings.set(10, { error: 'Cannot access a chrome:// URL' })
 
-  expect(await readPage(tabOf(10), LIMIT)).toEqual({
+  expect(await read(10)).toEqual({
     url: 'https://coast.example/tide-pools',
     title: 'Tide pools',
     content: { kind: 'unreadable', reason: 'restricted', detail: 'Cannot access a chrome:// URL' },
   })
 })
 
-// view-source:、alert() の最中、frozen のタブで executeScript は返らない。
+// view-source:、alert() の最中、frozen の Browser Tab で executeScript は返らない。
 test('a page that does not answer the script within 3 seconds cannot be read', async () => {
   install()
   fake.readings.set(10, 'hang')
   const setTimeoutSpy = spyOn(globalThis, 'setTimeout')
 
-  const reading = readPage(tabOf(10), LIMIT)
+  const reading = read(10)
   const limit = setTimeoutSpy.mock.calls.find(([, ms]) => ms === 3000)
   setTimeoutSpy.mockRestore()
   limit?.[0]()
@@ -101,15 +104,14 @@ function installPdfTab() {
   fake.readings.set(10, { contentType: 'application/pdf' })
 }
 
-// 偽の fetch。本物と同じく signal の abort で reject する。
-function fakeFetch(respond: (signal: AbortSignal) => Response | Promise<never>) {
+function fakeFetch(respond: () => Response | Promise<never>) {
   const calls: { url: string; init: RequestInit | undefined }[] = []
   const spy = spyOn(globalThis, 'fetch').mockImplementation((async (
     url: string,
     init?: RequestInit,
   ) => {
     calls.push({ url, init })
-    return respond(init!.signal!)
+    return respond()
   }) as unknown as typeof fetch)
   cleanups.push(() => spy.mockRestore())
   return calls
@@ -132,7 +134,7 @@ test('a Browser Tab showing a PDF has its URL fetched with the cookies of the br
   installPdfTab()
   const calls = fakeFetch(() => new Response(PDF_BYTES))
 
-  const page = await readPage(tabOf(10), LIMIT)
+  const page = await read(10)
 
   expect(calls).toEqual([
     { url: PDF_URL, init: expect.objectContaining({ credentials: 'include' }) },
@@ -150,7 +152,7 @@ test('a PDF whose response is not ok cannot be fetched, with the status as the d
   installPdfTab()
   fakeFetch(() => new Response('gone', { status: 404 }))
 
-  expect((await readPage(tabOf(10), LIMIT)).content).toEqual({
+  expect((await read(10)).content).toEqual({
     kind: 'unreadable',
     reason: 'fetch-failed',
     detail: 'HTTP 404',
@@ -162,7 +164,7 @@ test('a response that does not start as a PDF cannot be fetched as one', async (
   installPdfTab()
   fakeFetch(() => new Response('<!doctype html><title>Sign in</title>'))
 
-  expect((await readPage(tabOf(10), LIMIT)).content).toEqual({
+  expect((await read(10)).content).toEqual({
     kind: 'unreadable',
     reason: 'fetch-failed',
     detail: 'the response is not a PDF',
@@ -174,7 +176,7 @@ test('a PDF whose Content-Length passes the limit is too large, and its body is 
   const body = streamed([PDF_BYTES], { 'content-length': String(LIMIT + 1) })
   fakeFetch(() => body.response)
 
-  expect((await readPage(tabOf(10), LIMIT)).content).toEqual({
+  expect((await read(10)).content).toEqual({
     kind: 'unreadable',
     reason: 'too-large',
   })
@@ -188,7 +190,7 @@ test('a PDF that passes the limit while it is read is too large, and the rest is
   const body = streamed([chunk, chunk, new Uint8Array(1), new Uint8Array(1), new Uint8Array(1)])
   fakeFetch(() => body.response)
 
-  expect((await readPage(tabOf(10), LIMIT)).content).toEqual({
+  expect((await read(10)).content).toEqual({
     kind: 'unreadable',
     reason: 'too-large',
   })
@@ -201,21 +203,19 @@ test('a PDF exactly at the limit goes', async () => {
   bytes.set(PDF_BYTES)
   fakeFetch(() => streamed([bytes], { 'content-length': String(LIMIT) }).response)
 
-  expect((await readPage(tabOf(10), LIMIT)).content).toMatchObject({ kind: 'pdf' })
+  expect((await read(10)).content).toMatchObject({ kind: 'pdf' })
 })
 
-test('a PDF that does not arrive within 30 seconds cannot be fetched', async () => {
+// 応えない fetch で、打ち切りが fetch の終わりを待たないことを見る。
+const never = () => new Promise<never>(() => {})
+
+test('a PDF that does not arrive within 30 seconds cannot be fetched, and its fetch is aborted', async () => {
   installPdfTab()
-  fakeFetch(
-    (signal) =>
-      new Promise<never>((_, reject) =>
-        signal.addEventListener('abort', () => reject(new DOMException('aborted', 'AbortError'))),
-      ),
-  )
+  const calls = fakeFetch(never)
   const setTimeoutSpy = spyOn(globalThis, 'setTimeout')
   cleanups.push(() => setTimeoutSpy.mockRestore())
 
-  const reading = readPage(tabOf(10), LIMIT)
+  const reading = read(10)
   const limit = await until(() => setTimeoutSpy.mock.calls.find(([, ms]) => ms === 30_000))
   limit[0]()
 
@@ -224,4 +224,23 @@ test('a PDF that does not arrive within 30 seconds cannot be fetched', async () 
     reason: 'fetch-failed',
     detail: 'no response within 30 seconds',
   })
+  expect(calls[0]!.init!.signal!.aborted).toBe(true)
+})
+
+test('a PDF whose question is stopped while it is fetched is not read, and its fetch is aborted', async () => {
+  installPdfTab()
+  const calls = fakeFetch(never)
+  const controller = new AbortController()
+
+  const reading = read(10, controller.signal)
+  await until(() => calls[0])
+  controller.abort()
+
+  expect(
+    await reading.then(
+      () => 'read',
+      (error: unknown) => error,
+    ),
+  ).toBe(controller.signal.reason)
+  expect(calls[0]!.init!.signal!.aborted).toBe(true)
 })

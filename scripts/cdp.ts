@@ -5,6 +5,8 @@ export type Cdp = {
   send<T>(method: string, params?: object, sessionId?: string): Promise<T>
   /** CDP の event を受ける。flatten の session の event は sessionId 付きで届く。 */
   on(method: string, listener: (params: unknown, sessionId?: string) => void): void
+  /** 接続が切れたら resolve する。Brave が止まったときも。 */
+  closed: Promise<void>
   close(): void
 }
 
@@ -52,9 +54,11 @@ export async function connectCdp(url: string): Promise<Cdp> {
     if (reply.error) waiter.reject(new Error(reply.error.message))
     else waiter.resolve(reply.result)
   })
+  const { promise: closed, resolve: markClosed } = Promise.withResolvers<void>()
   socket.addEventListener('close', () => {
     for (const waiter of pending.values()) waiter.reject(new Error('CDP の接続が切れた'))
     pending.clear()
+    markClosed()
   })
   return {
     send<T>(method: string, params: object = {}, sessionId?: string) {
@@ -70,6 +74,7 @@ export async function connectCdp(url: string): Promise<Cdp> {
     on(method: string, listener: (params: unknown, sessionId?: string) => void) {
       listeners.set(method, [...(listeners.get(method) ?? []), listener])
     },
+    closed,
     close: () => socket.close(),
   }
 }

@@ -131,7 +131,7 @@ test('over 200,000 characters, the pages of the oldest turns go first, and their
   expect(texts(content)[0]).toContain('Question text 1?')
 })
 
-// 質問 2 字、前の turn の質問 16 字と答え 9 字、前のページ 100,000 字と今のページ n 字に、スクリーンショットが 2 枚。
+// 質問 2 字、前の turn の質問 16 字と答え 9 字、前のページ 100,000 字と Current Page の n 字に、スクリーンショットが 2 枚。
 const omittedWithTwoScreenshots = (n: number) =>
   askContent('Q?', page(chars(n, 'c'), { screenshot: SHOT }), [
     turn(1, page(chars(100_000, 'a'), { screenshot: 'b25l' })),

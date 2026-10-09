@@ -2,7 +2,7 @@ import { afterEach, expect, test } from 'bun:test'
 import { join } from 'node:path'
 
 import type { contract as chatContract } from '@monica/chat/contract'
-import { writeFakeClaude } from '@monica/chat/testing'
+import { untilFakeClaudesExit, writeFakeClaude } from '@monica/chat/testing'
 import { startFakePtyd, tempHome } from '@monica/workbench/testing'
 import { createORPCClient } from '@orpc/client'
 import { RPCLink } from '@orpc/client/fetch'
@@ -39,8 +39,10 @@ function announcements(stdout: ReadableStream<Uint8Array>) {
   }
 }
 
+type Env = { [key: string]: string | undefined }
+
 // main.ts は Backend の組み立てそのものなので、Shell と同じく process として起こす。
-async function startBackend(browserPort: number, env: { [key: string]: string | undefined } = {}) {
+async function startBackend(browserPort: number, envOf: (home: string) => Env = () => ({})) {
   const home = tempHome((cleanup) => cleanups.push(cleanup))
   const ptyd = startFakePtyd(home)
   cleanups.push(() => ptyd.stop())
@@ -53,16 +55,18 @@ async function startBackend(browserPort: number, env: { [key: string]: string | 
       MONICA_BROWSER_PORT: String(browserPort),
       // login shell の rc を読む時間を短くする。
       SHELL: '/bin/sh',
-      ...env,
+      ...envOf(home),
     },
     stdin: 'pipe',
     stdout: 'pipe',
     stderr: 'inherit',
   })
-  // Backend が exit で消す backend.json と競うと、Bun の rmSync は ENOENT で黙って止まり home を残す。
-  cleanups.push(() => {
+  // Backend が exit で消す backend.json や、偽の claude と競うと、Bun の rmSync は黙って止まり home を残す。
+  // Backend は exit で claude に SIGKILL を送るだけで、居なくなるのを待たない。
+  cleanups.push(async () => {
     backend.kill()
-    return backend.exited
+    await backend.exited
+    await untilFakeClaudesExit(home)
   })
   const next = announcements(backend.stdout)
   const beforeEndpoint: Announcement[] = []
@@ -130,13 +134,12 @@ test('the browser listener carries chat for a Chrome Extension and the token lis
 }, 20_000)
 
 test('the Backend answers chat.ask with the claude that MONICA_CLAUDE_PATH names', async () => {
-  const dir = tempHome((cleanup) => cleanups.push(cleanup))
   const browserPort = freePort()
-  await startBackend(browserPort, {
-    MONICA_CLAUDE_PATH: writeFakeClaude(dir, join(dir, 'claude.jsonl')),
+  await startBackend(browserPort, (home) => ({
+    MONICA_CLAUDE_PATH: writeFakeClaude(home, join(home, 'claude.jsonl')),
     // node_modules の claude を起こしてしまっても、keychain の login を読めずに本物の API を呼ばない。
     USER: undefined,
-  })
+  }))
   const client: ContractRouterClient<{ chat: typeof chatContract }> = createORPCClient(
     new RPCLink({
       url: `http://127.0.0.1:${browserPort}/rpc`,

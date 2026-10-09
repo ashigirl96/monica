@@ -31,6 +31,20 @@ export function isReleaseHome(home: string): boolean {
   return canonical(home) === canonical(RELEASE_HOME)
 }
 
+/**
+ * dev の Vite が使う home。release の Tab は MONICA_HOME=~/.monica を継ぐので、そこで起こすと dev の画面が release の Backend を呼ぶ。
+ * release の home なら throw する。
+ */
+export function devHome(given = process.env.MONICA_HOME): string {
+  const home = resolve(given || DEFAULT_HOME)
+  if (isReleaseHome(home)) {
+    throw new Error(
+      `MONICA_HOME が release の home（${RELEASE_HOME}）です。dev の home を渡してください`,
+    )
+  }
+  return home
+}
+
 export const BRAVE = '/Applications/Brave Browser.app/Contents/MacOS/Brave Browser'
 
 // bun run extension が dev の Chrome Extension を読み込ませる Brave の user-data-dir。

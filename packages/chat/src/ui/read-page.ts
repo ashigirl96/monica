@@ -1,6 +1,9 @@
 import type { Page, Unreadable } from '../contract.ts'
+import { addressOf } from './current-page.ts'
+import { messageOf } from './failure.ts'
+import { unlessAborted, within } from './within.ts'
 
-// view-source:、alert() の最中、frozen のタブでは executeScript が返らない。
+// view-source:、alert() の最中、frozen の Browser Tab では executeScript が返らない。
 const READ_TIMEOUT_MS = 3000
 const FETCH_TIMEOUT_MS = 30_000
 
@@ -44,23 +47,15 @@ function readDocument(): Read {
   }
 }
 
-async function readWithin(tabId: number): Promise<Read | 'timeout'> {
-  let timer: ReturnType<typeof setTimeout> | undefined
-  const timeout = new Promise<'timeout'>((resolve) => {
-    timer = setTimeout(() => resolve('timeout'), READ_TIMEOUT_MS)
-  })
-  try {
-    // world は既定の ISOLATED のままにし、ページの CSP を受けない。frameIds も allFrames も渡さず、top frame だけを読む。
-    const reading = chrome.scripting
-      .executeScript({ target: { tabId }, func: readDocument, injectImmediately: true })
-      .then(([frame]) => {
-        if (!frame?.result) throw new Error('the script returned nothing')
-        return frame.result
-      })
-    return await Promise.race([reading, timeout])
-  } finally {
-    clearTimeout(timer)
-  }
+function readWithin(tabId: number): Promise<Read | 'timeout'> {
+  // world は既定の ISOLATED のままにし、ページの CSP を受けない。frameIds も allFrames も渡さず、top frame だけを読む。
+  const reading = chrome.scripting
+    .executeScript({ target: { tabId }, func: readDocument, injectImmediately: true })
+    .then(([frame]) => {
+      if (!frame?.result) throw new Error('the script returned nothing')
+      return frame.result
+    })
+  return within(reading, READ_TIMEOUT_MS)
 }
 
 const PDF_MAGIC = '%PDF-'
@@ -97,64 +92,75 @@ async function bodyWithin(response: Response, maxBytes: number) {
  * PDF viewer の DOM は空なので、Browser Tab の URL を fetch する。host_permissions の host には CORS を受けない。
  * cookie を付けるのは、ログインが要る PDF も取れる見込みがあるため（確かめていない）。
  */
-async function fetchPdf(url: string, maxBytes: number): Promise<Page['content']> {
+async function pdfOf(url: string, maxBytes: number, signal: AbortSignal): Promise<Page['content']> {
+  const response = await fetch(url, { credentials: 'include', signal })
+  if (!response.ok) {
+    await response.body?.cancel()
+    return fetchFailed(`HTTP ${response.status}`)
+  }
+  const body = await bodyWithin(response, maxBytes)
+  if (!body) return { kind: 'unreadable', reason: 'too-large' }
+  // ログインが要る PDF は、ログインのページの HTML が 200 で返りうる。
+  if ((await body.slice(0, PDF_MAGIC.length).text()) !== PDF_MAGIC) {
+    return fetchFailed('the response is not a PDF')
+  }
+  return { kind: 'pdf', pdf: new File([body], 'page.pdf', { type: 'application/pdf' }) }
+}
+
+/** body を読み終えるまでを 30 秒で打ち切る。signal が abort したら、fetch を止めて reject する。 */
+async function fetchPdf(
+  url: string,
+  maxBytes: number,
+  signal: AbortSignal,
+): Promise<Page['content']> {
   const controller = new AbortController()
-  const timer = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS)
+  const stop = () => controller.abort(signal.reason)
+  signal.addEventListener('abort', stop)
   try {
-    const response = await fetch(url, { credentials: 'include', signal: controller.signal })
-    if (!response.ok) {
-      await response.body?.cancel()
-      return fetchFailed(`HTTP ${response.status}`)
-    }
-    const body = await bodyWithin(response, maxBytes)
-    if (!body) return { kind: 'unreadable', reason: 'too-large' }
-    // ログインが要る PDF は、ログインのページの HTML が 200 で返りうる。
-    if ((await body.slice(0, PDF_MAGIC.length).text()) !== PDF_MAGIC) {
-      return fetchFailed('the response is not a PDF')
-    }
-    return { kind: 'pdf', pdf: new File([body], 'page.pdf', { type: 'application/pdf' }) }
+    const fetched = await within(
+      unlessAborted(pdfOf(url, maxBytes, controller.signal), signal),
+      FETCH_TIMEOUT_MS,
+    )
+    return fetched === 'timeout' ? fetchFailed('no response within 30 seconds') : fetched
   } catch (error) {
-    if (controller.signal.aborted) return fetchFailed('no response within 30 seconds')
-    return fetchFailed((error as Error).message)
+    if (signal.aborted) throw error
+    return fetchFailed(messageOf(error))
   } finally {
-    clearTimeout(timer)
+    signal.removeEventListener('abort', stop)
+    // 打ち切った fetch の body を読み続けない。
+    controller.abort()
   }
 }
 
+const restricted = (detail: string): Unreadable => ({
+  kind: 'unreadable',
+  reason: 'restricted',
+  detail,
+})
+
 /**
  * 送る時に取り直した Browser Tab を読む。読めなくても、質問は送れるよう理由を持った page を返す。
- * PDF は maxPdfBytes を超えたら送らずに大きすぎたことにする。
+ * PDF は maxPdfBytes を超えたら送らずに大きすぎたことにする。signal が abort したら、PDF の fetch を止めて reject する。
  */
 export async function readPage(
   tab: chrome.tabs.Tab | undefined,
-  maxPdfBytes: number,
+  { maxPdfBytes, signal }: { maxPdfBytes: number; signal: AbortSignal },
 ): Promise<Page> {
-  const address = {
-    ...(tab?.url !== undefined && { url: tab.url }),
-    ...(tab?.title !== undefined && { title: tab.title }),
-  }
-  if (tab?.id === undefined) {
-    return {
-      ...address,
-      content: { kind: 'unreadable', reason: 'restricted', detail: 'no Browser Tab is active' },
-    }
-  }
+  const address = addressOf(tab ?? {})
+  if (tab?.id === undefined) return { ...address, content: restricted('no Browser Tab is active') }
+  let read: Read | 'timeout'
   try {
-    const read = await readWithin(tab.id)
-    if (read === 'timeout')
-      return { ...address, content: { kind: 'unreadable', reason: 'timeout' } }
-    if (read.contentType === 'application/pdf' && tab.url !== undefined) {
-      return { ...address, content: await fetchPdf(tab.url, maxPdfBytes) }
-    }
-    return {
-      ...address,
-      ...(read.selection && { selection: read.selection }),
-      content: { kind: 'html', html: read.html },
-    }
+    read = await readWithin(tab.id)
   } catch (error) {
-    return {
-      ...address,
-      content: { kind: 'unreadable', reason: 'restricted', detail: (error as Error).message },
-    }
+    return { ...address, content: restricted(messageOf(error)) }
+  }
+  if (read === 'timeout') return { ...address, content: { kind: 'unreadable', reason: 'timeout' } }
+  if (read.contentType === 'application/pdf' && tab.url !== undefined) {
+    return { ...address, content: await fetchPdf(tab.url, maxPdfBytes, signal) }
+  }
+  return {
+    ...address,
+    ...(read.selection && { selection: read.selection }),
+    content: { kind: 'html', html: read.html },
   }
 }

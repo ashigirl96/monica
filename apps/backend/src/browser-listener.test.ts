@@ -6,7 +6,7 @@ import { dirname, join } from 'node:path'
 
 import { type contract as chatContract, MAX_ASK_BODY_BYTES } from '@monica/chat/contract'
 import { createChatAgent } from '@monica/chat/server'
-import { type FakeScenario, writeFakeClaude } from '@monica/chat/testing'
+import { type FakeScenario, untilFakeClaudesExit, writeFakeClaude } from '@monica/chat/testing'
 import type { contract } from '@monica/note/contract'
 import { createNoteLedger, migrations } from '@monica/note/server'
 import { createORPCClient, ORPCError } from '@orpc/client'
@@ -18,9 +18,9 @@ import { migrate } from 'drizzle-orm/bun-sqlite/migrator'
 import { listenBrowser } from './browser-listener.ts'
 import { freePort } from './testing.ts'
 
-const cleanups: (() => void)[] = []
-afterEach(() => {
-  for (const cleanup of cleanups.splice(0).toReversed()) cleanup()
+const cleanups: (() => unknown)[] = []
+afterEach(async () => {
+  for (const cleanup of cleanups.splice(0).toReversed()) await cleanup()
 })
 
 function webDist(files: Record<string, string>): string {
@@ -47,7 +47,11 @@ function listen(
     home,
     claudePath: writeFakeClaude(home, join(home, 'claude.jsonl'), claude),
   })
-  cleanups.push(() => chatAgent.stop())
+  // 偽の claude が居なくなるのを待ってから home を消す（docs/packages/dev-loop.md の「検査と CI」）。
+  cleanups.push(async () => {
+    chatAgent.stop()
+    await untilFakeClaudesExit(home)
+  })
   const listener = listenBrowser(port?.toString(), {
     context: { db, noteLedger, chatAgent },
     webDist: dist,

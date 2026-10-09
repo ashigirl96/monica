@@ -15,10 +15,17 @@
     "react/react-in-jsx-scope": "off",
     // 名前の _ だけで判断するので、xterm の _core のような外が決めた名前にも当たる。
     "eslint/no-underscore-dangle": "off",
-    // @monica/chat/pdf-worker は、compiled binary の Worker の entrypoint（apps/backend/src/pdf-worker.ts）が読むだけで動く。
+    // @monica/chat の html-worker と pdf-worker は、compiled binary の Worker の entrypoint（apps/backend/src/*-worker.ts）が読むだけで動く。
     "import/no-unassigned-import": [
       "error",
-      { "allow": ["**/*.css", "@fontsource-variable/*", "@monica/chat/pdf-worker"] }
+      {
+        "allow": [
+          "**/*.css",
+          "@fontsource-variable/*",
+          "@monica/chat/html-worker",
+          "@monica/chat/pdf-worker"
+        ]
+      }
     ],
     // unknown や Buffer を `${…}` に入れる形を咎める。`[object Object]` になる値は no-base-to-string が見る。
     "typescript/restrict-template-expressions": "off",

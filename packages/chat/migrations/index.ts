@@ -8,6 +8,5 @@ const entries: { tag: string }[] = journal.entries
 export const migrations = {
   folder: join(import.meta.dir, 'chat'),
   table: '__drizzle_migrations_chat',
-  // journal の import は、generate の出力を bun --watch の import 木に入れるためにある。
   latest: entries.at(-1)?.tag,
 }

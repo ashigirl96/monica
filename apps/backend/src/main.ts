@@ -95,6 +95,7 @@ const chatAgent = createChatAgent({
   // MONICA_PTYD_PATH と違って検めない。claude を起こせなくても Workbench は動き、失敗は Chat の答えに出る。
   claudePath: process.env.MONICA_CLAUDE_PATH,
   // compiled binary の Worker は build の entrypoint に足したもので、entry の隣に置かれる。
+  htmlWorker: new URL('./html-worker.ts', import.meta.url),
   pdfWorker: new URL('./pdf-worker.ts', import.meta.url),
   ...(existsSync(cMaps) && { cMaps }),
 })

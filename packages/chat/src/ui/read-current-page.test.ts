@@ -1,4 +1,4 @@
-import { afterEach, expect, spyOn, test } from 'bun:test'
+import { afterEach, expect, test } from 'bun:test'
 
 import { watchCurrentPage } from './current-page.ts'
 import { FakeChrome, type FakeImage } from './fake-chrome.ts'
@@ -34,6 +34,12 @@ async function watchWindow(devicePixelRatio = 2) {
   return watch
 }
 
+const options = (screenshot: boolean) => ({
+  screenshot,
+  maxPdfBytes: PDF_LIMIT,
+  signal: new AbortController().signal,
+})
+
 const imageOf = (screenshot: string | undefined): FakeImage =>
   JSON.parse(atob(screenshot ?? '')) as FakeImage
 
@@ -41,7 +47,7 @@ const imageOf = (screenshot: string | undefined): FakeImage =>
 test('a screenshot is taken of the window of the side panel before reading the page waits on anything', async () => {
   const watch = await watchWindow()
 
-  const reading = readCurrentPage(watch, { screenshot: true, maxPdfBytes: PDF_LIMIT })
+  const reading = readCurrentPage(watch, options(true)).page
   const capturedAtOnce = [...fake.captures]
   await reading
 
@@ -51,7 +57,7 @@ test('a screenshot is taken of the window of the side panel before reading the p
 test('the screenshot shrinks to the CSS pixels of the side panel and goes as JPEG at quality 0.8 in base64, with the page read as it is', async () => {
   const watch = await watchWindow(2)
 
-  const page = await readCurrentPage(watch, { screenshot: true, maxPdfBytes: PDF_LIMIT })
+  const page = await readCurrentPage(watch, options(true)).page
 
   expect(imageOf(page.screenshot)).toEqual({
     type: 'image/jpeg',
@@ -69,7 +75,7 @@ test('the screenshot shrinks to the CSS pixels of the side panel and goes as JPE
 test('no screenshot is taken unless asked for', async () => {
   const watch = await watchWindow()
 
-  const page = await readCurrentPage(watch, { screenshot: false, maxPdfBytes: PDF_LIMIT })
+  const page = await readCurrentPage(watch, options(false)).page
 
   expect(fake.captures).toEqual([])
   expect(page).toEqual({
@@ -83,7 +89,7 @@ test('a screenshot that cannot be taken gives its reason and leaves the text of 
   const watch = await watchWindow()
   fake.screenshots.set(10, { error: 'Cannot access contents of the page' })
 
-  const page = await readCurrentPage(watch, { screenshot: true, maxPdfBytes: PDF_LIMIT })
+  const page = await readCurrentPage(watch, options(true)).page
 
   expect(page).toEqual({
     url: 'https://coast.example/tide-pools',
@@ -97,7 +103,7 @@ test('a page that cannot be read but can be taken a screenshot of carries both',
   const watch = await watchWindow()
   fake.readings.set(10, { error: 'Frame was removed' })
 
-  const page = await readCurrentPage(watch, { screenshot: true, maxPdfBytes: PDF_LIMIT })
+  const page = await readCurrentPage(watch, options(true)).page
 
   expect(page.content).toEqual({
     kind: 'unreadable',
@@ -107,18 +113,12 @@ test('a page that cannot be read but can be taken a screenshot of carries both',
   expect(imageOf(page.screenshot)).toMatchObject({ width: 862, height: 763 })
 })
 
-test('a screenshot that does not come within 3 seconds is given up', async () => {
+// 読み終える前に止めた質問は、この URL と title で履歴に入る。
+test('the URL and title that the side panel shows go with the reading, before the Browser Tab is read', async () => {
   const watch = await watchWindow()
-  fake.screenshots.set(10, 'hang')
-  const setTimeoutSpy = spyOn(globalThis, 'setTimeout')
+  fake.readings.set(10, 'hang')
 
-  const reading = readCurrentPage(watch, { screenshot: true, maxPdfBytes: PDF_LIMIT })
-  const limit = setTimeoutSpy.mock.calls.find(([, ms]) => ms === 3000)
-  setTimeoutSpy.mockRestore()
-  limit?.[0]()
+  const { shown } = readCurrentPage(watch, options(false))
 
-  expect(await reading).toMatchObject({
-    content: { kind: 'html' },
-    screenshotFailed: { reason: 'the Browser Tab did not answer within 3 seconds' },
-  })
+  expect(shown).toEqual({ url: 'https://coast.example/tide-pools', title: 'Tide pools' })
 })

@@ -1,22 +1,20 @@
 import { ORPCError } from '@orpc/client'
+import type { ContractRouterClient } from '@orpc/contract'
 
 import {
   type AskInput,
-  type ChatEvent,
+  type contract,
   MAX_ASK_BODY_BYTES,
   type Page,
   type PageSnapshot,
   type Turn,
 } from '../contract.ts'
+import { addressOf, type CurrentPage } from './current-page.ts'
 import { type Failure, failureOf, isUnreachable, retryingLine, usageLine } from './failure.ts'
 import { noticeOf } from './notice.ts'
 import { type Reach, watchReach } from './reach.ts'
 
-/** side panel が呼ぶ分の chat の client。ブラウザの口への oRPC の client の chat がそのまま入る。 */
-export type ChatClient = {
-  prepare(): Promise<unknown>
-  ask(input: AskInput, options: { signal: AbortSignal }): Promise<AsyncIterable<ChatEvent>>
-}
+export type ChatClient = ContractRouterClient<typeof contract>
 
 export type ChatEntry = {
   id: number
@@ -45,15 +43,15 @@ const jsonBytes = (value: unknown) => new TextEncoder().encode(JSON.stringify(va
 const STOPPED_MARK = '（ユーザーが途中で止めた）'
 
 /**
- * 今のページの PDF に残る bytes。body の上限から、PDF の他の input と余白を引く。
- * 今のページのスクリーンショットは読むのと並べて撮るので数えず、送る前の withinBodyLimit が数える。
+ * Current Page の PDF に残る bytes。body の上限から、PDF の他の input と余白を引く。
+ * Current Page のスクリーンショットは読むのと並べて撮るので数えず、送る前の withinBodyLimit が数える。
  */
 function pdfBudget(question: string, history: readonly Turn[]): number {
   return MAX_ASK_BODY_BYTES - BODY_MARGIN_BYTES - jsonBytes({ question, history })
 }
 
 /**
- * body の上限を超える input は、今のページの HTML・PDF・選択範囲を外し、大きすぎて読めなかったことにする。履歴は削らない。
+ * body の上限を超える input は、Current Page の HTML・PDF・選択範囲を外し、大きすぎて読めなかったことにする。履歴は削らない。
  * ユーザーが添えると決めたスクリーンショットは残す。
  */
 function withinBodyLimit(input: AskInput): AskInput {
@@ -72,10 +70,6 @@ function withinBodyLimit(input: AskInput): AskInput {
   }
 }
 
-function addressOf({ url, title }: Pick<PageSnapshot, 'url' | 'title'>) {
-  return { ...(url !== undefined && { url }), ...(title !== undefined && { title }) }
-}
-
 export type ChatSnapshot = {
   entries: readonly ChatEntry[]
   answering: boolean
@@ -87,8 +81,16 @@ export type ChatSnapshot = {
   retryable: number | undefined
 }
 
-/** 送る時に Current Page を読む。screenshot なら、その Browser Tab の表示領域も撮る。PDF は maxPdfBytes を超えたら読むのをやめる。 */
-export type ReadPage = (options: { screenshot: boolean; maxPdfBytes: number }) => Promise<Page>
+export type ReadOptions = { screenshot: boolean; maxPdfBytes: number; signal: AbortSignal }
+
+/** shown は送った時に side panel が出していた Current Page で、読み終える前に止めた質問の履歴に入れる。 */
+export type Reading = { shown: CurrentPage; page: Promise<Page> }
+
+/**
+ * 送る時に Current Page を読む。screenshot なら、その Browser Tab の表示領域も撮る。
+ * PDF は maxPdfBytes を超えたら読むのをやめる。signal が abort したら、PDF の fetch もやめる。
+ */
+export type ReadPage = (options: ReadOptions) => Reading
 
 /** side panel の Chat。document の memory にだけあり、どこにも残さない（ADR-0030・0031）。 */
 export type ChatStore = {
@@ -111,14 +113,16 @@ export type ChatStore = {
 }
 
 /** 送った質問。答えが返るか履歴から外れるまで、送った input（HTML・PDF・スクリーンショットも）を持つ。 */
-type Sent = { id: number; question: string; input: Promise<AskInput> }
+type Sent = { id: number; question: string; input: Promise<AskInput>; shown: CurrentPage }
 
 type Asking = Sent & {
   controller: AbortController
   answer: string
   retried: boolean
+  /** chat.ask の応答が届いた。 */
+  reached: boolean
   /** 履歴に入れるページ。snapshot が届くまでは送ったページの URL と title とスクリーンショットだけ。 */
-  page: PageSnapshot | undefined
+  page: PageSnapshot
 }
 
 export function createChatStore(client: ChatClient): ChatStore {
@@ -166,6 +170,7 @@ export function createChatStore(client: ChatClient): ChatStore {
       if (screenshot !== undefined) patch(id, sent)
       current.page = { ...addressOf(input.page), ...sent }
       const events = await client.ask(input, { signal: current.controller.signal })
+      current.reached = true
       reach?.reached()
       for await (const event of events) {
         if (!live()) return
@@ -195,7 +200,7 @@ export function createChatStore(client: ChatClient): ChatStore {
       if (isUnreachable(error)) reach?.failed()
       else if (error instanceof ORPCError) reach?.reached()
       asking = undefined
-      failed = { id, question, input: current.input }
+      failed = { id, question, input: current.input, shown: current.shown }
       patch(id, {
         status: 'failed',
         retrying: undefined,
@@ -204,13 +209,14 @@ export function createChatStore(client: ChatClient): ChatStore {
     }
   }
 
-  const start = (sent: Sent) => {
+  const start = (sent: Sent, controller = new AbortController()) => {
     const current: Asking = {
       ...sent,
-      controller: new AbortController(),
+      controller,
       answer: '',
       retried: false,
-      page: undefined,
+      reached: false,
+      page: addressOf(sent.shown),
     }
     asking = current
     void answer(current)
@@ -243,13 +249,16 @@ export function createChatStore(client: ChatClient): ChatStore {
       failed = undefined
       const id = nextId++
       const turns = [...history]
+      const controller = new AbortController()
       // captureVisibleTab は送る操作の user gesture の中で呼ばないと quota にかかるので、await を挟まずに読み始める。
-      const input = readPage({
+      const { shown, page } = readPage({
         screenshot: withScreenshot,
         maxPdfBytes: pdfBudget(question, turns),
-      }).then((page) => withinBodyLimit({ question, page, history: turns }))
+        signal: controller.signal,
+      })
+      const input = page.then((read) => withinBodyLimit({ question, page: read, history: turns }))
       withScreenshot = false
-      start({ id, question, input })
+      start({ id, question, input, shown }, controller)
       publish([...entries, { id, question, answer: '', status: 'waiting' }])
       return true
     },
@@ -274,7 +283,7 @@ export function createChatStore(client: ChatClient): ChatStore {
       asking = undefined
       history = [
         ...history,
-        { question, page: page ?? {}, answer: text ? `${text}\n\n${STOPPED_MARK}` : STOPPED_MARK },
+        { question, page, answer: text ? `${text}\n\n${STOPPED_MARK}` : STOPPED_MARK },
       ]
       patch(id, { status: 'stopped', retrying: undefined })
     },

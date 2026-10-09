@@ -21,14 +21,14 @@ ask       { question, page: Page, history: { question, answer, page: PageSnapsho
 
 ## createChatAgent
 
-`createChatAgent({ home, claudePath?, pdfWorker?, cMaps? })` は `stop()` だけを持つ `ChatAgent` を返す。Ledger と違い記録を持たないので、Ledger とは呼ばず、`start()` も無い。
+`createChatAgent({ home, claudePath?, htmlWorker?, pdfWorker?, cMaps? })` は `stop()` だけを持つ `ChatAgent` を返す。Ledger と違い記録を持たないので、Ledger とは呼ばず、`start()` も無い。
 
 - `$MONICA_HOME/chat` を `mkdirSync(…, { recursive: true, mode: 0o700 })` で作り、claude の cwd にする。
 - `claudePath` は claude の場所で、SDK の `pathToClaudeCodeExecutable` に渡す。省けば渡さず、SDK が node_modules の platform package（`@anthropic-ai/claude-agent-sdk-darwin-arm64` など）の claude を使う。
   - release の Backend は、Shell が env の `MONICA_CLAUDE_PATH` で渡す `.app` の `Contents/MacOS/claude` を渡す。compile した binary は node_modules の claude を解決できないため。`install-app` が同じ lockfile の platform package から写したもの（`docs/packages/dev-loop.md` の「release build と install」、ADR-0032）。
   - dev の Backend は env を受けないので省く。
-- `pdfWorker` は PDF を本文にする Worker の module の URL、`cMaps` は pdf.js の cMap の folder（下の「Page Snapshot」の「PDF の本文」）。省けば、`pdfWorker` は packages/chat の `src/pdf-worker.ts`、`cMaps` は packages/chat から解いた node_modules の `pdfjs-dist/cmaps` になる。`bun test` は両方を省いて動く。
-  - compile した Backend はどちらも解けないので、Backend は自分の隣の `pdf-worker.ts`（build の 2 つ目の entrypoint）と、`--asset` で同梱した `cmaps` を渡す（`docs/packages/backend.md` の「起動と終了」）。
+- `htmlWorker` と `pdfWorker` は HTML と PDF を本文にする Worker の module の URL、`cMaps` は pdf.js の cMap の folder（下の「Page Snapshot」の「本文への変換」と「PDF の本文」）。省けば、Worker は packages/chat の `src/html-worker.ts` と `src/pdf-worker.ts`、`cMaps` は packages/chat から解いた node_modules の `pdfjs-dist/cmaps` になる（`src/page/snapshot.ts` の `defaultReaders`）。`bun test` はどれも省いて動く。
+  - compile した Backend はどれも解けないので、Backend は自分の隣の `html-worker.ts` と `pdf-worker.ts`（build の entrypoint）と、`--asset` で同梱した `cmaps` を渡す（`docs/packages/backend.md` の「起動と終了」）。
 - `stop()` は同期で、持っている claude すべて（spare を含む）に SIGKILL を送り、spare の時限を消す。Backend の `exit()` は `process.exit(0)` まで await を挟まずに進むため。
 - procedure の handler が使う `prepare` と `ask` は、型に出さずに `internals(chatAgent)` で引く（`docs/packages.md` の「server entry の形」）。router の context は `{ chatAgent }`。
 - chat は他の domain を import せず、他の domain からも import されない。前者は `.oxlintrc.json` の override が、後者は package.json が守る。table は持たないが、空の journal を持つ（`docs/packages/migration.md`）。
@@ -115,18 +115,20 @@ claude の `system`（`init`）を受けたら、stderr に 1 行出す。tools 
 
 - 読むのは、送る時に `tabs.query({ active: true, windowId })` で取り直した Browser Tab（下の「Current Page の追い方」）。`url` と `title` もその Browser Tab のものにし、見出しと揃える。
 - `chrome.scripting.executeScript` に `target: { tabId }`・`func`・`injectImmediately: true` だけを渡す。`frameIds` も `allFrames` も渡さず top frame だけを読み、world は既定の ISOLATED のままにしてページの CSP を受けない。
-- 3 秒で返らなければ打ち切って `timeout` にする。`view-source:`、`alert()` の最中、frozen のタブでは返らず、`injectImmediately` が無いと body が終わらないページでも返らない。
+- 3 秒で返らなければ打ち切って `timeout` にする。`view-source:`、`alert()` の最中、frozen の Browser Tab では返らず、`injectImmediately` が無いと body が終わらないページでも返らない。
 - 注入する関数（`readDocument`）は `{ contentType, html, selection }` を返す自己完結した関数で、module の他の関数も import も参照しない。`func` は文字列にして送られ、build の minify で名前が変わった helper も届かないため。
   - `document.contentType` が `application/pdf` なら、HTML と選択範囲を読まずに返し、下の「PDF の取り方」に進む。PDF viewer の main frame は `contentType` が `application/pdf` で body が空、viewer は closed shadow root の中の OOPIF にあり、`executeScript` は viewer の frame に注入しない。URL の拡張子は当てにならず、HEAD を投げると request が 1 つ増えるので、`contentType` で見分ける。
   - shadow root は `document.documentElement` から要素を順に辿り、`chrome.dom.openOrClosedShadowRoot` で closed のものまで、見つけた root の中にも潜って集める。`html` は `document.documentElement.getHTML({ shadowRoots })` で、shadow root は `<template shadowrootmode>` として書き出される。
   - 選択範囲は top frame の `getSelection().toString()`。activeElement が textarea か、`type` が `text`・`search`・`url`・`tel` の input なら、その `selectionStart`・`selectionEnd` で読む。別の場所を選んだ後も古い値が残るので、focus のある欄だけを読む。それ以外の input（`password` など）に focus があれば読まない。空なら `selection` を送らない。
 - `executeScript` が reject したら `restricted` にし、`detail` に error の message を入れる。
-- 送る前に、input を `JSON.stringify` した UTF-8 の bytes に、PDF の bytes と 1MiB（oRPC の包みの分）を足して `MAX_ASK_BODY_BYTES` と比べる。File は `JSON.stringify` で `{}` になるので、PDF の大きさは `size` で足す。超えたら今のページの `html`・`pdf`・`selection` を外して `too-large` にする（`chat-store.ts`）。履歴は削らない。
+- 送る時に見出しが出していた Current Page の URL と title（`CurrentPageWatch.shown()`）を、読んだページと並べて `ChatStore` に返す。読み終える前に止めた質問の履歴に入れる（下の「失敗」の「再試行と履歴」）。
+- 送る前に、input を `JSON.stringify` した UTF-8 の bytes に、PDF の bytes と 1MiB（oRPC の包みの分）を足して `MAX_ASK_BODY_BYTES` と比べる。File は `JSON.stringify` で `{}` になるので、PDF の大きさは `size` で足す。超えたら Current Page の `html`・`pdf`・`selection` を外して `too-large` にする（`chat-store.ts`）。履歴は削らない。
 
 #### PDF の取り方
 
 - `fetch(tab.url, { credentials: 'include' })` で Browser Tab の URL を取り直す。`<all_urls>` の host permission の host へは CORS を受けずに取れる。cookie を付けるのは、ログインが要る PDF も取れる見込みがあるため（下の「確かめていないこと」）。
-- 30 秒で返らなければ `AbortController` で打ち切り、`fetch-failed`（detail `no response within 30 seconds`）にする。body を読み終えるまでを 30 秒に含める。
+- 30 秒で返らなければ打ち切り、fetch を abort して `fetch-failed`（detail `no response within 30 seconds`）にする。body を読み終えるまでを 30 秒に含める。fetch が abort に応えなくても、その終わりを待たない。
+- 止めるボタンか「新しい Chat」で質問を止めたら、fetch を abort し、その終わりを待たずに読むのをやめる（`ChatStore` が `readPage` に渡す `signal`）。止めた後も PDF を読み続けて memory と帯域を使わないため。
 - status が ok でなければ `fetch-failed`（detail `HTTP <status>`）。先頭が `%PDF-` でない応答も `fetch-failed`（detail `the response is not a PDF`）にする。ログインが要る PDF は、ログインのページの HTML が 200 で返りうる。
 - body は上限まで読んでやめる。上限は、body の上限から、PDF を除いた input（`question` と `history`）を `JSON.stringify` した UTF-8 の bytes と 1MiB を引いた値で、`chat-store.ts` が `readPage` に渡す。`Content-Length` が上限を超えていれば body を読まずに cancel し、読んでいる途中で超えても cancel して、どちらも bytes を送らずに `too-large` にする。50MB を超える PDF は、履歴を含めた body が上限に収まらない PDF として読む。上限に収まった bytes は、送る前の大きさの確かめ（上）でもう一度、page の `url` と `title` を含めて比べる。
 - PDF の選択範囲は送らない。viewer の frame には注入できず、top frame の `getSelection()` は viewer の中の選択を返さない。
@@ -161,7 +163,7 @@ snapshot      { type: 'snapshot', page: PageSnapshot から screenshot を除い
 - `same` の `turn` は、その request の `history` の添字。失敗した質問は履歴に入らず、Backend が落とす古い turn も side panel の配列は変えないので、一度返した添字は後の request でも同じ turn を指す。
 - `omitted` は、今回渡さなかった古いページと問答の数。問答ごと落とした turn のページは `turns` にだけ数える。
 
-### 本文への変換（`src/page/extract.ts`・`snapshot.ts`）
+### 本文への変換（`src/page/extract.ts`・`html.ts`・`worker.ts`・`snapshot.ts`・`src/html-worker.ts`）
 
 - HTML を `<!doctype html><html>` と `</html>` で包んで linkedom で DOM にし、`defuddle/node` の `Defuddle` に `markdown: true`・`useAsync: false`・`removeImages: true` を渡して Markdown にする。`useAsync: false` は、本文の無いページで第三者の API を呼ばせないため。jsdom 30 と happy-dom 20 では defuddle が失敗し、失敗しても例外を投げずに body 全体を返すので使わない。`defuddle/full` は Bun で Markdown 変換が失敗するので使わない。
 - defuddle は linkedom を見込んで `<template shadowrootmode>` を展開するので、open と closed の shadow root の中の文字が本文に残る。nav と footer は本文に入らない。
@@ -171,14 +173,16 @@ snapshot      { type: 'snapshot', page: PageSnapshot から screenshot を除い
   - turndown が生の HTML のまま残したもの（colspan のある表、`sup`）の中の `<a>` は tag だけを外し、`iframe`・`video`・`audio` は要素ごと消す。ほかの HTML の tag は残す。
 - 本文と選択範囲は 10 万字（`MAX_PAGE_CHARS`）で切り、先頭を残して `truncated` を立てる。字は JS の文字列の `length` で数え、surrogate pair は割らない。
 - 見えない文字は落とそうとしない。stylesheet の class で隠した文字は defuddle も残すので、`document` block と system prompt で受ける。
-- 変換は Backend の main thread で、claude を起こす前に行う。数百 ms で、spare から答えれば claude を並べて起こす得は小さいため。変換が例外を投げたら `unparsable`（`detail` に message）にして答えを続ける。
+- 変換は claude を起こす前に行う。数百 ms で、spare から答えれば claude を並べて起こす得は小さいため。変換が例外を投げたら `unparsable`（`detail` に message）にして答えを続ける。
+- linkedom と defuddle は Bun の Worker（`src/html-worker.ts`）で動かし、Backend の event loop を塞がない。defuddle は同期に走り、div を 3,000 段入れ子にしたページでは 23〜79 秒かかる。main thread で走らせると、その間 Backend は他の request に応えない。Worker は HTML 1 つごとに起こし、本文を返したら `terminate()` する（PDF と同じ `src/page/worker.ts` の `textInWorker`）。
+- 本文にするのが 30 秒を超えたら、Worker の返事を待たずに `terminate()` して `unparsable`（detail `turning the HTML into text took more than 30 seconds`）にする。30 秒は PDF の本文と同じ上限で、質問を送ってから答えが始まるまでに、ページを本文にするのを待たせる長さの上限にあたる。普通のページは 0.1 秒かからず（2 万字の HTML で 48ms）、div を 1,000 段入れ子にしたページでも数秒で終わるので、打ち切るのは答えを待たせ続けるページだけになる。`chat.ask` の `signal` が abort したときも `terminate()` し、`unparsable` にせずに `ask` ごと止める。
 - 本文が空なら `document` block を作らず、見出しに「本文の文字は無かった」と書く。知らせは出さない。
 
 ### PDF の本文（`src/page/pdf.ts`・`src/pdf-worker.ts`）
 
-- pdf.js（pdfjs-dist の modern build、`pdfjs-dist`）は Bun の Worker で動かし、Backend の event loop を塞がない。Worker は PDF 1 つごとに起こし、本文を返したら `terminate()` する。bytes の ArrayBuffer は transfer し、大きな PDF の memory を Backend に残さない。
+- pdf.js（pdfjs-dist の modern build、`pdfjs-dist`）は HTML と同じく Bun の Worker で動かし、Backend の event loop を塞がない。Worker は PDF 1 つごとに起こし、本文を返したら `terminate()` する。bytes の ArrayBuffer は transfer し、大きな PDF の memory を Backend に残さない。
 - Bun の中の pdf.js は、Web Worker を作らずに fake worker を呼んだ側の thread で動かし、fake worker は `./pdf.worker.mjs` を動的に import する。compile した binary ではその import が解けないので、Worker の module（`src/pdf-worker.ts`）が `pdfjs-dist/build/pdf.worker.mjs` を静的に import して `globalThis.pdfjsWorker` に置く。pdf.js はそれを見つけて動的な import をしない。pdf.js の fake worker が動くのは Bun の Worker の thread で、Backend の main thread ではない。`bun run` の Backend でも compile した binary でも Bun の Worker で動いたので、main thread の fake worker には落としていない。
-- Worker の module は top-level の `await` を持たない。`await` を `message` の listener より前に置くと、最初の message を取りこぼす。
+- Worker の module は top-level の `await` を持たない。`await` を `message` の listener より前に置くと、最初の message を取りこぼす。listener は `src/page/worker.ts` の `replyWithText` が置き、本文か error の message を返す。
 - `getDocument` には `data`、`cMapUrl`（`cMaps` の folder、末尾に `/`）、`cMapPacked: true`、`verbosity: 0` を渡す。日本語の CID font の PDF は、埋め込まない font（`UniJIS-UCS2-H` など）だと cMap が無ければ本文が空になる。埋め込まない Helvetica の文字は `standardFontDataUrl` 無しで取れるので、`standard_fonts` は同梱しない。
 - `verbosity: 0` で pdf.js の警告（`console.warn`、stderr）は出ないが、modern build は読み込みのたびに legacy build を勧める 1 行（`Warning: Please use the legacy build in Node.js environments.`）を stderr に出す。Worker ごとに 1 行出る。
 - 本文は、ページごとに `getTextContent()` の item の `str` をつなぎ、`hasEOL` で改行し、末尾の空白を落とす。文字の無いページは飛ばし、ページの間に空行を入れる。pdf.js はページの外の字を本文に入れない。
@@ -195,7 +199,7 @@ snapshot      { type: 'snapshot', page: PageSnapshot から screenshot を除い
 
 - 前の問答、前のページの本文と選択範囲とスクリーンショット、今の質問と Page Snapshot の字の和を 20 万字（`MAX_ASK_CHARS`）に収める。スクリーンショットは 1 枚を 1,500 字と数える。URL、title、Backend が足す見出しの文は数えない。
 - 超えたら、古い turn のページ（本文と選択範囲とスクリーンショット）から 1 つずつ落とす。1 ページを `document` と `image` の組で渡す形を崩さないよう、同じ質問のページの本文とスクリーンショットはまとめて落とす。それでも超えたら、古い turn の問答を 1 つずつ落とす。落としたスクリーンショットは `omitted.pages` に数え、別の知らせは足さない。
-- 今の質問と Page Snapshot は落とさない。今のページが `same` で指す turn も、ページと問答のどちらも落とさない。今のページの本文がそこにしか無いため。今の分だけで 20 万字を超えても、そのまま送る。
+- 今の質問と Page Snapshot は落とさない。Current Page の Page Snapshot が `same` で指す turn も、ページと問答のどちらも落とさない。Current Page の本文がそこにしか無いため。今の分だけで 20 万字を超えても、そのまま送る。
 
 ### prompt の block（`src/page/prompt.ts`）
 
@@ -216,7 +220,7 @@ snapshot      { type: 'snapshot', page: PageSnapshot から screenshot を除い
 | `timeout` | side panel | `executeScript` が 3 秒で返らない | ページを読めませんでした（3 秒以内に応えませんでした） |
 | `too-large` | side panel | 送る前の大きさの確かめで外した。PDF が上限を超えて読むのをやめた | ページを読めませんでした（大きすぎます） |
 | `fetch-failed` | side panel | PDF の fetch が失敗した、30 秒で返らない、status が ok でない、先頭が `%PDF-` でない | ページを読めませんでした（PDF を取得できませんでした） |
-| `unparsable` | Backend | HTML か PDF の本文への変換が例外を投げた。PDF の変換が 30 秒を超えた | ページを読めませんでした（本文を取り出せませんでした） |
+| `unparsable` | Backend | HTML か PDF の本文への変換が例外を投げた。変換が 30 秒を超えた | ページを読めませんでした（本文を取り出せませんでした） |
 
 - `snapshot` の `page` に `screenshotFailed` があれば「スクリーンショットを撮れませんでした」。理由は出さない。
 - 本文か選択範囲を切り詰めたら「本文を切り詰めました」「選択範囲を切り詰めました」（両方なら「本文と選択範囲を切り詰めました」）。
@@ -226,11 +230,10 @@ snapshot      { type: 'snapshot', page: PageSnapshot から screenshot を除い
 
 - context menu から選択範囲を渡す経路、iframe の中の本文と選択（`allFrames`）。
 - 本物のクリックで side panel の入力欄に focus を移した後も、ページの選択範囲が `selection` に入るか（CDP の操作でだけ確かめた）。
-- 入れ子の深い DOM での変換の時間。div を 256・512・1000 段入れ子にしたページで、defuddle は 0.33 秒・1.1 秒・4.4 秒かかった（3000 段で 79 秒）。main thread で走るので、その間 Backend は他の request に応えない。
 - ログインが要る PDF を side panel の fetch で取れるか。取れなければ、`fetch-failed`（ログインのページの HTML や ok でない status が返ったとき）か `unparsable`（`%PDF-` で始まるが pdf.js が開けないとき）に落ちる。headless の Brave 1.97 で、side panel の page の fetch に、PDF の host の cookie が付いたことだけは見た。
 - 大きな PDF を Worker で読む間に Backend の event loop が止まらないか（確かめたのは小さな PDF だけ）。
 - 本物の Retina の画面での `captureVisibleTab` の倍率（下の「実機で確かめたこと」は `--force-device-scale-factor=2` で真似た）。
-- side panel そのものから送ったときの quota。送るボタンで 2 回と Enter で 1 回を 1 秒の間に続けて撮れるか、Enter の keydown が quota を外す user gesture になるか。side panel の page を Browser Tab で開く確かめ方では、その Browser Tab が裏に回り、操作の間が 5〜10 秒空いた。
+- Enter の keydown が quota を外す user gesture になるか。side panel で式を評価して送る確かめ方では、gesture は評価の userGesture から来るので、本物の Enter の gesture は確かめられない。
 
 ## 失敗
 
@@ -272,8 +275,8 @@ side panel は `ORPCError`（`@orpc/client`）の `code` で分け、`data` は 
 
 | 場面 | side panel が見るもの | 答えの場所に出す 1 行 | 詳しい行 |
 |---|---|---|---|
-| Backend に届かない | 途中の答えの無い `TypeError` | 「monica の desktop に届きませんでした」。入力欄の上に帯も出す | なし |
-| 答えの途中で届かなくなった | 途中の答えの後の `TypeError` | 途中までの答えを残し「答えが途中で切れました」。帯も出す | なし |
+| Backend に届かない | `chat.ask` の応答が届く前の `TypeError` | 「monica の desktop に届きませんでした」。入力欄の上に帯も出す | なし |
+| 答えの途中で届かなくなった | `chat.ask` の応答が届いた後の `TypeError`（`snapshot`・`retry`・`text` の後） | 途中までの答えを残し「答えが途中で切れました」。帯も出す | なし |
 | Claude Code の login が無い | `NOT_AUTHENTICATED` | 「Claude Code に login していません。terminal で claude を起こし、/login してください」 | なし |
 | plan の上限 | `USAGE_LIMIT` | 「plan の 5 時間の上限に達しました。10:00 に戻ります」 | なし |
 | 同時の claude の上限 | `CHAT_BUSY` | 「ほかの Chat が答えています」 | なし |
@@ -286,7 +289,7 @@ side panel は `ORPCError`（`@orpc/client`）の `code` で分け、`data` は 
 | 止めた | 止めるボタン | 途中までの答えの後に淡く「止めました」 | なし |
 | 使用量の警告 | `usage` | 答えの下に淡く「plan の 5 時間の枠を 91% 使いました（10:00 に戻ります）」 | なし |
 
-- `AGENT_FAILED` の 1 行目は、画面の途中の答え → その質問で受けた `retry` → それ以外、の順に選ぶ。code だけでは「途中で切れた」「API に繋がらない」「起きない」を分けられないが、side panel はその質問で受けた event を知っているため。`TypeError` も、画面に途中の答えがあれば「答えが途中で切れました」にする。
+- `AGENT_FAILED` の 1 行目は、画面の途中の答え → その質問で受けた `retry` → それ以外、の順に選ぶ。code だけでは「途中で切れた」「API に繋がらない」「起きない」を分けられないが、side panel はその質問で受けた event を知っているため。`TypeError` は、`chat.ask` の応答が届いた後なら、途中の答えが無くても「答えが途中で切れました」にする。Backend には届いていたため。
 - 時刻は side panel が動く Mac の時刻帯で、今日なら `10:00`、別の日なら `10月12日 16:27` と書く。使用率は四捨五入した % にする。`usage` に `resetsAt` が無ければ「（…に戻ります）」を省く。
 - `rateLimitType` の呼び名は `five_hour` を「5 時間の」、`seven_day` を「週の」、`seven_day_opus` を「Opus の週の」、`seven_day_sonnet` を「Sonnet の週の」にし、ほかは呼び名を付けない（「plan の上限に達しました」）。知らない値でも文が壊れないようにするため。
 - toast は使わない。toast は server の英語の message をそのまま出す形（`packages/ui/src/toast.ts`）で、失敗はその質問の答えの場所に出すため。
@@ -298,7 +301,7 @@ side panel は `ORPCError`（`@orpc/client`）の `code` で分け、`data` は 
 - oRPC の `ClientRetryPlugin` は使わない。event iterator の途中の error で handler を最初から呼び直すので、途中まで流した値が client で重なる（research の §3）。side panel が自分で送り直す自動の再試行もしない。
 - 失敗した質問は、再試行して答えが返るまで、後の質問の `history` に入れない。再試行せずに次の質問を送ったら、失敗した質問を履歴から外し、画面には残す。Backend が `snapshot` を返した後に失敗した場合も、その Page Snapshot を `history` に入れない。
 - 止めた質問は、途中までの答えの後に空行を挟んで「（ユーザーが途中で止めた）」を付けて履歴に入れる。答えが空なら印だけにする。「続けて」と訊いたときの材料になる。Backend は答えの文字をそのまま prompt にするので、印も文字のまま claude に渡る。
-- `snapshot` が届く前に止めた質問は、送ったページの URL と title（と添えたスクリーンショット）だけで履歴に入れる。Backend が本文にしたものが side panel に無いため。ページを読み終える前に止めたら、URL も title も無い。
+- `snapshot` が届く前に止めた質問は、送ったページの URL と title（と添えたスクリーンショット）だけで履歴に入れる。Backend が本文にしたものが side panel に無いため。ページを読み終える前に止めたら、送った時に見出しが出していた Current Page の URL と title で入れる。
 - 止めた質問には再試行を付けない。履歴に入り、「続けて」で続きを訊けるため。
 
 ### 止めるボタン
@@ -306,6 +309,7 @@ side panel は `ORPCError`（`@orpc/client`）の `code` で分け、`data` は 
 - 答えの間（送ってから stream が閉じるまで。最初の text の前と、再試行を待つ間も含む）、InputMessage の送るボタンを止めるボタン（label は「止める」）にする。入力欄に文字があっても止めるボタンにし、Enter では送らない。queue を消したので、答えの間に送れる先が無いため。
 - 押すと side panel は `chat.ask` の stream を abort し、Backend は handler の `signal` の abort で子の claude を SIGKILL する（上の「claude の持ち方」）。side panel は押した後に届いた event を描かず、答えに「止めました」を淡く添える。`AbortController` だけでは、子が 2〜3 秒 delta を出し続けて残る。
 - 答えの途中で「新しい Chat」を押したときも、同じく stream を abort する。
+- ページを読んでいる間（PDF の fetch の最中）に押したときも、その fetch を abort する（上の「PDF の取り方」）。
 
 ### Backend の不在の帯（`src/ui/reach.ts`）
 
@@ -327,10 +331,12 @@ side panel は `ORPCError`（`@orpc/client`）の `code` で分け、`data` は 
   - Backend を起こした後に再試行を押すと、同じ質問の答えが返った。plan の使用率が 96% のときで、答えの下に「plan の 5 時間の枠を 96% 使いました（9:40 に戻ります）」が出た（本物の `allowed_warning`）。
   - 答えが流れ始めてから止めるを押すと「止めました」が出て、3 秒後も答えは増えず、Backend を親に持つ claude は無かった。
   - 答えが流れ始めてから Backend の stdin を閉じると、途中までの答えと「答えが途中で切れました」、再試行のボタン、帯が出た。stream の途中で Backend が居なくなっても `TypeError` になる。
+- side panel の target で、Backend の居ない口への `fetch` は `TypeError: Failed to fetch` で reject した（headless の Brave の side panel そのもので `extension-panel.ts eval` で評価した）。
+- side panel の page を Browser Tab で開いて、本文を送り終えない PDF（navigation には PDF を返し、fetch には `%PDF-` の頭だけを送って止まる URL）で送り、読み終える前に止めるを押すと、配る側でその fetch の request が abort された。「新しい Chat」でも同じだった。止めた後に別のページで送ると、body の `history[0]` は `{ question, page: { url, title }, answer: '（ユーザーが途中で止めた）' }` で、`url` と `title` は送った時の見出しの PDF のものだった。
+- 再試行は、スクリーンショットも PDF も取り直さない。headless の Brave の side panel で、Backend を止めて PDF の Browser Tab でスクリーンショットを添えて送り、Backend を起こして再試行すると、送り直した body は multipart の boundary を除いて最初の body と同じで、PDF の URL への fetch も起きなかった。
 
 ### 確かめていないこと
 
-- side panel の target で、Backend の居ない口への `fetch` が reject した error の constructor の名前と message。`extension-panel.ts eval` が worktree の guard に止められた。上の Browser Tab の page では、文言から `TypeError` だと分かった。
 - 帯が出ている間に、ページを click してから side panel を click すると、side panel の window が `focus` を受けて 5 秒を待たずに帯が消えるか。
 - 期限切れの OAuth token の 401 で、CLI が token を更新して答えるか（CLI のコードには更新して再試行する分岐がある）。
 - 本物の plan の上限の 429。research は header を真似た 429 で確かめた。
@@ -339,7 +345,9 @@ side panel は `ORPCError`（`@orpc/client`）の `code` で分け、`data` は 
 
 ## テスト
 
-- `src/chat.test.ts` が `createRouterClient(router, { context: { chatAgent } })` を通して確かめる。DB は使わない。本文への変換の失敗は、`defuddle/node` の `Defuddle` を `spyOn` で reject させて作る。
+- `src/chat.test.ts` が `createRouterClient(router, { context: { chatAgent } })` を通して確かめる。DB は使わない。本文への変換の失敗は、error を返す Worker（`src/page/fixtures/failing-worker.ts`）を `htmlWorker` に渡して作る。defuddle は自分の失敗を握って body 全体を返し、例外を投げる本物の HTML が無いため。
+- div を 3,000 段入れ子にしたページを本文にしている間に `prepare` がすぐ返ることを、`src/chat.test.ts` が本物の Worker で確かめる。本文になる前に abort して Worker を止める。
+- HTML と PDF の 30 秒の打ち切りは、返事をしない Worker（`src/page/fixtures/silent-worker.ts`）を `defaultReaders` で渡し、`setTimeout` を `spyOn` して callback を手で呼ぶ（`CODING_STANDARDS.md` の「テスト」）。いずれ返事をする本物の Worker では、打ち切りが Worker の返事を待つ実装でも通る。
 - 途中の失敗が RPCLink の client に `ORPCError` の `code` と `data` で届くことは、`apps/backend/src/browser-listener.test.ts` がブラウザの口に繋いで確かめる。
 - 本文への変換は `src/page/snapshot.test.ts` が `src/page/fixtures/` の HTML（`getHTML` が書き出す、document element の中身の形）で、同じページと全体の上限と block の並び（スクリーンショットの `image` の置き場所と 1,500 字の数え方を含む）は `src/page/prompt.test.ts` が `PageSnapshot` を直に組んで確かめる。どちらも claude を起こさない。
 - PDF の本文は `src/page/pdf.test.ts` が、Worker を通して確かめる。PDF は `src/page/test-pdf.ts` の `testPdf(pages)` が bytes を組み、binary の file を repo に置かない。`latin` のページは埋め込まない Helvetica、`japanese` のページは埋め込まない `HeiseiKakuGo-W5` と `UniJIS-UCS2-H` で書き、cMap が無いと日本語が落ちる。`'missing'` のページは無い object を指し、読めば pdf.js が例外を投げるので、残りのページを読まないことをそれで確かめる。ページの大きさは行の長さと数に合わせて広げる。pdf.js はページの外の字を本文に入れないため。
@@ -362,7 +370,7 @@ side panel は `ORPCError`（`@orpc/client`）の `code` で分け、`data` は 
 - claude の場所に何も無い場面は、`createChatAgent` に一時 directory の無い path を渡して作る。
 - 起こした claude は、テストの process の子のうち生きているもの（`ps` の ppid と stat）で数える。SDK は呼び出しの中で同期に spawn するので、`ask` と `prepare` が返った直後に数えれば、起こしていないことも確かめられる。
 - 5 分の時限は、`setTimeout` を `spyOn` で捕まえ、300000ms の callback を手で呼ぶ。
-- テストは偽の claude が居なくなるのを待ってから home を消す（`docs/packages/dev-loop.md` の「検査と CI」）。
+- テストは偽の claude が居なくなるのを待ってから home を消す（`docs/packages/dev-loop.md` の「検査と CI」）。`ChatAgent` を自分で作るテストは自分の子を数え、Backend の process を起こすテストは `@monica/chat/testing` の `untilFakeClaudesExit(dir)` で、wrapper を書いた dir を command line に持つ process が居なくなるのを待つ。`stop()` も Backend の終了も SIGKILL を送るだけで、居なくなるのを待たないため。
 
 ## 実機で確かめたこと
 
@@ -375,7 +383,7 @@ SDK 0.3.293 と同梱の claude 2.1.293 で、dev の Backend を `env -i`（`HO
 - spare を起こした Backend に SIGTERM を送ると、spare が居なくなる。
 - SIGKILL した claude は `~/.claude/sessions/<pid>.json` を残し、次に claude が起きたときに消える。
 - prompt cache（Page Snapshot を足した後、約 2 万字の fixture のページで 1 問目から 5 分以内に 3 問続けた）: usage は 1 問目が cache creation 5,424・cache read 0、2 問目（同じページで `same`）が 5,824・0、3 問目（`chrome://version`）が 6,204・0。質問ごとに claude を起こし直す形では、前の問答の部分は cache read にならなかった。理由は確かめていない。
-- 2 万字の HTML（本文 13,928 字）の変換から `snapshot` が届くまで、`bun run` の Backend で 48ms、compile した Backend で 36ms。
+- 2 万字の HTML（本文 13,928 字）の変換から `snapshot` が届くまで、`bun run` の Backend で 48ms、compile した Backend で 36ms。Worker に移した後は、`src/page/fixtures/article.html` の `snapshot` が呼んでから 106ms と 37ms で届き、本文は両方の Backend で同じだった。compile した Backend で、div を 3,000 段入れ子にしたページを本文にしている間（23 秒）、`chat.prepare` は 2ms で返った。
 - PDF（pdfjs-dist 6.4.299）: `testPdf` で組んだ 2 ページの日本語と英語の PDF を RPCLink で `chat.ask` に添えると、`bun run` の Backend でも、`scripts/build.ts` と同じ command で compile した Backend でも、最初の `snapshot` の本文が同じになった（呼んでから届くまで 67ms と 31ms）。compile した Backend は Worker を `/$bunfs/root/pdf-worker.ts` から、cMap を `/$bunfs/root/cmaps` から読み、migrate を終えて起き、SPA も今までどおり `dist` から配った。
 
 ## ui
@@ -386,7 +394,7 @@ SDK 0.3.293 と同梱の claude 2.1.293 で、dev の Backend を `env -i`（`HO
 
 部品は fluid-functionalism（MIT、`fluid/LICENSE`）の commit `bf9ece4` の registry から、`packages/chat/src/ui/fluid/` に写した。upstream を追う仕組みは持たない。
 
-- 写したのは 14 ファイル: `chat-message.tsx`、`input-message.tsx`、`thinking-indicator.tsx`、`button.tsx`（Base UI 版）、`hooks/use-touch-primary.tsx`、`lib/` の `utils.ts`・`springs.ts`・`font-weight.ts`・`shape-context.tsx`・`size-context.tsx`・`type-scale.ts`・`icon-context.tsx`・`surface-classes.ts`・`surface-context.tsx`。CSS は `fluid/typeset.css`（`.typeset`）と `fluid/shimmer.css`（`.shimmer-text` と keyframes）を、本家の `app/globals.css` から写した。
+- 写したのは 14 ファイル: `chat-message.tsx`、`input-message.tsx`、`thinking-indicator.tsx`、`button.tsx`（Base UI 版）、`hooks/use-touch-primary.tsx`、`lib/` の `utils.ts`・`springs.ts`・`font-weight.ts`・`shape-context.tsx`・`size-context.tsx`・`type-scale.ts`・`icon-context.tsx`・`surface-classes.ts`・`surface-context.tsx`。CSS は `fluid/typeset.css`（`.typeset`）と `fluid/shimmer.css`（`.shimmer-text` と keyframes）を、fluid-functionalism の `app/globals.css` から写した。
 - 写さないもの: Tooltip、use-fluid-hover、fluid-hover-highlight、popup、file-thumbnail。Button の loading の spinner の keyframes も、使わないので写さない。
 - 写すときの直し:
   - `"use client"` を消し、import を拡張子付きの相対 path にし、oxfmt を当てた。
@@ -423,13 +431,13 @@ React に依らない `createChatStore(client)` が Chat を持ち、`ChatApp` �
 
 - Chat は side panel の document の memory にだけあり、window ごとに 1 つ。「新しい Chat」を押すか side panel を閉じると終わり、どこにも残さない。Backend が居なくなっても終わらない（ADR-0030・0031）。
 - `open(readPage, focus)` は side panel を開いた時に `ChatApp` の effect が 1 回呼び、`chat.prepare` を呼んで spare を起こさせる。届かなければ帯を出す（上の「失敗」の「Backend の不在の帯」）。`focus` は `ChatApp` が渡す `window` で、帯の間はその `focus` の event でも確かめ直す。返す関数で確かめ直しを止める。dev の StrictMode で 2 回呼ばれても、Backend が spare を 1 つに保つので害は無い。
-- `ask` は、送る時に `readPage({ screenshot, maxPdfBytes })` で Current Page を読み直して `page` に入れ、答え終えた問答を古い順に `history` に入れて `chat.ask` を呼ぶ。`readPage` は await を挟まずに呼び、送る操作の user gesture の中で撮り始める。`ChatApp` が渡す `readPage` は `read-current-page.ts` の `readCurrentPage` で、撮り始めてから Browser Tab を取り直して `read-page.ts` で読む（上の「Page Snapshot」）。`maxPdfBytes` は PDF を読む上限（上の「PDF の取り方」）で、今のページのスクリーンショットは読むのと並べて撮るので数えず、送る前の大きさの確かめが数える。答えている間は送らずに false を返し、スクリーンショットのボタンも外さない。答えの途中で Current Page が替わっても、delta はその質問の答えに足す。
+- `ask` は、送る時に `readPage({ screenshot, maxPdfBytes, signal })` で Current Page を読み直して `page` に入れ、答え終えた問答を古い順に `history` に入れて `chat.ask` を呼ぶ。`readPage` は await を挟まずに呼び、送る操作の user gesture の中で撮り始める。`ChatApp` が渡す `readPage` は `read-current-page.ts` の `readCurrentPage` で、撮り始めてから Browser Tab を取り直して `read-page.ts` で読む（上の「Page Snapshot」）。`maxPdfBytes` は PDF を読む上限（上の「PDF の取り方」）で、Current Page のスクリーンショットは読むのと並べて撮るので数えず、送る前の大きさの確かめが数える。答えている間は送らずに false を返し、スクリーンショットのボタンも外さない。答えの途中で Current Page が替わっても、delta はその質問の答えに足す。
 - 送った input は、答えが返るか次の質問を送るまで持ち、`retry` が `readPage` を呼ばずにそのまま送り直す。`stop` は stream を abort し、止めた印を付けて履歴に入れる（上の「失敗」の「再試行と履歴」）。
 - `snapshot()` の `withScreenshot` がボタンの状態で、`toggleScreenshot` が切り替える。`ask` が送ったら外す。
 - 送ったスクリーンショットは、読み終えた時に質問の entry の `screenshot` に入れて縮小を出す。
 - 届いた `snapshot` の `page` に送ったスクリーンショットを足して、その問答の turn の `page` として履歴に入れ、`snapshot` から作った知らせを質問の entry の `notice` に入れる。
 - `startNewChat` は流れている stream を `signal` で abort し、問答と履歴を空にし、スクリーンショットのボタンを外す。abort の後に届いた delta は描かない。Backend は abort でその claude を止める。
-- client の型 `ChatClient` は、side panel が呼ぶ `prepare` と `ask` だけの形。ブラウザの口への oRPC の client の `chat` がそのまま入り、テストは偽の client を渡す。
+- client の型 `ChatClient` は contract から導いた `ContractRouterClient<typeof contract>`（note の ui の `client.ts` と同じ形、ADR-0002）。ブラウザの口への oRPC の client の `chat` がそのまま入り、テストは偽の client を渡す。
 
 ### Current Page の追い方（`current-page.ts`）
 
@@ -437,6 +445,7 @@ React に依らない `createChatStore(client)` が Chat を持ち、`ChatApp` �
 - `tabs.onActivated` はその window の event だけを見る。`tabs.onUpdated` は Current Page の Browser Tab の event だけを見て、tab の url と title が前に出したものと違えば出し直す。pushState と hash の変更も url の変化として届く。chrome:// へ移ったときは url も title も無い event だけが届くので、変化の中身ではなく tab の値で比べる。
 - 権限は `tabs` も `webNavigation` も足さない。`<all_urls>` の host permission で http・https・file のページの url と title が見える。
 - `read()` は送る時に `tabs.query({ active: true, windowId })` で Browser Tab を取り直して返す。見出しの追跡が event を取りこぼしても、読んで送るページを違えない。
+- `shown()` は見出しに出している Current Page の URL と title を返す。送る時に `readCurrentPage` が読むのと並べて `ChatStore` に渡す。
 - `windowId()` は side panel を載せた window の id を返し、`captureVisibleTab` に渡す。最初の `tabs.query` が返る前は undefined で、そのときは `windowId` を省いて呼ぶ（side panel からは同じ画像になる）。
 - 止めると listener を外し、読み途中の結果も捨てる。
 
@@ -450,9 +459,9 @@ React に依らない `createChatStore(client)` が Chat を持ち、`ChatApp` �
 
 - DOM の環境は入れない（`docs/packages/note-ui.md` の「テスト」と同じ）。
 - `current-page.test.ts` は `fake-chrome.ts` の偽の `chrome.tabs` で確かめる。偽物は `globalThis.chrome` に置いてテストの後に外し、`query` の `active`・`windowId`・`currentWindow` を本物と同じく絞る。chrome:// へ移ったときの url も title も無い `onUpdated` も出せる。
-- `read-page.test.ts` は同じ偽物の `chrome.scripting.executeScript` で確かめる。偽物は注入された関数を走らせず、`readings` に置いた結果を返すか、reject するか、返らない。省いた `contentType` は `text/html` になる。渡された injection は `injections` に残る。注入する関数そのもの（shadow root と選択範囲）は DOM が要るので、実機で確かめる。3 秒と 30 秒の打ち切りは `setTimeout` を `spyOn` して callback を手で呼ぶ。PDF の fetch は `fetch` を `spyOn` した偽物で、本物と同じく `signal` の abort で reject させ、読まれた chunk の数を数える body を返す。
-- `read-current-page.test.ts` は同じ偽物の `chrome.tabs.captureVisibleTab` と、偽の `createImageBitmap`・`OffscreenCanvas`・`devicePixelRatio` で、撮る時機・大きさと形式・撮れないとき・読めずに撮れたときを確かめる。偽の `captureVisibleTab` は `screenshots` に置いた大きさの偽の PNG を返すか、reject するか、返らない。呼ばれた引数は `captures` に残る。偽の canvas は画像を描かず、書き出した形式と quality と大きさを JSON にした Blob を返す。本物の縮小は bun test に canvas が無いので実機で確かめ、大きさの計算（`shrunkSize`）は `screenshot.test.ts` が純関数として確かめる。
-- `chat-store.test.ts` は偽の client で確かめる。偽の答えの stream は `signal` に応えず、test が流した delta をそのまま渡すので、abort の後に届いた delta を描かないことを確かめられる。偽の `readPage` は渡された `{ screenshot }` と PDF の上限を記録し、`ask` が返る前に呼ばれたかと、再試行が読み直さないことを見られる。
+- `read-page.test.ts` は同じ偽物の `chrome.scripting.executeScript` で確かめる。偽物は注入された関数を走らせず、`readings` に置いた結果を返すか、reject するか、返らない。省いた `contentType` は `text/html` になる。渡された injection は `injections` に残る。注入する関数そのもの（shadow root と選択範囲）は DOM が要るので、実機で確かめる。3 秒と 30 秒の打ち切りは `setTimeout` を `spyOn` して callback を手で呼ぶ。PDF の fetch は `fetch` を `spyOn` した偽物で、読まれた chunk の数を数える body を返す。打ち切りと止める操作は、`signal` にも応えずに返らない偽物で確かめる（`CODING_STANDARDS.md` の「テスト」）。`signal` で reject する偽物では、fetch の終わりを待つ実装でも通る。
+- `read-current-page.test.ts` は同じ偽物の `chrome.tabs.captureVisibleTab` と、偽の `createImageBitmap`・`OffscreenCanvas`・`devicePixelRatio` で、撮る時機・大きさと形式・撮れないとき・読めずに撮れたときを確かめる。偽の `captureVisibleTab` は `screenshots` に置いた大きさの偽の PNG を返すか、reject するか、返らない。呼ばれた引数は `captures` に残る。偽の canvas は画像を描かず、書き出した形式と quality と大きさを JSON にした Blob を返す。本物の縮小は bun test に canvas が無いので実機で確かめ、大きさの計算（`shrunkSize`）は `screenshot.test.ts` が純関数として確かめる。撮るのの 3 秒の打ち切りは、`executeScript` の 3 秒の timer と混ざらないよう、`screenshot.test.ts` が `takeScreenshot` を直に呼んで確かめる。
+- `chat-store.test.ts` は偽の client で確かめる。偽の答えの stream は `signal` に応えず、test が流した delta をそのまま渡すので、abort の後に届いた delta を描かないことを確かめられる。RPCLink の client と同じく、`@orpc/client` の `AsyncIteratorClass` で返す。偽の `readPage` は渡された `{ screenshot }` と PDF の上限と `signal` を記録し、`ask` が返る前に呼ばれたかと、再試行が読み直さないことと、止めたら読むのをやめさせたかを見られる。読み終えない `page` も返せる。
   - 偽の client は、Backend の宣言した error を `@orpc/client` の `ORPCError`（`defined: true`、contract の `askErrors` の status と message）で、届かないことを `TypeError` で投げ分ける。ui の entry は server を import できないので、router を in-process で呼べないため。
   - 失敗の文言は store の entry の `failure` で確かめる。時刻の期待値は local の `Date` から作り、時刻帯に依らせない。
   - 帯の 5 秒おきの確かめ直しは `setInterval` を `spyOn` で捕まえて callback を手で呼び、focus は `open` に渡した `EventTarget` に `focus` の event を出す。
@@ -479,3 +488,4 @@ Brave 1.97 で確かめた。
   - `--force-device-scale-factor=2` で起こした Brave では、撮った PNG が 2400×1850（`innerWidth` 1200 の 2 倍）、縮めた JPEG が 1200×925 だった。
   - Backend を止めて `chrome://version` で送ると、body の `page.content` が `restricted`（`Cannot access a chrome:// URL`）、`page.screenshotFailed.reason` が `The 'activeTab' permission is not in effect because this extension has not been in invoked.` だった。
   - PDF の Browser Tab（Brave の PDF viewer）は撮れた。viewer の toolbar と縮小の列ごと写る。
+- スクリーンショットの quota（headless の Brave の side panel そのもので、`extension-panel.ts eval` で送った）: Backend を止めた状態で、ボタンを押して送る式を 0.3 秒おきに 3 回評価すると、680ms の間に 3 回とも撮れ、どの body にも JPEG があり `screenshotFailed` は無かった。Backend が答えている間は、2 回目の click が送るボタンではなく止めるボタンを押す（上の「失敗」の「止めるボタン」）ので、続けて送る確かめは Backend を止めて、送った質問がすぐ失敗する状態で行う。

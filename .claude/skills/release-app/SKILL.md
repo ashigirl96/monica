@@ -88,8 +88,12 @@ dock() {
        headers: { 'sec-fetch-site': 'none', 'sec-fetch-mode': 'cors' },
      }),
    )
-   for await (const event of await client.chat.ask({ question: '1 から 5 を並べて', page: {}, history: [] }))
-     process.stdout.write(event.text)
+   const answer = await client.chat.ask({
+     question: '1 から 5 を並べて',
+     page: { content: { kind: 'unreadable', reason: 'restricted' } },
+     history: [],
+   })
+   for await (const event of answer) if (event.type === 'text') process.stdout.write(event.text)
    ```
 
    答えの text が流れ、答えている間は Backend の子に `$A/Contents/MacOS/claude` が居て、答えた後にその pid が消える。答えた後には次の質問のための spare が別の pid で起きる（`docs/packages/chat.md` の「spare」）。

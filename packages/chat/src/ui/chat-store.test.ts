@@ -1,6 +1,6 @@
 import { afterEach, expect, spyOn, test } from 'bun:test'
 
-import { ORPCError } from '@orpc/client'
+import { AsyncIteratorClass, ORPCError } from '@orpc/client'
 
 import {
   askErrors,
@@ -13,6 +13,7 @@ import {
   type Unreadable,
 } from '../contract.ts'
 import { type ChatClient, createChatStore } from './chat-store.ts'
+import type { CurrentPage } from './current-page.ts'
 
 const cleanups: (() => void)[] = []
 afterEach(() => {
@@ -70,14 +71,18 @@ class FakeClient implements ChatClient {
     if (this.prepareError) throw this.prepareError
   }
 
-  async ask(
-    input: AskInput,
-    { signal }: { signal: AbortSignal },
-  ): Promise<AsyncIterable<ChatEvent>> {
+  async ask(input: AskInput, options?: { signal?: AbortSignal }) {
     if (this.askError) throw this.askError
     const answer = new FakeAnswer()
-    this.asked.push({ input, signal, answer })
-    return answer
+    this.asked.push({ input, signal: options!.signal!, answer })
+    const events = answer[Symbol.asyncIterator]()
+    // RPCLink の client と同じく、oRPC の event iterator で返す。
+    return new AsyncIteratorClass(
+      () => events.next(),
+      async () => {
+        await events.return(undefined)
+      },
+    )
   }
 }
 
@@ -112,24 +117,39 @@ const SHOT = 'c2NyZWVuc2hvdA=='
 
 function openChat(client = new FakeClient()) {
   let page = pageAt('https://a.example/', 'A')
+  let shown: CurrentPage = { url: page.url, title: page.title }
   let shot: Pick<Page, 'screenshot' | 'screenshotFailed'> = { screenshot: SHOT }
+  let reading = true
   const reads: { screenshot: boolean }[] = []
+  const signals: AbortSignal[] = []
   const pdfLimits: number[] = []
   const focus = new EventTarget()
   const store = createChatStore(client)
-  store.open(async ({ screenshot, maxPdfBytes }) => {
+  store.open(({ screenshot, maxPdfBytes, signal }) => {
     reads.push({ screenshot })
+    signals.push(signal)
     pdfLimits.push(maxPdfBytes)
-    return screenshot ? { ...page, ...shot } : page
+    const read = screenshot ? { ...page, ...shot } : page
+    return { shown, page: reading ? Promise.resolve(read) : new Promise<never>(() => {}) }
   }, focus)
   return {
     client,
     store,
     focus,
     reads,
+    signals,
     pdfLimits,
     showPage: (next: Page) => {
       page = next
+      shown = { url: next.url, title: next.title }
+    },
+    /** 見出しに出ている Current Page。Browser Tab を読み終えないと、送ったページになる前の URL と title。 */
+    showHeader: (next: CurrentPage) => {
+      shown = next
+    },
+    /** これから送る質問のページを、held が false になるまで読み終えない。 */
+    holdReading: (held = true) => {
+      reading = !held
     },
     failScreenshots: (reason: string) => {
       shot = { screenshotFailed: { reason } }
@@ -322,7 +342,7 @@ test('an answer that came without a Page Snapshot keeps only the URL and title o
   ])
 })
 
-// body の上限を超えた request は 413 で失敗するので、今のページの中身だけを外して質問は届ける。
+// body の上限を超えた request は 413 で失敗するので、Current Page の中身だけを外して質問は届ける。
 test('a question whose request would pass the body limit goes without the HTML and selection of its page, as too large to read', async () => {
   const { client, store, showPage } = openChat()
   const html = 'x'.repeat(MAX_ASK_BODY_BYTES - 512 * 1024)
@@ -629,6 +649,18 @@ test('an answer whose Backend went away keeps the answer so far, says it was cut
     failure: { line: '答えが途中で切れました' },
   })
   expect(store.snapshot()).toMatchObject({ unreachable: true, retryable: 0 })
+})
+
+test('an answer whose Backend went away after its Page Snapshot or a retry, before any text, says it was cut off', async () => {
+  const afterSnapshot = await failAfter([], new TypeError('network error'))
+  const afterRetry = await failAfter(
+    [{ type: 'retry', attempt: 1 }],
+    new TypeError('network error'),
+  )
+
+  expect(afterSnapshot.entry.failure).toEqual({ line: '答えが途中で切れました' })
+  expect(afterRetry.entry.failure).toEqual({ line: '答えが途中で切れました' })
+  expect(afterSnapshot.store.snapshot().unreachable).toBe(true)
 })
 
 test('a claude that is not logged in tells how to log in', async () => {
@@ -953,6 +985,40 @@ test('a question stopped before its Page Snapshot joins the history with only th
       answer: '（ユーザーが途中で止めた）',
     },
   ])
+})
+
+test('a question stopped before its page is read joins the history with the URL and title that the side panel showed when it was sent', async () => {
+  const { client, store, showHeader, holdReading } = openChat()
+  showHeader({ url: 'https://b.example/', title: 'B' })
+  holdReading()
+  store.ask('What is this?')
+  await settled()
+  showHeader({ url: 'https://c.example/', title: 'C' })
+
+  store.stop()
+  holdReading(false)
+  store.ask('Go on')
+  await settled()
+
+  expect(latest(client).input.history).toEqual([
+    {
+      question: 'What is this?',
+      page: { url: 'https://b.example/', title: 'B' },
+      answer: '（ユーザーが途中で止めた）',
+    },
+  ])
+})
+
+test('a question stopped while its page is read, and a new Chat started while its page is read, abort the reading', async () => {
+  const { store, signals, holdReading } = openChat()
+  holdReading()
+
+  store.ask('What is this?')
+  store.stop()
+  store.ask('And this?')
+  store.startNewChat()
+
+  expect(signals.map(({ aborted }) => aborted)).toEqual([true, true])
 })
 
 // ── Backend の不在の帯 ──────────────────────────────────────────────────

@@ -2,6 +2,8 @@
 export type CurrentPage = { url?: string; title?: string }
 
 export type CurrentPageWatch = {
+  /** 見出しに出している Current Page。最初の tabs.query が返るまでは空。 */
+  shown: () => CurrentPage
   /** side panel の window の Current Page の Browser Tab を、event を待たずに取り直す。 */
   read: () => Promise<chrome.tabs.Tab | undefined>
   /** side panel を載せた window の id。最初の tabs.query が返るまでは undefined。 */
@@ -9,7 +11,8 @@ export type CurrentPageWatch = {
   stop: () => void
 }
 
-function pageOf({ url, title }: chrome.tabs.Tab): CurrentPage {
+/** url と title のうち、在るものだけを持つ形。 */
+export function addressOf({ url, title }: CurrentPage): CurrentPage {
   return { ...(url !== undefined && { url }), ...(title !== undefined && { title }) }
 }
 
@@ -22,7 +25,7 @@ export function watchCurrentPage(onChange: (page: CurrentPage) => void): Current
 
   const show = (tab: chrome.tabs.Tab) => {
     tabId = tab.id
-    shown = pageOf(tab)
+    shown = addressOf(tab)
     onChange(shown)
   }
   const onActivated = (info: chrome.tabs.OnActivatedInfo) => {
@@ -49,6 +52,7 @@ export function watchCurrentPage(onChange: (page: CurrentPage) => void): Current
   })
 
   return {
+    shown: () => shown ?? {},
     async read() {
       const [tab] = await chrome.tabs.query(
         windowId === undefined ? { active: true, currentWindow: true } : { active: true, windowId },
