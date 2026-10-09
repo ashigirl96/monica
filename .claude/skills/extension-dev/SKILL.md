@@ -84,8 +84,8 @@ cdp.close();'
 
 - Backend は本物の GitHub（`gh auth token`）から Issue を引く。headless の Brave は GitHub に未ログインだが、public な repo の一覧は開ける。
 - Run を押すと本物の ghq と claude が動く。Backend を `env -i` で起こし、`GHQ_ROOT=$MONICA_HOME/ghq`（clone と worktree を home の下に置き、本体の checkout に branch を作らない）と、`SHELL=/bin/sh` と `ENV=<claude() { echo "FAKE-CLAUDE argv: $*"; } を書いた file>`（Tab の対話 shell が読み、本物の claude の代わりに引数を出す）を渡す。Tab に打たれた行は backend-headless の「Tab への打ち込みと画面」の `attach` で読む。
-- ボタンの有無はページで `document.querySelectorAll('[data-monica-run-button]')` を読む。agent-browser の `eval` は worktree の guard に止められるので、`scripts/cdp.ts` の `connectCdp`・`attach` で github.com の page の target に繋ぐ script を scratchpad に書いて走らせる。`isTrusted` の確かめは、`Runtime.evaluate` の `.click()`（信頼されない）と agent-browser の `click`（信頼される）を比べる。
-- headless の Brave では `title` の tooltip を撮れない。ボタンの中心の `document.elementFromPoint` がボタンそのものを返し、`title` を持つかで、hover が理由に届くことを確かめる。
+- ボタンの有無はページで `document.querySelectorAll('[data-monica-run-button]')` を読む。agent-browser の `eval` と、`$(cat …)` で JS を渡す command は worktree の guard に止められるので、JS は file に書き、`bun scripts/github-page.ts <ws URL> script <file>` で github.com の page に評価させる。ws URL は `agent-browser --session <名前> [--cdp <port>] get cdp-url` で取る。`isTrusted` の確かめは、`Runtime.evaluate` の `.click()`（信頼されない）と agent-browser の `click`（信頼される）を比べる。
+- 押せない Run の tooltip は、agent-browser の `hover`（本物の mouse の経路）で出して `screenshot` で撮る。page の session に送った CDP の `Input.dispatchMouseEvent` では tooltip が出ない。focus で出すときは、先に page の空いた所を agent-browser の `mouse down`・`mouse up` で押して page に focus を移してから、agent-browser の `focus` を打つ。Chrome Extension も Backend も無しで試すときは、agent-browser で一覧を開き、`bun scripts/github-page.ts <ws URL> inject '{ref} is blocked by acme/lib#3'` で、どの行にも押せない Run を出す `issues-list.ts` を注入する。
 - GitHub の一覧は行の中の要素に `tabindex="-1"` を付け、Tab の移動を自分の script で回すので、`tabIndex` や `focus()` の戻りでは focus が届くかを判断できない。CDP の `Input.dispatchKeyEvent` で Tab を送り、`document.activeElement` を読む。
 - manifest（`content_scripts` など）を変えると、Vite は dev の出力を書き直すが、Brave は Chrome Extension を読み直さない。service worker の target で `chrome.runtime.reload()` を呼ぶ。
 

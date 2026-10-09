@@ -30,7 +30,7 @@ monica/
 ├── tsconfig.json       1 つだけ
 ├── Cargo.toml          Rust の workspace（crates/* と apps/desktop/src-tauri）
 ├── .claude-plugin/     plugin.json・marketplace.json（ADR-0006）
-├── scripts/            desktop.ts・dev-instance.ts・dev.ts・extension.ts・native-host.ts・extension-panel.ts・cdp.ts・build.ts・install-app.ts・bundled-claude.ts・check-brief.ts・test.ts・monica-dev・oxlint/
+├── scripts/            desktop.ts・dev-instance.ts・dev.ts・extension.ts・native-host.ts・extension-panel.ts・github-page.ts・cdp.ts・build.ts・install-app.ts・bundled-claude.ts・check-brief.ts・test.ts・monica-dev・oxlint/
 ├── apps/
 │   ├── backend/        @monica/backend   Backend の組み立て
 │   ├── cli/            @monica/cli       bin は monica
