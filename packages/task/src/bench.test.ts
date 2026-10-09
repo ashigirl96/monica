@@ -137,8 +137,7 @@ test('a setup still running after 600 seconds fails, its process group getting S
     [
       '#!/bin/sh',
       `sh -c 'trap "sleep 0.3; touch .cleaned; exit 0" TERM; touch .trapping; while :; do sleep 0.05; done' &`,
-      `sh -c 'trap "" TERM; exec sleep 30' &`,
-      'echo $! > .stubborn',
+      `sh -c 'trap "" TERM; echo $$ > .stubborn; exec sleep 30' &`,
       'sleep 30',
     ].join('\n'),
   )
@@ -170,6 +169,7 @@ test('a setup still running after 600 seconds fails, its process group getting S
   await until(
     () =>
       existsSync(join(cwd, '.stubborn')) &&
+      readFileSync(join(cwd, '.stubborn'), 'utf8') !== '' &&
       existsSync(join(cwd, '.trapping')) &&
       fireTimeout !== undefined,
   )

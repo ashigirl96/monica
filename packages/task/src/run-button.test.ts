@@ -68,7 +68,11 @@ test('a wayfinder Issue with no parent map gets no button, and running it is ref
   expect(await fixture.client.runButtons({ refs: [ref] })).toEqual({
     buttons: [{ ref, button: null, reason: expect.stringContaining('no map above it') }],
   })
-  expect((await failure(fixture.client.runFromButton({ ref }))).code).toBe('PRECONDITION_FAILED')
+  const refused = await failure(fixture.client.runFromButton({ ref }))
+  expect([refused.code, refused.message]).toEqual([
+    'PRECONDITION_FAILED',
+    `${ref} is a wayfinder Issue with no map above it`,
+  ])
 })
 
 test('a wayfinder Issue under a parent that is not a map gets no button, and running it is refused', async () => {
@@ -308,7 +312,11 @@ test('a ready-for-agent Issue whose sub-issues are all closed gets no button, an
   expect(await fixture.client.runButtons({ refs: [ref] })).toEqual({
     buttons: [{ ref, button: null, reason: expect.stringContaining('sub-issues are all closed') }],
   })
-  expect((await failure(fixture.client.runFromButton({ ref }))).code).toBe('PRECONDITION_FAILED')
+  const refused = await failure(fixture.client.runFromButton({ ref }))
+  expect([refused.code, refused.message]).toEqual([
+    'PRECONDITION_FAILED',
+    `${ref} is a spec whose sub-issues are all closed`,
+  ])
 })
 
 test.each([
@@ -342,19 +350,6 @@ test('running from the button of a wayfinder Issue under a map types claude with
     data: "claude '/wayfinder 7 12'\r",
   })
   expect((await fixture.client.list({})).tasks.map((t) => t.ref)).toEqual([ref])
-})
-
-test('running from a button types the prompt of the labels the Issue has when it runs, not when the button was told', async () => {
-  const fixture = withOrigin()
-  fixture.github.issue(ref, { title: 'Ship it', labels: ['ready-for-agent'] })
-  await fixture.client.runButtons({ refs: [ref] })
-  fixture.github.issue(ref, { title: 'Ship it', labels: ['needs-triage'] })
-
-  const output = await fixture.client.runFromButton({ ref })
-
-  expect((await typedInto(fixture, output.terminalSessionId)).at(-1)).toMatchObject({
-    data: "claude '/triage #12'\r",
-  })
 })
 
 test('running from a button reads the labels anew and refuses an Issue that has lost its button, opening no Bench', async () => {

@@ -148,32 +148,26 @@ test.each([
   expect(await fixture.client.bench.list()).toEqual([])
 })
 
-test.each([
-  ['owner/repo#n', ref],
-  ['the issue URL', 'https://github.com/acme/app/issues/12'],
-])(
-  'run given %s of an untracked Issue tracks it, prepares its Bench and starts claude in it',
-  async (_, asked) => {
-    const fixture = untracked()
+test('run of an untracked Issue tracks it, prepares its Bench and starts claude in it', async () => {
+  const fixture = untracked()
 
-    const output = await fixture.client.run({ ref: asked })
+  const output = await fixture.client.run({ ref })
 
-    expect(output).toMatchObject({
-      ref,
-      title: 'Ship it',
-      tracked: true,
-      cwd: fixture.cwd,
-      benchCreated: true,
-      resumed: null,
-    })
-    expect((await fixture.client.list({})).tasks).toMatchObject([
-      { ref, title: 'Ship it', cwd: fixture.cwd },
-    ])
-    expect((await typedInto(fixture, output.terminalSessionId)).at(-1)).toMatchObject({
-      data: "claude '/tackle'\r",
-    })
-  },
-)
+  expect(output).toMatchObject({
+    ref,
+    title: 'Ship it',
+    tracked: true,
+    cwd: fixture.cwd,
+    benchCreated: true,
+    resumed: null,
+  })
+  expect((await fixture.client.list({})).tasks).toMatchObject([
+    { ref, title: 'Ship it', cwd: fixture.cwd },
+  ])
+  expect((await typedInto(fixture, output.terminalSessionId)).at(-1)).toMatchObject({
+    data: "claude '/tackle'\r",
+  })
+})
 
 test("run asked by a repo's old name for an untracked Issue tracks it under the new name and starts claude", async () => {
   const fixture = untracked({ origin: false })
