@@ -26,9 +26,18 @@ export type ChatEntry = {
 // oRPC が input を包む分の余白。
 const BODY_MARGIN_BYTES = 1024 * 1024
 
-/** body の上限を超える input は、今のページの HTML と選択範囲を外し、大きすぎて読めなかったことにする。履歴は削らない。 */
+// File は JSON.stringify で {} になり、multipart の別の part で送られる。
+const jsonBytes = (value: unknown) => new TextEncoder().encode(JSON.stringify(value)).byteLength
+
+/** 今のページの PDF に残る bytes。body の上限から、PDF の他の input と余白を引く。 */
+function pdfBudget(question: string, history: readonly Turn[]): number {
+  return MAX_ASK_BODY_BYTES - BODY_MARGIN_BYTES - jsonBytes({ question, history })
+}
+
+/** body の上限を超える input は、今のページの HTML・PDF・選択範囲を外し、大きすぎて読めなかったことにする。履歴は削らない。 */
 function withinBodyLimit(input: AskInput): AskInput {
-  const bytes = new TextEncoder().encode(JSON.stringify(input)).byteLength
+  const { content } = input.page
+  const bytes = jsonBytes(input) + (content.kind === 'pdf' ? content.pdf.size : 0)
   if (bytes + BODY_MARGIN_BYTES <= MAX_ASK_BODY_BYTES) return input
   return {
     ...input,
@@ -46,8 +55,11 @@ export type ChatSnapshot = { entries: readonly ChatEntry[]; answering: boolean }
 export type ChatStore = {
   snapshot: () => ChatSnapshot
   subscribe: (listener: () => void) => () => void
-  /** side panel を開いた時に呼ぶ。質問はそれぞれ、送る時に readPage で読んだ Current Page について訊く。 */
-  open: (readPage: () => Promise<Page>) => void
+  /**
+   * side panel を開いた時に呼ぶ。質問はそれぞれ、送る時に readPage で読んだ Current Page について訊く。
+   * readPage は、PDF が maxPdfBytes を超えたら読むのをやめる。
+   */
+  open: (readPage: (maxPdfBytes: number) => Promise<Page>) => void
   /** 開く前と答えている間は送らずに false を返す。 */
   ask: (question: string) => boolean
   /** 今の Chat を終える。答えの途中なら、その stream を abort する。 */
@@ -59,7 +71,7 @@ export function createChatStore(client: ChatClient): ChatStore {
   let history: readonly Turn[] = []
   let answering: AbortController | undefined
   let snapshot: ChatSnapshot = { entries, answering: false }
-  let readPage: (() => Promise<Page>) | undefined
+  let readPage: ((maxPdfBytes: number) => Promise<Page>) | undefined
   let nextId = 0
   const listeners = new Set<() => void>()
 
@@ -76,11 +88,11 @@ export function createChatStore(client: ChatClient): ChatStore {
     id: number,
     question: string,
     controller: AbortController,
-    read: () => Promise<Page>,
+    read: (maxPdfBytes: number) => Promise<Page>,
   ) => {
     const live = () => answering === controller
     try {
-      const page = await read()
+      const page = await read(pdfBudget(question, history))
       if (!live()) return
       const events = await client.ask(withinBodyLimit({ question, page, history: [...history] }), {
         signal: controller.signal,

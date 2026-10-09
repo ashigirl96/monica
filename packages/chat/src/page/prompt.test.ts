@@ -6,7 +6,7 @@ import { askContent } from './prompt.ts'
 const page = (text: string, more: Partial<PageSnapshot> = {}): PageSnapshot => ({
   url: 'https://coast.example/tide-pools',
   title: 'Tide pools',
-  content: { kind: 'text', text, truncated: false },
+  content: { kind: 'text', source: 'html', text, truncated: false },
   ...more,
 })
 
@@ -40,7 +40,9 @@ test('the document title is the first 500 characters of the page title, and is l
 })
 
 test('the context of a cut text says that only the first 100,000 characters are there', () => {
-  const cutPage = page('Text.', { content: { kind: 'text', text: 'Text.', truncated: true } })
+  const cutPage = page('Text.', {
+    content: { kind: 'text', source: 'html', text: 'Text.', truncated: true },
+  })
 
   const [document] = documents(askContent('Q?', cutPage, []).content)
 

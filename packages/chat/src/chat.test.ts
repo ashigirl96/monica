@@ -7,6 +7,7 @@ import { createRouterClient } from '@orpc/server'
 import * as defuddle from 'defuddle/node'
 
 import type { AskInput, ChatEvent } from './contract.ts'
+import { testPdf } from './page/test-pdf.ts'
 import { createChatAgent, router } from './server.ts'
 import { writeFakeClaude } from './testing.ts'
 
@@ -103,6 +104,7 @@ test('ask sends the Page Snapshot first, then streams the text deltas of claude 
         title: 'Math',
         content: {
           kind: 'text',
+          source: 'html',
           text: 'One and one make two, and two and two make four.',
           truncated: false,
         },
@@ -265,6 +267,7 @@ test('claude reads each earlier turn with its page text and answer, then the cur
             title: 'Addition',
             content: {
               kind: 'text',
+              source: 'html',
               text: 'Carrying moves a ten to the next column.',
               truncated: false,
             },
@@ -297,6 +300,46 @@ test('a question on the page of an earlier turn gets a snapshot that points at t
   const [, secondAsk] = records().filter((r) => r.kind === 'user')
   if (secondAsk?.kind !== 'user') throw new Error('no second question')
   expect(secondAsk.content.filter(({ type }) => type === 'document')).toHaveLength(1)
+})
+
+const pdfQuestion = (question: string): AskInput => ({
+  question,
+  page: {
+    url: 'https://example.com/tides.pdf',
+    content: {
+      kind: 'pdf',
+      pdf: new File([testPdf([{ font: 'japanese', lines: ['合言葉は桜餅です'] }])], 'tides.pdf'),
+    },
+  },
+  history: [],
+})
+
+test('a question on a PDF gets a snapshot of the text of the PDF, and the same PDF asked again points at that turn', async () => {
+  const { client, records } = startChat()
+
+  const [first] = await Array.fromAsync(await client.ask(pdfQuestion('この PDF の合言葉は？')))
+  if (first?.type !== 'snapshot') throw new Error('no snapshot')
+  const [second] = await Array.fromAsync(
+    await client.ask({
+      ...pdfQuestion('もう一度'),
+      history: [{ question: 'この PDF の合言葉は？', page: first.page, answer: '桜餅です。' }],
+    }),
+  )
+
+  expect(first.page.content).toEqual({
+    kind: 'text',
+    source: 'pdf',
+    text: '合言葉は桜餅です',
+    truncated: false,
+  })
+  expect(second).toMatchObject({ type: 'snapshot', page: { content: { kind: 'same', turn: 0 } } })
+  const [firstAsk] = records().filter((r) => r.kind === 'user')
+  if (firstAsk?.kind !== 'user') throw new Error('no question')
+  expect(firstAsk.content[0]).toMatchObject({
+    type: 'document',
+    source: { data: '合言葉は桜餅です' },
+    context: expect.stringContaining('extracted from a PDF'),
+  })
 })
 
 // chrome:// の Browser Tab では side panel から URL と title が見えず、読めない。

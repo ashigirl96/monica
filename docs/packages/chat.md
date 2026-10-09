@@ -14,17 +14,20 @@ ask       { question, page: Page, history: { question, answer, page: PageSnapsho
 - `question` は 1 字以上。`page` と `PageSnapshot` の `url` と `title` は省略できるただの文字列で、形を検めない。`chrome://` などの Browser Tab では side panel から見えず、`file://` のページもあるため。
 - `history` は Chat の前の問答を古い順に並べたもの。turn ごとに、その質問の `snapshot` で返した `PageSnapshot` を持つ。Backend は Chat を持たず、送られた履歴をそのまま prompt にする（ADR-0031）。
 - `.errors()` で宣言するのは `CHAT_BUSY`（status 429）だけ。claude を 4 つ持っているときの `ask` に、iterator を返す前に投げる。claude が落ちたときの error は型にせず、SDK の iterator が投げた error がそのまま oRPC の `INTERNAL_SERVER_ERROR` として流れる。
-- `MAX_ASK_BODY_BYTES`（50MB）は、ブラウザの口が受ける body の上限。ブラウザの口の 2 つの `Bun.serve` に `maxRequestBodySize` で渡し、超えた body には 413 が返る。
+- `MAX_ASK_BODY_BYTES`（50MB）は、ブラウザの口が受ける body の上限。ブラウザの口の 2 つの `Bun.serve` に `maxRequestBodySize` で渡し、超えた body には 413 が返る。side panel は送る前に大きさを見て、超える分を「読めなかった」にするので、413 は他のブラウザ拡張からしか届かない。
+- PDF の bytes は `page.content` の `pdf`（`z.file()`）に入れる。RPCLink は input のどこにある `Blob` も multipart の別の part で送るので、base64 で膨らませない（note の画像の upload と同じ形）。
 - router は CLI に出さず、ブラウザの口にだけ `{ note, chat }` で載せる。token の口には載せない。change stream は持たない（ADR-0028・0031）。
 
 ## createChatAgent
 
-`createChatAgent({ home, claudePath? })` は `stop()` だけを持つ `ChatAgent` を返す。Ledger と違い記録を持たないので、Ledger とは呼ばず、`start()` も無い。
+`createChatAgent({ home, claudePath?, pdfWorker?, cMaps? })` は `stop()` だけを持つ `ChatAgent` を返す。Ledger と違い記録を持たないので、Ledger とは呼ばず、`start()` も無い。
 
 - `$MONICA_HOME/chat` を `mkdirSync(…, { recursive: true, mode: 0o700 })` で作り、claude の cwd にする。
 - `claudePath` は claude の場所で、SDK の `pathToClaudeCodeExecutable` に渡す。省けば渡さず、SDK が node_modules の platform package（`@anthropic-ai/claude-agent-sdk-darwin-arm64` など）の claude を使う。
   - release の Backend は、Shell が env の `MONICA_CLAUDE_PATH` で渡す `.app` の `Contents/MacOS/claude` を渡す。compile した binary は node_modules の claude を解決できないため。`install-app` が同じ lockfile の platform package から写したもの（`docs/packages/dev-loop.md` の「release build と install」、ADR-0032）。
   - dev の Backend は env を受けないので省く。
+- `pdfWorker` は PDF を本文にする Worker の module の URL、`cMaps` は pdf.js の cMap の folder（下の「Page Snapshot」の「PDF の本文」）。省けば、`pdfWorker` は packages/chat の `src/pdf-worker.ts`、`cMaps` は packages/chat から解いた node_modules の `pdfjs-dist/cmaps` になる。`bun test` は両方を省いて動く。
+  - compile した Backend はどちらも解けないので、Backend は自分の隣の `pdf-worker.ts`（build の 2 つ目の entrypoint）と、`--asset` で同梱した `cmaps` を渡す（`docs/packages/backend.md` の「起動と終了」）。
 - `stop()` は同期で、持っている claude すべて（spare を含む）に SIGKILL を送り、spare の時限を消す。Backend の `exit()` は `process.exit(0)` まで await を挟まずに進むため。
 - procedure の handler が使う `prepare` と `ask` は、型に出さずに `internals(chatAgent)` で引く（`docs/packages.md` の「server entry の形」）。router の context は `{ chatAgent }`。
 - chat は他の domain を import せず、他の domain からも import されない。前者は `.oxlintrc.json` の override が、後者は package.json が守る。table は持たないが、空の journal を持つ（`docs/packages/migration.md`）。
@@ -102,26 +105,36 @@ claude の `system`（`init`）を受けたら、stderr に 1 行出す。tools 
 
 ## Page Snapshot
 
-質問を送った時に、side panel が Current Page を読み、HTML と選択範囲を `chat.ask` に添える。Backend が HTML を本文にし、切り詰め、同じページを判定し、全体の上限を当てる。Chrome Extension は読んで送るだけにする（#263 の resolution の 8）。side panel を開いているだけでは読まない。
+質問を送った時に、side panel が Current Page を読み、HTML と選択範囲か、PDF の bytes を `chat.ask` に添える。Backend が HTML か PDF を本文にし、切り詰め、同じページを判定し、全体の上限を当てる。Chrome Extension は読んで送るだけにする（#263 の resolution の 8）。side panel を開いているだけでは読まない。
 
 ### 読み方（`src/ui/read-page.ts`）
 
 - 読むのは、送る時に `tabs.query({ active: true, windowId })` で取り直した Browser Tab（下の「Current Page の追い方」）。`url` と `title` もその Browser Tab のものにし、見出しと揃える。
 - `chrome.scripting.executeScript` に `target: { tabId }`・`func`・`injectImmediately: true` だけを渡す。`frameIds` も `allFrames` も渡さず top frame だけを読み、world は既定の ISOLATED のままにしてページの CSP を受けない。
 - 3 秒で返らなければ打ち切って `timeout` にする。`view-source:`、`alert()` の最中、frozen のタブでは返らず、`injectImmediately` が無いと body が終わらないページでも返らない。
-- 注入する関数（`readDocument`）は `{ html, selection }` を返す自己完結した関数で、module の他の関数も import も参照しない。`func` は文字列にして送られ、build の minify で名前が変わった helper も届かないため。
+- 注入する関数（`readDocument`）は `{ contentType, html, selection }` を返す自己完結した関数で、module の他の関数も import も参照しない。`func` は文字列にして送られ、build の minify で名前が変わった helper も届かないため。
+  - `document.contentType` が `application/pdf` なら、HTML と選択範囲を読まずに返し、下の「PDF の取り方」に進む。PDF viewer の main frame は `contentType` が `application/pdf` で body が空、viewer は closed shadow root の中の OOPIF にあり、`executeScript` は viewer の frame に注入しない。URL の拡張子は当てにならず、HEAD を投げると request が 1 つ増えるので、`contentType` で見分ける。
   - shadow root は `document.documentElement` から要素を順に辿り、`chrome.dom.openOrClosedShadowRoot` で closed のものまで、見つけた root の中にも潜って集める。`html` は `document.documentElement.getHTML({ shadowRoots })` で、shadow root は `<template shadowrootmode>` として書き出される。
   - 選択範囲は top frame の `getSelection().toString()`。activeElement が textarea か、`type` が `text`・`search`・`url`・`tel` の input なら、その `selectionStart`・`selectionEnd` で読む。別の場所を選んだ後も古い値が残るので、focus のある欄だけを読む。それ以外の input（`password` など）に focus があれば読まない。空なら `selection` を送らない。
 - `executeScript` が reject したら `restricted` にし、`detail` に error の message を入れる。
-- 送る前に、input を `JSON.stringify` した UTF-8 の bytes に 1MiB（oRPC の包みの分）を足して `MAX_ASK_BODY_BYTES` と比べる。超えたら今のページの `html` と `selection` を外して `too-large` にする（`chat-store.ts`）。履歴は削らない。
-- PDF の Browser Tab は分けない。viewer の DOM は空なので本文は空になる（#279 が分ける）。
+- 送る前に、input を `JSON.stringify` した UTF-8 の bytes に、PDF の bytes と 1MiB（oRPC の包みの分）を足して `MAX_ASK_BODY_BYTES` と比べる。File は `JSON.stringify` で `{}` になるので、PDF の大きさは `size` で足す。超えたら今のページの `html`・`pdf`・`selection` を外して `too-large` にする（`chat-store.ts`）。履歴は削らない。
+
+#### PDF の取り方
+
+- `fetch(tab.url, { credentials: 'include' })` で Browser Tab の URL を取り直す。`<all_urls>` の host permission の host へは CORS を受けずに取れる。cookie を付けるのは、ログインが要る PDF も取れる見込みがあるため（下の「確かめていないこと」）。
+- 30 秒で返らなければ `AbortController` で打ち切り、`fetch-failed`（detail `no response within 30 seconds`）にする。body を読み終えるまでを 30 秒に含める。
+- status が ok でなければ `fetch-failed`（detail `HTTP <status>`）。先頭が `%PDF-` でない応答も `fetch-failed`（detail `the response is not a PDF`）にする。ログインが要る PDF は、ログインのページの HTML が 200 で返りうる。
+- body は上限まで読んでやめる。上限は、body の上限から、PDF を除いた input（`question` と `history`）を `JSON.stringify` した UTF-8 の bytes と 1MiB を引いた値で、`chat-store.ts` が `readPage` に渡す。`Content-Length` が上限を超えていれば body を読まずに cancel し、読んでいる途中で超えても cancel して、どちらも bytes を送らずに `too-large` にする。50MB を超える PDF は、履歴を含めた body が上限に収まらない PDF として読む。上限に収まった bytes は、送る前の大きさの確かめ（上）でもう一度、page の `url` と `title` を含めて比べる。
+- PDF の選択範囲は送らない。viewer の frame には注入できず、top frame の `getSelection()` は viewer の中の選択を返さない。
+- 取れた bytes は `{ kind: 'pdf', pdf: File }` で送る。pdf.js は Chrome Extension に同梱しない（本文にするのは Backend）。
+- 扱わないもの: HTML のページに `<embed>` や `<iframe>` で埋めた PDF（top frame の HTML だけを読む）、画像だけの PDF の OCR。
 
 ### 形（`src/contract.ts`）
 
 ```
-Page          { url?, title?, selection?: string, content: { kind: 'html', html } | Unreadable }
-PageSnapshot  { url?, title?, selection?: { text, truncated }, content?: { kind: 'text', text, truncated } | { kind: 'same', turn } | Unreadable }
-Unreadable    { kind: 'unreadable', reason: 'restricted' | 'timeout' | 'too-large' | 'unparsable', detail? }
+Page          { url?, title?, selection?: string, content: { kind: 'html', html } | { kind: 'pdf', pdf: File } | Unreadable }
+PageSnapshot  { url?, title?, selection?: { text, truncated }, content?: { kind: 'text', source: 'html' | 'pdf', text, truncated } | { kind: 'same', turn } | Unreadable }
+Unreadable    { kind: 'unreadable', reason: 'restricted' | 'timeout' | 'too-large' | 'fetch-failed' | 'unparsable', detail? }
 snapshot      { type: 'snapshot', page: PageSnapshot, omitted: { pages, turns } }
 ```
 
@@ -141,6 +154,18 @@ snapshot      { type: 'snapshot', page: PageSnapshot, omitted: { pages, turns } 
 - 見えない文字は落とそうとしない。stylesheet の class で隠した文字は defuddle も残すので、`document` block と system prompt で受ける。
 - 変換は Backend の main thread で、claude を起こす前に行う。数百 ms で、spare から答えれば claude を並べて起こす得は小さいため。変換が例外を投げたら `unparsable`（`detail` に message）にして答えを続ける。
 - 本文が空なら `document` block を作らず、見出しに「本文の文字は無かった」と書く。知らせは出さない。
+
+### PDF の本文（`src/page/pdf.ts`・`src/pdf-worker.ts`）
+
+- pdf.js（pdfjs-dist の modern build、`pdfjs-dist`）は Bun の Worker で動かし、Backend の event loop を塞がない。Worker は PDF 1 つごとに起こし、本文を返したら `terminate()` する。bytes の ArrayBuffer は transfer し、大きな PDF の memory を Backend に残さない。
+- Bun の中の pdf.js は、Web Worker を作らずに fake worker を呼んだ側の thread で動かし、fake worker は `./pdf.worker.mjs` を動的に import する。compile した binary ではその import が解けないので、Worker の module（`src/pdf-worker.ts`）が `pdfjs-dist/build/pdf.worker.mjs` を静的に import して `globalThis.pdfjsWorker` に置く。pdf.js はそれを見つけて動的な import をしない。pdf.js の fake worker が動くのは Bun の Worker の thread で、Backend の main thread ではない。`bun run` の Backend でも compile した binary でも Bun の Worker で動いたので、main thread の fake worker には落としていない。
+- Worker の module は top-level の `await` を持たない。`await` を `message` の listener より前に置くと、最初の message を取りこぼす。
+- `getDocument` には `data`、`cMapUrl`（`cMaps` の folder、末尾に `/`）、`cMapPacked: true`、`verbosity: 0` を渡す。日本語の CID font の PDF は、埋め込まない font（`UniJIS-UCS2-H` など）だと cMap が無ければ本文が空になる。埋め込まない Helvetica の文字は `standardFontDataUrl` 無しで取れるので、`standard_fonts` は同梱しない。
+- `verbosity: 0` で pdf.js の警告（`console.warn`、stderr）は出ないが、modern build は読み込みのたびに legacy build を勧める 1 行（`Warning: Please use the legacy build in Node.js environments.`）を stderr に出す。Worker ごとに 1 行出る。
+- 本文は、ページごとに `getTextContent()` の item の `str` をつなぎ、`hasEOL` で改行し、末尾の空白を落とす。文字の無いページは飛ばし、ページの間に空行を入れる。pdf.js はページの外の字を本文に入れない。
+- つないだ本文が 10 万字（`MAX_PAGE_CHARS`）を超えたら残りのページを読まず、HTML の本文と同じく先頭を残して切り、`truncated` を立てる。ちょうど 10 万字なら、続きがあるかを次のページで確かめる。
+- PDF の本文は見出しや段落の構造を持たないので、本文の `document` の `context` に `Text extracted from a PDF, without its layout.` の行を足す。同じページの判定と全体の上限は HTML の本文と同じ。
+- pdf.js が例外を投げた（壊れた PDF、パスワード付きの PDF、開けないページ）か、本文にするのが 30 秒を超えたら、Worker を `terminate()` して `unparsable`（`detail` に message）にする。`chat.ask` の `signal` が abort したときも `terminate()` し、`unparsable` にせずに `ask` ごと止める。
 
 ### 同じページ
 
@@ -169,8 +194,9 @@ snapshot      { type: 'snapshot', page: PageSnapshot, omitted: { pages, turns } 
 |---|---|---|---|
 | `restricted` | side panel | `executeScript` が reject した（`chrome://`・Web Store・ブラウザ拡張のページ・top-level の `about:blank` と `data:`・`account.brave.com`・error のページ） | ページを読めませんでした（このページは Chrome Extension から読めません） |
 | `timeout` | side panel | `executeScript` が 3 秒で返らない | ページを読めませんでした（3 秒以内に応えませんでした） |
-| `too-large` | side panel | 送る前の大きさの確かめで外した | ページを読めませんでした（大きすぎます） |
-| `unparsable` | Backend | 本文への変換が例外を投げた | ページを読めませんでした（本文を取り出せませんでした） |
+| `too-large` | side panel | 送る前の大きさの確かめで外した。PDF が上限を超えて読むのをやめた | ページを読めませんでした（大きすぎます） |
+| `fetch-failed` | side panel | PDF の fetch が失敗した、30 秒で返らない、status が ok でない、先頭が `%PDF-` でない | ページを読めませんでした（PDF を取得できませんでした） |
+| `unparsable` | Backend | HTML か PDF の本文への変換が例外を投げた。PDF の変換が 30 秒を超えた | ページを読めませんでした（本文を取り出せませんでした） |
 
 - 本文か選択範囲を切り詰めたら「本文を切り詰めました」「選択範囲を切り詰めました」（両方なら「本文と選択範囲を切り詰めました」）。
 - `omitted` の和が 1 以上なら「古いページや問答 n 件を渡していません」。
@@ -180,11 +206,13 @@ snapshot      { type: 'snapshot', page: PageSnapshot, omitted: { pages, turns } 
 - context menu から選択範囲を渡す経路、iframe の中の本文と選択（`allFrames`）。
 - 本物のクリックで side panel の入力欄に focus を移した後も、ページの選択範囲が `selection` に入るか（CDP の操作でだけ確かめた）。
 - 入れ子の深い DOM での変換の時間。div を 256・512・1000 段入れ子にしたページで、defuddle は 0.33 秒・1.1 秒・4.4 秒かかった（3000 段で 79 秒）。main thread で走るので、その間 Backend は他の request に応えない。
-
+- ログインが要る PDF を side panel の fetch で取れるか。取れなければ、`fetch-failed`（ログインのページの HTML や ok でない status が返ったとき）か `unparsable`（`%PDF-` で始まるが pdf.js が開けないとき）に落ちる。headless の Brave 1.97 で、side panel の page の fetch に、PDF の host の cookie が付いたことだけは見た。
+- 大きな PDF を Worker で読む間に Backend の event loop が止まらないか（確かめたのは小さな PDF だけ）。
 ## テスト
 
 - `src/chat.test.ts` が `createRouterClient(router, { context: { chatAgent } })` を通して確かめる。DB は使わない。本文への変換の失敗は、`defuddle/node` の `Defuddle` を `spyOn` で reject させて作る。
 - 本文への変換は `src/page/snapshot.test.ts` が `src/page/fixtures/` の HTML（`getHTML` が書き出す、document element の中身の形）で、同じページと全体の上限と block の並びは `src/page/prompt.test.ts` が `PageSnapshot` を直に組んで確かめる。どちらも claude を起こさない。
+- PDF の本文は `src/page/pdf.test.ts` が、Worker を通して確かめる。PDF は `src/page/test-pdf.ts` の `testPdf(pages)` が bytes を組み、binary の file を repo に置かない。`latin` のページは埋め込まない Helvetica、`japanese` のページは埋め込まない `HeiseiKakuGo-W5` と `UniJIS-UCS2-H` で書き、cMap が無いと日本語が落ちる。`'missing'` のページは無い object を指し、読めば pdf.js が例外を投げるので、残りのページを読まないことをそれで確かめる。ページの大きさは行の長さと数に合わせて広げる。pdf.js はページの外の字を本文に入れないため。
 - claude は `src/fake-claude.ts` の偽の claude に差し替える。テストは拡張子の無い `/bin/sh` の wrapper を一時 directory に書いて `claudePath` に渡す。wrapper は `@monica/chat/testing` の `writeFakeClaude(dir, recordPath)` が書き、Backend のテスト（`apps/backend/src/main.test.ts`）も `MONICA_CLAUDE_PATH` に渡して使う。wrapper は `exec "<process.execPath>" "<fake-claude.ts の path>" "<記録の file>" "$@"` の 1 行。SDK は path が `.js`・`.mjs`・`.ts`・`.tsx`・`.jsx` で終わると `bun` か `node` を名前で起こすが、claude の env には `PATH` が無い。拡張子の無い path は直に起こす。wrapper の `/bin/sh` は env に `PWD`・`SHLVL`・`_` を足す。
 - 偽の claude は次のように話す。
   - stdin の `control_request` に `control_response`（`subtype: success`、`response: {}`）を返す。
@@ -208,6 +236,7 @@ SDK 0.3.293 と同梱の claude 2.1.293 で、dev の Backend を `env -i`（`HO
 - SIGKILL した claude は `~/.claude/sessions/<pid>.json` を残し、次に claude が起きたときに消える。
 - prompt cache（Page Snapshot を足した後、約 2 万字の fixture のページで 1 問目から 5 分以内に 3 問続けた）: usage は 1 問目が cache creation 5,424・cache read 0、2 問目（同じページで `same`）が 5,824・0、3 問目（`chrome://version`）が 6,204・0。質問ごとに claude を起こし直す形では、前の問答の部分は cache read にならなかった。理由は確かめていない。
 - 2 万字の HTML（本文 13,928 字）の変換から `snapshot` が届くまで、`bun run` の Backend で 48ms、compile した Backend で 36ms。
+- PDF（pdfjs-dist 6.4.299）: `testPdf` で組んだ 2 ページの日本語と英語の PDF を RPCLink で `chat.ask` に添えると、`bun run` の Backend でも、`scripts/build.ts` と同じ command で compile した Backend でも、最初の `snapshot` の本文が同じになった（呼んでから届くまで 67ms と 31ms）。compile した Backend は Worker を `/$bunfs/root/pdf-worker.ts` から、cMap を `/$bunfs/root/cmaps` から読み、migrate を終えて起き、SPA も今までどおり `dist` から配った。
 
 ## ui
 
@@ -251,7 +280,7 @@ React に依らない `createChatStore(client)` が Chat を持ち、`ChatApp` �
 
 - Chat は side panel の document の memory にだけあり、window ごとに 1 つ。「新しい Chat」を押すか side panel を閉じると終わり、どこにも残さない。Backend が居なくなっても終わらない（ADR-0030・0031）。
 - `open(readPage)` は side panel を開いた時に `ChatApp` の effect が 1 回呼び、`chat.prepare` を呼んで spare を起こさせる。失敗は無視する。Backend の不在を知らせる帯はまだ無い。dev の StrictMode で 2 回呼ばれても、Backend が spare を 1 つに保つので害は無い。
-- `ask` は、送る時に `readPage` で Current Page を読み直して `page` に入れ、答え終えた問答を古い順に `history` に入れて `chat.ask` を呼ぶ。`ChatApp` が渡す `readPage` は、Browser Tab を取り直して `read-page.ts` で読む（上の「Page Snapshot」）。答えている間は送らずに false を返す。答えの途中で Current Page が替わっても、delta はその質問の答えに足す。
+- `ask` は、送る時に `readPage` で Current Page を読み直して `page` に入れ、答え終えた問答を古い順に `history` に入れて `chat.ask` を呼ぶ。`ChatApp` が渡す `readPage` は、Browser Tab を取り直して `read-page.ts` で読む（上の「Page Snapshot」）。`readPage` には PDF を読む上限の bytes を渡す。答えている間は送らずに false を返す。答えの途中で Current Page が替わっても、delta はその質問の答えに足す。
 - 届いた `snapshot` の `page` を、その問答の turn の `page` として履歴に入れ、`snapshot` から作った知らせを質問の entry の `notice` に入れる。
 - `startNewChat` は流れている stream を `signal` で abort し、問答と履歴を空にする。abort の後に届いた delta は描かない。Backend は abort でその claude を止める。
 - client の型 `ChatClient` は、side panel が呼ぶ `prepare` と `ask` だけの形。ブラウザの口への oRPC の client の `chat` がそのまま入り、テストは偽の client を渡す。
@@ -274,7 +303,7 @@ React に依らない `createChatStore(client)` が Chat を持ち、`ChatApp` �
 
 - DOM の環境は入れない（`docs/packages/note-ui.md` の「テスト」と同じ）。
 - `current-page.test.ts` は `fake-chrome.ts` の偽の `chrome.tabs` で確かめる。偽物は `globalThis.chrome` に置いてテストの後に外し、`query` の `active`・`windowId`・`currentWindow` を本物と同じく絞る。chrome:// へ移ったときの url も title も無い `onUpdated` も出せる。
-- `read-page.test.ts` は同じ偽物の `chrome.scripting.executeScript` で確かめる。偽物は注入された関数を走らせず、`readings` に置いた結果を返すか、reject するか、返らない。渡された injection は `injections` に残る。注入する関数そのもの（shadow root と選択範囲）は DOM が要るので、実機で確かめる。3 秒の打ち切りは `setTimeout` を `spyOn` して callback を手で呼ぶ。
+- `read-page.test.ts` は同じ偽物の `chrome.scripting.executeScript` で確かめる。偽物は注入された関数を走らせず、`readings` に置いた結果を返すか、reject するか、返らない。省いた `contentType` は `text/html` になる。渡された injection は `injections` に残る。注入する関数そのもの（shadow root と選択範囲）は DOM が要るので、実機で確かめる。3 秒と 30 秒の打ち切りは `setTimeout` を `spyOn` して callback を手で呼ぶ。PDF の fetch は `fetch` を `spyOn` した偽物で、本物と同じく `signal` の abort で reject させ、読まれた chunk の数を数える body を返す。
 - `chat-store.test.ts` は偽の client で確かめる。偽の答えの stream は `signal` に応えず、test が流した delta をそのまま渡すので、abort の後に届いた delta を描かないことを確かめられる。
 - `answer.test.tsx` は `react-dom/server` の `renderToStaticMarkup` で markdown の描画を確かめる。react-dom は devDependency。
 
@@ -288,3 +317,8 @@ Brave 1.97 で確かめた。
   - script で `attachShadow({ mode: 'closed' })` した要素の中の文字は、body の `html` に `<template shadowrootmode="closed">` で入り、本文に残った。page の script で選んだ 1 文は、side panel の入力欄に打った後も `selection` に入った。
   - `chrome://version` は `restricted`（`detail` は `Cannot access a chrome:// URL`）になり、知らせが出て答えも返った。
   - `view-source:` は、Enter から約 3.3 秒後に `timeout` の body を送った。`view-source:` は CDP の `Page.navigate` では開けず、新しい Browser Tab としてなら開けた。
+- PDF（同じく side panel の page を Browser Tab で開いて送った。PDF は scratchpad の http server が配った）:
+  - `testPdf` の日本語の PDF の Browser Tab で「この PDF の合言葉は？」と送ると、PDF の URL に `Sec-Fetch-Dest: empty` の GET が 1 つ出て、`chat.ask` は multipart で送られた。`data` の part の `page.content` は `{ kind: 'pdf', pdf: {} }` で `selection` は無く、File の part に PDF の bytes が入った。haiku は「この PDF の合言葉は「桜餅」です。」と答え、次の質問の `history[0].page` は `source: 'pdf'` の本文を持ち、同じ PDF は `same` になった。
+  - 60MB の `%PDF-` の file は、`Content-Length` で読まずに止め、body は JSON だけで `page.content` が `too-large` だった。
+  - navigation（`Sec-Fetch-Dest: document`）には PDF、fetch には HTML を 200 で返す URL は、`fetch-failed`（`the response is not a PDF`）になり、吹き出しの下に「ページを読めませんでした（PDF を取得できませんでした）」が出た。
+  - side panel の page の fetch に、PDF の host に置いた cookie が付いた。

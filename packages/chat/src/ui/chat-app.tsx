@@ -81,7 +81,7 @@ export function ChatApp({ client }: { client: ChatClient }) {
   useEffect(() => {
     const watch = watchCurrentPage(setPage)
     // 質問を送った時に、その時の Browser Tab を読む。side panel を開いているだけでは読まない。
-    store.open(async () => readPage(await watch.read()))
+    store.open(async (maxPdfBytes) => readPage(await watch.read(), maxPdfBytes))
     return () => {
       store.startNewChat()
       watch.stop()

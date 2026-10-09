@@ -4,8 +4,9 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 
-import { MAX_ASK_BODY_BYTES } from '@monica/chat/contract'
+import { type contract as chatContract, MAX_ASK_BODY_BYTES } from '@monica/chat/contract'
 import { createChatAgent } from '@monica/chat/server'
+import { writeFakeClaude } from '@monica/chat/testing'
 import type { contract } from '@monica/note/contract'
 import { createNoteLedger, migrations } from '@monica/note/server'
 import { createORPCClient } from '@orpc/client'
@@ -38,7 +39,11 @@ function listen(port: number | undefined, dist = webDist({ 'index.html': '<p>not
   const db = drizzle(new Database(':memory:'))
   migrate(db, { migrationsFolder: migrations.folder, migrationsTable: migrations.table })
   const noteLedger = createNoteLedger({ db, home })
-  const chatAgent = createChatAgent({ home })
+  const chatAgent = createChatAgent({
+    home,
+    claudePath: writeFakeClaude(home, join(home, 'claude.jsonl')),
+  })
+  cleanups.push(() => chatAgent.stop())
   const listener = listenBrowser(port?.toString(), {
     context: { db, noteLedger, chatAgent },
     webDist: dist,
@@ -153,6 +158,34 @@ test('a body larger than the limit for a question is refused with 413', async ()
   expect((await ask(MAX_ASK_BODY_BYTES + 1)).status).toBe(413)
   // 上限の内側の壊れた body は oRPC まで届く。
   expect((await ask(1024)).status).toBe(400)
+})
+
+// side panel は body が上限から 1MiB の余白を残すまで PDF を送る。RPCLink は File を multipart の別の part で送る。
+test('a PDF 1MiB under the body limit goes through RPCLink to chat.ask, and bytes that are no PDF come back as unparsable', async () => {
+  const port = freePort()
+  listen(port)
+  const client: ContractRouterClient<{ chat: typeof chatContract }> = createORPCClient(
+    new RPCLink({
+      url: `http://127.0.0.1:${port}/rpc`,
+      headers: { 'sec-fetch-site': 'none', 'sec-fetch-mode': 'cors' },
+    }),
+  )
+  const pdf = new File(['%PDF-', new Uint8Array(MAX_ASK_BODY_BYTES - 1024 * 1024 - 5)], 'big.pdf', {
+    type: 'application/pdf',
+  })
+
+  const answer = await client.chat.ask({
+    question: 'What does it say?',
+    page: { url: 'https://example.com/big.pdf', content: { kind: 'pdf', pdf } },
+    history: [],
+  })
+  const { value: snapshot } = await answer.next()
+  await answer.return(undefined)
+
+  expect(snapshot).toMatchObject({
+    type: 'snapshot',
+    page: { content: { kind: 'unreadable', reason: 'unparsable' } },
+  })
 })
 
 const PNG = Uint8Array.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 0x0d])
