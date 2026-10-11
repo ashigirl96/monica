@@ -151,6 +151,7 @@ package ごとに in-memory の SQLite に自分の migration を当てる（tas
   - 本番が `Date.now()` の締め切りと短い sleep の loop で待つもの（setup と Job の SIGTERM から SIGKILL までの猶予）は、待ち始めた印を見てから `setSystemTime` で時計を進める。猶予の手前まで進めた時点でまだ待っていることも確かめ、値を検出できるようにする。最後に `setSystemTime()` で戻す。
   - 子の process の timer はテストの process から spy できないので、子を `bun --preload <テスト用の file>` で起こし、preload で差し替える（hook の `AbortSignal.timeout`、`apps/cli/src/hook.test.ts`）。
   - 偽の GitHub に request が届くのは、`requests` を poll せず `received(count)` を await する。固定の sleep でも待たない。
+- 手元の暦日や時刻で切る処理は、テストの中で `process.env.TZ` を UTC 以外（`Asia/Tokyo` など）にして確かめ、`finally` で戻す。`bun test` は TZ を UTC にするので、UTC の日付で切る誤りも通る（`packages/usage/src/usage.test.ts`）。
 - 終わった行のように procedure に出ない行は、`@monica/<d>/schema` の table を SELECT して確かめてよい。他の domain が読むのと同じ面だから。
 
 ## contract の規約
