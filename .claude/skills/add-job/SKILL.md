@@ -12,7 +12,7 @@ description: ユーザーの Job を登録する。「毎日〜したい」「�
 名前・schedule・cwd・timeout を依頼から決める。依頼に無いものは推奨で決め、4 で登録する前にまとめて見せる。
 
 - schedule の時刻は、desktop が開いていて Mac が起きている時間に置く。Job は Backend が居る間だけ走り、予定の時刻に居なかった回とスリープで 60 秒を超えて遅れた回は飛ばして、後から追いつかない（ADR-0016）。「1 日 1 回」なら日中の時刻にする。
-- 名前が `monica job list` の Job と重なるときは、置き換えてよいかをユーザーに確かめる（remove してから add する）。
+- 名前が `monica job list` の Job と重なるときは、置き換えてよいかをユーザーに確かめる。了承をもらったら、2 で script を書き換える前に `monica job pause <名前>` で旧い Job を止め、4 の前に remove する。
 
 ## 2. script を書く
 
