@@ -16,5 +16,6 @@ status: accepted
 
 - desktop が閉じていて Backend が居ない間の呼び出しは、失敗して Usage に残らない。Backend の寿命の外にある利用は数えない。
 - Backend の口を通らない操作（端末の入出力、Tauri command、Ledger の直接呼び出し、system の Job）は Feature ではなく、数えない。
+- webview の Usage には、画面が開いたときや描き直すときに自分で打つ読み出しと `changes` の購読も入る。画面の機能を私が使ったかは測れず、0 回で消す候補を探せるのは CLI や Chrome Extension から呼ぶ Feature になる。画面の操作を数えるなら、Feature ではなく UI の操作を単位にした別の記録が要る。
 - CLI を私が打ったか agent が打ったかは見分けない。agent が使う Feature を消すと agent の仕事が壊れるので、どちらも「使われた」に数える。
 - 時刻や引数を後から知りたくなっても、過去の分は戻らない。
