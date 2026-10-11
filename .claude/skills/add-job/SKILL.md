@@ -5,6 +5,8 @@ description: ユーザーの Job を登録する。「毎日〜したい」「�
 
 依頼を shell command の Job に落とし、`monica job add` で release の Backend（`~/.monica`）に登録して、1 回走らせて確かめる。Job の規則（名前・cron 式・cwd・timeout・process の env・結果の決まり方）は `docs/packages/job-ledger.md` の「ユーザーの Job」にあり、flag は `monica job add --help` にある。
 
+この skill の `monica` は release の CLI を指す。`echo "${MONICA_HOME:-}"` が空か `$HOME/.monica` ならそのまま使う。それ以外（dev の Workbench の Tab は dev の home を渡し、PATH の `monica` も dev のものになる）では、`monica` を `env MONICA_HOME="$HOME/.monica" "$HOME/.local/bin/monica"` に置き換えて呼ぶ。dev の Backend に登録した Job は dev の desktop を閉じている間に走らない。
+
 ## 1. Job の形を決める
 
 名前・schedule・cwd・timeout を依頼から決める。依頼に無いものは推奨で決め、4 で登録する前にまとめて見せる。
