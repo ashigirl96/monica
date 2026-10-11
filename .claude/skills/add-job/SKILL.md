@@ -12,7 +12,7 @@ description: ユーザーの Job を登録する。「毎日〜したい」「�
 名前・schedule・cwd・timeout を依頼から決める。依頼に無いものは推奨で決め、4 で登録する前にまとめて見せる。
 
 - schedule の時刻は、desktop が開いていて Mac が起きている時間に置く。Job は Backend が居る間だけ走り、予定の時刻に居なかった回とスリープで 60 秒を超えて遅れた回は飛ばして、後から追いつかない（ADR-0016）。「1 日 1 回」なら日中の時刻にする。
-- 名前が `monica job list` の Job と重なるときは、置き換えてよいかをユーザーに確かめる。了承をもらったら、2 で script を書き換える前に `monica job pause <名前>` で旧い Job の予定を止め、`monica job show <名前>` の最新の RESULT が `running` を抜けるのを待つ（pause は走っている回を止めない）。旧い Job は 4 の前に remove する。
+- 名前は、`<名前>` も 3 で使う `<名前>-dry-run` も `monica job list` の Job と `~/.local/share/monica-jobs/` の file に重ならないものにする。既にある Job を置き換えたいときも、旧い Job と script には手を付けずに新しい名前で作り、5 を通してから、ユーザーに確かめて旧い Job を remove する。
 
 ## 2. script を書く
 
@@ -37,6 +37,8 @@ monica job run <名前>-dry-run
 monica job show <名前>-dry-run
 ```
 
+1 行ずつ走らせ、`add` が失敗したら後の command は走らせずに 1 に戻る。
+
 RESULT が `running` を抜けたら、LOG の file を読んで中身を手元に持ち、それから結果によらず `monica job remove <名前>-dry-run` で外す（remove は LOG の directory ごと消す）。`succeeded` で、LOG に意図した対象とやることが出ていれば、それをユーザーに見せて了承をもらい、4 に進む。それ以外は LOG から原因を探し、script を直して 3 をやり直す。
 
 ## 4. 登録する
@@ -59,7 +61,7 @@ monica job run <名前>
 monica job show <名前>
 ```
 
-`show` の最新の RESULT が `running` の間は読み直す。`succeeded` になり、LOG の file を読んで、意図した処理が起きたと分かったら `monica job resume <名前>` して完了。`failed` か `timed_out` なら、LOG と ERROR から原因を探す。直すのが script の中身だけなら、直して（外に変化を起こす Job は 3 を通して）5 をやり直す。command・schedule・cwd・timeout を変えるときは、`monica job remove` してから 4 に戻る。
+`show` の最新の RESULT が `running` の間は読み直す。`succeeded` になり、LOG の file を読んで、意図した処理が起きたと分かったら `monica job resume <名前>` して完了。`failed` か `timed_out` なら、LOG と ERROR から原因を探す。外に変化を起こす Job は、LOG から途中まで済んだ変化を拾ってユーザーに見せ、走らせ直してよいかを確かめる。直すのが script の中身だけなら、直して（外に変化を起こす Job は 3 を通して）5 をやり直す。command・schedule・cwd・timeout を変えるときは、`monica job remove` してから 4 に戻る。
 
 ## 6. 報告する
 
