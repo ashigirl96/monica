@@ -16,7 +16,7 @@ description: ユーザーの Job を登録する。「毎日〜したい」「�
 
 ## 2. script を書く
 
-command が 1 行に収まらなければ、`~/.local/bin/<名前>` に `#!/bin/sh` と `set -eu` で始まる script を置いて `chmod +x` し、command にはその絶対 path を渡す。
+command が 1 行に収まらなければ、`~/.local/bin/<名前>` に `#!/bin/sh` と `set -eu` で始まる script を置いて `chmod +x` し、command にはその絶対 path を渡す。置く path は `test -e` で空きを確かめ、既に file があれば Job の名前を変える（`~/.local/bin` には `monica` などユーザーの実行ファイルが並ぶ）。
 
 - script は stdin も TTY も無く、login shell の PATH で走る。対話を待つ command には非対話の flag を付ける。
 - monica は exit code だけで成否を決める。やるべきことを果たせなかった回は 0 以外で終わらせ、原因を最後の行に出す（`monica job show` の ERROR にその行が出る）。
@@ -25,7 +25,13 @@ command が 1 行に収まらなければ、`~/.local/bin/<名前>` に `#!/bin/
 
 ## 3. 手で走らせる
 
-script を Job と同じ cwd で直に走らせる。消す Job は `--dry-run` で走らせ、出た対象をユーザーに見せて了承をもらう。exit 0 で、出力が意図した対象と結果を示していれば完了。
+command を、Job と同じ cwd と、release の Backend に近い env で走らせる。launchd の最小の PATH から login shell が PATH を組むので、Tab の `MONICA_HOME` と PATH は届かない。
+
+```sh
+cd <cwd> && env -i HOME="$HOME" USER="$USER" SHELL="$SHELL" PATH=/usr/bin:/bin:/usr/sbin:/sbin MONICA_HOME="$HOME/.monica" "$SHELL" -ilc '<command>' </dev/null
+```
+
+消す Job は command に `--dry-run` を足して走らせ、出た対象をユーザーに見せて了承をもらう。exit 0 で、出力が意図した対象と結果を示していれば完了。
 
 ## 4. 登録する
 
@@ -42,7 +48,7 @@ monica job run <名前>
 monica job show <名前>
 ```
 
-`show` の最新の RESULT が `running` の間は読み直す。`succeeded` になり、LOG の file を読んで、意図した処理が起きたと分かれば完了。`failed` か `timed_out` なら、LOG と ERROR から直して 2 に戻る。command か schedule を直すときは `monica job remove` してから 4 をやり直す。
+`show` の最新の RESULT が `running` の間は読み直す。`succeeded` になり、LOG の file を読んで、意図した処理が起きたと分かれば完了。`failed` か `timed_out` なら、LOG と ERROR から原因を探す。直すのが script の中身だけなら、直して 3 を通し、5 をやり直す。command・schedule・cwd・timeout を変えるときは、`monica job remove` してから 4 に戻る。
 
 ## 6. 報告する
 
