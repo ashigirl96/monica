@@ -5,10 +5,17 @@ import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 
 import type { contract } from '@monica/note/contract'
-import { createNoteLedger, migrations } from '@monica/note/server'
+import { createNoteLedger, migrations, router as noteRouter } from '@monica/note/server'
+import {
+  createUsageLedger,
+  featuresOf,
+  migrations as usageMigrations,
+  router as usageRouter,
+} from '@monica/usage/server'
 import { createORPCClient } from '@orpc/client'
 import { RPCLink } from '@orpc/client/fetch'
 import type { ContractRouterClient } from '@orpc/contract'
+import { createRouterClient } from '@orpc/server'
 import { drizzle } from 'drizzle-orm/bun-sqlite'
 import { migrate } from 'drizzle-orm/bun-sqlite/migrator'
 
@@ -34,14 +41,20 @@ function listen(port: number | undefined, dist = webDist({ 'index.html': '<p>not
   const home = mkdtempSync(join(tmpdir(), 'monica-home-'))
   cleanups.push(() => rmSync(home, { recursive: true, force: true }))
   const db = drizzle(new Database(':memory:'))
-  migrate(db, { migrationsFolder: migrations.folder, migrationsTable: migrations.table })
+  for (const m of [migrations, usageMigrations]) {
+    migrate(db, { migrationsFolder: m.folder, migrationsTable: m.table })
+  }
   const noteLedger = createNoteLedger({ db, home })
+  const usageLedger = createUsageLedger({ db, features: featuresOf({ note: noteRouter }) })
   const listener = listenBrowser(port?.toString(), {
     context: { db, noteLedger },
+    usageLedger,
     webDist: dist,
   })
   if (listener) cleanups.push(() => listener.stop())
-  return { listener, home }
+  const usages = async () =>
+    (await createRouterClient(usageRouter, { context: { db, usageLedger } }).list()).usages
+  return { listener, home, usages }
 }
 
 test('the browser listener answers on both loopbacks to the three names of its port and refuses any other Host', async () => {
@@ -91,6 +104,26 @@ test('a request other than GET runs a note procedure only from the same origin o
   for (const [site, mode, status] of cases) {
     expect([site, mode, (await openDaily(site, mode)).status]).toEqual([site, mode, status])
   }
+})
+
+test('a note procedure called through the browser listener counts as Usage by notes', async () => {
+  const port = freePort()
+  const { usages } = listen(port)
+
+  const response = await fetch(`http://127.0.0.1:${port}/rpc/note/daily/open`, {
+    method: 'POST',
+    headers: {
+      host: `monica.localhost:${port}`,
+      'content-type': 'application/json',
+      'sec-fetch-site': 'same-origin',
+    },
+    body: JSON.stringify({ json: { date: '2026-10-06' } }),
+  })
+
+  expect(response.status).toBe(200)
+  expect(await usages()).toContainEqual(
+    expect.objectContaining({ feature: 'note.daily.open', caller: 'notes', ok: 1, failed: 0 }),
+  )
 })
 
 test('a GET for a path of the SPA gets index.html uncached, and a hashed asset is cached for good', async () => {
