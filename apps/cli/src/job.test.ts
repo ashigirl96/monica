@@ -15,10 +15,10 @@ test('job list prints the system Jobs with their schedules', async () => {
   expect(result).toEqual({
     code: 0,
     stdout: [
-      'NAME                    SCHEDULE   STATE   LAST  NEXT',
-      'task.sync               every 5m   active  -     -',
-      'task.setup-log-cleanup  every 24h  active  -     -',
-      'note.image-cleanup      every 24h  active  -     -',
+      'NAME                    SCHEDULE   STATE   LAST  NEXT  CWD',
+      'task.sync               every 5m   active  -     -     -',
+      'task.setup-log-cleanup  every 24h  active  -     -     -',
+      'note.image-cleanup      every 24h  active  -     -     -',
       '',
     ].join('\n'),
     stderr: '',
