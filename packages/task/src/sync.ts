@@ -2,7 +2,7 @@ import type { Db, Tx } from '@monica/workbench/server'
 import { ORPCError } from '@orpc/server'
 import { and, eq, inArray, isNull, type SQL } from 'drizzle-orm'
 
-import type { SyncOutput, TaskChange, TrackOutput } from './contract.ts'
+import type { SyncOutput, TaskChange } from './contract.ts'
 import { isIssue, isRepo, writeIssues, writePullRequests } from './copy.ts'
 import {
   BATCH,
@@ -25,11 +25,13 @@ export type SyncDeps = {
   running: Map<string, Promise<SyncOutcome>>
 }
 
+export type TrackResult = { ref: string; title: string; alreadyTracked: boolean; closed: boolean }
+
 /** `failures` は `owner/repo: 理由` の並び。token が取れなければ理由だけの 1 つになる。 */
 export type SyncOutcome = { synced: number; missing: string[]; failures: string[] }
 
 // 改名した repo の issue は旧名でも新しい名前でも引けるので、track 済みかは名前でなく Task の行の insert で決める。
-export async function trackIssue(deps: SyncDeps, input: string): Promise<TrackOutput> {
+export async function trackIssue(deps: SyncDeps, input: string): Promise<TrackResult> {
   const ref = parseRef(input)
   const tracked = findTask(deps.db, isIssue(ref))
   let issueId = tracked?.issueId

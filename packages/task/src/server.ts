@@ -9,7 +9,7 @@ import { currentTask } from './current.ts'
 import { listTasks } from './list.ts'
 import { reopenFromButton, runButtons, runFromButton } from './run-button.ts'
 import { runTask } from './run-claude.ts'
-import { syncCommand, trackIssue } from './sync.ts'
+import { syncCommand } from './sync.ts'
 import { internals, type TaskLedger } from './task.ts'
 
 export { migrations } from '../migrations/index.ts'
@@ -21,9 +21,6 @@ export { createTaskLedger, systemJobs, type TaskLedger } from './task.ts'
 const os = implement(contract).$context<{ db: Db; taskLedger: TaskLedger }>()
 
 export const router = os.router({
-  track: os.track.handler(({ context, input }) =>
-    trackIssue(internals(context.taskLedger), input.ref),
-  ),
   sync: os.sync.handler(({ context, input }) =>
     syncCommand(internals(context.taskLedger), input.ref),
   ),

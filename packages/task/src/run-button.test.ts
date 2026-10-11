@@ -119,9 +119,9 @@ test('telling the buttons tracks no Issue', async () => {
 })
 
 test('a closed Task gets a reopen button, running from it is refused, and once reopened it gets its Run button back', async () => {
-  const { github, client } = setup()
+  const { github, client, track } = setup()
   github.issue(ref, { title: 'Ship it', labels: ['ready-for-agent'] })
-  await client.track({ ref })
+  await track(ref)
   await client.close({ ref })
 
   expect(await client.runButtons({ refs: [ref] })).toEqual({
@@ -140,9 +140,9 @@ test('a closed Task gets a reopen button, running from it is refused, and once r
 })
 
 test('reopening from a button reads the Issue anew and refuses a Task whose Issue was closed since, leaving it closed', async () => {
-  const { github, client } = setup()
+  const { github, client, track } = setup()
   github.issue(ref, { title: 'Ship it', labels: ['ready-for-agent'] })
-  await client.track({ ref })
+  await track(ref)
   await client.close({ ref })
   github.issue(ref, { title: 'Ship it', state: 'closed', labels: ['ready-for-agent'] })
 
@@ -155,9 +155,9 @@ test('reopening from a button reads the Issue anew and refuses a Task whose Issu
 })
 
 test('a closed Task whose repo was renamed before any sync gets its reopen button by the new name, and reopens from it', async () => {
-  const { github, client } = setup()
+  const { github, client, track } = setup()
   github.issue(ref, { title: 'Ship it', labels: ['ready-for-agent'] })
-  await client.track({ ref })
+  await track(ref)
   await client.close({ ref })
   github.renameRepo('acme/app', 'acme/renamed')
   const renamed = 'acme/renamed#12'
@@ -174,7 +174,7 @@ test('a closed Task whose repo was renamed before any sync gets its reopen butto
 test('reopening from a button refuses a Task whose Issue is closed between the button and the sync of reopen, leaving it closed', async () => {
   const fixture = setup()
   fixture.github.issue(ref, { title: 'Ship it', labels: ['ready-for-agent'] })
-  await fixture.client.track({ ref })
+  await fixture.track(ref)
   await fixture.client.close({ ref })
 
   const releaseRead = fixture.github.hold()
@@ -196,9 +196,9 @@ test('reopening from a button refuses a Task whose Issue is closed between the b
 })
 
 test('reopening from a button refuses an open Task', async () => {
-  const { github, client } = setup()
+  const { github, client, track } = setup()
   github.issue(ref, { title: 'Ship it', labels: ['ready-for-agent'] })
-  await client.track({ ref })
+  await track(ref)
 
   const refusal = await failure(client.reopenFromButton({ ref }))
   expect([refusal.code, refusal.message]).toEqual([
@@ -208,9 +208,9 @@ test('reopening from a button refuses an open Task', async () => {
 })
 
 test('a closed Task of a closed Issue gets no reopen button', async () => {
-  const { github, client } = setup()
+  const { github, client, track } = setup()
   github.issue(ref, { title: 'Ship it', labels: ['ready-for-agent'] })
-  await client.track({ ref })
+  await track(ref)
   await client.close({ ref })
   github.issue(ref, { title: 'Ship it', state: 'closed', labels: ['ready-for-agent'] })
 

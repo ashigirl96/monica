@@ -23,7 +23,7 @@ async function tracked() {
   const fixture = setup()
   fixture.taskLedger.start()
   fixture.github.issue(ref, { title: 'Ship it', labels: ['ready-for-agent'] })
-  await fixture.client.track({ ref })
+  await fixture.track(ref)
   mkdirSync(fixture.ghq.checkout('acme/app'), { recursive: true })
   return fixture
 }
@@ -116,10 +116,10 @@ test('a run whose claude neither becomes a Run nor ends stops refusing the next 
 
 test('a run refused in the transaction that would open its Tab leaves no reservation, so the next run passes once the Run that refused it ends', async () => {
   const fixture = setup()
-  const { client, ghq } = fixture
+  const { client, ghq, track } = fixture
   fixture.taskLedger.start()
   fixture.github.issue(ref, { title: 'Ship it', labels: ['ready-for-agent'] })
-  await client.track({ ref })
+  await track(ref)
   const asked = Promise.withResolvers<void>()
   const cloned = Promise.withResolvers<void>()
   spyOn(ghq.client, 'get').mockImplementation(() => {

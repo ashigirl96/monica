@@ -13,16 +13,6 @@ const item = (overrides: Partial<ListItem>): ListItem => ({
   ...overrides,
 })
 
-test('track says which Issue it tracked, or that it was already tracked', () => {
-  const output = { ref: 'acme/app#12', title: 'Ship it', alreadyTracked: false, closed: false }
-
-  expect(formatters.track(output)).toBe('tracked acme/app#12 Ship it')
-  expect(formatters.track({ ...output, alreadyTracked: true })).toBe('already tracked acme/app#12')
-  expect(formatters.track({ ...output, alreadyTracked: true, closed: true })).toBe(
-    'already tracked acme/app#12; it is closed, so run `monica task reopen acme/app#12`',
-  )
-})
-
 test('sync counts the synced Tasks and names the missing Issues', () => {
   expect(formatters.sync({ synced: 1, missing: [] })).toBe('synced 1 Task')
   expect(formatters.sync({ synced: 2, missing: ['acme/app#3', 'acme/lib#4'] })).toBe(

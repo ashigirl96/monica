@@ -37,7 +37,7 @@ async function tracked() {
   const fixture = setup()
   fixture.taskLedger.start()
   fixture.github.issue(ref, { title: 'Ship it' })
-  await fixture.client.track({ ref })
+  await fixture.track(ref)
   return { ...fixture, cwd: join(fixture.home, 'worktrees/acme/app/issue-12') }
 }
 

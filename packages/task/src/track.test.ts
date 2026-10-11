@@ -34,7 +34,7 @@ function copies(db: ReturnType<typeof setup>['db']) {
 }
 
 test('track copies the Issue with its parent and Blockers and makes it a Task', async () => {
-  const { db, github, client } = setup()
+  const { db, github, track } = setup()
   github.issue('acme/app#10', { title: 'Epic', labels: ['epic'] })
   github.issue('acme/lib#3', { title: 'Upstream fix', state: 'closed' })
   github.issue('acme/app#4', { title: 'Schema first' })
@@ -45,7 +45,7 @@ test('track copies the Issue with its parent and Blockers and makes it a Task', 
     blockedBy: ['acme/lib#3', 'acme/app#4'],
   })
 
-  const output = await client.track({ ref: 'acme/app#12' })
+  const output = await track('acme/app#12')
 
   expect(output).toEqual({
     ref: 'acme/app#12',
@@ -93,24 +93,22 @@ test('track copies the Issue with its parent and Blockers and makes it a Task', 
 })
 
 test("track takes the issue URL and keeps GitHub's spelling of the repo", async () => {
-  const { db, github, client } = setup()
+  const { db, github, track } = setup()
   github.issue('Acme/App#12', { title: 'Ship it' })
 
-  const output = await client.track({
-    ref: 'https://github.com/acme/app/issues/12#issuecomment-1',
-  })
+  const output = await track('https://github.com/acme/app/issues/12#issuecomment-1')
 
   expect(output.ref).toBe('Acme/App#12')
   expect(copies(db).map((r) => r.repo)).toEqual(['Acme/App'])
 })
 
 test('tracking a tracked Task syncs it and says it was already tracked', async () => {
-  const { github, client } = setup()
+  const { github, track } = setup()
   github.issue('acme/app#12', { title: 'Ship it' })
-  await client.track({ ref: 'acme/app#12' })
+  await track('acme/app#12')
   github.issue('acme/app#12', { title: 'Ship it now' })
 
-  const output = await client.track({ ref: 'ACME/app#12' })
+  const output = await track('ACME/app#12')
 
   expect(output).toEqual({
     ref: 'acme/app#12',
@@ -121,12 +119,12 @@ test('tracking a tracked Task syncs it and says it was already tracked', async (
 })
 
 test('tracking a closed Task does not reopen it', async () => {
-  const { db, github, client } = setup()
+  const { db, github, track } = setup()
   github.issue('acme/app#12', { title: 'Ship it' })
-  await client.track({ ref: 'acme/app#12' })
+  await track('acme/app#12')
   db.update(task).set({ closedAt: new Date() }).run()
 
-  const output = await client.track({ ref: 'acme/app#12' })
+  const output = await track('acme/app#12')
 
   expect(output).toMatchObject({ alreadyTracked: true, closed: true })
   expect(db.select().from(task).get()?.closedAt).not.toBeNull()
@@ -139,19 +137,19 @@ test.each([
   ['a missing issue', 'acme/app#99', 'NOT_FOUND'],
   ['a repo GitHub cannot resolve', 'acme/gone#1', 'NOT_FOUND'],
 ])('track refuses %s with %s and writes nothing', async (_, ref, code) => {
-  const { db, github, client } = setup()
+  const { db, github, track } = setup()
   github.issue('acme/app#12', { title: 'Ship it' })
 
-  expect(await codeOf(client.track({ ref }))).toBe(code)
+  expect(await codeOf(track(ref))).toBe(code)
   expect(copies(db)).toEqual([])
 })
 
 test('track fails without writing when gh auth token fails', async () => {
-  const { db, github, client } = setup()
+  const { db, github, track } = setup()
   github.issue('acme/app#12', { title: 'Ship it' })
   github.logOut()
 
-  const error = await client.track({ ref: 'acme/app#12' }).catch((e: unknown) => e)
+  const error = await track('acme/app#12').catch((e: unknown) => e)
 
   expect(error).toBeInstanceOf(ORPCError)
   expect((error as ORPCError<string, unknown>).code).toBe('BAD_GATEWAY')
@@ -160,26 +158,26 @@ test('track fails without writing when gh auth token fails', async () => {
 })
 
 test('track tells the change to subscribers', async () => {
-  const { github, client, taskLedger } = setup()
+  const { github, taskLedger, track } = setup()
   github.issue('acme/app#12', { title: 'Ship it' })
   const controller = new AbortController()
   const changes = taskLedger.events.subscribe('change', { signal: controller.signal })
 
-  await client.track({ ref: 'acme/app#12' })
+  await track('acme/app#12')
 
   expect((await changes.next()).value).toEqual({ type: 'task', ref: 'acme/app#12' })
   controller.abort()
 })
 
 test('a parent that is itself a Task keeps the labels and parent its own sync wrote', async () => {
-  const { db, github, client } = setup()
+  const { db, github, track } = setup()
   github.issue('acme/app#1', { title: 'Roadmap' })
   github.issue('acme/app#10', { title: 'Epic', labels: ['epic'], parent: 'acme/app#1' })
   github.issue('acme/app#12', { title: 'Ship it', parent: 'acme/app#10' })
-  await client.track({ ref: 'acme/app#10' })
+  await track('acme/app#10')
   github.issue('acme/app#10', { title: 'Epic (renamed)', labels: ['epic'], parent: 'acme/app#1' })
 
-  await client.track({ ref: 'acme/app#12' })
+  await track('acme/app#12')
 
   const epic = db.select().from(issue).where(eq(issue.number, 10)).get()!
   expect(epic).toMatchObject({ title: 'Epic (renamed)', labels: ['epic'] })
@@ -187,13 +185,13 @@ test('a parent that is itself a Task keeps the labels and parent its own sync wr
 })
 
 test('a Task in a renamed repo follows the new name, tracked again by either name', async () => {
-  const { db, github, client } = setup()
+  const { db, github, track } = setup()
   github.issue('acme/old#1', { title: 'One' })
-  await client.track({ ref: 'acme/old#1' })
+  await track('acme/old#1')
   github.renameRepo('acme/old', 'acme/new')
 
-  const byNewName = await client.track({ ref: 'https://github.com/acme/new/issues/1' })
-  const byOldName = await client.track({ ref: 'acme/old#1' })
+  const byNewName = await track('https://github.com/acme/new/issues/1')
+  const byOldName = await track('acme/old#1')
 
   expect(byNewName).toMatchObject({ ref: 'acme/new#1', alreadyTracked: true })
   expect(byOldName).toMatchObject({ ref: 'acme/new#1', alreadyTracked: true })

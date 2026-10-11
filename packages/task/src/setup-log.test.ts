@@ -30,7 +30,7 @@ function writeLog(home: string, path: string, daysAgo: number): string {
 async function benched() {
   const fixture = setup()
   fixture.github.issue(ref, { title: 'Ship it' })
-  await fixture.client.track({ ref })
+  await fixture.track(ref)
   mkdirSync(fixture.ghq.checkout('acme/app'), { recursive: true })
   await fixture.exit((await fixture.client.run({ ref, inPlace: true })).terminalSessionId)
   return { ...fixture, log: writeLog(fixture.home, 'acme/app/issue-12.log', 0) }

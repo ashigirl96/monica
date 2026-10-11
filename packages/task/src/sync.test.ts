@@ -57,10 +57,10 @@ async function failure(promise: Promise<unknown>): Promise<ORPCError<string, unk
   return error
 }
 
-async function track(fixture: Fixture, ...refs: string[]) {
+async function trackAll(fixture: Fixture, ...refs: string[]) {
   for (const ref of refs) {
     fixture.github.issue(ref, { title: `Issue ${ref}` })
-    await fixture.client.track({ ref })
+    await fixture.track(ref)
   }
   fixture.github.requests.length = 0
 }
@@ -70,7 +70,7 @@ test('sync copies every open Task with one query per repo and replaces the Block
   const { github, client } = fixture
   github.issue('acme/app#4', { title: 'Schema first' })
   github.issue('acme/app#5', { title: 'Migrate' })
-  await track(fixture, 'acme/app#1', 'acme/app#2', 'acme/lib#7')
+  await trackAll(fixture, 'acme/app#1', 'acme/app#2', 'acme/lib#7')
   github.issue('acme/app#1', { title: 'One', blockedBy: ['acme/app#4'] })
   await client.sync({})
   github.issue('acme/app#1', { title: 'One', blockedBy: ['acme/app#5'] })
@@ -116,7 +116,7 @@ test('each sync rewrites the copies of the pull requests it gets and drops the l
   github.pullRequest('acme/app#20', { title: 'Fix it', headRef: 'fix', isDraft: true })
   github.pullRequest('acme/app#21', { title: 'Docs', headRef: 'docs' })
   github.issue('acme/app#1', { title: 'One', closingPullRequests: ['acme/app#20', 'acme/app#21'] })
-  await client.track({ ref: 'acme/app#1' })
+  await fixture.track('acme/app#1')
   github.pullRequest('acme/app#20', { title: 'Fix it for good', headRef: 'fix-2', state: 'merged' })
   github.issue('acme/app#1', { title: 'One', closingPullRequests: ['acme/app#20'] })
 
@@ -172,7 +172,7 @@ test('an Issue GitHub answers null for keeps the links of its Task', async () =>
   const { github, client } = fixture
   github.pullRequest('acme/app#20', { title: 'Fix it', headRef: 'fix' })
   github.issue('acme/app#1', { title: 'One', closingPullRequests: ['acme/app#20'] })
-  await client.track({ ref: 'acme/app#1' })
+  await fixture.track('acme/app#1')
   github.remove('acme/app#1')
 
   expect(await client.sync({})).toEqual({ synced: 0, missing: ['acme/app#1'] })
@@ -182,7 +182,7 @@ test('an Issue GitHub answers null for keeps the links of its Task', async () =>
 test('sync splits a repo with more than 50 open Tasks into queries of 50', async () => {
   const fixture = setup()
   const refs = Array.from({ length: 51 }, (_, i) => `acme/app#${i + 1}`)
-  await track(fixture, ...refs)
+  await trackAll(fixture, ...refs)
 
   const output = await fixture.client.sync({})
 
@@ -193,7 +193,7 @@ test('sync splits a repo with more than 50 open Tasks into queries of 50', async
 test('sync writes the repos that answered and names the ones that failed', async () => {
   const fixture = setup()
   const { github, client } = fixture
-  await track(fixture, 'acme/app#1', 'acme/lib#7')
+  await trackAll(fixture, 'acme/app#1', 'acme/lib#7')
   github.issue('acme/app#1', { title: 'One, renamed' })
   github.issue('acme/lib#7', { title: 'Seven, renamed' })
   github.fail('acme/lib')
@@ -212,7 +212,7 @@ test('sync writes the repos that answered and names the ones that failed', async
 test('a repo GitHub cannot resolve fails the sync and keeps its copies', async () => {
   const fixture = setup()
   const { github, client } = fixture
-  await track(fixture, 'acme/app#1', 'acme/lib#7')
+  await trackAll(fixture, 'acme/app#1', 'acme/lib#7')
   github.issue('acme/app#1', { title: 'One, renamed' })
   github.removeRepo('acme/lib')
 
@@ -233,7 +233,7 @@ test('a Blocker in a renamed repo stays one row and follows the new name', async
   const { github, client } = fixture
   github.issue('acme/lib#5', { title: 'Five' })
   github.issue('acme/app#1', { title: 'One', blockedBy: ['acme/lib#5'] })
-  await client.track({ ref: 'acme/app#1' })
+  await fixture.track('acme/app#1')
   github.renameRepo('acme/lib', 'acme/core')
 
   await client.sync({})
@@ -367,7 +367,7 @@ test('an issue number GitHub now gives to another issue fails the sync instead o
 test('an alias GitHub returns null for keeps its copy and shows up as missing', async () => {
   const fixture = setup()
   const { github, client } = fixture
-  await track(fixture, 'acme/app#1', 'acme/app#2')
+  await trackAll(fixture, 'acme/app#1', 'acme/app#2')
   github.remove('acme/app#2')
   github.issue('acme/app#1', { title: 'One, renamed' })
 
@@ -382,7 +382,7 @@ test('an alias GitHub returns null for keeps its copy and shows up as missing', 
 
 test('sync fails when gh auth token fails', async () => {
   const fixture = setup()
-  await track(fixture, 'acme/app#1')
+  await trackAll(fixture, 'acme/app#1')
   fixture.github.logOut()
 
   const error = await failure(fixture.client.sync({}))
@@ -395,7 +395,7 @@ test('sync fails when gh auth token fails', async () => {
 test('sync with a ref copies that Task only, even a closed one', async () => {
   const fixture = setup()
   const { db, github, client } = fixture
-  await track(fixture, 'acme/app#1', 'acme/app#2')
+  await trackAll(fixture, 'acme/app#1', 'acme/app#2')
   db.update(task).set({ closedAt: new Date() }).run()
   github.issue('acme/app#2', { title: 'Two, renamed' })
 
@@ -417,7 +417,7 @@ test('sync with a ref that is not tracked is NOT_FOUND', async () => {
 test('a closed Task is left as it was unless an open Task names it as a Blocker', async () => {
   const fixture = setup()
   const { db, github, client } = fixture
-  await track(fixture, 'acme/app#1', 'acme/app#2', 'acme/app#3')
+  await trackAll(fixture, 'acme/app#1', 'acme/app#2', 'acme/app#3')
   db.update(task)
     .set({ closedAt: new Date() })
     .where(eq(task.issueId, db.select().from(issue).where(eq(issue.number, 1)).get()!.id))
@@ -441,7 +441,7 @@ test('a closed Task is left as it was unless an open Task names it as a Blocker'
 
 test('a sync asked for while the same sync runs waits for the running one', async () => {
   const fixture = setup()
-  await track(fixture, 'acme/app#1')
+  await trackAll(fixture, 'acme/app#1')
   const release = fixture.github.hold()
 
   const first = fixture.client.sync({})
@@ -458,7 +458,7 @@ test('a sync asked for while the same sync runs waits for the running one', asyn
 
 test('a sync that joins a running one gives up at its own timeout', async () => {
   const fixture = setup()
-  await track(fixture, 'acme/app#1')
+  await trackAll(fixture, 'acme/app#1')
   const deps = internals(fixture.taskLedger)
   const ref = { repo: 'acme/app', number: 1 }
   const release = fixture.github.hold()
@@ -483,7 +483,7 @@ test('a sync that joins a running one gives up at its own timeout', async () => 
 
 test('sync tells subscribers that the copies changed', async () => {
   const fixture = setup()
-  await track(fixture, 'acme/app#1')
+  await trackAll(fixture, 'acme/app#1')
   const controller = new AbortController()
   const changes = fixture.taskLedger.events.subscribe('change', { signal: controller.signal })
 

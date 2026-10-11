@@ -336,10 +336,10 @@ test('a worktree Bench whose worktree and branch issue-n are both gone has nothi
 
 test("close leaves the worktree and the branch alone when another Task's Bench has the same path", async () => {
   const fixture = await withWorktreeBench()
-  const { db, workbenchLedger, client, github, ghq, cwd } = fixture
+  const { db, workbenchLedger, client, github, ghq, cwd, track } = fixture
   // 改名した repo の旧名を別の repo が使い、その Task が同じ path に Bench を開いた形を、行で作る。
   github.issue('acme/app#13', { title: 'Next' })
-  await client.track({ ref: 'acme/app#13' })
+  await track('acme/app#13')
   const other = db.select().from(issue).where(eq(issue.number, 13)).get()!
   db.transaction((tx) =>
     insertBench(tx, workbenchLedger, other, { cwd, mode: 'worktree', setupState: 'ready' }),

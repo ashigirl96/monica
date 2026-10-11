@@ -153,7 +153,7 @@ package ごとに in-memory の SQLite に自分の migration を当てる（tas
 
 ## contract の規約
 
-1. 合成した contract の root は package 名で mount する（token の口では `{ workbench, task, job, chat }`、ブラウザの口では `{ note }`）。path の先頭が package 名になり、CLI もそれに従う（`monica task track`、`monica workbench hook claude`）。
+1. 合成した contract の root は package 名で mount する（token の口では `{ workbench, task, job, chat }`、ブラウザの口では `{ note }`）。path の先頭が package 名になり、CLI もそれに従う（`monica task run`、`monica workbench hook claude`）。
 2. 全 procedure に `.meta({ description })` と `.output()` を付ける。description は CLI の help の正本、output は `--format json` の形の正本になる（#17 の JSON の形もここに書く）。
 3. CLI に出すのは `.meta({ cli: true })` を付けた procedure だけ（ADR-0003）。event iterator の procedure は付けても出ない。
 4. 呼び手が分岐する domain エラー（close の guard のように `data` に理由の一覧を持つもの）だけを `.errors()` で宣言する。それ以外は oRPC の標準 code（`NOT_FOUND`、`BAD_REQUEST`）を投げる。
