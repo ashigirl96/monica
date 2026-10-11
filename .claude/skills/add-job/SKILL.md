@@ -31,13 +31,13 @@ command が 1 行に収まらなければ、PATH の外の `~/.local/share/monic
 dry-run も本番と同じ env・PATH・cwd・`/bin/sh -c` で走るよう、`<script の絶対 path> --dry-run` を別名の Job として release の Backend に登録し、予定では走らないよう pause してから起こす。
 
 ```bash
-monica job add <名前>-dry-run --schedule '<cron 式>' --command '<script の絶対 path> --dry-run' --cwd <絶対 path>
+monica job add <名前>-dry-run --schedule '<cron 式>' --command '<script の絶対 path> --dry-run' --cwd <絶対 path> --timeout <本番と同じ>
 monica job pause <名前>-dry-run
 monica job run <名前>-dry-run
 monica job show <名前>-dry-run
 ```
 
-RESULT が `running` を抜けたら、LOG の file を読んで中身を手元に持ち、それから結果によらず `monica job remove <名前>-dry-run` で外す（remove は LOG の directory ごと消す）。`succeeded` で、LOG に意図した対象とやることが出ていれば、それをユーザーに見せて了承をもらえば完了。それ以外は LOG から原因を探し、script を直して 3 をやり直す。
+RESULT が `running` を抜けたら、LOG の file を読んで中身を手元に持ち、それから結果によらず `monica job remove <名前>-dry-run` で外す（remove は LOG の directory ごと消す）。`succeeded` で、LOG に意図した対象とやることが出ていれば、それをユーザーに見せて了承をもらい、4 に進む。それ以外は LOG から原因を探し、script を直して 3 をやり直す。
 
 ## 4. 登録する
 
