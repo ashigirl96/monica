@@ -1,5 +1,5 @@
 import { afterEach, expect, mock, setSystemTime, spyOn, test } from 'bun:test'
-import { existsSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, lstatSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 
 import { runspace, tab } from '@monica/workbench/schema'
@@ -67,6 +67,46 @@ test("run makes a worktree on a new branch issue-n from origin's default branch,
   expect((await client.list({})).tasks).toMatchObject([
     { ref, cwd, displayState: { state: 'ended' } },
   ])
+})
+
+test("run makes an empty CLAUDE.local.md in the checkout, ignored by git, and links the worktree's to it before the setup", async () => {
+  const { ghq, client, cwd } = await tracked('#!/bin/sh\ntest -L CLAUDE.local.md\n')
+
+  expect(await client.run({ ref })).toMatchObject({ warnings: [] })
+
+  const checkout = ghq.checkout('acme/app')
+  expect(readFileSync(join(checkout, 'CLAUDE.local.md'), 'utf8')).toBe('')
+  expect(realpathSync(join(cwd, 'CLAUDE.local.md'))).toBe(
+    realpathSync(join(checkout, 'CLAUDE.local.md')),
+  )
+  expect(git(checkout, 'status', '--porcelain')).toBe('')
+  expect(git(cwd, 'status', '--porcelain')).toBe('')
+})
+
+test('run keeps the CLAUDE.local.md already in the checkout and does not exclude it again', async () => {
+  const { ghq, client, cwd } = await tracked(null)
+  ghq.clone('acme/app')
+  const checkout = ghq.checkout('acme/app')
+  writeFileSync(join(checkout, 'CLAUDE.local.md'), 'lesson\n')
+  writeFileSync(join(checkout, '.git/info/exclude'), 'CLAUDE.local.md\n')
+
+  await client.run({ ref })
+
+  expect(readFileSync(join(cwd, 'CLAUDE.local.md'), 'utf8')).toBe('lesson\n')
+  expect(readFileSync(join(checkout, '.git/info/exclude'), 'utf8')).toBe('CLAUDE.local.md\n')
+})
+
+test('run leaves a CLAUDE.local.md the worktree already has in place of the link', async () => {
+  const fixture = setup()
+  fixture.ghq.origin('acme/app', { 'CLAUDE.local.md': { content: 'tracked\n' } })
+  fixture.github.issue(ref, { title: 'Ship it' })
+  await fixture.client.track({ ref })
+  const cwd = join(fixture.home, 'worktrees/acme/app/issue-12')
+
+  expect(await fixture.client.run({ ref })).toMatchObject({ warnings: [] })
+
+  expect(lstatSync(join(cwd, 'CLAUDE.local.md')).isSymbolicLink()).toBe(false)
+  expect(readFileSync(join(cwd, 'CLAUDE.local.md'), 'utf8')).toBe('tracked\n')
 })
 
 test('the Bench is listed while it prepares, and a second run waits for the same preparation, then is refused without a Tab once the first opens its own', async () => {
@@ -268,6 +308,8 @@ test("run --in-place opens the Bench on the Repo's checkout, cloning it, and run
   })
   expect(ghq.gets).toEqual(['acme/app'])
   expect(existsSync(join(home, 'worktrees'))).toBe(false)
+  expect(readFileSync(join(checkout, 'CLAUDE.local.md'), 'utf8')).toBe('')
+  expect(git(checkout, 'status', '--porcelain')).toBe('')
   expect(await client.bench.list()).toMatchObject([{ setupState: 'ready' }])
   expect(await client.run({ ref })).toMatchObject({ cwd: checkout, benchCreated: false })
 })

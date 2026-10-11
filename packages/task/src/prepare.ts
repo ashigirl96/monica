@@ -1,5 +1,16 @@
-import { appendFileSync, closeSync, existsSync, openSync, realpathSync } from 'node:fs'
-import { join } from 'node:path'
+import {
+  appendFileSync,
+  closeSync,
+  existsSync,
+  lstatSync,
+  mkdirSync,
+  openSync,
+  readFileSync,
+  realpathSync,
+  symlinkSync,
+  writeFileSync,
+} from 'node:fs'
+import { dirname, join } from 'node:path'
 
 import { inheritableEnv } from '@monica/workbench/server'
 import type { Subprocess } from 'bun'
@@ -11,6 +22,7 @@ import type { bench } from './schema.ts'
 const SETUP_TIMEOUT_MS = 600_000
 const SETUP_KILL_GRACE_MS = 2000
 const SETUP_SCRIPT = '.monica/setup.sh'
+const CLAUDE_LOCAL = 'CLAUDE.local.md'
 
 export type Ghq = {
   root(): Promise<string>
@@ -48,7 +60,7 @@ export async function prepare(
 ): Promise<string[]> {
   if (mode === 'in_place') {
     await clone(deps.ghq, ref.repo, cwd)
-    return []
+    return shareClaudeLocal(cwd)
   }
   let warnings: string[] = []
   // repo が改名されても、作った worktree は作った時の checkout に登録されているので、checkout を引き直さない。
@@ -63,6 +75,7 @@ export async function prepare(
     await clone(deps.ghq, ref.repo, checkout)
     warnings = await addWorktree(checkout, cwd, branchOf(ref))
   }
+  warnings.push(...(await shareClaudeLocal(cwd)))
   await runSetup(cwd, log, deps.setups)
   return warnings
 }
@@ -113,6 +126,38 @@ async function addWorktree(checkout: string, path: string, branch: string): Prom
   }
   await git(checkout, 'worktree', 'add', '-b', branch, path, `origin/${base}`)
   return warnings
+}
+
+// CLAUDE.local.md は追跡しないので、worktree には checkout のものを symlink で見せ、教訓を 1 か所に残す。
+// worktree を作った後なので、失敗しても Bench を failed にせず warnings に載せる。
+async function shareClaudeLocal(cwd: string): Promise<string[]> {
+  // 直下に .git が無い directory は git の外か別の repo の下で、そこに書くと関係の無い repo を汚す。
+  if (!existsSync(join(cwd, '.git'))) return []
+  try {
+    const commonDir = await git(cwd, 'rev-parse', '--path-format=absolute', '--git-common-dir')
+    const checkout = dirname(commonDir)
+    const checkoutFile = join(checkout, CLAUDE_LOCAL)
+    if (!existsSync(checkoutFile)) writeFileSync(checkoutFile, '')
+    if (!(await succeeds(git(checkout, 'check-ignore', '--quiet', CLAUDE_LOCAL)))) {
+      excludeFromGit(commonDir, CLAUDE_LOCAL)
+    }
+    const link = join(cwd, CLAUDE_LOCAL)
+    // 既にある file や link は、ユーザーが置いたものとして上書きしない。
+    if (realpathSync(cwd) !== checkout && !lstatSync(link, { throwIfNoEntry: false })) {
+      symlinkSync(checkoutFile, link)
+    }
+    return []
+  } catch (error) {
+    return [`could not share ${CLAUDE_LOCAL} with the checkout: ${messageOf(error)}`]
+  }
+}
+
+function excludeFromGit(commonDir: string, pattern: string) {
+  const exclude = join(commonDir, 'info/exclude')
+  mkdirSync(dirname(exclude), { recursive: true })
+  const current = existsSync(exclude) ? readFileSync(exclude, 'utf8') : ''
+  const separator = current === '' || current.endsWith('\n') ? '' : '\n'
+  appendFileSync(exclude, `${separator}${pattern}\n`)
 }
 
 async function defaultBranch(checkout: string): Promise<string> {
