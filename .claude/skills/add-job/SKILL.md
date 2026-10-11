@@ -21,39 +21,45 @@ command が 1 行に収まらなければ、PATH の外の `~/.local/share/monic
 - script は stdin も TTY も無く、release の Backend の env と、Backend が login shell から取った PATH で、`/bin/sh -c` から走る。対話を待つ command には非対話の flag を付ける。
 - monica は exit code だけで成否を決める。やるべきことを果たせなかった回は 0 以外で終わらせ、原因を最後の行に出す（`monica job show` の ERROR にその行が出る）。
 - `claude -p` を呼ぶなら、`docs/packages/job-ledger.md` の「claude を呼ぶ Job の成否」の形で result 行を確かめる。その script は例と同じく `set -u` で始め、claude の exit code を自分で受ける。
-- 外に変化を起こす Job（消す・送る・作る・書き換える）は、`--dry-run` で対象とやることを出すだけの mode を持たせ、本番でも変える前に対象を 1 行ずつ log に出す。
+- 外に変化を起こす Job（消す・送る・作る・書き換える）は、1 行で書けても script にし、command は script の絶対 path だけにする。script には `--dry-run` で対象とやることを出すだけの mode を持たせ、本番でも変える前に対象を 1 行ずつ log に出す。
 - 消す Job は、戻せないもの（push していない commit、未 commit の変更）を持つ対象を残す。この checkout と `.claude/worktrees/` では別の session が同時に動いているので、使っている worktree も残す。
 
 ## 3. dry-run を Backend で走らせる
 
 外に変化を起こす Job だけが通る。起こさない Job は 4 に進み、5 の `monica job run` を 1 回目にする。
 
-dry-run も本番と同じ env・PATH・cwd・`/bin/sh -c` で走るよう、`--dry-run` を足した command を別名の Job として release の Backend に登録して走らせる。
+dry-run も本番と同じ env・PATH・cwd・`/bin/sh -c` で走るよう、`<script の絶対 path> --dry-run` を別名の Job として release の Backend に登録し、予定では走らないよう pause してから起こす。
 
 ```bash
-monica job add <名前>-dry-run --schedule '<cron 式>' --command '<command> --dry-run' --cwd <絶対 path>
+monica job add <名前>-dry-run --schedule '<cron 式>' --command '<script の絶対 path> --dry-run' --cwd <絶対 path>
+monica job pause <名前>-dry-run
 monica job run <名前>-dry-run
 monica job show <名前>-dry-run
 ```
 
-RESULT が `succeeded` になり、LOG に意図した対象とやることが出ていれば、それをユーザーに見せて了承をもらう。了承をもらったら `monica job remove <名前>-dry-run` で外す。
+RESULT が `running` を抜けたら、結果によらず `monica job remove <名前>-dry-run` で外す。`succeeded` で、LOG に意図した対象とやることが出ていれば、それをユーザーに見せて了承をもらえば完了。それ以外は script を直して 3 をやり直す。
 
 ## 4. 登録する
 
+5 で確かめ終えるまで予定では走らないよう、登録したらすぐ pause する。
+
 ```bash
 monica job add <名前> --schedule '<cron 式>' --command '<command>' --cwd <絶対 path> --timeout <30m など>
+monica job pause <名前>
 ```
 
 `--cwd` と `--timeout` は既定（`$HOME`・1h）でよければ省く。`BAD_REQUEST` なら、エラーの文面と「ユーザーの Job」の規則を突き合わせて直す。
 
 ## 5. 確かめる
 
+pause のままでも `run` で起こせる。
+
 ```bash
 monica job run <名前>
 monica job show <名前>
 ```
 
-`show` の最新の RESULT が `running` の間は読み直す。`succeeded` になり、LOG の file を読んで、意図した処理が起きたと分かれば完了。`failed` か `timed_out` なら、LOG と ERROR から原因を探す。直すのが script の中身だけなら、直して（外に変化を起こす Job は 3 を通して）5 をやり直す。command・schedule・cwd・timeout を変えるときは、`monica job remove` してから 4 に戻る。
+`show` の最新の RESULT が `running` の間は読み直す。`succeeded` になり、LOG の file を読んで、意図した処理が起きたと分かったら `monica job resume <名前>` して完了。`failed` か `timed_out` なら、LOG と ERROR から原因を探す。直すのが script の中身だけなら、直して（外に変化を起こす Job は 3 を通して）5 をやり直す。command・schedule・cwd・timeout を変えるときは、`monica job remove` してから 4 に戻る。
 
 ## 6. 報告する
 
