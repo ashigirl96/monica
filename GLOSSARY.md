@@ -211,6 +211,20 @@ _Avoid_: 帳簿
 **ptyd**:
 Terminal Session を管理する常駐 daemon。Backend が起動し、desktop より長生きする。socket 越しに使う。
 
+### Usage
+
+**Feature**:
+Backend が受ける呼び出しの名前 1 つ（`task.run` など）。CLI の command は、それが呼ぶ Feature と同じものとして数える。Backend を通らない操作（端末の入出力、Shell が OS に頼むこと、Job が Ledger を直接触ること）は Feature ではない。
+_Avoid_: 機能（Job も Skill も機能と呼べて広すぎる）、endpoint、command
+
+**Caller**:
+Feature を呼んだ入口。webview、CLI、Chrome Extension、notes の画面の 4 つ。CLI を私が打ったか agent が打ったかは区別しない。
+_Avoid_: client、source、呼び出し元
+
+**Usage**:
+ある日にある Caller がある Feature を呼んだ回数を、成功と失敗に分けて残した記録。消してよい Feature を探す拠り所で、ログではない。呼ばれなかった Feature は 0 回として数える。
+_Avoid_: metrics、telemetry、analytics、利用ログ
+
 ### Skill
 
 **Skill**:
