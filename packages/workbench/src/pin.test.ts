@@ -82,6 +82,9 @@ test('a pinned Tab cannot be closed or go with its Runspace, and its Terminal Se
   })
 
   expect(await client.layout.get()).toEqual(before)
+  // ptyd は 1 本の接続で順に受けるので、後から開いた Tab の Create が届けば、先に送られたものも届いている。
+  const later = await client.runspace.create(size)
+  await ptyd.received((op) => op.op === 'create' && op.session_id === later.tab.terminalSessionId)
   expect(ptyd.receivedAll((op) => op.op === 'terminate')).toEqual([])
 })
 

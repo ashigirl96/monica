@@ -470,8 +470,9 @@ test('leaving the answer before the result kills the claude that answers', async
 
   for await (const event of await client.ask(HELD)) if (event.type === 'text') break
 
-  const [pid] = answeringPids(records())
-  await gone(pid!)
+  const pids = answeringPids(records())
+  expect(pids).toHaveLength(1)
+  await gone(pids[0]!)
 })
 
 type Client = ReturnType<typeof startChat>['client']
