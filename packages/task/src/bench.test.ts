@@ -26,7 +26,7 @@ async function tracked(script: string | null = '#!/bin/sh\npwd > .setup-ran\n', 
     script === null ? {} : { '.monica/setup.sh': { content: script, mode } },
   )
   fixture.github.issue(ref, { title: 'Ship it' })
-  await fixture.client.track({ ref })
+  await fixture.track(ref)
   return { ...fixture, cwd: join(fixture.home, 'worktrees/acme/app/issue-12') }
 }
 
@@ -100,7 +100,7 @@ test('run warns when the .gitignore of the Repo keeps CLAUDE.local.md from being
   const fixture = setup()
   fixture.ghq.origin('acme/app', { '.gitignore': { content: '!CLAUDE.local.md\n' } })
   fixture.github.issue(ref, { title: 'Ship it' })
-  await fixture.client.track({ ref })
+  await fixture.track(ref)
 
   const output = await fixture.client.run({ ref })
 
@@ -113,7 +113,7 @@ test('run excludes CLAUDE.local.md when only the branch of the checkout ignores 
   const fixture = setup()
   fixture.ghq.origin('acme/app', { '.gitignore': { content: 'CLAUDE.local.md\n' } })
   fixture.github.issue(ref, { title: 'Ship it' })
-  await fixture.client.track({ ref })
+  await fixture.track(ref)
   fixture.ghq.clone('acme/app')
   const checkout = fixture.ghq.checkout('acme/app')
   git(checkout, 'switch', '--quiet', '-c', 'issue-12')
@@ -141,7 +141,7 @@ test('run leaves a CLAUDE.local.md the worktree already has in place of the link
   const fixture = setup()
   fixture.ghq.origin('acme/app', { 'CLAUDE.local.md': { content: 'tracked\n' } })
   fixture.github.issue(ref, { title: 'Ship it' })
-  await fixture.client.track({ ref })
+  await fixture.track(ref)
   const cwd = join(fixture.home, 'worktrees/acme/app/issue-12')
 
   expect(await fixture.client.run({ ref })).toMatchObject({ warnings: [] })

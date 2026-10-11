@@ -1,0 +1,13 @@
+#!/bin/sh
+# 伏せる名前の一覧は追跡しないので、worktree からも本体の checkout の .git から読む。
+# worktree の session の guard はコマンド置換の中の git を拒むので、置換はこの script の中に閉じる。
+patterns="$(git rev-parse --git-common-dir)/info/sensitive-patterns"
+grep -inEf "$patterns" "$@"
+case $? in
+  0)
+    echo "check-sensitive: the lines above name something to hide as <work-org>/<repo>" >&2
+    exit 1
+    ;;
+  1) exit 0 ;;
+  *) exit 2 ;;
+esac

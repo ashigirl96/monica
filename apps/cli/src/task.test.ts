@@ -54,20 +54,6 @@ test('task list --format json prints the procedure output as it is', async () =>
   })
 })
 
-test('task track takes the ref as an argument and refuses a bare #n with exit 1', async () => {
-  const result = await monica(['task', 'track', '#12'], backendWithTasks())
-
-  expect(result.code).toBe(1)
-  expect(result.stderr).toMatch(/^BAD_REQUEST: "#12" is not owner\/repo#n[^\n]*\n$/)
-})
-
-test('task track exits 1 when GitHub cannot be reached', async () => {
-  const result = await monica(['task', 'track', 'acme/app#99'], backendWithTasks())
-
-  expect(result.code).toBe(1)
-  expect(result.stderr).toMatch(/^BAD_GATEWAY: could not sync from GitHub: `gh auth token`/)
-})
-
 test('task sync takes an optional ref and exits 1 for one that is not tracked', async () => {
   const result = await monica(['task', 'sync', 'acme/app#99'], backendWithTasks())
 

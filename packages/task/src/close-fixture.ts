@@ -16,7 +16,7 @@ export async function tracked({ origin }: { origin?: Files } = {}) {
   if (origin !== undefined) fixture.ghq.origin('acme/app', origin)
   fixture.taskLedger.start()
   fixture.github.issue(ref, { title: 'Ship it' })
-  await fixture.client.track({ ref })
+  await fixture.track(ref)
   return { ...fixture, cwd: join(fixture.home, 'worktrees/acme/app/issue-12') }
 }
 

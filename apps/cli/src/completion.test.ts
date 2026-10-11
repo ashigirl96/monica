@@ -16,7 +16,6 @@ test('__complete lists the subcommands with their descriptions for zsh', async (
   expect(result).toEqual({
     code: 0,
     stdout:
-      'track:Track a GitHub Issue as a Task and copy it with its parent and Blockers; a tracked one is synced\n' +
       'sync:Copy the Issues of every open Task, or of one Task given its ref, from GitHub\n' +
       'list:List open Tasks in the order they were tracked\n' +
       'run:Start claude with a first prompt (/tackle if left out) in a new Tab of the Bench of an open Task, tracking the Issue and opening and preparing the Bench first, or resume the last claude of the Bench once it has ended\n' +

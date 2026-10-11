@@ -5,7 +5,6 @@
 ## contract（root は `task`）
 
 ```
-track       { ref } → { ref, title, alreadyTracked, closed }                                cli
 sync        { ref? } → { synced, missing }                                                  cli
 list        { closed? } → { tasks: ListItem[], backgroundSyncError: { at, message } | null }  cli
 run         { ref, prompt?, inPlace?, force? } → { ref, title, tracked, cwd, mode,              cli
@@ -79,7 +78,7 @@ createTaskLedger(deps: {
 
 `run` の前半。Bench を確保し、準備が終わるのを待つ。後半は「Run の起動」の節。
 
-- `run` は open な Task だけを受ける（closed は `BAD_REQUEST` で reopen を案内する）。未 track の ref は、`track` と同じく写しと Task の行を 1 つの transaction で書いてから、新しい Run の手順（「Run の起動」の節）に進む。GitHub が issue を返さなければ `track` と同じく `NOT_FOUND` で、何も書かない。track の後で `run` が失敗しても（`BLOCKED`、準備の失敗）track は巻き戻さない（ADR-0024）。output の `tracked` は、この `run` で track したかを示す。track は GitHub の今の名前で Task を書くので、改名前の名前で頼まれても引けるよう、track の後は `track` の返す ref で Task を引き直す。
+- `run` は open な Task だけを受ける（closed は `BAD_REQUEST` で reopen を案内する）。未 track の ref は、写しと Task の行を 1 つの transaction で書いて track してから、新しい Run の手順（「Run の起動」の節）に進む。GitHub が issue を返さなければ `NOT_FOUND` で、何も書かない。track の後で `run` が失敗しても（`BLOCKED`、準備の失敗）track は巻き戻さない（ADR-0024）。output の `tracked` は、この `run` で track したかを示す。track は GitHub の今の名前で Task を書くので、改名前の名前で頼まれても引けるよう、track の後は GitHub の今の名前の ref で Task を引き直す。
 - Bench が無ければ、`writeOpenTask`（「close と reopen」）の transaction の中で `bench` の行（`preparing`）と `workbenchLedger.createRunspace(tx, { cwd })` を作って commit し（`--in-place` の ghq root を待つ間に close が走り終えることがあるため。Tab を開く tx も `writeOpenTask` と同じ確認をする `openRunTab` で開く）、準備を Backend の中で始める。準備中の Bench は sidebar にすぐ出る。
 - cwd は作る前に決め、その後は変えない。worktree は `$MONICA_HOME/worktrees/<owner>/<repo>/issue-<n>`、`--in-place` は `$(ghq root)/github.com/<owner>/<repo>`。`--in-place` で ghq root が引けなければ、Bench を作らずに `PRECONDITION_FAILED`。worktree の Bench に `--in-place` を打つと `BAD_REQUEST`、flag の無い `run` は今の Bench の mode に従う。
 - 準備: in-place は、checkout（cwd）が無ければ `ghq get <owner>/<repo>` して終わる。ghq は repo の今の名前の場所に clone するので、改名の後で cwd に来なければ失敗にする。worktree は、cwd が linked worktree ならそのまま使う。repo が改名されても、作った worktree は作った時の checkout に登録されているので、checkout を引き直さない。cwd が worktree でなければ、checkout が無いときに `ghq get` する。ただし、改名の前に作った worktree が消えていたら（cwd が今の名前の path と違えば）失敗にする。元の branch は改名前の checkout にしか無く、新しい名前の clone から作り直すと黙って別の branch になるため。そのうえで、path が消えていればその登録だけを `git worktree remove <path>` で外し（`prune` は外付けの disk の上の worktree のような、関係の無い登録まで外すので使わない）、branch `issue-<n>` があれば `git worktree add <path> issue-<n>`。無ければ default branch（`refs/remotes/origin/HEAD`、取れなければ `git remote set-head origin --auto` を 1 回）を求め、`git fetch origin <default>` を best-effort で打ってから `git worktree add -b issue-<n> <path> origin/<default>`。fetch の失敗は output の `warnings` に載せる。git と ghq には `GIT_TERMINAL_PROMPT=0` を渡す。Backend が端末から起こされていると、git は認証を /dev/tty で尋ねて止まるため。準備に git の呼び出しを足すときは、「テスト」の節の `openBench` を見る。in-place のテストの checkout は git でない directory なため。
@@ -164,21 +163,21 @@ Chrome Extension が GitHub の Issues の一覧と Issue の画面に差し込�
 
 ## sync
 
-- GitHub client（`github.ts`）は repo ごとに 1 本の GraphQL で最大 50 件を alias（`i<number>`）で引く。null の alias（削除・transfer・PR の番号）は写しを消さずに `missing` に回し、`errors` があっても返った alias は書く。`repository` ごと null なら（削除・権限の喪失）その repo の失敗にする。多くは gh のアカウント違いや SSO による権限の喪失で、`missing` にすると背景 sync の警告に出ず、写しが黙って古くなるため。新しい Issue の `track` だけは、打ち間違いを GitHub の障害に見せないよう `NOT_FOUND` にする。
-- `track` は、track 済みの Task でも GitHub が Issue を返さなければ `NOT_FOUND`、repo の失敗なら `BAD_GATEWAY` にする。未 track の ref への `sync <ref>` は `NOT_FOUND`。
+- GitHub client（`github.ts`）は repo ごとに 1 本の GraphQL で最大 50 件を alias（`i<number>`）で引く。null の alias（削除・transfer・PR の番号）は写しを消さずに `missing` に回し、`errors` があっても返った alias は書く。`repository` ごと null なら（削除・権限の喪失）その repo の失敗にする。多くは gh のアカウント違いや SSO による権限の喪失で、`missing` にすると背景 sync の警告に出ず、写しが黙って古くなるため。未 track の Issue の track だけは、打ち間違いを GitHub の障害に見せないよう `NOT_FOUND` にする。
+- track は、track 済みの Task に当たっても GitHub が Issue を返さなければ `NOT_FOUND`、repo の失敗なら `BAD_GATEWAY` にする。未 track の ref への `sync <ref>` は `NOT_FOUND`。
 - Pull Request は 2 つの経路で引く。各 Issue からは closing reference の PR（`closedByPullRequestsReferences(first: 10, includeClosedPrs: true)`、手動のリンクを含む）を引き、parent と Blocker の node からは引かない。worktree の Bench を持つ Task には、同じ repo の query に `pr<n>: pullRequests(headRefName: "<Bench の branch>", states: [OPEN, CLOSED, MERGED], first: 10)` の alias を足す。Bench が無いか in_place の Bench なら、head が一致する branch も無いので、alias を足さずに branch の経路を空とする。
 - PR の写しは小文字の repo と番号で照らして upsert し、repo は GitHub の今の名前に書き直す。state は GraphQL の値を小文字にし、head は branch の名前と commit（`headRefOid`）を写す。行は消さない。repo の改名で旧名の行が残っても、対応は sync のたびに置き換えるのでどこからも指されない。
-- `task_pull_request` は Task ごと・経路（`branch` / `closing_reference`）ごとに delete → insert で置き換え、両方に当たる PR は 2 行になる。GitHub が答えなかった経路（null の alias や connection）、Issue が返らなかった Task、失敗した repo の分は置き換えず、前の行を残す。reopen した Task は Bench を作り直すまで branch の対応を持たない。`track` は Task の行を足してから対応を書く。closed な Task は背景と全件の sync で引かないので、対応も close した時点のまま残る。
+- `task_pull_request` は Task ごと・経路（`branch` / `closing_reference`）ごとに delete → insert で置き換え、両方に当たる PR は 2 行になる。GitHub が答えなかった経路（null の alias や connection）、Issue が返らなかった Task、失敗した repo の分は置き換えず、前の行を残す。reopen した Task は Bench を作り直すまで branch の対応を持たない。track は Task の行を足してから対応を書く。closed な Task は背景と全件の sync で引かないので、対応も close した時点のまま残る。
 - token は sync のたびに取り直す。`gh auth token` の失敗は 0 件成功にせず、sync の失敗にする。
-- timeout は sync 1 回の全体（token と全 query）にかかる。`track` / `sync` / 背景は 30 秒。`stop()` は走っている request を切る。
+- timeout は sync 1 回の全体（token と全 query）にかかる。track・`sync`・背景は 30 秒。`stop()` は走っている request を切る。
 - 範囲（open な Task すべて、または 1 つの Task）ごとに走る sync を 1 つにし、後から来た要求はその完了を自分の timeout まで待つ。5 秒の直前の sync が 30 秒の sync に合流しても 5 秒で返すため。
 - 背景の sync は `TaskLedger` の `syncInBackground()` で、open な Task すべてを sync する。起動時と 5 分おきに呼ぶのは system の Job `task.sync`（`docs/packages/job-ledger.md`）で、task は timer を持たない。失敗した repo があるか throw したら reject し、Job Execution の結果は `failed` になる。retry と backoff は持たず、次の回がやり直す。
 - repo ごとに引けた分をその都度 1 transaction で書く。失敗した repo は `owner/repo: 理由` で並べ、`sync` は `BAD_GATEWAY` を投げ、背景は stderr の 1 行と `list` の `backgroundSyncError` に出す。背景の次の回が成功すれば消える。`backgroundSyncError` は job の記録から読まずに task の memory に置く。読み出しを job に移すと task → job の依存が生まれるため（ADR-0016）。`stop()` の後に終わった回は記録しない。
 - 写しの行が同じ issue かは、GitHub の node ID（`issue.node_id`）で決める。repo の改名で GitHub は旧名の query にも新しい名前で答え、parent や Blocker の node は新しい名前でしか来ないので、repo と番号だけでは同じ issue の行が 2 つに分かれるため。node ID で見つからなければ、node ID の無い行（node ID を足す前に書いた行）を `(lower(repo), number)` で照らす。Task の Issue は、query に渡した ref（改名前の名前のこともある）の行を先に照らす。Task が指すのはその行だから。どれでも見つからなければ足す。見つけた行の repo と番号は、GitHub の今の値に書き直す。同じ node ID か、書き直す先の `(repo, number)` に別の行があれば、同じ issue の写しが 2 つあるので、その repo の sync の失敗にする。
 - repo の query 1 本分の写しを書くときは、parent や Blocker を書く前に、その batch の Task の Issue の行に node ID と今の名前を付ける。改名した repo の Task が同じ batch の別の Task の parent や Blocker として先に出てきても、Task の行に当たるようにするため。別の repo の Task の parent や Blocker として先に写った場合は 2 行になり、失敗になる（node ID を足す前に書いた行が残る DB で、repo を改名したときだけ）。
 - 同じ `(repo, number)` に node ID の違う行があれば、その番号は GitHub で別の issue に使われている（repo を消して作り直したときなど）。黙って付け替えず、その repo の sync の失敗にする。
-- `track` が既に track 済みかは、Task の行の insert が重なったかで決める。改名した repo の issue は旧名でも新しい名前でも引けるので、入力の ref の名前では決められない。
-- 新しい Issue の `track` は写しと Task の行を同じ transaction で書くので、失敗か `missing` なら何も書かない。
+- track 済みかは、Task の行の insert が重なったかで決める。改名した repo の issue は旧名でも新しい名前でも引けるので、入力の ref の名前では決められない。
+- 未 track の Issue の track は写しと Task の行を同じ transaction で書くので、失敗か `missing` なら何も書かない。
 - `syncTask` は 1 つの Task を sync し、成否を投げずに `{ synced, missing, failures }` で返す。`run` / `close` / `reopen` の直前の 5 秒の sync はこれを呼ぶ。
 
 ## テスト
@@ -188,6 +187,7 @@ Chrome Extension が GitHub の Issues の一覧と Issue の画面に差し込�
 - Bench の Tab は Workbench Ledger の `openTab` で、Bench の外の Tab は workbench の router の `runspace.create` で開き（shell の起動は fake の ptyd が受ける）、hook は workbench の `agentSession.recordHook` に渡す（`testing.ts` の `openTab`・`openTabOutsideBench`・`hook`）。Tab・Terminal Session・Agent Session の行と合図を Backend と同じ経路で作るため。
 - GitHub は `packages/task/src/fake-github.ts` に差し替える。fake は GraphQL の `repository { issue(number:) }` と `pullRequests(headRefName:)` の alias だけを話し、届いた request を記録し、repo ごとの失敗、branch ごとの null の応答、未認証、応答の保留を起こせる。CLI のテストの Task Ledger は `gh auth token` が失敗する GitHub を持ち、本物の GitHub に届かない。
 - ghq は `packages/task/src/fake-ghq.ts` に差し替える。CI の ts job に ghq は無い。fake は一時 directory の `origins/<owner>/<repo>` を origin（default branch は main）にし、`get` でそれを clone して記録する。origin と clone は files の組ごとに 1 回だけ git で作って memory に写しを持ち、2 回目からは写す（git で作ると 1 回 100ms を越える）。clone の写しは origin の refs が写しと同じときだけ使うので、テストが後から commit や branch を足した origin は git で clone する。git を使わないテストは origin を作らない。Bench の準備は本物の git で確かめる。CLI のテストの Task Ledger は失敗する ghq を持つ。
+- Bench を開かずに Issue を track するテストは、`testing.ts` の `track(ref)` で `trackIssue` を直に呼ぶ。track を出す procedure は無く、`run` で代えると Bench と Tab を開く副作用が前準備に入るため。
 - `testing.ts` の `openBench` は、checkout を mkdir して in-place の Bench を開く。checkout が在れば in-place の準備は git を呼ばない。worktree の振る舞いを見るテストだけが `{ worktree: true }` を渡す。準備中の Bench は、ghq の取得（in-place は `get`、worktree は `root`）を pending の Promise にして作る。
 - `run` の後に、強制でない close や同じ Task の次の `run` を呼ぶテストは、先に起動中の予約を外す。`testing.ts` の `exit` で run の Tab の Terminal Session を終わらせるか、`close-fixture.ts` の `startedAndEnded` で claude を Run にして終わらせる。外さないと、60 秒の間は `CONFLICT` で断られる。
 - setup の 600 秒の timeout は、`setTimeout` を `spyOn` してその callback を捕まえ、手で呼ぶ。

@@ -11,7 +11,6 @@ import type {
   ReopenOutput,
   RunOutput,
   SyncOutput,
-  TrackOutput,
 } from './contract.ts'
 import { stateText } from './state-text.ts'
 
@@ -36,11 +35,6 @@ export const completers = {
 }
 
 export const formatters = {
-  track({ ref, title, alreadyTracked, closed }: TrackOutput): string {
-    if (!alreadyTracked) return `tracked ${ref} ${title}`
-    if (closed) return `already tracked ${ref}; it is closed, so run \`monica task reopen ${ref}\``
-    return `already tracked ${ref}`
-  },
   sync({ synced, missing }: SyncOutput): string {
     const lines = [`synced ${synced} ${synced === 1 ? 'Task' : 'Tasks'}`]
     if (missing.length > 0) {

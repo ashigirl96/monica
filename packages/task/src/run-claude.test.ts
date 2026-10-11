@@ -28,7 +28,7 @@ function untracked({ blockedBy = [] as string[], origin = true } = {}) {
 
 async function tracked({ blockedBy = [] as string[], origin = true } = {}) {
   const fixture = untracked({ blockedBy, origin })
-  await fixture.client.track({ ref })
+  await fixture.track(ref)
   return fixture
 }
 
@@ -414,7 +414,7 @@ const subIssueRuns = {
     fixture.taskLedger.start()
   },
   'a resume': async (fixture: Fixture) => {
-    await fixture.client.track({ ref })
+    await fixture.track(ref)
     await endedRun(fixture)
   },
 }

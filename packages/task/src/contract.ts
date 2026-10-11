@@ -67,13 +67,6 @@ const ref = z.string().meta({
   description: 'owner/repo#n or https://github.com/owner/repo/issues/n',
 })
 
-export const TrackOutputSchema = z.object({
-  ref: z.string(),
-  title: z.string(),
-  alreadyTracked: z.boolean(),
-  closed: z.boolean(),
-})
-
 export const SyncOutputSchema = z.object({
   synced: z.number().int().nonnegative(),
   missing: z.array(z.string()).describe('refs GitHub did not return; their copies are kept'),
@@ -202,7 +195,6 @@ export const BenchItemSchema = z.object({
   setupState: BenchSchema.shape.setupState,
 })
 
-export type TrackOutput = z.infer<typeof TrackOutputSchema>
 export type SyncOutput = z.infer<typeof SyncOutputSchema>
 export type ListOutput = z.infer<typeof ListOutputSchema>
 export type RunOutput = z.infer<typeof RunOutputSchema>
@@ -217,14 +209,6 @@ export type ReopenOutput = z.infer<typeof ReopenOutputSchema>
 export type BenchItem = z.infer<typeof BenchItemSchema>
 
 export const contract = {
-  track: meta
-    .meta({
-      description:
-        'Track a GitHub Issue as a Task and copy it with its parent and Blockers; a tracked one is synced',
-      cli: true,
-    })
-    .input(z.object({ ref }))
-    .output(TrackOutputSchema),
   sync: meta
     .meta({
       description: 'Copy the Issues of every open Task, or of one Task given its ref, from GitHub',

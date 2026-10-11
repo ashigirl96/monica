@@ -19,7 +19,7 @@ function close({ db }: Fixture, number: number) {
 
 test('list shows open Tasks in tracked order with their open Blockers and display state', async () => {
   const fixture = setup()
-  const { github, client } = fixture
+  const { github, client, track } = fixture
   github.issue('acme/app#4', { title: 'Schema first' })
   github.issue('acme/lib#3', { title: 'Upstream fix' })
   github.issue('acme/app#5', { title: 'Done already', state: 'closed' })
@@ -29,7 +29,7 @@ test('list shows open Tasks in tracked order with their open Blockers and displa
   })
   github.issue('acme/app#2', { title: 'Merged, not cleaned up', state: 'closed' })
   github.issue('acme/app#1', { title: 'Shipped' })
-  for (const ref of ['acme/app#12', 'acme/app#2', 'acme/app#1']) await client.track({ ref })
+  for (const ref of ['acme/app#12', 'acme/app#2', 'acme/app#1']) await track(ref)
   close(fixture, 1)
 
   const output = await client.list({})
@@ -59,10 +59,10 @@ test('list shows open Tasks in tracked order with their open Blockers and displa
 
 test('list with closed shows only the closed Tasks', async () => {
   const fixture = setup()
-  const { github, client } = fixture
+  const { github, client, track } = fixture
   github.issue('acme/app#1', { title: 'Shipped' })
   github.issue('acme/app#2', { title: 'Open' })
-  for (const ref of ['acme/app#1', 'acme/app#2']) await client.track({ ref })
+  for (const ref of ['acme/app#1', 'acme/app#2']) await track(ref)
   close(fixture, 1)
 
   const output = await client.list({ closed: true })
@@ -71,9 +71,9 @@ test('list with closed shows only the closed Tasks', async () => {
 })
 
 test('syncInBackground copies the Issues of the open Tasks from GitHub', async () => {
-  const { github, client, taskLedger } = setup()
+  const { github, client, taskLedger, track } = setup()
   github.issue('acme/app#1', { title: 'One' })
-  await client.track({ ref: 'acme/app#1' })
+  await track('acme/app#1')
   github.issue('acme/app#1', { title: 'One, renamed' })
   github.requests.length = 0
 
@@ -86,9 +86,9 @@ test('syncInBackground copies the Issues of the open Tasks from GitHub', async (
 })
 
 test('a failed background sync rejects and shows in list until one succeeds', async () => {
-  const { github, client, taskLedger } = setup()
+  const { github, client, taskLedger, track } = setup()
   github.issue('acme/app#1', { title: 'One' })
-  await client.track({ ref: 'acme/app#1' })
+  await track('acme/app#1')
   github.logOut()
 
   const rejected = await taskLedger.syncInBackground().catch((error: unknown) => error)
@@ -109,9 +109,9 @@ test('a failed background sync rejects and shows in list until one succeeds', as
 
 test('start neither syncs nor sets a timer; the Job Ledger runs the background sync', async () => {
   const setInterval = spyOn(globalThis, 'setInterval')
-  const { github, client, taskLedger } = setup()
+  const { github, taskLedger, track } = setup()
   github.issue('acme/app#1', { title: 'One' })
-  await client.track({ ref: 'acme/app#1' })
+  await track('acme/app#1')
   github.requests.length = 0
 
   taskLedger.start()

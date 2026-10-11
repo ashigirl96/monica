@@ -21,6 +21,8 @@ import { startFakeGitHub } from './fake-github.ts'
 import { parseRef } from './ref.ts'
 import { bench, issue } from './schema.ts'
 import { createTaskLedger, migrations, nameAgentSession, router } from './server.ts'
+import { trackIssue } from './sync.ts'
+import { internals } from './task.ts'
 
 const cleanups: (() => void)[] = []
 export const onCleanup = (cleanup: () => void) => cleanups.push(cleanup)
@@ -77,7 +79,8 @@ export function setup() {
     })
     onCleanup(() => taskLedger.stop())
     const client = createRouterClient(router, { context: { db, taskLedger } })
-    return { taskLedger, client }
+    const track = (ref: string) => trackIssue(internals(taskLedger), ref)
+    return { taskLedger, client, track }
   }
 
   const booted = boot()
@@ -93,7 +96,6 @@ export function setup() {
     { worktree = false } = {},
   ): Promise<string> {
     github.issue(ref, { title })
-    await booted.client.track({ ref })
     if (!worktree) mkdirSync(ghq.checkout(parseRef(ref).repo), { recursive: true })
     await booted.client.run({ ref, inPlace: !worktree })
     return db
