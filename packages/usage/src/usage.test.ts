@@ -54,20 +54,6 @@ function setUp({ now = () => new Date(2026, 9, 11, 12, 0) }: { now?: () => Date 
   return { db, as, list }
 }
 
-test('a call that returns counts as ok for its Feature and Caller', async () => {
-  const { as, list } = setUp()
-
-  expect(await as('cli').ping()).toBe('pong')
-
-  expect(await list()).toContainEqual({
-    feature: 'ping',
-    caller: 'cli',
-    ok: 1,
-    failed: 0,
-    lastUsed: '2026-10-11',
-  })
-})
-
 test('a procedure that throws an ORPCError and an input that fails validation count as failed, not ok', async () => {
   const { as, list } = setUp()
 

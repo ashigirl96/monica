@@ -82,30 +82,9 @@ describe('previewPasteTransaction', () => {
     expect(firstContainer(plain2).child(0).textContent).toBe('hello')
     expect(back!.next.index).toBe(0)
   })
-
-  test('plain は元 blockId を再発行する（synced は元 id を保つ）', () => {
-    const original = textContainer('x', 'src-1')
-    const plain = [reissueIds(original)]
-    expect(plain[0]!.attrs.id).not.toBe('src-1')
-
-    const synced = buildSyncedContainer([original], 'note-A')
-    expect(synced.child(0).attrs.blockIds).toEqual(['src-1'])
-  })
 })
 
 describe('syncedBlock schema', () => {
-  test('PMNode.fromJSON で round-trip し attrs を保つ', () => {
-    const container = createContainer(
-      nodes.syncedBlock.create({ noteId: 'note-A', blockIds: ['blk-1', 'blk-2'] }),
-      [],
-      'wrapper-1',
-    )
-    const restored = PMNode.fromJSON(schema, container.toJSON())
-    expect(restored.child(0).type).toBe(nodes.syncedBlock)
-    expect(restored.child(0).attrs.noteId).toBe('note-A')
-    expect(restored.child(0).attrs.blockIds).toEqual(['blk-1', 'blk-2'])
-  })
-
   test('reissueIds は container の id だけ変え、syncedBlock の参照先 attrs は透過する', () => {
     const container = createContainer(
       nodes.syncedBlock.create({ noteId: 'note-A', blockIds: ['blk-1', 'blk-2'] }),

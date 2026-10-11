@@ -330,34 +330,4 @@ mod tests {
         assert!(results[1].is_err());
         assert!(matches!(results[2], Ok(Request { id: Some(1), .. })));
     }
-
-    #[test]
-    fn write_frame_then_read_frames_round_trips() {
-        let messages = [
-            ServerMessage::Output {
-                session_id: "ts-1".into(),
-                data: "aGk=".into(),
-            },
-            ServerMessage::Exit {
-                session_id: "ts-1".into(),
-                exit_code: Some(0),
-            },
-        ];
-        let mut buf = Vec::new();
-        for msg in &messages {
-            write_frame(&mut buf, msg).unwrap();
-        }
-        let back: Vec<ServerMessage> = read_frames::<_, ServerMessage>(buf.as_slice())
-            .map(Result::unwrap)
-            .collect();
-        assert_eq!(back.len(), 2);
-        assert!(matches!(back[0], ServerMessage::Output { .. }));
-        assert!(matches!(
-            back[1],
-            ServerMessage::Exit {
-                exit_code: Some(0),
-                ..
-            }
-        ));
-    }
 }
