@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 
 import type { contract } from '@monica/note/contract'
-import { createNoteLedger, migrations, router as noteRouter } from '@monica/note/server'
+import { createNoteLedger, migrations } from '@monica/note/server'
 import {
   createUsageLedger,
   featuresOf,
@@ -19,7 +19,7 @@ import { createRouterClient } from '@orpc/server'
 import { drizzle } from 'drizzle-orm/bun-sqlite'
 import { migrate } from 'drizzle-orm/bun-sqlite/migrator'
 
-import { listenBrowser } from './browser-listener.ts'
+import { browserRouter, listenBrowser } from './browser-listener.ts'
 import { freePort } from './testing.ts'
 
 const cleanups: (() => unknown)[] = []
@@ -45,7 +45,7 @@ function listen(port: number | undefined, dist = webDist({ 'index.html': '<p>not
     migrate(db, { migrationsFolder: m.folder, migrationsTable: m.table })
   }
   const noteLedger = createNoteLedger({ db, home })
-  const usageLedger = createUsageLedger({ db, features: featuresOf({ note: noteRouter }) })
+  const usageLedger = createUsageLedger({ db, features: featuresOf(browserRouter) })
   const listener = listenBrowser(port?.toString(), {
     context: { db, noteLedger },
     usageLedger,

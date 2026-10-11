@@ -25,7 +25,7 @@ Backend の組み立てが request ごとに context に `caller` を入れる�
 
 `createUsageLedger({ db, features, now? })`。
 
-- `features` は全 Feature の名前で、Backend の組み立てが `featuresOf(router)`（`traverseContractProcedures` で辿った path）で token の口の router（workbench・task・job・chat・usage）とブラウザの口の `{ note }` から作って渡す。ブラウザの口を立てない起動でも note の Feature を含む。usage は他の domain を import しないので、一覧は deps で受ける。
+- `features` は全 Feature の名前で、Backend の組み立てが `featuresOf(router)`（`traverseContractProcedures` で辿った path）で token の口の router（workbench・task・job・chat・usage）とブラウザの口の `browserRouter` から作って渡す。どちらも口が mount するのと同じ router の値を辿る。ブラウザの口を立てない起動でも note の Feature を含む。usage は他の domain を import しないので、一覧は deps で受ける。
 - `now` は暦日を決める時計で、テストが日をまたがせるために差し替える。既定は `new Date()`。
 - 型に出すのは `count` だけ。`start()` / `stop()` は持たない。`usage.list` の中身は `internals(usageLedger)` に置く。
 

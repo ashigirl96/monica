@@ -17,7 +17,6 @@ import {
 import {
   createNoteLedger,
   migrations as noteMigrations,
-  router as noteRouter,
   systemJobs as noteSystemJobs,
 } from '@monica/note/server'
 import {
@@ -48,7 +47,7 @@ import { bearerAuth } from 'hono/bearer-auth'
 import { cors } from 'hono/cors'
 import { timingSafeEqual } from 'hono/utils/buffer'
 
-import { listenBrowser } from './browser-listener.ts'
+import { browserRouter, listenBrowser } from './browser-listener.ts'
 import { loginShellPath } from './login-shell-path.ts'
 
 // stdout は Shell 宛ての JSON 行だけを書く channel なので、log は stderr に出す。
@@ -125,7 +124,7 @@ const tokenRouter = {
 // ブラウザの口を立てない起動でも、note の Feature を 0 回として出す。
 const usageLedger = createUsageLedger({
   db,
-  features: [...featuresOf(tokenRouter), ...featuresOf({ note: noteRouter })],
+  features: [...featuresOf(tokenRouter), ...featuresOf(browserRouter)],
 })
 
 const context = { db, workbenchLedger, taskLedger, jobLedger, chatAgent, usageLedger }

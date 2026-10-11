@@ -10,6 +10,10 @@ import { type Context, Hono } from 'hono'
 
 const IMMUTABLE = 'public, max-age=31536000, immutable'
 
+// openTab の input は shell に打鍵されるので、token の無い口に workbench・task・job を載せると任意のコマンドになる（ADR-0017）。
+// chat は Current Page を送るので、port を先に握った別の process に渡さないよう token の口に載せる（ADR-0034）。
+export const browserRouter = { note: noteRouter }
+
 type BrowserContext = InferRouterInitialContext<typeof noteRouter>
 
 type Deps = {
@@ -25,10 +29,8 @@ export function listenBrowser(
   if (!port) return null
   // DNS rebinding で別の名前から届いた request を止める。
   const hosts = new Set(NOTES_HOSTNAMES.map((name) => `${name}:${port}`))
-  // openTab の input は shell に打鍵されるので、token の無い口に workbench・task・job を載せると任意のコマンドになる（ADR-0017）。
-  // chat は Current Page を送るので、port を先に握った別の process に渡さないよう token の口に載せる（ADR-0034）。
   const handler = new RPCHandler(
-    os.$context<BrowserContext & { caller: 'notes' }>().router({ note: noteRouter }),
+    os.$context<BrowserContext & { caller: 'notes' }>().router(browserRouter),
     { clientInterceptors: [usageLedger.count] },
   )
 
