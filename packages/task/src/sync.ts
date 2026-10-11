@@ -25,7 +25,7 @@ export type SyncDeps = {
   running: Map<string, Promise<SyncOutcome>>
 }
 
-export type TrackResult = { ref: string; title: string; alreadyTracked: boolean; closed: boolean }
+export type TrackResult = { ref: string; alreadyTracked: boolean }
 
 /** `failures` は `owner/repo: 理由` の並び。token が取れなければ理由だけの 1 つになる。 */
 export type SyncOutcome = { synced: number; missing: string[]; failures: string[] }
@@ -53,7 +53,7 @@ export async function trackIssue(deps: SyncDeps, input: string): Promise<TrackRe
   outputOrThrow(outcome, { missingIsNotFound: true })
   const row = findTask(deps.db, eq(issue.id, issueId!))!
   if (!alreadyTracked) deps.publish({ type: 'task', ref: formatRef(row) })
-  return { ref: formatRef(row), title: row.title, alreadyTracked, closed: row.closedAt !== null }
+  return { ref: formatRef(row), alreadyTracked }
 }
 
 export async function syncCommand(deps: SyncDeps, input: string | undefined): Promise<SyncOutput> {

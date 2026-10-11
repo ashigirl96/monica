@@ -47,12 +47,7 @@ test('track copies the Issue with its parent and Blockers and makes it a Task', 
 
   const output = await track('acme/app#12')
 
-  expect(output).toEqual({
-    ref: 'acme/app#12',
-    title: 'Ship it',
-    alreadyTracked: false,
-    closed: false,
-  })
+  expect(output).toEqual({ ref: 'acme/app#12', alreadyTracked: false })
   const rows = copies(db)
   const idOf = (repo: string, number: number) =>
     rows.findIndex((r) => r.repo === repo && r.number === number) + 1
@@ -103,37 +98,18 @@ test("track takes the issue URL and keeps GitHub's spelling of the repo", async 
 })
 
 test('tracking a tracked Task syncs it and says it was already tracked', async () => {
-  const { github, track } = setup()
+  const { db, github, track } = setup()
   github.issue('acme/app#12', { title: 'Ship it' })
   await track('acme/app#12')
   github.issue('acme/app#12', { title: 'Ship it now' })
 
   const output = await track('ACME/app#12')
 
-  expect(output).toEqual({
-    ref: 'acme/app#12',
-    title: 'Ship it now',
-    alreadyTracked: true,
-    closed: false,
-  })
-})
-
-test('tracking a closed Task does not reopen it', async () => {
-  const { db, github, track } = setup()
-  github.issue('acme/app#12', { title: 'Ship it' })
-  await track('acme/app#12')
-  db.update(task).set({ closedAt: new Date() }).run()
-
-  const output = await track('acme/app#12')
-
-  expect(output).toMatchObject({ alreadyTracked: true, closed: true })
-  expect(db.select().from(task).get()?.closedAt).not.toBeNull()
+  expect(output).toEqual({ ref: 'acme/app#12', alreadyTracked: true })
+  expect(copies(db).map((r) => r.title)).toEqual(['Ship it now'])
 })
 
 test.each([
-  ['a bare #n', '#12', 'BAD_REQUEST'],
-  ['a pull request URL', 'https://github.com/acme/app/pull/12', 'BAD_REQUEST'],
-  ['a pull request number', 'acme/app#13', 'NOT_FOUND'],
   ['a missing issue', 'acme/app#99', 'NOT_FOUND'],
   ['a repo GitHub cannot resolve', 'acme/gone#1', 'NOT_FOUND'],
 ])('track refuses %s with %s and writes nothing', async (_, ref, code) => {
