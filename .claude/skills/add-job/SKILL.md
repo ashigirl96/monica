@@ -16,25 +16,27 @@ description: ユーザーの Job を登録する。「毎日〜したい」「�
 
 ## 2. script を書く
 
-command が 1 行に収まらなければ、`~/.local/bin/<名前>` に `#!/bin/sh` と `set -eu` で始まる script を置いて `chmod +x` し、command にはその絶対 path を渡す。置く path は `test -e` で空きを確かめ、既に file があれば Job の名前を変える（`~/.local/bin` には `monica` などユーザーの実行ファイルが並ぶ）。
+command が 1 行に収まらなければ、PATH の外の `~/.local/share/monica-jobs/<名前>.sh` に `#!/bin/sh` と `set -eu` で始まる script を置いて `chmod +x` し、command にはその絶対 path を渡す。
 
-- script は stdin も TTY も無く、login shell の PATH で走る。対話を待つ command には非対話の flag を付ける。
+- script は stdin も TTY も無く、release の Backend の env と、Backend が login shell から取った PATH で、`/bin/sh -c` から走る。対話を待つ command には非対話の flag を付ける。
 - monica は exit code だけで成否を決める。やるべきことを果たせなかった回は 0 以外で終わらせ、原因を最後の行に出す（`monica job show` の ERROR にその行が出る）。
 - `claude -p` を呼ぶなら、`docs/packages/job-ledger.md` の「claude を呼ぶ Job の成否」の形で result 行を確かめる。その script は例と同じく `set -u` で始め、claude の exit code を自分で受ける。
 - 外に変化を起こす Job（消す・送る・作る・書き換える）は、`--dry-run` で対象とやることを出すだけの mode を持たせ、本番でも変える前に対象を 1 行ずつ log に出す。
 - 消す Job は、戻せないもの（push していない commit、未 commit の変更）を持つ対象を残す。この checkout と `.claude/worktrees/` では別の session が同時に動いているので、使っている worktree も残す。
 
-## 3. 手で走らせる
+## 3. dry-run を Backend で走らせる
 
-本番の 1 回目は 5 の `monica job run` にし、ここでは外に変化を起こさずに走らせる。外に変化を起こす Job は command に `--dry-run` を足し、起こさない Job はそのまま走らせる。
+外に変化を起こす Job だけが通る。起こさない Job は 4 に進み、5 の `monica job run` を 1 回目にする。
 
-release の Backend に近い env から、Job と同じ cwd で、Job と同じ `/bin/sh -c` に渡す。Tab が足す変数を落とし、Backend と同じく `$HOME` から launchd の最小の PATH で login shell を起こして PATH を組ませ、その PATH のまま cwd に移って `/bin/sh` に替わるので、dev の home も zsh の構文も効かない。
+dry-run も本番と同じ env・PATH・cwd・`/bin/sh -c` で走るよう、`--dry-run` を足した command を別名の Job として release の Backend に登録して走らせる。
 
-```sh
-cd "$HOME" && env -u MONICA_TERMINAL_SESSION_ID -u MONICA_USER_ZDOTDIR -u CLAUDECODE ZDOTDIR="${MONICA_USER_ZDOTDIR:-$HOME}" MONICA_HOME="$HOME/.monica" PATH=/usr/bin:/bin:/usr/sbin:/sbin "$SHELL" -ilc 'cd "$1" && exec /bin/sh -c "$0"' '<command>' '<cwd>' </dev/null
+```bash
+monica job add <名前>-dry-run --schedule '<cron 式>' --command '<command> --dry-run' --cwd <絶対 path>
+monica job run <名前>-dry-run
+monica job show <名前>-dry-run
 ```
 
-exit 0 で、出力が意図した対象とやることを示していれば完了。`--dry-run` で走らせた Job は、出た対象をユーザーに見せて了承をもらう。
+RESULT が `succeeded` になり、LOG に意図した対象とやることが出ていれば、それをユーザーに見せて了承をもらう。了承をもらったら `monica job remove <名前>-dry-run` で外す。
 
 ## 4. 登録する
 
@@ -51,7 +53,7 @@ monica job run <名前>
 monica job show <名前>
 ```
 
-`show` の最新の RESULT が `running` の間は読み直す。`succeeded` になり、LOG の file を読んで、意図した処理が起きたと分かれば完了。`failed` か `timed_out` なら、LOG と ERROR から原因を探す。直すのが script の中身だけなら、直して 3 を通し、5 をやり直す。command・schedule・cwd・timeout を変えるときは、`monica job remove` してから 4 に戻る。
+`show` の最新の RESULT が `running` の間は読み直す。`succeeded` になり、LOG の file を読んで、意図した処理が起きたと分かれば完了。`failed` か `timed_out` なら、LOG と ERROR から原因を探す。直すのが script の中身だけなら、直して（外に変化を起こす Job は 3 を通して）5 をやり直す。command・schedule・cwd・timeout を変えるときは、`monica job remove` してから 4 に戻る。
 
 ## 6. 報告する
 
