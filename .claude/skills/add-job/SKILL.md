@@ -21,17 +21,20 @@ command が 1 行に収まらなければ、`~/.local/bin/<名前>` に `#!/bin/
 - script は stdin も TTY も無く、login shell の PATH で走る。対話を待つ command には非対話の flag を付ける。
 - monica は exit code だけで成否を決める。やるべきことを果たせなかった回は 0 以外で終わらせ、原因を最後の行に出す（`monica job show` の ERROR にその行が出る）。
 - `claude -p` を呼ぶなら、`docs/packages/job-ledger.md` の「claude を呼ぶ Job の成否」の形で result 行を確かめる。
-- 消す Job（branch・worktree・file）は、`--dry-run` で消す対象を出すだけの mode を持たせ、消す前に対象を 1 行ずつ log に出す。戻せないもの（push していない commit、未 commit の変更）を持つ対象は残す。この checkout と `.claude/worktrees/` では別の session が同時に動いているので、使っている worktree も残す。
+- 外に変化を起こす Job（消す・送る・作る・書き換える）は、`--dry-run` で対象とやることを出すだけの mode を持たせ、本番でも変える前に対象を 1 行ずつ log に出す。
+- 消す Job は、戻せないもの（push していない commit、未 commit の変更）を持つ対象を残す。この checkout と `.claude/worktrees/` では別の session が同時に動いているので、使っている worktree も残す。
 
 ## 3. 手で走らせる
 
-command を、Job と同じ cwd と、release の Backend に近い env で、Job と同じ `/bin/sh -c` に渡して走らせる。launchd の最小の PATH から login shell が PATH を組み、その PATH のまま `/bin/sh` に替わるので、Tab の `MONICA_HOME` と PATH は届かず、zsh の構文も効かない。
+本番の 1 回目は 5 の `monica job run` にし、ここでは外に変化を起こさずに走らせる。外に変化を起こす Job は command に `--dry-run` を足し、起こさない Job はそのまま走らせる。
+
+Job と同じ cwd で、release の Backend に近い env から、Job と同じ `/bin/sh -c` に渡す。Tab が足す変数を落とし、launchd の最小の PATH から login shell に PATH を組ませ、その PATH のまま `/bin/sh` に替わるので、dev の home も zsh の構文も効かない。
 
 ```sh
-cd <cwd> && env -i HOME="$HOME" USER="$USER" SHELL="$SHELL" PATH=/usr/bin:/bin:/usr/sbin:/sbin MONICA_HOME="$HOME/.monica" "$SHELL" -ilc 'exec /bin/sh -c "$0"' '<command>' </dev/null
+cd <cwd> && env -u MONICA_TERMINAL_SESSION_ID -u MONICA_USER_ZDOTDIR -u CLAUDECODE ZDOTDIR="${MONICA_USER_ZDOTDIR:-$HOME}" MONICA_HOME="$HOME/.monica" PATH=/usr/bin:/bin:/usr/sbin:/sbin "$SHELL" -ilc 'exec /bin/sh -c "$0"' '<command>' </dev/null
 ```
 
-消す Job は command に `--dry-run` を足して走らせ、出た対象をユーザーに見せて了承をもらう。exit 0 で、出力が意図した対象と結果を示していれば完了。
+exit 0 で、出力が意図した対象とやることを示していれば完了。`--dry-run` で走らせた Job は、出た対象をユーザーに見せて了承をもらう。
 
 ## 4. 登録する
 
