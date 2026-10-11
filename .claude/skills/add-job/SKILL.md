@@ -25,10 +25,10 @@ command が 1 行に収まらなければ、`~/.local/bin/<名前>` に `#!/bin/
 
 ## 3. 手で走らせる
 
-command を、Job と同じ cwd と、release の Backend に近い env で走らせる。launchd の最小の PATH から login shell が PATH を組むので、Tab の `MONICA_HOME` と PATH は届かない。
+command を、Job と同じ cwd と、release の Backend に近い env で、Job と同じ `/bin/sh -c` に渡して走らせる。launchd の最小の PATH から login shell が PATH を組み、その PATH のまま `/bin/sh` に替わるので、Tab の `MONICA_HOME` と PATH は届かず、zsh の構文も効かない。
 
 ```sh
-cd <cwd> && env -i HOME="$HOME" USER="$USER" SHELL="$SHELL" PATH=/usr/bin:/bin:/usr/sbin:/sbin MONICA_HOME="$HOME/.monica" "$SHELL" -ilc '<command>' </dev/null
+cd <cwd> && env -i HOME="$HOME" USER="$USER" SHELL="$SHELL" PATH=/usr/bin:/bin:/usr/sbin:/sbin MONICA_HOME="$HOME/.monica" "$SHELL" -ilc 'exec /bin/sh -c "$0"' '<command>' </dev/null
 ```
 
 消す Job は command に `--dry-run` を足して走らせ、出た対象をユーザーに見せて了承をもらう。exit 0 で、出力が意図した対象と結果を示していれば完了。
