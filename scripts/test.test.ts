@@ -51,9 +51,11 @@ const runTestScript = async (files: string[], env: Record<string, string> = {}) 
 test('進捗が止まった bun test を kill し、終わっていない test file だけを出して失敗する', async () => {
   const { code, stderr } = await runTestScript([spin, pass], { MONICA_TEST_STALL_MS: '3000' })
 
+  // GitHub Actions では reporter が通った file の名前も出すので、watchdog が出した一覧だけを見る。
+  const unfinished = stderr.slice(stderr.indexOf('終わっていない test file:'))
   expect(code).not.toBe(0)
-  expect(stderr).toContain('spin.test.ts')
-  expect(stderr).not.toContain('pass.test.ts')
+  expect(unfinished).toContain('spin.test.ts')
+  expect(unfinished).not.toContain('pass.test.ts')
   const pid = Number(readFileSync(workerPid, 'utf8'))
   const deadline = Date.now() + 2000
   while (isAlive(pid) && Date.now() < deadline) await Bun.sleep(50)
