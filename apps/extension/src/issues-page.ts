@@ -7,8 +7,10 @@ const ISSUES_PATH = /^\/([^/]+)\/([^/]+)\/issues(?:\/(\d+))?\/?$/
 const TITLE_LINK = 'a[data-testid="issue-listitem-title-link"]'
 // class 名の末尾は GitHub の build ごとに変わる hash なので、前の部分で当てる。
 const METADATA = '[class*="MetadataContainer-module__container"]'
+const HEADER = '[data-testid="issue-header"]'
 // header は幅でどちらかを CSS で隠す New issue の container を 2 つ持つので、両方に差し込む。
-const HEADER_ACTIONS = '[data-testid="issue-header"] [class*="HeaderMenu-module__buttonContainer"]'
+const HEADER_ACTIONS = '[class*="HeaderMenu-module__buttonContainer"]'
+const TITLE_NUMBER = /^#\d+$/
 
 const buttons = new WeakMap<HTMLElement, HTMLElement[]>()
 
@@ -63,26 +65,44 @@ function slotsOnPage(): Slot[] {
   const path = issuesPathOf(location.pathname)
   if (!path) return []
   if (path.number !== undefined) {
-    const ref = `${path.repo}#${path.number}`
-    return [...document.querySelectorAll<HTMLElement>(HEADER_ACTIONS)].map((host) => ({
-      host,
-      ref,
-      layout: ISSUE_HEADER,
-    }))
+    const pageRef = refOf({ repo: path.repo, number: path.number })
+    return [...document.querySelectorAll<HTMLElement>(HEADER)].flatMap((header) => {
+      const titleNumber = ownedBy(header, header.querySelectorAll<HTMLAnchorElement>('a[href]'))
+        .filter((link) => TITLE_NUMBER.test(link.textContent?.trim() ?? ''))
+        .map(issueOf)
+        .find((issue) => issue !== null)
+      const ref = titleNumber ? refOf(titleNumber) : pageRef
+      return ownedBy(header, header.querySelectorAll<HTMLElement>(HEADER_ACTIONS)).map((host) => ({
+        host,
+        ref,
+        layout: ISSUE_HEADER,
+      }))
+    })
   }
   return [...document.querySelectorAll<HTMLAnchorElement>(TITLE_LINK)].flatMap((host) => {
-    const ref = refOf(host, path.repo)
-    return ref ? [{ host, ref, layout: LIST_ROW }] : []
+    const issue = issueOf(host)
+    if (!issue || issue.repo.toLowerCase() !== path.repo.toLowerCase()) return []
+    return [{ host, ref: refOf(issue), layout: LIST_ROW }]
   })
 }
 
-function refOf(link: HTMLAnchorElement, repo: string): string | null {
+// sub-issue を開いた横のパネルは path を親のままにして、自分への `#<n>` の link を持つ header を足す。header が入れ子でも、外側に内側の要素を拾わせない。
+function ownedBy<E extends Element>(header: HTMLElement, elements: NodeListOf<E>): E[] {
+  return [...elements].filter((element) => element.closest(HEADER) === header)
+}
+
+type Issue = { repo: string; number: string }
+
+function issueOf(link: HTMLAnchorElement): Issue | null {
   const url = new URL(link.href, location.href)
   if (url.origin !== location.origin) return null
   const path = issuesPathOf(url.pathname)
   if (!path || path.number === undefined) return null
-  if (path.repo.toLowerCase() !== repo.toLowerCase()) return null
-  return `${path.repo}#${path.number}`
+  return { repo: path.repo, number: path.number }
+}
+
+function refOf({ repo, number }: Issue): string {
+  return `${repo}#${number}`
 }
 
 async function send<T>(request: RunButtonRequest): Promise<T | null> {
