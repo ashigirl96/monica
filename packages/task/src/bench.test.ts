@@ -96,6 +96,19 @@ test('run keeps the CLAUDE.local.md already in the checkout and does not exclude
   expect(readFileSync(join(checkout, '.git/info/exclude'), 'utf8')).toBe('CLAUDE.local.md\n')
 })
 
+test('run warns when the .gitignore of the Repo keeps CLAUDE.local.md from being ignored', async () => {
+  const fixture = setup()
+  fixture.ghq.origin('acme/app', { '.gitignore': { content: '!CLAUDE.local.md\n' } })
+  fixture.github.issue(ref, { title: 'Ship it' })
+  await fixture.client.track({ ref })
+
+  const output = await fixture.client.run({ ref })
+
+  expect(output.warnings).toEqual([
+    expect.stringContaining('CLAUDE.local.md is not ignored by git'),
+  ])
+})
+
 test('run leaves a CLAUDE.local.md the worktree already has in place of the link', async () => {
   const fixture = setup()
   fixture.ghq.origin('acme/app', { 'CLAUDE.local.md': { content: 'tracked\n' } })
