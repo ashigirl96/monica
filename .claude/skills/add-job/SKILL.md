@@ -3,52 +3,45 @@ name: add-job
 description: ユーザーの Job を登録する。「毎日〜したい」「定期的に〜を走らせたい」のように、予定で繰り返し走る処理を monica に足したいときに使う。
 ---
 
-依頼を shell command の Job に落とし、`monica job add` で release の Backend（`~/.monica`）に登録して、1 回走らせて確かめる。Job の規則（名前・cron 式・cwd・timeout・process の env・結果の決まり方）は `docs/packages/job-ledger.md` の「ユーザーの Job」にあり、flag は `monica job add --help` にある。
+依頼を Job に落とし、release の Backend に登録して、1 回走らせて確かめる。Job の規則は `docs/packages/job-ledger.md` の「ユーザーの Job」にある。
 
-この skill の `monica` は release の CLI を指す。`echo "${MONICA_HOME:-}"` が空か `$HOME/.monica` ならそのまま使う。それ以外（dev の Workbench の Tab は dev の home を渡し、PATH の `monica` も dev のものになる）では、`monica` を `env MONICA_HOME="$HOME/.monica" "$HOME/.local/bin/monica"` に置き換えて呼ぶ。dev の Backend に登録した Job は dev の desktop を閉じている間に走らない。
+この skill の `monica` は release の CLI を指す。`$MONICA_HOME` が空か `$HOME/.monica` でなければ（dev の Tab）、`env MONICA_HOME="$HOME/.monica" "$HOME/.local/bin/monica"` に置き換える。
+
+**副作用のある Job**（消す・送る・作る・書き換える）は、本番の前に dry-run を通し、確かめ終えるまで予定では走らせない。
 
 ## 1. Job の形を決める
 
-名前・schedule・cwd・timeout を依頼から決める。依頼に無いものは推奨で決め、4 で登録する前にまとめて見せる。
+名前・cron 式・cwd・timeout を決め、依頼に無いものは推奨で埋めて、登録の前にまとめて見せる。
 
-- schedule の時刻は、desktop が開いていて Mac が起きている時間に置く。Job は Backend が居る間だけ走り、予定の時刻に居なかった回とスリープで 60 秒を超えて遅れた回は飛ばして、後から追いつかない（ADR-0016）。「1 日 1 回」なら日中の時刻にする。
-- 名前は、`<名前>` も 3 で使う `<名前>-dry-run` も `monica job list` の Job と `~/.local/share/monica-jobs/` の file に重ならないものにする。既にある Job を置き換えたいときも、旧い Job と script には手を付けずに新しい名前で作る。旧い Job は、5 で新しい Job が `succeeded` になった後、`resume` の前に、ユーザーに確かめて remove する。
+- 時刻は desktop が開いている日中に置く。Backend が居なかった回とスリープで遅れた回は飛ばされ、後から走らない。
+- `<名前>` と `<名前>-dry-run` は、`monica job list` と `~/.local/share/monica-jobs/` に無いものにする。既にある Job の置き換えも新しい名前で作り、旧い Job は 5 の resume の前にユーザーに確かめて remove する。
 
 ## 2. script を書く
 
-command が 1 行に収まらなければ、PATH の外の `~/.local/share/monica-jobs/<名前>.sh` に `#!/bin/sh` と `set -eu` で始まる script を置いて `chmod +x` し、command にはその絶対 path を渡す。
+1 行に収まらない command と、副作用のある Job は、PATH の外の `~/.local/share/monica-jobs/<名前>.sh` に script を書き（`#!/bin/sh`・`set -eu`・`chmod +x`）、command はその絶対 path だけにする。
 
-- script は stdin も TTY も無く、release の Backend の env と、Backend が login shell から取った PATH で、`/bin/sh -c` から走る。対話を待つ command には非対話の flag を付ける。
-- monica は exit code だけで成否を決める。やるべきことを果たせなかった回は 0 以外で終わらせ、原因を最後の行に出す（`monica job show` の ERROR にその行が出る）。
-- `claude -p` を呼ぶなら、`docs/packages/job-ledger.md` の「claude を呼ぶ Job の成否」の形で result 行を確かめる。その script は例と同じく `set -u` で始め、claude の exit code を自分で受ける。
-- 外に変化を起こす Job（消す・送る・作る・書き換える）は、1 行で書けても script にし、command は script の絶対 path だけにする。script には `--dry-run` で対象とやることを出すだけの mode を持たせ、本番でも変える前に対象を 1 行ずつ log に出す。
-- 消す Job は、戻せないもの（push していない commit、未 commit の変更）を持つ対象を残す。この checkout と `.claude/worktrees/` では別の session が同時に動いているので、使っている worktree も残す。
+- stdin も TTY も無い。対話を待つ command には非対話の flag を付ける。
+- 成否は exit code だけで決まる。果たせなかった回は 0 以外で終え、原因を最後の行に出す。`claude -p` を呼ぶなら job-ledger.md の「claude を呼ぶ Job の成否」の形にする（`set -u` で exit code を自分で受ける）。
+- 副作用のある Job は `--dry-run` で対象を出すだけの mode を持ち、本番でも変える前に対象を log に出す。
+- 消す Job は、push していない commit・未 commit の変更・別の session が使っている worktree を持つ対象を残す。
 
-## 3. dry-run を Backend で走らせる
+## 3. dry-run を走らせる
 
-外に変化を起こす Job だけが通る。起こさない Job は 4 に進み、5 の `monica job run` を 1 回目にする。
-
-dry-run も本番と同じ env・PATH・cwd・`/bin/sh -c` で走るよう、`<script の絶対 path> --dry-run` を別名の Job として release の Backend に登録し、予定では走らないよう pause してから起こす。
+副作用のある Job だけが通る。本番と同じ env で走るよう、dry-run も Job として Backend に起こさせる。
 
 ```bash
-monica job add <名前>-dry-run --schedule '<cron 式>' --command '<script の絶対 path> --dry-run' --cwd <絶対 path> --timeout <本番と同じ> && monica job pause <名前>-dry-run
+monica job add <名前>-dry-run --schedule '<cron 式>' --command '<script の絶対 path> --dry-run' --cwd <cwd> --timeout <timeout> && monica job pause <名前>-dry-run
 monica job run <名前>-dry-run
 monica job show <名前>-dry-run
 ```
 
-`add` が失敗したら後の command は走らせずに 1 に戻る。
-
-RESULT が `running` を抜けたら、LOG の file を読んで中身を手元に持ち、それから結果によらず `monica job remove <名前>-dry-run` で外す（remove は LOG の directory ごと消す）。`succeeded` で、LOG に意図した対象とやることが出ていれば、それをユーザーに見せて了承をもらい、4 に進む。それ以外は LOG から原因を探し、script を直して 3 をやり直す。
+`add` が通らなければ 1 に戻る。RESULT が `running` を抜けるまで `show` を読み直し、LOG の file を読んでから `monica job remove <名前>-dry-run` する（remove は LOG も消す）。`succeeded` で LOG の対象が意図どおりなら、ユーザーに見せて了承をもらい 4 へ。それ以外は script を直して 3 をやり直す。
 
 ## 4. 登録する
 
-5 で確かめ終えるまで予定では走らないよう、登録したらすぐ pause する。
-
 ```bash
-monica job add <名前> --schedule '<cron 式>' --command '<command>' --cwd <絶対 path> --timeout <30m など> && monica job pause <名前>
+monica job add <名前> --schedule '<cron 式>' --command '<command>' --cwd <cwd> --timeout <timeout> && monica job pause <名前>
 ```
-
-`--cwd` と `--timeout` は既定（`$HOME`・1h）でよければ省く。`BAD_REQUEST` なら、エラーの文面と「ユーザーの Job」の規則を突き合わせて直す。
 
 ## 5. 確かめる
 
@@ -59,8 +52,8 @@ monica job run <名前>
 monica job show <名前>
 ```
 
-`show` の最新の RESULT が `running` の間は読み直す。`succeeded` になり、LOG の file を読んで、意図した処理が起きたと分かったら `monica job resume <名前>` して完了。`failed` か `timed_out` なら、LOG と ERROR から原因を探す。外に変化を起こす Job は、LOG から途中まで済んだ変化を拾ってユーザーに見せ、走らせ直してよいかを確かめる。直すのが script の中身だけなら、直して（外に変化を起こす Job は 3 を通して）5 をやり直す。command・schedule・cwd・timeout を変えるときは、`monica job remove` してから 4 に戻る。
+`succeeded` になり、LOG で意図した処理が起きたと分かったら `monica job resume <名前>` して完了。失敗したら LOG と ERROR から直す。副作用のある Job は、途中まで済んだ変化をユーザーに見せてから走らせ直す。script だけを直すなら 3（副作用のある Job）か 5 に戻り、command・cron 式・cwd・timeout を変えるなら remove して 4 に戻る。
 
 ## 6. 報告する
 
-名前、schedule と `show` の NEXT、script の path、止め方（`monica job pause <名前>` と `monica job remove <名前>`）を伝える。
+名前、cron 式と `show` の NEXT、script の path、止め方（`monica job pause` と `monica job remove`）を伝える。
