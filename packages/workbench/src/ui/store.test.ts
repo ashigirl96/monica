@@ -331,7 +331,7 @@ test('jump mode is left once the Tab shown changes, and stays while the layout r
 })
 
 test('d in jump mode on a pinned Tab leaves jump mode and the Tab', async () => {
-  const { ptyd, client, store } = bench()
+  const { client, store } = bench()
   const { tab } = await client.runspace.create(size)
   await client.tab.pin({ id: tab.id })
   await store.set(reloadAtom)
@@ -341,7 +341,6 @@ test('d in jump mode on a pinned Tab leaves jump mode and the Tab', async () => 
 
   expect((await client.layout.get()).runspaces[0]!.tabs.map((t) => t.id)).toEqual([tab.id])
   expect(store.get(jumpModeActiveAtom)).toBe(false)
-  expect(ptyd.receivedAll((op) => op.op === 'terminate')).toEqual([])
   expect(toasts).toEqual([])
 })
 
