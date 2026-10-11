@@ -15,6 +15,7 @@ const sync = (overrides: Partial<JobItem>): JobItem => ({
   state: 'active',
   last: { startedAt: at(12, 0, 0), result: 'succeeded' },
   nextAt: at(12, 5, 0),
+  cwd: null,
   ...overrides,
 })
 
@@ -29,7 +30,7 @@ const execution = (overrides: Partial<JobExecution>): JobExecution => ({
   ...overrides,
 })
 
-test('list prints each Job with its schedule, state, last start and result, and next time in local time', () => {
+test('list prints each Job with its schedule, state, last start and result, next time in local time, and the cwd of a user Job', () => {
   const text = formatters.list({
     jobs: [
       sync({}),
@@ -47,17 +48,18 @@ test('list prints each Job with its schedule, state, last start and result, and 
         state: 'paused',
         last: { startedAt: at(3, 0, 20), result: 'timed_out' },
         nextAt: null,
+        cwd: '/Users/me',
       }),
     ],
   })
 
   expect(text).toBe(
     [
-      'NAME       SCHEDULE   STATE    LAST                             NEXT',
-      'task.sync  every 5m   active   2026-10-06 12:00:00 succeeded    2026-10-06 12:05:00',
-      'nightly    every 24h  running  2026-10-06 03:00:12 interrupted  -',
-      'fresh      every 90s  active   -                                2026-10-06 12:05:00',
-      'dreaming   0 3 * * *  paused   2026-10-06 03:00:20 timed_out    -',
+      'NAME       SCHEDULE   STATE    LAST                             NEXT                 CWD',
+      'task.sync  every 5m   active   2026-10-06 12:00:00 succeeded    2026-10-06 12:05:00  -',
+      'nightly    every 24h  running  2026-10-06 03:00:12 interrupted  -                    -',
+      'fresh      every 90s  active   -                                2026-10-06 12:05:00  -',
+      'dreaming   0 3 * * *  paused   2026-10-06 03:00:20 timed_out    -                    /Users/me',
     ].join('\n'),
   )
 })
@@ -67,7 +69,7 @@ test('list says so when there are no Jobs', () => {
 })
 
 test('show prints the Job, then its Job Executions newest first with duration, result and error', () => {
-  const { last: _last, ...job } = sync({})
+  const { last: _last, cwd: _cwd, ...job } = sync({})
   const text = formatters.show({
     ...job,
     shell: null,
@@ -98,7 +100,7 @@ test('show prints the Job, then its Job Executions newest first with duration, r
 })
 
 test('show says so when the Job has no Job Executions yet', () => {
-  const { last: _last, ...job } = sync({})
+  const { last: _last, cwd: _cwd, ...job } = sync({})
 
   expect(formatters.show({ ...job, shell: null, executions: [] })).toBe(
     [

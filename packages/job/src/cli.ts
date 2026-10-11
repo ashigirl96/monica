@@ -49,13 +49,14 @@ export const formatters = {
   list({ jobs }: ListOutput): string {
     if (jobs.length === 0) return 'No Jobs'
     return table([
-      ['NAME', 'SCHEDULE', 'STATE', 'LAST', 'NEXT'],
+      ['NAME', 'SCHEDULE', 'STATE', 'LAST', 'NEXT', 'CWD'],
       ...jobs.map((job) => [
         job.name,
         scheduleText(job.schedule),
         job.state,
         job.last ? `${localTime(job.last.startedAt)} ${job.last.result}` : '-',
         nextText(job),
+        job.cwd ?? '-',
       ]),
     ])
   },

@@ -71,6 +71,7 @@ test('add registers a Job whose next scheduled time comes from its cron expressi
     state: 'active',
     last: null,
     nextAt: new Date(2026, 9, 7, 3, 0, 0),
+    cwd,
   })
 })
 

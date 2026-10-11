@@ -251,6 +251,7 @@ export function createJobLedger(deps: {
         return {
           ...overview(runtime),
           last: last?.result ? { startedAt: last.startedAt, result: last.result } : null,
+          cwd: runtime.kind === 'user' ? runtime.job.cwd : null,
         }
       }),
     show(name) {

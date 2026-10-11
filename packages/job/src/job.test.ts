@@ -78,6 +78,7 @@ test('a system Job runs at start, and list shows when it started, how it ended a
       state: 'running',
       last: null,
       nextAt: new Date(2026, 9, 6, 12, 5, 0),
+      cwd: null,
     },
   ])
   expect(done.jobs[0]).toMatchObject({
