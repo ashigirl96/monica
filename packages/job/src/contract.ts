@@ -34,6 +34,9 @@ export const JobItemSchema = JobSchema.extend({
     })
     .nullable()
     .describe('the latest Job Execution that has ended, or null for none'),
+  cwd: UserJobSchema.shape.cwd
+    .nullable()
+    .describe('where a user Job runs its command, or null for a system Job'),
 })
 
 export const ListOutputSchema = z.object({ jobs: z.array(JobItemSchema) })

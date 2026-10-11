@@ -5,7 +5,7 @@
 ## contract（root は `job`）
 
 ```
-list    → { jobs: { name, schedule, state, last: { startedAt, result } | null, nextAt }[] }  cli
+list    → { jobs: { name, schedule, state, last: { startedAt, result } | null, nextAt, cwd: string | null }[] }  cli
 show    { name } → { name, schedule, state, nextAt, shell: { command, cwd, timeoutMs } | null, executions: JobExecution[] }  cli
 run     { name } → { name, startedAt }                                                    cli
 add     { name, schedule, command, cwd?, timeout? } → { name, nextAt }                    cli
@@ -18,10 +18,11 @@ resume  { name } → { name, nextAt }                                           
 - `state` は `running` / `paused` / `active` の順に決める。pause したユーザーの Job を `run` で起こした間は `running` になる。system の Job は `paused` にならない。
 - `last` は終わった Job Execution のうち最新のもの。走っている回は `state` の `running` で分かるので、`last` には前回の結果を残す。`nextAt` は `start()` の前と、pause したユーザーの Job では null。
 - `list` は system の Job を渡された順に、その後にユーザーの Job を add した順に並べる。
+- `list` の `cwd` はユーザーの Job の cwd で、system の Job では null。
 - `show` の `shell` はユーザーの Job の command・cwd・timeout で、system の Job では null。`executions` は新しい順に 20 件。
 - 無い名前は `NOT_FOUND`。
 - change stream は持たない。購読する画面が無いため（ADR-0016）。
-- CLI の時刻は local time の `YYYY-MM-DD HH:MM:SS` で出す。`list` の SCHEDULE は `every 5m` か cron 式、LAST は開始時刻と結果。`show` は、ユーザーの Job なら TIMEOUT・CWD・COMMAND と、各 Job Execution の EXIT と LOG も出す。DURATION は終わった回だけに出し、走っている回の RESULT は `running` にする。`show` と `run` の名前の位置には Job の名前を、`remove`・`pause`・`resume` の名前の位置にはユーザーの Job の名前を補完する。
+- CLI の時刻は local time の `YYYY-MM-DD HH:MM:SS` で出す。`list` の SCHEDULE は `every 5m` か cron 式、LAST は開始時刻と結果、CWD はユーザーの Job の cwd で、system の Job では `-`。`show` は、ユーザーの Job なら TIMEOUT・CWD・COMMAND と、各 Job Execution の EXIT と LOG も出す。DURATION は終わった回だけに出し、走っている回の RESULT は `running` にする。`show` と `run` の名前の位置には Job の名前を、`remove`・`pause`・`resume` の名前の位置にはユーザーの Job の名前を補完する。
 
 ## createJobLedger
 
