@@ -127,6 +127,17 @@ test('run excludes CLAUDE.local.md when only the branch of the checkout ignores 
   expect(git(cwd, 'status', '--porcelain')).toBe('')
 })
 
+test('run excludes CLAUDE.local.md even when the checkout hides untracked files from git status', async () => {
+  const { ghq, client, cwd } = await tracked(null)
+  ghq.clone('acme/app')
+  const checkout = ghq.checkout('acme/app')
+  git(checkout, 'config', 'status.showUntrackedFiles', 'no')
+
+  await client.run({ ref })
+
+  expect(git(cwd, 'check-ignore', 'CLAUDE.local.md')).toBe('CLAUDE.local.md')
+})
+
 test('run leaves a CLAUDE.local.md the worktree already has in place of the link', async () => {
   const fixture = setup()
   fixture.ghq.origin('acme/app', { 'CLAUDE.local.md': { content: 'tracked\n' } })

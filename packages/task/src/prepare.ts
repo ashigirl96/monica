@@ -148,7 +148,8 @@ async function shareClaudeLocal(cwd: string): Promise<string[]> {
     const listed = async () => {
       const statuses = await Promise.all(
         [...new Set([checkout, cwd])].map((dir) =>
-          git(dir, 'status', '--porcelain', '--', CLAUDE_LOCAL),
+          // status.showUntrackedFiles=no の設定でも untracked の file を出させる。
+          git(dir, 'status', '--porcelain', '--untracked-files=all', '--', CLAUDE_LOCAL),
         ),
       )
       return statuses.some((status) => status !== '')
