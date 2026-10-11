@@ -20,6 +20,12 @@ import {
   systemJobs as taskSystemJobs,
 } from '@monica/task/server'
 import {
+  createUsageLedger,
+  featuresOf,
+  migrations as usageMigrations,
+  router as usageRouter,
+} from '@monica/usage/server'
+import {
   createWorkbenchLedger,
   migrations as workbenchMigrations,
   router as workbenchRouter,
@@ -49,7 +55,13 @@ export function inMemoryBackend({ home, ghq = noGhq }: { home?: string; ghq?: Gh
   const sqlite = new Database(':memory:')
   sqlite.run('PRAGMA foreign_keys = ON')
   const db = drizzle(sqlite)
-  for (const m of [workbenchMigrations, taskMigrations, jobMigrations, noteMigrations]) {
+  for (const m of [
+    workbenchMigrations,
+    taskMigrations,
+    jobMigrations,
+    noteMigrations,
+    usageMigrations,
+  ]) {
     migrate(db, { migrationsFolder: m.folder, migrationsTable: m.table })
   }
   const ptydHome = tempHome(onCleanup)
@@ -83,16 +95,15 @@ export function inMemoryBackend({ home, ghq = noGhq }: { home?: string; ghq?: Gh
     systemJobs: [...taskSystemJobs(taskLedger), ...noteSystemJobs(noteLedger)],
   })
   onCleanup(() => jobLedger.stop())
-  const context = { db, workbenchLedger, taskLedger, jobLedger }
-  return {
-    sqlite,
-    db,
-    ptyd,
-    router: os
-      .$context<typeof context>()
-      .router({ workbench: workbenchRouter, task: taskRouter, job: jobRouter }),
-    context,
+  const tokenRouter = {
+    workbench: workbenchRouter,
+    task: taskRouter,
+    job: jobRouter,
+    usage: usageRouter,
   }
+  const usageLedger = createUsageLedger({ db, features: featuresOf(tokenRouter) })
+  const context = { db, workbenchLedger, taskLedger, jobLedger, usageLedger }
+  return { sqlite, db, ptyd, router: os.$context<typeof context>().router(tokenRouter), context }
 }
 
 // procedure で開く Runspace は Tab を 1 つ持って生まれるので、Bench の外の Tab は Runspace ごと開く。

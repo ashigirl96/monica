@@ -19,6 +19,7 @@
         "@monica/job": "workspace:*",
         "@monica/note": "workspace:*",
         "@monica/task": "workspace:*",
+        "@monica/usage": "workspace:*",
         "@monica/workbench": "workspace:*",
         "@orpc/server": "catalog:",
         "drizzle-orm": "catalog:",
@@ -37,6 +38,7 @@
       "dependencies": {
         "@monica/job": "workspace:*",
         "@monica/task": "workspace:*",
+        "@monica/usage": "workspace:*",
         "@monica/workbench": "workspace:*",
         "@orpc/client": "catalog:",
         "@orpc/contract": "catalog:",
@@ -216,6 +218,20 @@
       "devDependencies": {
         "@types/react": "catalog:",
         "@types/react-dom": "catalog:",
+      },
+    },
+    "packages/usage": {
+      "name": "@monica/usage",
+      "dependencies": {
+        "@monica/ui": "workspace:*",
+        "@orpc/contract": "catalog:",
+        "@orpc/server": "catalog:",
+        "drizzle-orm": "catalog:",
+        "drizzle-zod": "catalog:",
+        "zod": "catalog:",
+      },
+      "devDependencies": {
+        "drizzle-kit": "catalog:",
       },
     },
     "packages/workbench": {
@@ -430,6 +446,8 @@
     "@monica/task": ["@monica/task@workspace:packages/task"],
 
     "@monica/ui": ["@monica/ui@workspace:packages/ui"],
+
+    "@monica/usage": ["@monica/usage@workspace:packages/usage"],
 
     "@monica/web": ["@monica/web@workspace:apps/web"],
 

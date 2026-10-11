@@ -26,6 +26,13 @@ import {
   router as taskRouter,
   systemJobs as taskSystemJobs,
 } from '@monica/task/server'
+import type { Caller } from '@monica/usage/contract'
+import {
+  createUsageLedger,
+  featuresOf,
+  migrations as usageMigrations,
+  router as usageRouter,
+} from '@monica/usage/server'
 import {
   createWorkbenchLedger,
   migrations as workbenchMigrations,
@@ -40,7 +47,7 @@ import { bearerAuth } from 'hono/bearer-auth'
 import { cors } from 'hono/cors'
 import { timingSafeEqual } from 'hono/utils/buffer'
 
-import { listenBrowser } from './browser-listener.ts'
+import { browserRouter, listenBrowser } from './browser-listener.ts'
 import { loginShellPath } from './login-shell-path.ts'
 
 // stdout は Shell 宛ての JSON 行だけを書く channel なので、log は stderr に出す。
@@ -74,6 +81,7 @@ for (const m of [
   jobMigrations,
   noteMigrations,
   chatMigrations,
+  usageMigrations,
 ]) {
   migrate(db, { migrationsFolder: m.folder, migrationsTable: m.table })
 }
@@ -106,15 +114,28 @@ const chatAgent = createChatAgent({
   ...(existsSync(cMaps) && { cMaps }),
 })
 
-const context = { db, workbenchLedger, taskLedger, jobLedger, chatAgent }
-const handler = new RPCHandler(
-  os
-    .$context<typeof context>()
-    .router({ workbench: workbenchRouter, task: taskRouter, job: jobRouter, chat: chatRouter }),
-)
+const tokenRouter = {
+  workbench: workbenchRouter,
+  task: taskRouter,
+  job: jobRouter,
+  chat: chatRouter,
+  usage: usageRouter,
+}
+// ブラウザの口を立てない起動でも、note の Feature を 0 回として出す。
+const usageLedger = createUsageLedger({
+  db,
+  features: [...featuresOf(tokenRouter), ...featuresOf(browserRouter)],
+})
+
+const context = { db, workbenchLedger, taskLedger, jobLedger, chatAgent, usageLedger }
+type TokenContext = typeof context & { caller: Caller }
+const clientInterceptors = [usageLedger.count]
+const handler = new RPCHandler(os.$context<TokenContext>().router(tokenRouter), {
+  clientInterceptors,
+})
 // Chrome Extension に渡す token は chat と、prompt を受け取らない task の procedure だけを持つ handler に通すので、path の書き方で workbench や task.run に届くことは無い（ADR-0035）。
 const extensionHandler = new RPCHandler(
-  os.$context<typeof context>().router({
+  os.$context<TokenContext>().router({
     chat: chatRouter,
     task: {
       runButtons: taskRouter.runButtons,
@@ -122,6 +143,7 @@ const extensionHandler = new RPCHandler(
       reopenFromButton: taskRouter.reopenFromButton,
     },
   }),
+  { clientInterceptors },
 )
 
 const origins = ['tauri://localhost', 'http://tauri.localhost']
@@ -148,11 +170,21 @@ app.use(
   }),
 )
 app.use('/rpc/*', async (c, next) => {
-  const { matched, response } = await c.var.handler.handle(c.req.raw, { prefix: '/rpc', context })
+  const caller = callerOf(c.var.handler, c.req.header('origin'))
+  const { matched, response } = await c.var.handler.handle(c.req.raw, {
+    prefix: '/rpc',
+    context: { ...context, caller },
+  })
   if (matched) return c.newResponse(response.body, response)
   if (c.var.handler === extensionHandler) return c.text('Unauthorized', 401)
   return next()
 })
+// webview の fetch には Origin が必ず付き、CLI の Bun の fetch には付かない。
+function callerOf(presented: typeof handler, origin: string | undefined): Caller {
+  if (presented === extensionHandler) return 'extension'
+  return origin ? 'webview' : 'cli'
+}
+
 const server = Bun.serve({
   hostname: '127.0.0.1',
   port: 0,
@@ -171,6 +203,7 @@ noteLedger.start()
 // compiled binary の --asset は entry の隣に置かれ、bun run の Backend には無い。
 const browserListener = listenBrowser(process.env.MONICA_BROWSER_PORT, {
   context: { db, noteLedger },
+  usageLedger,
   webDist: join(import.meta.dir, 'dist'),
 })
 if (!(await Promise.race([workbenchStarted, Bun.sleep(3000).then(() => false)]))) {

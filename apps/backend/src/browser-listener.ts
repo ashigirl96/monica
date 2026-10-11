@@ -3,29 +3,36 @@ import { join } from 'node:path'
 
 import { IMAGE_URL_PREFIX, NOTES_HOSTNAMES } from '@monica/note/contract'
 import { router as noteRouter } from '@monica/note/server'
+import type { UsageLedger } from '@monica/usage/server'
 import { type InferRouterInitialContext, os } from '@orpc/server'
 import { RPCHandler } from '@orpc/server/fetch'
 import { type Context, Hono } from 'hono'
 
 const IMMUTABLE = 'public, max-age=31536000, immutable'
 
+// openTab の input は shell に打鍵されるので、token の無い口に workbench・task・job を載せると任意のコマンドになる（ADR-0017）。
+// chat は Current Page を送るので、port を先に握った別の process に渡さないよう token の口に載せる（ADR-0034）。
+export const browserRouter = { note: noteRouter }
+
 type BrowserContext = InferRouterInitialContext<typeof noteRouter>
 
 type Deps = {
   context: BrowserContext
+  usageLedger: UsageLedger
   webDist: string
 }
 
 export function listenBrowser(
   port: string | undefined,
-  { context, webDist }: Deps,
+  { context, usageLedger, webDist }: Deps,
 ): { stop(): void } | null {
   if (!port) return null
   // DNS rebinding で別の名前から届いた request を止める。
   const hosts = new Set(NOTES_HOSTNAMES.map((name) => `${name}:${port}`))
-  // openTab の input は shell に打鍵されるので、token の無い口に workbench・task・job を載せると任意のコマンドになる（ADR-0017）。
-  // chat は Current Page を送るので、port を先に握った別の process に渡さないよう token の口に載せる（ADR-0034）。
-  const handler = new RPCHandler(os.$context<BrowserContext>().router({ note: noteRouter }))
+  const handler = new RPCHandler(
+    os.$context<BrowserContext & { caller: 'notes' }>().router(browserRouter),
+    { clientInterceptors: [usageLedger.count] },
+  )
 
   const app = new Hono()
   app.use('*', async (c, next) => {
@@ -34,7 +41,10 @@ export function listenBrowser(
     return next()
   })
   app.use('/rpc/*', async (c) => {
-    const { matched, response } = await handler.handle(c.req.raw, { prefix: '/rpc', context })
+    const { matched, response } = await handler.handle(c.req.raw, {
+      prefix: '/rpc',
+      context: { ...context, caller: 'notes' },
+    })
     return matched ? c.newResponse(response.body, response) : c.notFound()
   })
   app.get(`${IMAGE_URL_PREFIX}*`, (c) =>

@@ -92,12 +92,14 @@ function viaToken(
   { port, token }: { port: number; token?: string },
   path: string,
   input: object = {},
+  headers: Record<string, string> = {},
 ) {
   return fetch(`http://127.0.0.1:${port}/rpc/${path}`, {
     method: 'POST',
     headers: {
       ...(token && { authorization: `Bearer ${token}` }),
       'content-type': 'application/json',
+      ...headers,
     },
     body: JSON.stringify({ json: input }),
   })
@@ -314,4 +316,59 @@ test('the Backend hands the Job Ledger the system Jobs of task and note', async 
     'task.setup-log-cleanup',
     'note.image-cleanup',
   ])
+})
+
+type UsageItem = {
+  feature: string
+  caller: string | null
+  ok: number
+  failed: number
+  lastUsed: string | null
+}
+
+async function usages(backend: Backend): Promise<UsageItem[]> {
+  const response = await viaToken(backend, 'usage/list')
+  return ((await response.json()) as { json: { usages: UsageItem[] } }).json.usages
+}
+
+test('the token listener counts a call without Origin as cli, with Origin as webview, and with the Chrome Extension token as extension, failures apart', async () => {
+  const backend = await startBackend(freePort())
+  const viaExtensionToken = { port: backend.port, token: endpointFile(backend.home).extensionToken }
+
+  expect((await viaToken(backend, 'job/list')).status).toBe(200)
+  expect((await viaToken(backend, 'job/show', { name: 'task.synk' })).status).toBe(404)
+  expect((await viaToken(backend, 'job/list', {}, { origin: 'tauri://localhost' })).status).toBe(
+    200,
+  )
+  expect((await viaToken(viaExtensionToken, 'chat/ask', INVALID_QUESTION)).status).toBe(400)
+
+  const counted = await usages(backend)
+  expect(counted).toContainEqual(
+    expect.objectContaining({ feature: 'job.list', caller: 'cli', ok: 1, failed: 0 }),
+  )
+  expect(counted).toContainEqual(
+    expect.objectContaining({ feature: 'job.show', caller: 'cli', ok: 0, failed: 1 }),
+  )
+  expect(counted).toContainEqual(
+    expect.objectContaining({ feature: 'job.list', caller: 'webview', ok: 1, failed: 0 }),
+  )
+  expect(counted).toContainEqual(
+    expect.objectContaining({ feature: 'chat.ask', caller: 'extension', ok: 0, failed: 1 }),
+  )
+})
+
+test('usage.list gives every Feature of both listeners as 0 calls, even when the Backend starts without the browser listener', async () => {
+  const backend = await startBackend(freePort(), () => ({ MONICA_BROWSER_PORT: undefined }))
+
+  const features = (await usages(backend)).map(({ feature }) => feature)
+
+  for (const feature of ['workbench.layout.get', 'task.run', 'job.add', 'chat.ask', 'usage.list'])
+    expect(features).toContain(feature)
+  expect(await usages(backend)).toContainEqual({
+    feature: 'note.daily.open',
+    caller: null,
+    ok: 0,
+    failed: 0,
+    lastUsed: null,
+  })
 })

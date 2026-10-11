@@ -17,7 +17,7 @@ ask       { question, page: Page, history: { question, answer, page: PageSnapsho
 - `.errors()` で宣言するのは `CHAT_BUSY`・`NOT_AUTHENTICATED`・`USAGE_LIMIT`・`AGENT_FAILED`。`CHAT_BUSY`（status 429）は、claude を 4 つ持っているときと、本文にしているページが 4 つあるときの `ask` に、iterator を返す前に投げる。本文にする Worker は 1 つ最長 30 秒 CPU と memory を使うため。ほかの 3 つは下の「失敗」にある。
 - `MAX_ASK_BODY_BYTES`（50MB）は、token の口が受ける body の上限。token の口の `Bun.serve` に `maxRequestBodySize` で渡し、超えた body には 413 が返る（`docs/packages/backend.md` の「token の口の 2 つの token」）。side panel は送る前に大きさを見て、超える分を「読めなかった」にするので、413 は side panel からは届かない。
 - PDF の bytes は `page.content` の `pdf`（`z.file()`）に入れる。RPCLink は input のどこにある `Blob` も multipart の別の part で送るので、base64 で膨らませない（note の画像の upload と同じ形）。
-- router は CLI に出さず、token の口に `{ workbench, task, job, chat }` で載せる。Chrome Extension は Native Messaging の host から受け取った Chrome Extension の token で呼び、その token は chat の procedure と task の Run ボタンの 2 つの procedure だけを開く（下の「Backend の探し方」、ADR-0034・0035）。ブラウザの口には載せない。change stream は持たない（ADR-0031）。
+- router は CLI に出さず、token の口に `{ workbench, task, job, chat, usage }` で載せる。Chrome Extension は Native Messaging の host から受け取った Chrome Extension の token で呼び、その token は chat の procedure と task の Run ボタンの 2 つの procedure だけを開く（下の「Backend の探し方」、ADR-0034・0035）。ブラウザの口には載せない。change stream は持たない（ADR-0031）。
 
 ## createChatAgent
 
