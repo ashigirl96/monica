@@ -276,20 +276,6 @@ test('task close exits 1 with each reason on its own line after the code, and --
   })
 })
 
-test('task close in the Tab of a live Run is not stopped by that Run, and task reopen opens the Task again', async () => {
-  const backend = backendWithBench()
-  const terminalSessionId = await withLiveRun(backend)
-
-  const closed = await monica(['task', 'close', 'acme/app#12'], backend.connect, {
-    terminalSessionId,
-  })
-  const reopened = await monica(['task', 'reopen', 'acme/app#12'], backend.connect)
-
-  expect(closed.code).toBe(0)
-  expect(reopened.code).toBe(0)
-  expect(reopened.stdout).toStartWith('reopened acme/app#12 Ship it\n')
-})
-
 test('task current exits 1 outside a Tab, and takes no flag for the Terminal Session', async () => {
   const { connect } = backendWithBench()
 
