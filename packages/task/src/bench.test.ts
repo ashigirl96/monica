@@ -109,6 +109,24 @@ test('run warns when the .gitignore of the Repo keeps CLAUDE.local.md from being
   ])
 })
 
+test('run excludes CLAUDE.local.md when only the branch of the checkout ignores it, not that of the worktree', async () => {
+  const fixture = setup()
+  fixture.ghq.origin('acme/app', { '.gitignore': { content: 'CLAUDE.local.md\n' } })
+  fixture.github.issue(ref, { title: 'Ship it' })
+  await fixture.client.track({ ref })
+  fixture.ghq.clone('acme/app')
+  const checkout = fixture.ghq.checkout('acme/app')
+  git(checkout, 'switch', '--quiet', '-c', 'issue-12')
+  git(checkout, 'rm', '--quiet', '.gitignore')
+  git(checkout, 'commit', '--quiet', '-m', 'unignore')
+  git(checkout, 'switch', '--quiet', 'main')
+  const cwd = join(fixture.home, 'worktrees/acme/app/issue-12')
+
+  expect(await fixture.client.run({ ref })).toMatchObject({ warnings: [] })
+
+  expect(git(cwd, 'status', '--porcelain')).toBe('')
+})
+
 test('run leaves a CLAUDE.local.md the worktree already has in place of the link', async () => {
   const fixture = setup()
   fixture.ghq.origin('acme/app', { 'CLAUDE.local.md': { content: 'tracked\n' } })

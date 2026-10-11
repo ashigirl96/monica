@@ -138,25 +138,25 @@ async function shareClaudeLocal(cwd: string): Promise<string[]> {
     const checkout = dirname(commonDir)
     const checkoutFile = join(checkout, CLAUDE_LOCAL)
     if (!existsSync(checkoutFile)) writeFileSync(checkoutFile, '')
-    // 追跡している file は ignore されないが status にも出ないので、check-ignore ではなく status で見る。
-    const listed = async () =>
-      (await git(checkout, 'status', '--porcelain', '--', CLAUDE_LOCAL)) !== ''
-    const warnings: string[] = []
-    if (await listed()) {
-      excludeFromGit(commonDir, CLAUDE_LOCAL)
-      // .gitignore の `!CLAUDE.local.md` は info/exclude より強いので、足しても ignore されないことがある。
-      if (await listed()) {
-        warnings.push(
-          `${CLAUDE_LOCAL} is not ignored by git in ${checkout}, so git status lists it`,
-        )
-      }
-    }
     const link = join(cwd, CLAUDE_LOCAL)
     // 既にある file や link は、ユーザーが置いたものとして上書きしない。
     if (realpathSync(cwd) !== checkout && !lstatSync(link, { throwIfNoEntry: false })) {
       symlinkSync(checkoutFile, link)
     }
-    return warnings
+    // .gitignore は branch ごとに違いうるので、checkout と worktree の両方で見る。
+    // 追跡している file は ignore されないが status にも出ないので、check-ignore ではなく status で見る。
+    const listed = async () => {
+      const statuses = await Promise.all(
+        [...new Set([checkout, cwd])].map((dir) =>
+          git(dir, 'status', '--porcelain', '--', CLAUDE_LOCAL),
+        ),
+      )
+      return statuses.some((status) => status !== '')
+    }
+    if (!(await listed())) return []
+    excludeFromGit(commonDir, CLAUDE_LOCAL)
+    // .gitignore の `!CLAUDE.local.md` は info/exclude より強いので、足しても ignore されないことがある。
+    return (await listed()) ? [`${CLAUDE_LOCAL} is not ignored by git, so git status lists it`] : []
   } catch (error) {
     return [`could not share ${CLAUDE_LOCAL} with the checkout: ${messageOf(error)}`]
   }
