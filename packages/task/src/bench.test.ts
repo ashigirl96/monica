@@ -117,8 +117,7 @@ test('run excludes CLAUDE.local.md when only the branch of the checkout ignores 
   fixture.ghq.clone('acme/app')
   const checkout = fixture.ghq.checkout('acme/app')
   git(checkout, 'switch', '--quiet', '-c', 'issue-12')
-  git(checkout, 'rm', '--quiet', '.gitignore')
-  git(checkout, 'commit', '--quiet', '-m', 'unignore')
+  commit(checkout, { '.gitignore': { content: '' } }, 'unignore')
   git(checkout, 'switch', '--quiet', 'main')
   const cwd = join(fixture.home, 'worktrees/acme/app/issue-12')
 
