@@ -37,7 +37,7 @@ monica job run <名前>-dry-run
 monica job show <名前>-dry-run
 ```
 
-RESULT が `running` を抜けたら、結果によらず `monica job remove <名前>-dry-run` で外す。`succeeded` で、LOG に意図した対象とやることが出ていれば、それをユーザーに見せて了承をもらえば完了。それ以外は script を直して 3 をやり直す。
+RESULT が `running` を抜けたら、LOG の file を読んで中身を手元に持ち、それから結果によらず `monica job remove <名前>-dry-run` で外す（remove は LOG の directory ごと消す）。`succeeded` で、LOG に意図した対象とやることが出ていれば、それをユーザーに見せて了承をもらえば完了。それ以外は LOG から原因を探し、script を直して 3 をやり直す。
 
 ## 4. 登録する
 
