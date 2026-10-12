@@ -14,7 +14,7 @@
     "packages/job/src/user-job.test.ts": 1496,
     "packages/task/src/teardown.test.ts": 1486,
     "packages/workbench/src/repo.test.ts": 834,
-    "packages/task/src/ui/close-bench.test.ts": 833,
+    "packages/task/src/ui/bench-close.test.ts": 833,
     "packages/workbench/src/tab-env.test.ts": 571,
     "packages/workbench/src/terminal-session.test.ts": 529,
     "packages/workbench/src/ui/store.test.ts": 409,

@@ -1,10 +1,4 @@
-import {
-  useBenches,
-  useBenchLabels,
-  useCloseTaskOfBench,
-  useEmptyBenchContent,
-  useTabMenuItems,
-} from '@monica/task/ui'
+import { useBenchClose, useBenches, useBenchLabels, useTabMenuItems } from '@monica/task/ui'
 import { Toaster } from '@monica/ui'
 import { Workbench } from '@monica/workbench/ui'
 import { useMemo } from 'react'
@@ -18,9 +12,8 @@ export function App() {
   const task = useMemo(() => client?.task ?? null, [client])
   const benches = useBenches(task)
   const benchLabelOf = useBenchLabels(benches)
-  const emptyBenchContent = useEmptyBenchContent(task, benches)
+  const { onLastTabClosed, emptyBenchContent } = useBenchClose(task, benches)
   const tabMenuItems = useTabMenuItems(task)
-  const closeTaskOfBench = useCloseTaskOfBench(task)
 
   return (
     <>
@@ -28,7 +21,7 @@ export function App() {
         client={workbench}
         benchLabelOf={benchLabelOf}
         tabMenuItems={tabMenuItems}
-        onLastTabClosed={closeTaskOfBench}
+        onLastTabClosed={onLastTabClosed}
         emptyBenchContent={emptyBenchContent}
       />
       <Toaster />

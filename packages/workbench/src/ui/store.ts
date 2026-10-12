@@ -41,11 +41,11 @@ export type Runspace = Layout['runspaces'][number]
 // oRPC の client は callable な Proxy で、jotai の set が updater と取り違えるので `() => client` で渡す。
 export const workbenchClientAtom = atom<WorkbenchClient | null>(null)
 
-// workbench は誰が Runspace を所有するかを知らないので、閉じて空になった所有された Runspace は slot に渡す（ADR-0005）。
-export const lastTabClosedAtom = atom<((runspaceId: string) => void) | null>(null)
+// exitRecorded は Backend が閉じた Tab の Exit を記録するか、待ちを打ち切ると resolve し、reject しない。
+export type LastTabClosed = (runspaceId: string, exitRecorded: Promise<void>) => void
 
-// Tab が 0 になってから Exit の記録を待って slot に渡すまでの Runspace。その間に Bench の画面へ Task の操作を出さない。
-export const handingOverRunspaceIdsAtom = atom<ReadonlySet<string>>(new Set<string>())
+// workbench は誰が Runspace を所有するかを知らないので、閉じて空になった所有された Runspace は slot に渡す（ADR-0005）。
+export const lastTabClosedAtom = atom<LastTabClosed | null>(null)
 
 function clientOf(get: Getter): WorkbenchClient {
   const client = get(workbenchClientAtom)
@@ -332,15 +332,13 @@ async function closeTab(get: Getter, set: Setter, { runspace, tab }: TabInRunspa
     await set(reloadAtom)
     return
   }
-  const handedOver = emptiedRunspaceId
-  set(handingOverRunspaceIdsAtom, (ids) => new Set(ids).add(handedOver))
-  try {
-    await set(reloadAtom)
-    await untilExitRecorded(get, tab.terminalSessionId)
-    get(lastTabClosedAtom)?.(handedOver)
-  } finally {
-    set(handingOverRunspaceIdsAtom, (ids) => new Set([...ids].filter((id) => id !== handedOver)))
-  }
+  const exitRecorded = untilExitRecorded(get, tab.terminalSessionId).catch((e: unknown) =>
+    warnFailed('waiting for the exit', e),
+  )
+  // 読み直して Tab の無い Bench を出す前に渡し、slot が Exit を待つ間の中身を決められるようにする。
+  get(lastTabClosedAtom)?.(emptiedRunspaceId, exitRecorded)
+  await set(reloadAtom)
+  await exitRecorded
 }
 
 export const closeTerminalTabAtom = action(async (get, set, tabId?: string) => {

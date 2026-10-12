@@ -284,7 +284,7 @@ code は上から順に当てる。
 
 ### side panel の文言（`src/ui/failure.ts`）
 
-side panel は `ORPCError`（`@orpc/client`）の `code` で分け、`data` は contract の `askErrors` の schema で `safeParse` して読む（task の `close-bench.ts` と同じ形）。Backend の `message` は出さず、文は chat の ui が作る。Backend に届かないことは、`chat.prepare` と `chat.ask` の失敗が、`TypeError`、`BackendUnreachable`（host が無い・落ちた・Backend が居ない）、`ORPCError` の `UNAUTHORIZED`（古い Chrome Extension の token）のどれかであることで見分ける（`isUnreachable`、下の「Backend の探し方」）。止めるボタンの abort（`DOMException` の AbortError）は失敗にしない。
+side panel は `ORPCError`（`@orpc/client`）の `code` で分け、`data` は contract の `askErrors` の schema で `safeParse` して読む（task の `bench-close.ts` と同じ形）。Backend の `message` は出さず、文は chat の ui が作る。Backend に届かないことは、`chat.prepare` と `chat.ask` の失敗が、`TypeError`、`BackendUnreachable`（host が無い・落ちた・Backend が居ない）、`ORPCError` の `UNAUTHORIZED`（古い Chrome Extension の token）のどれかであることで見分ける（`isUnreachable`、下の「Backend の探し方」）。止めるボタンの abort（`DOMException` の AbortError）は失敗にしない。
 
 | 場面 | side panel が見るもの | 答えの場所に出す 1 行 | 詳しい行 |
 |---|---|---|---|

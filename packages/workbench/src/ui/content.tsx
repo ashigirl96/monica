@@ -10,7 +10,6 @@ import {
   closeTerminalTabAtom,
   createTerminalTabAtom,
   deadTabsAtom,
-  handingOverRunspaceIdsAtom,
   startNewShellForTabAtom,
   tabExitedAtom,
   updateTabCwdAtom,
@@ -99,10 +98,9 @@ function EmptyRunspaceOverlay({
   emptyBenchContent?: EmptyBenchContent
 }) {
   const createTab = useSetAtom(createTerminalTabAtom)
-  const handingOver = useAtomValue(handingOverRunspaceIdsAtom).has(runspaceId)
   return (
     <Overlay>
-      {!handingOver && emptyBenchContent?.(runspaceId)}
+      {emptyBenchContent?.(runspaceId)}
       <NewShellButton onClick={() => void createTab()}>New shell in {baseName(cwd)}</NewShellButton>
     </Overlay>
   )
