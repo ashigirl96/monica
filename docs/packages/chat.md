@@ -107,7 +107,7 @@ SDK の `env` は `process.env` に重ならず丸ごと置き換わる。claude
 
 ## log
 
-claude の `system`（`init`）を受けたら、stderr に 1 行出す。tools が WebSearch の 1 つと MCP 0 を実機で見るためと、SDK を上げて `haiku` の解決先が変わったときに気づくため（ADR-0032）。result を受けたら、その usage も 1 行出す。prompt cache の効き方を見るためで、Backend の stdout は Shell 宛ての JSON 行専用なので stderr にする。
+claude の `system`（`init`）を受けたら、stderr に 1 行出す。translate は行を `log` に渡し、`ChatAgent` が claude の pid を前に付けて出す。tools が WebSearch の 1 つと MCP 0 を実機で見るためと、SDK を上げて `haiku` の解決先が変わったときに気づくため（ADR-0032）。result を受けたら、その usage も 1 行出す。prompt cache の効き方を見るためで、Backend の stdout は Shell 宛ての JSON 行専用なので stderr にする。
 
 ```
 [chat] claude <pid>: model <model>, <n> tools, <m> MCP servers
@@ -246,9 +246,9 @@ snapshot      { type: 'snapshot', page: PageSnapshot から screenshot を除い
 
 質問に答えを返せないとき、side panel はその質問の答えの場所に日本語で理由を出し、どの失敗にも「再試行」のボタンを付ける。Backend に届かないことは、入力欄の上の帯でも知らせる（#269 の resolution）。読めなかった・切り詰めた・渡していないことの知らせ（上の「知らせ」）は質問の吹き出しの下に出し、答えの場所の失敗とは混ぜない。
 
-### 失敗を決める（`src/chat-agent.ts`）
+### 失敗を決める（`src/translate.ts`）
 
-`ChatAgent` は SDK の message から失敗を決める。決めるのは `result` を受けた時で、`is_error` が true か `subtype` が `success` でなければ失敗にする。調べたどの失敗でも `assistant` の `error` の直後に `result` が来たので遅れは無く、`max_output_tokens` のように CLI が続きを頼む途中の message で早まって決めない。SDK がその 0.5〜1.4 秒後に投げる `Error("Claude Code returned an error result: …")` は待たず、claude を SIGKILL してから typed error を投げる。
+`translate(messages, log)` は SDK の message を `ChatEvent` に訳し、失敗を決める。claude の process を知らないので、記録した `SDKMessage` の配列で確かめられる。`ChatAgent`（`src/chat-agent.ts`）は `snapshot` を流した後に translate を回し、translate が返れば答えたとして spare を起こし、`ChatFailure` を投げればそのまま投げて claude を止め、`EndedEarly` を投げれば下のとおり process を見て決める。決めるのは `result` を受けた時で、`is_error` が true か `subtype` が `success` でなければ失敗にする。調べたどの失敗でも `assistant` の `error` の直後に `result` が来たので遅れは無く、`max_output_tokens` のように CLI が続きを頼む途中の message で早まって決めない。SDK がその 0.5〜1.4 秒後に投げる `Error("Claude Code returned an error result: …")` は待たず、claude を SIGKILL してから typed error を投げる。
 
 code は上から順に当てる。
 
@@ -262,20 +262,20 @@ code は上から順に当てる。
 - `rateLimitType` は enum にせず文字列にする。CLI が版ごとに足す値で data が schema を通らないと、typed error が `defined: false` になり、side panel が上限と分からなくなるため。
 - `detail` は先頭 2,000 字で切る。side panel が詳しい行にそのまま出すため。
   - `result` があればその文字列にする。成功の形の `result` は `result`、`SDKResultError` は `errors` を改行でつないだもの。
-  - `result` の前に SDK の iterator が投げたら、その message に claude の stderr の末尾（上の「claude の持ち方」）を足す。claude の場所に何も無い、起きてすぐ落ちた（`Claude Code process exited with code 1`）、答えの途中で落ちた、`initialize_timeout` がこれに当たる。
-  - result 無しに iterator が終わったら、`claude exited before it answered` に stderr の末尾を足す。
+  - `result` の前に SDK の iterator が投げたら、translate はその message で `EndedEarly` を投げ、`ChatAgent` が claude の stderr の末尾（上の「claude の持ち方」）を足す。claude の場所に何も無い、起きてすぐ落ちた（`Claude Code process exited with code 1`）、答えの途中で落ちた、`initialize_timeout` がこれに当たる。
+  - result 無しに iterator が終わったら、translate は `claude exited before it answered` で `EndedEarly` を投げ、`ChatAgent` が stderr の末尾を足す。
 - typed error は、それまで流した `snapshot`・`text`・`retry`・`usage` の後に投げる（`docs/packages.md` の contract の規約 7）。
 - `chat.ask` の handler（`src/server.ts`）は、`ChatAgent` が投げた `ChatFailure` を宣言した error にし、ほかの想定外の error も `AGENT_FAILED` に包む。iterator を返す前（Page Snapshot の変換や claude の起動）に投げた error も同じに包む。素の `Error` は `INTERNAL_SERVER_ERROR`「Internal server error」になり、理由が消えるため。
-- 自分で SIGKILL した claude の error は失敗にしない（上の「claude の持ち方」）。stream の abort と Backend の終了では、stream は error を投げずに閉じる。
+- 自分で SIGKILL した claude の `EndedEarly` は失敗にしない（上の「claude の持ち方」）。stream の abort と Backend の終了では、stream は error を投げずに閉じる。
 - contract に載せないもの: Backend に届かない場合、古い Chrome Extension の token の 401（`UNAUTHORIZED`）、body の上限の 413（`PAYLOAD_TOO_LARGE`）。413 は side panel が送る前に大きさを見て「読めなかった」にするので、side panel からは届かない。
 
-### `search`
+### `search`（`src/translate.ts`）
 
 - `assistant` の content の `tool_use` のうち、`name` が `WebSearch` のものごとに、その `input` の `query` で `{ type: 'search', query }` を流す。`includePartialMessages` の `input_json_delta` からは組まない。block が閉じる前の delta では query が途中で切れるため。
 - tool_result（`user` の message）は流さない。検索結果のリンクと要約は side panel に出さず、答えの中で model が出典として link にしたものだけが出る。
 - tool_use の前に model が書いた text も答えの `text` として流す。
 
-### `retry` と `usage`
+### `retry` と `usage`（`src/translate.ts`）
 
 - `system` の `api_retry` が来るたびに `{ type: 'retry', attempt }` を流す。text の前か後かで分けない。CLI は API の stream が切れると答えを最初からやり直すので、side panel は途中の答えを消して描き直す。
 - CLI が stream しない request に替えると、答えは `stream_event` の delta を伴わない `assistant` 1 つで届く。最後の `api_retry` の後に text の delta を流していないとき、`error` の無い `assistant` の text block をつないで 1 つの `text` で流す。delta を流した答えでは、`assistant` の text を重ねて流さない。
@@ -389,16 +389,11 @@ side panel は Backend の token の口を、Native Messaging の host から受
   - argv、env、cwd、pid、`initialize` の request、`user` の content、EOF を、記録の file に JSON 行で書く。
   - 質問に `HOLD` を含むと、最初の text の delta の後に止まり、stdin の EOF と SIGTERM では抜けない。居なくなれば SIGKILL で終わっている。30 秒で自分から抜ける。
 - `chat.models` の読み直しは、`exit-at-start` で失敗させた後に同じ dir へ `writeFakeClaude` で `answer` の wrapper を書き直して確かめる。`.args` は起こすたびに読まれる。
-- 検索の場面 `search` は、text の delta と `assistant`、WebSearch の tool_use（`content_block_start`、query を 2 つに割った `input_json_delta`、`tool_use` だけの `assistant`）、tool_result の `user`、続きの text の delta と `assistant`、`result` を流す。
-- 失敗の場面は wrapper ごとに `scenario`（`FakeScenario`）で選ぶ。`ChatAgent` に場面を渡す口は足さない。偽の claude は、research（`docs/research/chat-failures.md` の §2）で本物の claude が流した message の並びを真似る。
+- message を `ChatEvent` に訳す規則（失敗の code、`retry`・`search`・`usage`、やり直しと stream しない答え、log の行、成功の result の後に iterator を読まず閉じないこと）は、`src/translate.test.ts` が `SDKMessage` の配列を translate に渡して確かめる。配列は偽の claude が research（`docs/research/chat-failures.md` の §2）を真似て流していた並びから写した。偽の claude は、process の扱いを見る場面だけを持つ。
+- 場面は wrapper ごとに `scenario`（`FakeScenario`）で選ぶ。`ChatAgent` に場面を渡す口は足さない。
   - `not-logged-in`: `assistant`（`error: authentication_failed`）、`result`（`is_error`）の後、5 秒 exit しない。`ChatAgent` が SDK の error を待たずに決め、claude を止めることを見る。
-  - `usage-limit`: `rejected` で `resetsAt`（`FAKE_RESETS_AT`）と `five_hour` を持つ `rate_limit_event`、`assistant`（`rate_limit`）、`result`（429）。
-  - `throttled`: `api_retry` の後に `resetsAt` の無い `rejected`（`rateLimitType` はある）、`assistant`（`rate_limit`）、`result`（429）。
-  - `overloaded`: `api_retry` を 4 回、`assistant`（`server_error`）、`result`（529）。`billing`: `assistant`（`billing_error`）と `result`。
-  - `max-output-tokens`: text の delta を 2 つ流した後に `assistant`（`max_output_tokens`）と `result`。
+  - `max-output-tokens`: text の delta を 2 つ流した後に `assistant`（`max_output_tokens`）と `result`。`apps/backend/src/main.test.ts` が、RPCLink 越しに typed error が届くことを見るのに使う。
   - `exit-at-start`: stdin を読む前に stderr に 1 行書いて exit 1。`exit-mid-answer`: text の delta の後に stderr に 1 行書いて exit 1。
-  - `restart`: text の delta、`api_retry`、最初からの delta、`result`。`unstreamed`: text の delta、`api_retry`、delta の無い `assistant`、`result`。
-  - `usage-warning`: 普段の答えの `result` の前に `allowed_warning`（`utilization` 0.91）の `rate_limit_event`。普段の答え（`answer`）は `allowed` の `rate_limit_event` を流す。
 - claude の場所に何も無い場面は、`createChatAgent` に一時 directory の無い path を渡して作る。
 - 起こした claude は、テストの process の子のうち生きているもの（`ps` の ppid と stat）で数える。SDK は呼び出しの中で同期に spawn するので、`ask` と `prepare` が返った直後に数えれば、起こしていないことも確かめられる。
 - 5 分の時限は、`setTimeout` を `spyOn` で捕まえ、300000ms の callback を手で呼ぶ。

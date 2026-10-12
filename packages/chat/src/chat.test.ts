@@ -8,7 +8,7 @@ import { createRouterClient } from '@orpc/server'
 import type { AskInput, ChatEvent } from './contract.ts'
 import { testPdf } from './page/test-pdf.ts'
 import { createChatAgent, router } from './server.ts'
-import { FAKE_RESETS_AT, type FakeScenario, writeFakeClaude } from './testing.ts'
+import { type FakeScenario, writeFakeClaude } from './testing.ts'
 
 type Block =
   | { type: 'text'; text: string }
@@ -147,6 +147,22 @@ test('ask sends the Page Snapshot first, then streams the text deltas of claude 
     { type: 'text', text: ' is' },
     { type: 'text', text: ' the answer.' },
   ])
+})
+
+test('the log lines of an answer go to stderr after the pid of the claude that answers', async () => {
+  const consoleError = spyOn(console, 'error')
+  cleanups.push(() => consoleError.mockRestore())
+  const { client, records } = startChat()
+
+  await answerOf(await client.ask(QUESTION))
+
+  const [pid] = answeringPids(records())
+  expect(consoleError.mock.calls.map(([line]) => line)).toEqual(
+    expect.arrayContaining([
+      `[chat] claude ${pid}: model claude-haiku-5-5, 0 tools, 0 MCP servers`,
+      `[chat] claude ${pid}: usage input 1, cache creation 0, cache read 0, output 1`,
+    ]),
+  )
 })
 
 async function answerOf(answer: AsyncIterable<ChatEvent>): Promise<string> {
@@ -722,75 +738,6 @@ test('a claude that is not logged in ends the answer as NOT_AUTHENTICATED within
   expect(claudes()).toEqual([])
 })
 
-test('a claude at the plan limit ends the answer, after the snapshot, as USAGE_LIMIT with the kind of limit and when it resets', async () => {
-  const { client } = startChat('usage-limit')
-
-  const { events, error } = await outcomeOf(client.ask(QUESTION))
-
-  expect(kinds(events)).toEqual(['snapshot'])
-  expect(error).toMatchObject({
-    code: 'USAGE_LIMIT',
-    status: 429,
-    defined: true,
-    data: { rateLimitType: 'five_hour', resetsAt: FAKE_RESETS_AT },
-  })
-})
-
-// 上限の header の無い 429 は API の一時的な失敗で、rejected でも resetsAt を持たない。
-test('a 429 without the headers of a plan limit ends the answer as AGENT_FAILED after its retry, not as USAGE_LIMIT', async () => {
-  const { client } = startChat('throttled')
-
-  const { events, error } = await outcomeOf(client.ask(QUESTION))
-
-  expect(events.slice(1)).toEqual([{ type: 'retry', attempt: 1 }])
-  expect(error).toMatchObject({
-    code: 'AGENT_FAILED',
-    status: 500,
-    defined: true,
-    data: { detail: expect.stringContaining('not your usage limit') },
-  })
-})
-
-test('an overloaded API that outlasts the retries ends the answer, after a retry event for each attempt, as AGENT_FAILED with the result of claude', async () => {
-  const { client } = startChat('overloaded')
-
-  const { events, error } = await outcomeOf(client.ask(QUESTION))
-
-  expect(events.slice(1)).toEqual([1, 2, 3, 4].map((attempt) => ({ type: 'retry', attempt })))
-  expect(error).toMatchObject({
-    code: 'AGENT_FAILED',
-    data: {
-      detail: 'API Error: 529 Overloaded. This is a server-side issue, usually temporary',
-    },
-  })
-})
-
-test('an account without credit ends the answer as AGENT_FAILED', async () => {
-  const { client } = startChat('billing')
-
-  const { error } = await outcomeOf(client.ask(QUESTION))
-
-  expect(error).toMatchObject({
-    code: 'AGENT_FAILED',
-    data: { detail: 'Credit balance is too low' },
-  })
-})
-
-test('an answer cut off at the output limit ends as AGENT_FAILED after the text that came', async () => {
-  const { client } = startChat('max-output-tokens')
-
-  const { events, error } = await outcomeOf(client.ask(QUESTION))
-
-  expect(events.slice(1)).toEqual([
-    { type: 'text', text: 'Two' },
-    { type: 'text', text: ' is' },
-  ])
-  expect(error).toMatchObject({
-    code: 'AGENT_FAILED',
-    data: { detail: expect.stringContaining('output token maximum') },
-  })
-})
-
 const detailOf = (error: unknown) => (error as { data: { detail: string } }).data.detail
 
 test('a claude that exits at once ends the answer as AGENT_FAILED with the error and the end of its stderr, not as an internal error', async () => {
@@ -821,64 +768,6 @@ test('a claude that exits mid-answer ends the answer as AGENT_FAILED after the t
   expect(error).toMatchObject({ code: 'AGENT_FAILED', defined: true })
   expect(detailOf(error)).toContain('exited with code 1')
   expect(detailOf(error)).toContain('claude: out of memory')
-})
-
-test('an answer that claude starts over after a cut API stream comes as text, a retry, then the text from the start', async () => {
-  const { client } = startChat('restart')
-
-  const { events, error } = await outcomeOf(client.ask(QUESTION))
-
-  expect(error).toBeUndefined()
-  expect(events.slice(1)).toEqual([
-    { type: 'text', text: 'Tw' },
-    { type: 'text', text: 'o' },
-    { type: 'retry', attempt: 1 },
-    { type: 'text', text: 'Two' },
-    { type: 'text', text: ' is' },
-    { type: 'text', text: ' the answer.' },
-  ])
-})
-
-test('an answer that claude gets without streaming after a retry comes whole as one text', async () => {
-  const { client } = startChat('unstreamed')
-
-  const { events, error } = await outcomeOf(client.ask(QUESTION))
-
-  expect(error).toBeUndefined()
-  expect(events.slice(1)).toEqual([
-    { type: 'text', text: 'Tw' },
-    { type: 'retry', attempt: 1 },
-    { type: 'text', text: 'Two is the answer.' },
-  ])
-})
-
-test('a WebSearch of claude comes as a search with the whole query, and the text before and after it joins into one answer without the search results', async () => {
-  const { client } = startChat('search')
-
-  const { events, error } = await outcomeOf(client.ask(QUESTION))
-
-  expect(error).toBeUndefined()
-  expect(events.slice(1)).toEqual([
-    { type: 'text', text: 'Let me look that up. ' },
-    { type: 'search', query: 'Claude Shannon birthday' },
-    { type: 'text', text: 'He was born on' },
-    { type: 'text', text: ' April 30, 1916.' },
-  ])
-})
-
-test('an answer near the plan limit is not a failure and is followed by the usage of the plan', async () => {
-  const { client } = startChat('usage-warning')
-
-  const { events, error } = await outcomeOf(client.ask(QUESTION))
-
-  expect(error).toBeUndefined()
-  expect(kinds(events)).toEqual(['snapshot', 'text', 'text', 'text', 'usage'])
-  expect(events.at(-1)).toEqual({
-    type: 'usage',
-    utilization: 0.91,
-    rateLimitType: 'five_hour',
-    resetsAt: FAKE_RESETS_AT,
-  })
 })
 
 // SDK が投げる SIGKILL の error は、claude が自分で落ちたときと同じ文になる。
