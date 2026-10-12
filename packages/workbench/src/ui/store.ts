@@ -32,8 +32,8 @@ import {
   type TerminalSessionStatusEntry,
   terminalSessionStatusAtom,
 } from './terminal-sessions.ts'
-import { OUTSIDE, tileAssignmentAtom } from './tile-assignment.ts'
-import { collapsedSectionsAtom } from './ui-state.ts'
+import { OUTSIDE, reorderTiles, tileAssignmentAtom } from './tile-assignment.ts'
+import { collapsedSectionsAtom, tileOrderAtom } from './ui-state.ts'
 
 export type WorkbenchClient = ContractRouterClient<typeof contract>
 export type Runspace = Layout['runspaces'][number]
@@ -248,6 +248,15 @@ export const toggleSectionAtom = atom(null, (_get, set, key: string) =>
   }),
 )
 
+// Repo の外の Tile は ⌘0 の Tile として一番下に置くので、動かさず、落とし先にもしない。
+export const moveTileAtom = atom(null, (get, set, from: string, to: string) => {
+  const shown = get(tileAssignmentAtom)
+    .tiles.map((tile) => tile.key)
+    .filter((key) => key !== OUTSIDE)
+  if (from === to || !shown.includes(from) || !shown.includes(to)) return
+  set(tileOrderAtom, reorderTiles(get(tileOrderAtom), shown, from, to))
+})
+
 export const createRunspaceAtom = action(async (get, set) => {
   const active = get(activeRunspaceAtom)
   const tab = get(activeTerminalTabAtom)
@@ -427,8 +436,6 @@ async function moveTab(get: Getter, set: Setter, id: string, runspaceId: string,
   await set(reloadAtom)
 }
 
-export const reorderRunspacesAtom = action(moveRunspaceTo)
-
 const moveRunspaceToEndAtom = atom(null, (get, set, id: string) =>
   moveRunspace(get, set, id, (get(layoutAtom)?.runspaces.length ?? 0) - 1),
 )
@@ -460,12 +467,6 @@ export function appendRunspacesJoiningTile(store: Store): () => void {
   return store.sub(tileAssignmentAtom, check)
 }
 
-export const reorderTabsAtom = action(async (get, set, fromId: string, toId: string) => {
-  const runspace = get(activeRunspaceAtom)
-  const index = runspace?.tabs.findIndex((t) => t.id === toId) ?? -1
-  if (runspace && index >= 0) await moveTab(get, set, fromId, runspace.id, index)
-})
-
 export const moveActiveRunspaceAtom = action(async (get, set, direction: 'up' | 'down') => {
   const active = get(activeRunspaceAtom)
   if (!active) return
@@ -485,13 +486,4 @@ export const moveActiveTabAtom = action(async (get, set, direction: 'left' | 'ri
   if (index >= 0 && index < runspace.tabs.length) {
     await moveTab(get, set, tab.id, runspace.id, index)
   }
-})
-
-export const draggedTabIdAtom = atom<string | null>(null)
-
-export const moveTabToRunspaceAtom = action(async (get, set, tabId: string, runspaceId: string) => {
-  const found = findTab(get, tabId)
-  const target = get(layoutAtom)?.runspaces.find((r) => r.id === runspaceId)
-  if (!found || !target || found.runspace.id === runspaceId) return
-  await moveTab(get, set, tabId, runspaceId, target.tabs.length)
 })

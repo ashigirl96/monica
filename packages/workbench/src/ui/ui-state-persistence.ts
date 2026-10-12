@@ -8,6 +8,7 @@ import {
   saveUiState,
   sidebarOpenAtom,
   sidebarWidthAtom,
+  tileOrderAtom,
   type UiState,
   uiZoomAtom,
 } from './ui-state.ts'
@@ -26,6 +27,7 @@ const uiStateAtom = atom((get): UiState => {
     uiZoom: get(uiZoomAtom),
     tile: get(keptTileAtom),
     collapsedSections: [...get(collapsedSectionsAtom)],
+    tileOrder: [...get(tileOrderAtom)],
   }
 })
 

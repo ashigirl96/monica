@@ -91,7 +91,7 @@ Terminal Session の行の状態機械、Create をまだ送っていない集�
   - pin された Tab と、Tab の無い Bench では、d は何もせずに jump モードを抜ける。
 - `tab.close` は Tab の行を消し、その Terminal Session の Terminate を transaction の後に予約する（`removeRunspace` と同じ形。ADR-0015）。webview は終了も detach も頼まない。呼び手を 1 つ忘れるだけで Tab の無い Terminal Session ができるため（ADR-0023）。
 - shell が終わった Tab は webview が閉じる。接続中の Tab で Shell の Exit を受けたら、webview が `tab.close` を呼ぶ（旧 Monica どおり）。Backend は行を exited にするだけで、Tab を閉じない。exit の時点で接続していなかった Tab と、lost / failed の Tab は、overlay を出したまま `tab.respawn` か `tab.close` を待つ。pin された Tab は例外で、webview は閉じず、Backend が張り直す（「pin」の節）。
-- `tab.close` の `emptiedRunspaceId` は、その close で Tab が 0 になって残った所有された Runspace の id で、それ以外は null。webview は Tab を閉じ（Ctrl+T → d、接続中の Tab の Exit、overlay の「Close tab」）、`emptiedRunspaceId` があれば、layout を読み直した後でその id を `Workbench` の slot `onLastTabClosed` に渡す。0 になったかを close の transaction で決めるのは、読み直した layout では、close の後で読み直す前に Tab を外へ移した分（CLI の Attach など）と区別できないため。渡すのは、Backend がその Terminal Session の Exit を記録して一覧から消すのを待ってから（`terminalSession.list` を 50ms おきに、最大 3 秒）にする。Agent Session は Exit の記録で終わるので、その前に Task の close を頼むと、終わらせた claude が live な Run に見えて guard に止められるため。task の ui がそれを Task の close にする（`docs/packages/task-ledger.md` の「close と reopen」）。Tab を別の Runspace へ移して 0 になったとき（header の drag、CLI と picker の Attach）は呼ばない。閉じたのではないため。Backend の `changes` からは判定しない。`layout` の合図は Tab がどの経路で減ったかを持たず、`run` と `attach` は Bench を作ってから Tab を開く・移すので、Tab の 0 は普段の操作でも起きるため。
+- `tab.close` の `emptiedRunspaceId` は、その close で Tab が 0 になって残った所有された Runspace の id で、それ以外は null。webview は Tab を閉じ（Ctrl+T → d、接続中の Tab の Exit、overlay の「Close tab」）、`emptiedRunspaceId` があれば、layout を読み直した後でその id を `Workbench` の slot `onLastTabClosed` に渡す。0 になったかを close の transaction で決めるのは、読み直した layout では、close の後で読み直す前に Tab を外へ移した分（CLI の Attach など）と区別できないため。渡すのは、Backend がその Terminal Session の Exit を記録して一覧から消すのを待ってから（`terminalSession.list` を 50ms おきに、最大 3 秒）にする。Agent Session は Exit の記録で終わるので、その前に Task の close を頼むと、終わらせた claude が live な Run に見えて guard に止められるため。task の ui がそれを Task の close にする（`docs/packages/task-ledger.md` の「close と reopen」）。Tab を別の Runspace へ移して 0 になったとき（CLI と picker の Attach）は呼ばない。閉じたのではないため。Backend の `changes` からは判定しない。`layout` の合図は Tab がどの経路で減ったかを持たず、`run` と `attach` は Bench を作ってから Tab を開く・移すので、Tab の 0 は普段の操作でも起きるため。
 - active な Runspace に Tab が無ければ、webview は content に「New shell in <cwd の末尾>」のボタンを Tab の overlay と同じ見た目で出し、押すと Runspace の cwd で `tab.open` する。所有されていない Runspace は常に Tab を持つので、この画面は Bench にだけ出る。close の guard で残った Bench と、close が終わるまでの間に見える。
 
 ## Terminal Session の起動と終了
@@ -115,7 +115,7 @@ ptyd への Create・Write・Terminate は、行を書いた transaction の後�
 - `tab.close` と `runspace.remove` は、pin された Tab が対象か中にあれば `CONFLICT` で断る。
 - `tab.move` と `moveTab`（Attach）は、Tab を別の Runspace へ移したら同じ transaction で pin を外す。同じ Runspace の中の並べ替えでは外さない。
 - `removeRunspace`（Task の close）は pin を見ない。Bench の pin された Tab も他の Tab と同じく消える。
-- webview は ⌘P で pin を切り替える（旧 Monica どおり）。sidebar は pin された Tab を持つ Runspace を先頭の Pinned グループにまとめ、グループの中は `sort_order` 順に並べる。drag でグループはまたげない。
+- webview は ⌘P で pin を切り替える（旧 Monica どおり）。sidebar は pin された Tab を持つ Runspace を先頭の Pinned グループにまとめ、グループの中は `sort_order` 順に並べる。⇧J / ⇧K でグループはまたげない。
 
 張り直し:
 

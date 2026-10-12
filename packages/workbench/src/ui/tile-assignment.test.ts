@@ -5,6 +5,7 @@ import {
   assignTiles,
   type BenchLabel,
   OUTSIDE,
+  reorderTiles,
   type TileAssignment,
   tileKeyAt,
 } from './tile-assignment.ts'
@@ -133,5 +134,52 @@ test('a number picks the Tile of the Repo at that place from the top, 0 the Tile
     'acme/app',
     'acme/lib',
     undefined,
+  ])
+})
+
+const WEB = '/src/acme/web'
+
+test('Tiles in the order dragged come first in that order, the others after them as their Repos first appear, and the Tile for outside the Repos stays last and numbered 0', () => {
+  const assignment = assignTiles({
+    runspaces: [
+      runspaceIn('a', APP),
+      runspaceIn('home', HOME),
+      runspaceIn('w', WEB),
+      runspaceIn('l', LIB),
+    ],
+    places: { ...places, [WEB]: { repo: 'acme/web', path: 'web', branch: null } },
+    benchLabelOf: () => null,
+    tileOrder: ['acme/lib', OUTSIDE, 'acme/gone', 'acme/app'],
+  })
+
+  expect(assignment.tiles.map((tile) => tile.key)).toEqual([
+    'acme/lib',
+    'acme/app',
+    'acme/web',
+    OUTSIDE,
+  ])
+  expect([1, 2, 3, 0].map((n) => tileKeyAt(assignment, n))).toEqual([
+    'acme/lib',
+    'acme/app',
+    'acme/web',
+    OUTSIDE,
+  ])
+})
+
+test('a Tile dropped on an earlier Tile goes before it, one dropped on a later Tile goes after it, and Tiles not shown keep their places in the order', () => {
+  const shown = ['acme/app', 'acme/lib', 'acme/web']
+  const order = ['acme/app', 'acme/gone', 'acme/lib']
+
+  expect(reorderTiles(order, shown, 'acme/web', 'acme/app')).toEqual([
+    'acme/web',
+    'acme/app',
+    'acme/gone',
+    'acme/lib',
+  ])
+  expect(reorderTiles(order, shown, 'acme/app', 'acme/lib')).toEqual([
+    'acme/gone',
+    'acme/lib',
+    'acme/app',
+    'acme/web',
   ])
 })

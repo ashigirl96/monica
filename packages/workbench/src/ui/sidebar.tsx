@@ -1,6 +1,13 @@
-import { ChevronRightIcon, cn, FolderIcon, PinIcon, useDragReorder } from '@monica/ui'
+import {
+  ChevronRightIcon,
+  cn,
+  type DragPhase,
+  FolderIcon,
+  PinIcon,
+  useDragReorder,
+} from '@monica/ui'
 import { useAtomValue, useSetAtom } from 'jotai'
-import { type MouseEvent, type RefObject, useLayoutEffect, useRef, useState } from 'react'
+import { type MouseEvent, type PointerEvent, type RefObject, useLayoutEffect, useRef } from 'react'
 
 import { AgentDotMark, AgentTallyMark } from './agent-dot-mark.tsx'
 import { AGENT_DOT_STYLE, agentTallyLabel, UNREAD_LABEL_STYLE } from './agent-dot.ts'
@@ -8,6 +15,7 @@ import { JumpHint } from './jump-hint.tsx'
 import { jumpHintTargetsAtom } from './keys.ts'
 import { metaHeldAtom } from './meta-hold.ts'
 import { activateRunspaceAtom, pickTileAtom } from './navigation.ts'
+import { keyboardClick, pointerPress, pressHandlers } from './press.ts'
 import {
   type ListedIn,
   repoName,
@@ -17,13 +25,7 @@ import {
   type SidebarSection,
   type Tile,
 } from './sidebar-model.ts'
-import {
-  draggedTabIdAtom,
-  moveTabToRunspaceAtom,
-  reorderRunspacesAtom,
-  sidebarAtom,
-  toggleSectionAtom,
-} from './store.ts'
+import { moveTileAtom, sidebarAtom, toggleSectionAtom } from './store.ts'
 import { sectionKey, tileNumberOf } from './tile-assignment.ts'
 
 const OUTSIDE_LABEL = 'その他'
@@ -62,19 +64,9 @@ function rowLabel(title: string, meta: RowMeta | null, unreadCount: number): str
   return withUnread([title, ...agent].join('、'), unreadCount)
 }
 
-// WKWebView は trackpad の tap を up、down の順で届け、click は 1 つ前の tap の down と組んで共通の祖先に飛ぶので、押した要素に届く mousedown で動かす。
-function pressHandlers(action: () => void) {
-  return {
-    onMouseDown: (e: MouseEvent) => {
-      // 押した後に focus を戻すと xterm が DECSET 1004 を立てた app に focus out と in を送るので、既定の動作を止めて端末から focus を外さない。
-      e.preventDefault()
-      if (e.button === 0) action()
-    },
-    onClick: (e: MouseEvent) => {
-      const fromKeyboard = e.detail === 0
-      if (fromKeyboard) action()
-    },
-  }
+const DRAG_PHASE_STYLE: Record<DragPhase, string> = {
+  pressed: 'ring-2 ring-white/80',
+  dragging: 'opacity-35 ring-0 outline-1 outline-offset-1 outline-white outline-dotted',
 }
 
 function UnreadCount({ count, className }: { count: number; className?: string }) {
@@ -92,16 +84,24 @@ function UnreadCount({ count, className }: { count: number; className?: string }
   )
 }
 
+type TilePress = {
+  onPointerDown?: (e: PointerEvent<HTMLElement>) => void
+  onMouseDown?: (e: MouseEvent) => void
+  onClick: (e: MouseEvent) => void
+}
+
 function TileButton({
   tile,
   number,
   selected,
-  onPick,
+  press,
+  dragPhase,
 }: {
   tile: Tile
   number: number | null
   selected: boolean
-  onPick: () => void
+  press: TilePress
+  dragPhase: DragPhase | null
 }) {
   const label = tile.repo ?? OUTSIDE_LABEL
   const hue = tile.repo ? hueOf(tile.repo) : null
@@ -120,13 +120,14 @@ function TileButton({
         aria-label={withUnread(label, tile.unreadCount)}
         aria-keyshortcuts={number === null ? undefined : `Meta+${number}`}
         title={number === null ? label : `${label} (⌘${number})`}
-        {...pressHandlers(onPick)}
+        {...press}
         className={cn(
           'relative flex size-[30px] shrink-0 cursor-pointer items-center justify-center text-xs leading-none font-bold',
           'transition-[border-radius,filter] duration-150 hover:brightness-125 motion-reduce:transition-none',
           'focus-visible:outline-1 focus-visible:outline-offset-1 focus-visible:outline-white/50',
           selected ? 'rounded-[7px] ring-[1.5px] ring-white/55' : 'rounded-[9px]',
           !hue && 'bg-white/[0.08] text-white/75',
+          dragPhase && DRAG_PHASE_STYLE[dragPhase],
         )}
         style={hue ? { background: hue.bg, color: hue.fg } : undefined}
       >
@@ -217,35 +218,19 @@ function RowMetaLine({ meta }: { meta: RowMeta }) {
 function RunspaceItem({
   row,
   listedIn,
-  dragHandlers,
-  isDragOver,
+  onActivate,
   hint,
 }: {
   row: RunspaceRow
   listedIn: ListedIn
-  dragHandlers: ReturnType<ReturnType<typeof useDragReorder>['handlersFor']>
-  isDragOver: boolean
+  onActivate: () => void
   hint?: string
 }) {
-  const draggedTabId = useAtomValue(draggedTabIdAtom)
-  const moveTab = useSetAtom(moveTabToRunspaceAtom)
-  const [tabOver, setTabOver] = useState(false)
   const meta = rowMetaOf(row, listedIn)
 
   return (
     <button
-      {...dragHandlers}
-      onPointerEnter={() => {
-        dragHandlers.onPointerEnter()
-        setTabOver(true)
-      }}
-      onPointerLeave={() => {
-        dragHandlers.onPointerLeave()
-        setTabOver(false)
-      }}
-      onPointerUp={() => {
-        if (draggedTabId) void moveTab(draggedTabId, row.id)
-      }}
+      {...pointerPress(onActivate)}
       data-runspace-id={row.id}
       aria-label={rowLabel(row.title, meta, row.unreadCount)}
       className={cn(
@@ -255,7 +240,6 @@ function RunspaceItem({
         row.isActive
           ? 'bg-white/[0.1] text-foreground focus-visible:ring-white/50'
           : 'text-muted-foreground hover:bg-white/[0.06] hover:text-foreground',
-        (isDragOver || (tabOver && draggedTabId)) && 'ring-1 ring-sky-400/60',
       )}
     >
       <span className="flex min-w-0 items-start gap-2">
@@ -322,9 +306,9 @@ export function WorkbenchSidebar() {
   const { pinned, tiles, selected } = sidebar
   const activate = useSetAtom(activateRunspaceAtom)
   const pickTile = useSetAtom(pickTileAtom)
-  const reorder = useSetAtom(reorderRunspacesAtom)
+  const moveTile = useSetAtom(moveTileAtom)
   const jumpHints = useAtomValue(jumpHintTargetsAtom)
-  const { dragOverId, handlersFor } = useDragReorder(reorder)
+  const { handlersFor, phaseOf } = useDragReorder(moveTile)
   const listedIn: ListedIn = selected.repo ? 'repo' : 'outside'
 
   const renderRunspace = (row: RunspaceRow, at: ListedIn) => (
@@ -332,20 +316,28 @@ export function WorkbenchSidebar() {
       key={row.id}
       row={row}
       listedIn={at}
-      dragHandlers={handlersFor(row.id, () => activate(row.id))}
-      isDragOver={dragOverId === row.id}
+      onActivate={() => activate(row.id)}
       hint={jumpHints.byRunspaceId[row.id]}
     />
   )
-  const tileButton = (tile: Tile) => (
-    <TileButton
-      key={tile.key}
-      tile={tile}
-      number={tileNumberOf(sidebar, tile.key)}
-      selected={tile.key === selected.key}
-      onPick={() => pickTile(tile.key)}
-    />
-  )
+  // drag の pointerdown は既定の動作を止め、WebKit は続く mousedown を出さないので、Repo の Tile は pointerdown で選ぶ。
+  const tileButton = (tile: Tile) => {
+    const pick = () => pickTile(tile.key)
+    return (
+      <TileButton
+        key={tile.key}
+        tile={tile}
+        number={tileNumberOf(sidebar, tile.key)}
+        selected={tile.key === selected.key}
+        press={
+          tile.repo
+            ? { ...handlersFor(tile.key, pick), ...keyboardClick(pick) }
+            : pressHandlers(pick)
+        }
+        dragPhase={phaseOf(tile.key)}
+      />
+    )
+  }
 
   return (
     <div className="flex min-h-0 flex-1">

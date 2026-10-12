@@ -56,16 +56,16 @@ createTaskLedger(deps: {
 - `start()` は購読を張った後に、全件に 1 回当てる。Backend の更新より前から Bench の Tab に居た Agent Session と、commit から購読の microtask までの間に Backend が止まった分を拾う。Backend が居ない間の hook は CLI が捨てるので、不在中に始まった claude の行は起動後の最初の hook で生まれ、購読の経路で Run になる。
 - 全件は workbench の reconcile を待たずに当てるので、不在中に Terminal Session が終わった Agent Session も、終了になる前に Run になることがある。Backend が止まる前に Bench の Tab で動いていた agent なので、Task の Run にして差し支えない。
 - どちらの経路も `origin = started` で insert する。一度 Run になった Agent Session は、Tab がどこに移っても、終わるまでその Task の Run のまま（`run.agent_session_id` の UNIQUE が守る）。closed な Task には Bench が無いので、Run は生まれない。
-- `layout` の合図（Tab の移動）でも、同じく commit の後に当てる。合図はどの Tab が動いたかを持たないので、Bench の Tab すべてに当てる。この経路で生まれる Run は Tab ごと Bench に入った Agent Session なので `origin = attached` にする（GUI の drag）。Bench の Tab で始まった claude の Run は、hook の commit と同じ同期の区間で積まれた `agentSession` の合図の microtask が先に作るので、この経路に横取りされない。
+- `layout` の合図（Tab の移動）でも、同じく commit の後に当てる。合図はどの Tab が動いたかを持たないので、Bench の Tab すべてに当てる。この経路で生まれる Run は Tab ごと Bench に入った Agent Session なので `origin = attached` にする（`tab.move` で Bench へ移った Tab）。Bench の Tab で始まった claude の Run は、hook の commit と同じ同期の区間で積まれた `agentSession` の合図の microtask が先に作るので、この経路に横取りされない。
 
 ## Attach
 
-`GLOSSARY.md` の Attach。CLI の `monica task attach <ref>` は呼び手の Tab を、Tab のメニューの picker は選んだ Tab を、同じ `attach` で移す。GUI の drag は `tab.move` で移し、Run は「Run」の節の `layout` の経路が作る。
+`GLOSSARY.md` の Attach。CLI の `monica task attach <ref>` は呼び手の Tab を、Tab のメニューの picker は選んだ Tab を、同じ `attach` で移す。`tab.move` の procedure で Bench へ移った Tab の Run は、「Run」の節の `layout` の経路が作る。
 
 - `terminalSessionId` が無ければ `BAD_REQUEST`、未 track は `NOT_FOUND`、closed な Task は `BAD_REQUEST`（`run` と同じ）。
 - 1 つの transaction で次の順に進める。
   1. その Terminal Session を表示している Tab を引く。無ければ（Tab を閉じて shell が終わるのを待っている、または Workbench Ledger に無い）`BAD_REQUEST`。
-  2. その Terminal Session の live な Agent Session が別の Task の Run なら `CONFLICT`。message にはその Task の ref を出す。GUI の drag はこれを断らず、Tab だけが移る。
+  2. その Terminal Session の live な Agent Session が別の Task の Run なら `CONFLICT`。message にはその Task の ref を出す。`tab.move` はこれを断らず、Tab だけが移る。
   3. Tab が既にその Bench に居れば、何も変えずに返す（`moveTab` は同じ Runspace でも末尾へ並べ替えるので呼ばない）。
   4. Bench が無ければ、in_place の Bench を作る（`createRunspace` を含む）。cwd は Repo の checkout（`$(ghq root)/github.com/<owner>/<repo>`）で、setup は走らせず、`setup_state` は最初から `ready`（`prepared_at` は作った時刻）。checkout が無いか ghq root が引けなければ `BAD_REQUEST`。attach は network を使わないので clone しない。ghq root は async なので transaction の前に引き、transaction の中で Bench がまだ無いときだけ使う。待つ間に `run` が Bench を作っていれば、そちらに移す。checkout の path は transaction の中で引き直した repo の名前から作る。待つ間に sync が repo の改名を写すと、前に引いた名前の path は古い checkout を指すか、clone されていないことになるため。
   5. `moveTab(tx, tabId, bench.runspaceId)`。pin は外れる。
