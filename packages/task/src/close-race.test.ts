@@ -65,6 +65,22 @@ test('while close is under way, a run that would resume the last claude is refus
   expect(fixture.ptyd.receivedAll((op) => op.op === 'create')).toHaveLength(1)
 })
 
+test('pressing Resume while close is under way gives a row instead of failing, and resumes nothing', async () => {
+  const fixture = await withWorktreeBench()
+  await fixture.hook(fixture.claudeTab, 's-1', 'SessionStart', { source: 'startup' })
+  await fixture.hook(fixture.claudeTab, 's-1', 'SessionEnd', { reason: 'exit' })
+  const { closing, release } = await closeHeldAtSync(fixture)
+
+  const sent = fixture.github.requests.length
+  const pressing = fixture.client.press({ ref, run: 'resume' })
+  await fixture.github.received(sent + 1)
+  release()
+
+  expect(await pressing).toMatchObject({ ref })
+  expect(await closing).toMatchObject({ removedWorktree: fixture.cwd })
+  expect(fixture.ptyd.receivedAll((op) => op.op === 'create')).toHaveLength(1)
+})
+
 test('a run --in-place that waited on ghq while the Task was closed opens no Bench', async () => {
   const fixture = await tracked()
   const { client, db, ghq } = fixture

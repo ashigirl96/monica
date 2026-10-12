@@ -5,7 +5,7 @@ import { reopenTask } from './close.ts'
 import type { Pressable, PromptKind, RunButtonRow, RunButtonsOutput } from './contract.ts'
 import { isLinkedIssue } from './copy.ts'
 import { type GitHubIssue, oneLine } from './github.ts'
-import { taskIfTracked } from './open-task.ts'
+import { TaskStateRefusal, taskIfTracked } from './open-task.ts'
 import { formatRef, type IssueRef, parseRef } from './ref.ts'
 import { runPlanned } from './run-claude.ts'
 import { isMap, labelVerdict, planRun, type RunPlan } from './run-plan.ts'
@@ -126,10 +126,7 @@ class Refused extends Error {}
 
 const refuse = () => new Refused()
 
-// 読んだ後に Task が close されたか close の途中なら、Task を引き直す所が BAD_REQUEST か CONFLICT で断るので、それも断りとして次の行で返す。
-const isRefusal = (error: unknown) =>
-  error instanceof Refused ||
-  (error instanceof ORPCError && (error.code === 'BAD_REQUEST' || error.code === 'CONFLICT'))
+const isRefusal = (error: unknown) => error instanceof Refused || error instanceof TaskStateRefusal
 
 async function readIssue(deps: SyncDeps, ref: string): Promise<GitHubIssue | undefined> {
   const parsed = parseRef(ref)

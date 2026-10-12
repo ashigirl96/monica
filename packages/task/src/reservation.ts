@@ -3,7 +3,13 @@ import type { Db, Tx } from '@monica/workbench/server'
 import { ORPCError } from '@orpc/server'
 import { and, eq, inArray } from 'drizzle-orm'
 
-import { type FoundTask, findTrackedTask, refuseClosed, refuseOpen } from './open-task.ts'
+import {
+  type FoundTask,
+  findTrackedTask,
+  refuseClosed,
+  refuseOpen,
+  TaskStateRefusal,
+} from './open-task.ts'
 import { formatRef } from './ref.ts'
 import { issue, run } from './schema.ts'
 
@@ -133,5 +139,5 @@ function stillLaunching(
 }
 
 function beingClosed(ref: string) {
-  return new ORPCError('CONFLICT', { message: `${ref} is being closed` })
+  return new TaskStateRefusal('CONFLICT', { message: `${ref} is being closed` })
 }
