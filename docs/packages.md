@@ -150,6 +150,7 @@ package ごとに in-memory の SQLite に自分の migration を当てる（tas
 - 一定の間隔で走る処理は、`setInterval` を `spyOn` で捕まえ、間隔を確かめてから callback を手で呼ぶ。決まった時間の打ち切りは、`setTimeout` を `spyOn` してその callback を捕まえ、手で呼ぶ。Bun の `jest.useFakeTimers()` は `Bun.sleep` と `setTimeout` も止め、一部の timer だけを偽にできないので、HTTP の応答を待つテストが進まなくなる。
   - 本番が `Date.now()` の締め切りと短い sleep の loop で待つもの（setup と Job の SIGTERM から SIGKILL までの猶予）は、待ち始めた印を見てから `setSystemTime` で時計を進める。猶予の手前まで進めた時点でまだ待っていることも確かめ、値を検出できるようにする。最後に `setSystemTime()` で戻す。
   - 子の process の timer はテストの process から spy できないので、子を `bun --preload <テスト用の file>` で起こし、preload で差し替える（hook の `AbortSignal.timeout`、`apps/cli/src/hook.test.ts`）。
+  - 待たずに進むことは、待てば打ち切りまで返らない場面（Exit を送らない fake の ptyd など）を作り、操作を打ち切りより短い `Bun.sleep` と `Promise.race` して確かめる。テストの既定の timeout は打ち切りより長いことがあり、待ちを戻す変異も通すため（`packages/workbench/src/ui/store.test.ts`）。
   - 偽の GitHub に request が届くのは、`requests` を poll せず `received(count)` を await する。固定の sleep でも待たない。
 - 手元の暦日や時刻で切る処理は、テストの中で `process.env.TZ` を UTC 以外（`Asia/Tokyo` など）にして確かめ、`finally` で戻す。`bun test` は TZ を UTC にするので、UTC の日付で切る誤りも通る（`packages/usage/src/usage.test.ts`）。
 - oRPC の client の procedure は `spyOn` で差し替えられない。client は property を読むたびに新しい Proxy を返すため。呼び出しを記録するか差し替えるときは、client を `new Proxy` で包み、`get` でその key だけを替えて、呼び手に渡す（`packages/task/src/ui/bench-close.test.ts`）。
