@@ -1,4 +1,4 @@
-import type { RunButton } from '@monica/task/contract'
+import type { Pressable, RunButton, RunButtonRow } from '@monica/task/contract'
 
 import type { PressReply, RunButtonRequest, RunButtonsReply } from './run-button-relay.ts'
 
@@ -21,8 +21,11 @@ const LABELS: Record<RunButton['run'], string> = {
   reopen: 'Reopen',
 }
 
-const RUN = { pressed: LABELS.running, type: 'monica.runFromButton' } as const
-const REOPEN = { pressed: 'Reopening', type: 'monica.reopenFromButton' } as const
+const PRESSED: Record<Pressable, string> = {
+  new: LABELS.running,
+  resume: LABELS.running,
+  reopen: 'Reopening',
+}
 
 /** Issues の一覧なら number が無く、Issue の画面なら number がある。 */
 function issuesPathOf(pathname: string): { repo: string; number: string | undefined } | null {
@@ -138,21 +141,24 @@ async function scan() {
     }
     return
   }
-  for (const { ref, button, reason } of reply.buttons) {
-    if (!button && !reason) continue
-    for (const slot of asked.get(ref) ?? []) {
-      const { host, layout } = slot
-      if (host.dataset.monicaRef !== ref || !host.isConnected) continue
-      if (button) {
-        const { cell, refusal } = runButtonFor(slot, button.run)
-        buttons.set(host, [cell, refusal])
-        layout.place(host, cell, refusal)
-      } else if (reason) {
-        const cell = disabledRunButtonFor(slot, reason)
-        buttons.set(host, [cell])
-        layout.place(host, cell)
-      }
+  for (const row of reply.buttons) {
+    for (const slot of asked.get(row.ref) ?? []) {
+      if (slot.host.dataset.monicaRef === row.ref && slot.host.isConnected) draw(slot, row)
     }
+  }
+}
+
+// ボタンも reason も無い行（読めなかった Issue）には何も出さない。
+function draw(slot: Slot, { button, reason }: RunButtonRow) {
+  const { host, layout } = slot
+  if (button) {
+    const { cell, refusal } = runButtonFor(slot, button.run)
+    buttons.set(host, [cell, refusal])
+    layout.place(host, cell, refusal)
+  } else if (reason) {
+    const cell = disabledRunButtonFor(slot, reason)
+    buttons.set(host, [cell])
+    layout.place(host, cell)
   }
 }
 
@@ -246,14 +252,14 @@ function tooltipFor(button: HTMLButtonElement, text: string): HTMLElement {
   return tooltip
 }
 
-// Issue の画面では隠れた側の container にも同じ ref のボタンがあるので、ref の付いた要素をすべて決め直す。
-function redecide(ref: string) {
-  for (const { host } of slotsOnPage()) {
-    if (host.dataset.monicaRef !== ref) continue
-    for (const element of buttons.get(host) ?? []) element.remove()
-    delete host.dataset.monicaRef
+// Issue の画面では隠れた側の container にも同じ ref のボタンがあるので、ref の付いた要素をすべて描き直す。
+function redraw(ref: string, row: RunButtonRow) {
+  for (const slot of slotsOnPage()) {
+    if (slot.host.dataset.monicaRef !== ref) continue
+    for (const element of buttons.get(slot.host) ?? []) element.remove()
+    buttons.delete(slot.host)
+    draw(slot, row)
   }
-  scheduleScan()
 }
 
 function runButtonFor(
@@ -271,19 +277,18 @@ function runButtonFor(
     event.preventDefault()
     event.stopPropagation()
     // GitHub のページの script が .click() で押した run は通さない。
-    if (!event.isTrusted || button.disabled) return
+    if (!event.isTrusted || button.disabled || run === 'running') return
     button.disabled = true
-    const press = run === 'reopen' ? REOPEN : RUN
-    button.textContent = press.pressed
+    button.textContent = PRESSED[run]
     refusal.textContent = ''
-    const reply = await send<PressReply>({ type: press.type, ref })
-    if (reply?.accepted) {
-      if (press === REOPEN) redecide(ref)
+    const reply = await send<PressReply>({ type: 'monica.press', ref, run })
+    if (reply && 'row' in reply) {
+      redraw(ref, reply.row)
       return
     }
     button.disabled = false
     button.textContent = LABELS[run]
-    refusal.textContent = reply ? reply.reason : 'Monica was reloaded; reload this page'
+    refusal.textContent = reply ? reply.failed : 'Monica was reloaded; reload this page'
   })
   return { cell, refusal }
 }

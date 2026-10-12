@@ -2,12 +2,12 @@ import { ORPCError } from '@orpc/server'
 
 import type { BenchDeps } from './bench.ts'
 import { reopenTask } from './close.ts'
-import type { PromptKind, ReopenOutput, RunButtonsOutput, RunOutput } from './contract.ts'
+import type { Pressable, PromptKind, RunButtonRow, RunButtonsOutput } from './contract.ts'
 import { isLinkedIssue } from './copy.ts'
 import { type GitHubIssue, oneLine } from './github.ts'
 import { taskIfTracked } from './open-task.ts'
 import { formatRef, type IssueRef, parseRef } from './ref.ts'
-import { refusalOf, type RunErrors, runPlanned } from './run-claude.ts'
+import { runPlanned } from './run-claude.ts'
 import { isMap, labelVerdict, planRun, type RunPlan } from './run-plan.ts'
 import { queryByRepo, type SyncDeps } from './sync.ts'
 
@@ -35,10 +35,7 @@ function planOf({ db, reservations }: Pick<BenchDeps, 'db' | 'reservations'>, is
 }
 
 // resume と running のボタンはラベルの規則より先に決まるので、ラベルが prompt を選ばない Issue にも出る。
-function buttonOf(
-  plan: RunPlan,
-  issue: GitHubIssue,
-): Pick<RunButtonsOutput['buttons'][number], 'button' | 'reason'> {
+function buttonOf(plan: RunPlan, issue: GitHubIssue): Pick<RunButtonRow, 'button' | 'reason'> {
   switch (plan.type) {
     case 'reopen':
       return { button: { run: 'reopen' }, reason: null }
@@ -74,62 +71,75 @@ export async function runButtons(
   }
 }
 
-export async function runFromButton(
+/** 押下を行っても断っても、押す前に読んだ Issue と押下の後の Task Ledger で決めた次の行を返す。 */
+export async function press(
   deps: SyncDeps & BenchDeps,
   ref: string,
-  errors: RunErrors,
-): Promise<RunOutput> {
+  shown: Pressable,
+): Promise<RunButtonRow> {
   const issue = await readIssue(deps, ref)
-  const { plan } = planOf(deps, issue)
+  if (!issue) return { ref, button: null, reason: null }
+  const planned = planOf(deps, issue)
+  const now = buttonOf(planned.plan, issue)
+  if (now.button?.run !== shown) return { ref, ...now }
+  try {
+    await carryOut(deps, issue, planned)
+  } catch (error) {
+    if (!isRefusal(error)) throw error
+  }
+  return { ref, ...buttonOf(planOf(deps, issue).plan, issue) }
+}
+
+async function carryOut(
+  deps: SyncDeps & BenchDeps,
+  issue: GitHubIssue,
+  { tracked, plan }: ReturnType<typeof planOf>,
+): Promise<void> {
   switch (plan.type) {
     // resume する claude は前の会話の途中か後なので、どの種類の prompt も送り直さない（ADR-0024）。
     case 'resume':
-      return runPlanned(deps, { facts: issue, nodeId: issue.nodeId, plan }, errors)
+      await runPlanned(deps, { facts: issue, nodeId: issue.nodeId, plan }, refuse)
+      return
     case 'new': {
       const prompt = plan.kind && promptOf(plan.kind, issue)
-      return runPlanned(deps, { facts: issue, nodeId: issue.nodeId, plan, prompt }, errors)
+      await runPlanned(deps, { facts: issue, nodeId: issue.nodeId, plan, prompt }, refuse)
+      return
     }
-    default:
-      throw refusalOf(plan, errors)
-  }
-}
-
-export async function reopenFromButton(
-  deps: SyncDeps & Pick<BenchDeps, 'reservations'>,
-  ref: string,
-): Promise<ReopenOutput> {
-  const issue = await readIssue(deps, ref)
-  const { tracked, plan } = planOf(deps, issue)
-  // Task Ledger の写しは次の sync まで repo の改名前の名前を持つので、頼まれた ref でなく node ID で引き当てた Task の ref で reopen する。
-  if (plan.type === 'reopen' && tracked) {
-    return reopenTask(
-      deps,
-      { ref: formatRef(tracked.issue) },
-      {
-        // reopen の sync が判定の後に closed になった Issue を写すので、写しで見直す。
-        recheck({ issue: copied }) {
-          if (copied.state === 'closed') throw refused(`${formatRef(copied)} is a closed Issue`)
+    case 'reopen':
+      if (!tracked) return
+      // Task Ledger の写しは次の sync まで repo の改名前の名前を持つので、頼まれた ref でなく node ID で引き当てた Task の ref で reopen する。
+      await reopenTask(
+        deps,
+        { ref: formatRef(tracked.issue) },
+        {
+          // reopen の sync が判定の後に closed になった Issue を写すので、写しで見直す。
+          recheck({ issue: copied }) {
+            if (copied.state === 'closed') throw refuse()
+          },
         },
-      },
-    )
+      )
   }
-  throw refused(plan.type === 'refused' ? plan.message : `${formatRef(issue)} is not a closed Task`)
 }
 
-async function readIssue(deps: SyncDeps, ref: string): Promise<GitHubIssue> {
+/** 押下を規則か live な Run が断った印。 */
+class Refused extends Error {}
+
+const refuse = () => new Refused()
+
+// 読んだ後に Task が close されたか close の途中なら、Task を引き直す所が BAD_REQUEST か CONFLICT で断るので、それも断りとして次の行で返す。
+const isRefusal = (error: unknown) =>
+  error instanceof Refused ||
+  (error instanceof ORPCError && (error.code === 'BAD_REQUEST' || error.code === 'CONFLICT'))
+
+async function readIssue(deps: SyncDeps, ref: string): Promise<GitHubIssue | undefined> {
   const parsed = parseRef(ref)
   const { issues, failures } = await readIssues(deps, [parsed])
   const issue = issues.get(key(parsed))
-  if (issue) return issue
-  if (failures.length > 0) {
-    throw new ORPCError('BAD_GATEWAY', {
-      message: `could not read ${formatRef(parsed)} from GitHub: ${failures.join('; ')}`,
-    })
-  }
-  throw new ORPCError('NOT_FOUND', { message: `GitHub did not return ${formatRef(parsed)}` })
+  if (issue || failures.length === 0) return issue
+  throw new ORPCError('BAD_GATEWAY', {
+    message: `could not read ${formatRef(parsed)} from GitHub: ${failures.join('; ')}`,
+  })
 }
-
-const refused = (message: string) => new ORPCError('PRECONDITION_FAILED', { message })
 
 function parsedOrNull(ref: string): IssueRef | null {
   try {

@@ -32,7 +32,7 @@ type Launch = {
   resumed: string | null
 }
 
-export type RunErrors = ORPCErrorConstructorMap<typeof runErrors>
+type RunErrors = ORPCErrorConstructorMap<typeof runErrors>
 
 type Request = { prompt?: string; inPlace?: boolean; force?: boolean }
 
@@ -54,7 +54,7 @@ export async function runTask(
   if (found.bench) refuseInPlace(found.bench, input.inPlace, formatRef(found.issue))
   const facts = copyFacts(deps.db, found.issue.id)
   const fromLedger = planFromLedger(deps.db, deps.reservations, found, facts, input)
-  const refuse = (refusal: Refusal) => refusalOf(refusal, errors, { hintForce: true })
+  const refuse = (refusal: Refusal) => refusalOf(refusal, errors)
   if (fromLedger)
     return start(deps, { found, tracked, facts, plan: fromLedger, warnings: [] }, input, refuse)
   const synced = await syncForNewRun(deps, found)
@@ -71,10 +71,9 @@ export async function runPlanned(
     plan,
     prompt,
   }: { facts: IssueFacts; nodeId: string; plan: Launchable; prompt?: string },
-  errors: RunErrors,
+  refuse: (refusal: Refusal) => Error,
 ): Promise<RunOutput> {
   const { found, tracked } = await findOrTrack(deps, facts, nodeId)
-  const refuse = (refusal: Refusal) => refusalOf(refusal, errors)
   const launching =
     plan.type === 'resume'
       ? { found, tracked, facts, plan, warnings: [] }
@@ -120,21 +119,16 @@ async function start(
   }
 }
 
-export function refusalOf(
-  refusal: Refusal,
-  errors: RunErrors,
-  { hintForce = false }: { hintForce?: boolean } = {},
-): Error {
+function refusalOf(refusal: Refusal, errors: RunErrors): Error {
   switch (refusal.type) {
     case 'running':
       return new ORPCError('CONFLICT', { message: refusal.message })
     case 'reopen':
       return new ORPCError('PRECONDITION_FAILED', { message: refusal.message })
     case 'refused': {
-      const message =
-        hintForce && refusal.forceHint
-          ? `${refusal.message}; ${refusal.forceHint}`
-          : refusal.message
+      const message = refusal.forceHint
+        ? `${refusal.message}; ${refusal.forceHint}`
+        : refusal.message
       return refusal.blockers
         ? errors.BLOCKED({ message, data: { blockers: refusal.blockers } })
         : new ORPCError('PRECONDITION_FAILED', { message })

@@ -7,7 +7,7 @@ import { closeTask, reopenTask } from './close.ts'
 import { contract } from './contract.ts'
 import { currentTask } from './current.ts'
 import { listTasks } from './list.ts'
-import { reopenFromButton, runButtons, runFromButton } from './run-button.ts'
+import { press, runButtons } from './run-button.ts'
 import { runTask } from './run-claude.ts'
 import { syncCommand } from './sync.ts'
 import { internals, type TaskLedger } from './task.ts'
@@ -34,11 +34,8 @@ export const router = os.router({
   runButtons: os.runButtons.handler(({ context, input }) =>
     runButtons(internals(context.taskLedger), input.refs),
   ),
-  runFromButton: os.runFromButton.handler(({ context, input, errors }) =>
-    runFromButton(internals(context.taskLedger), input.ref, errors),
-  ),
-  reopenFromButton: os.reopenFromButton.handler(({ context, input }) =>
-    reopenFromButton(internals(context.taskLedger), input.ref),
+  press: os.press.handler(({ context, input }) =>
+    press(internals(context.taskLedger), input.ref, input.run),
   ),
   current: os.current.handler(({ context, input }) =>
     currentTask(context.db, input.terminalSessionId),
