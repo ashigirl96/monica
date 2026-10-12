@@ -41,8 +41,7 @@ export type Runspace = Layout['runspaces'][number]
 // oRPC の client は callable な Proxy で、jotai の set が updater と取り違えるので `() => client` で渡す。
 export const workbenchClientAtom = atom<WorkbenchClient | null>(null)
 
-// exitRecorded は Backend が閉じた Tab の Exit を記録するか、待ちを打ち切ると resolve し、reject しない。
-export type LastTabClosed = (runspaceId: string, exitRecorded: Promise<void>) => void
+export type LastTabClosed = (runspaceId: string) => void
 
 // workbench は誰が Runspace を所有するかを知らないので、閉じて空になった所有された Runspace は slot に渡す（ADR-0005）。
 export const lastTabClosedAtom = atom<LastTabClosed | null>(null)
@@ -304,19 +303,6 @@ function isGone(e: unknown): boolean {
   return typeof e === 'object' && e !== null && 'code' in e && e.code === 'NOT_FOUND'
 }
 
-const EXIT_POLL_MS = 50
-const EXIT_WAIT_MS = 3000
-
-// Agent Session は Backend が ptyd の Exit を記録したときに終わるので、その前に Task の close を頼むと、
-// 終わらせた claude が live な Run に見えて guard に止められる。
-async function untilExitRecorded(get: Getter, terminalSessionId: string) {
-  for (let waited = 0; waited < EXIT_WAIT_MS; waited += EXIT_POLL_MS) {
-    const listed = await clientOf(get).terminalSession.list()
-    if (!listed.some((s) => s.id === terminalSessionId && !isDeadStatus(s.status))) return
-    await new Promise((resolve) => setTimeout(resolve, EXIT_POLL_MS))
-  }
-}
-
 // Terminal Session の終了は Backend が tab.close の transaction の後に予約するので、webview からは頼まない（ADR-0023）。
 async function closeTab(get: Getter, set: Setter, { runspace, tab }: TabInRunspace) {
   // 空になったかは close の transaction で決まる。読み直した layout では、間に Tab を外へ移した分と区別できない。
@@ -332,13 +318,9 @@ async function closeTab(get: Getter, set: Setter, { runspace, tab }: TabInRunspa
     await set(reloadAtom)
     return
   }
-  const exitRecorded = untilExitRecorded(get, tab.terminalSessionId).catch((e: unknown) =>
-    warnFailed('waiting for the exit', e),
-  )
-  // 読み直して Tab の無い Bench を出す前に渡し、slot が Exit を待つ間の中身を決められるようにする。
-  get(lastTabClosedAtom)?.(emptiedRunspaceId, exitRecorded)
+  // 読み直して Tab の無い Bench を出す前に渡し、slot が close の間の中身を決められるようにする。
+  get(lastTabClosedAtom)?.(emptiedRunspaceId)
   await set(reloadAtom)
-  await exitRecorded
 }
 
 export const closeTerminalTabAtom = action(async (get, set, tabId?: string) => {

@@ -47,17 +47,9 @@ function runspaceOfTab({ db }: Fixture, terminalSessionId: string) {
     .get()?.runspaceId
 }
 
-function tabIdOf({ db }: Fixture, terminalSessionId: string) {
-  return db
-    .select({ id: tab.id })
-    .from(tab)
-    .where(eq(tab.terminalSessionId, terminalSessionId))
-    .get()!.id
-}
-
 function moveByTabMove(fixture: Fixture, terminalSessionId: string, runspaceId: string) {
   return fixture.workbenchClient.tab.move({
-    id: tabIdOf(fixture, terminalSessionId),
+    id: fixture.tabIdOf(terminalSessionId),
     runspaceId,
     index: 0,
   })
@@ -95,7 +87,7 @@ test('a layout signal after attach leaves the Run attach made alone, without a f
   const errors = spyOn(console, 'error')
 
   await fixture.workbenchClient.tab.setCwd({
-    id: tabIdOf(fixture, outside),
+    id: fixture.tabIdOf(outside),
     cwd: '/work/elsewhere',
   })
 
@@ -248,7 +240,7 @@ test('attach refuses a Terminal Session whose Tab was closed, a call from outsid
   const fixture = started()
   await fixture.openBench(ref)
   const closed = await fixture.openTabOutsideBench()
-  await fixture.workbenchClient.tab.close({ id: tabIdOf(fixture, closed) })
+  await fixture.workbenchClient.tab.close({ id: fixture.tabIdOf(closed) })
   const outside = await fixture.openTabOutsideBench()
 
   expect((await failure(fixture.client.attach({ ref, terminalSessionId: closed }))).code).toBe(

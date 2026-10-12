@@ -4,6 +4,7 @@ import { mkdirSync } from 'node:fs'
 import { tab } from '@monica/workbench/schema'
 
 import { LAUNCH_TIMEOUT_MS } from './reservation.ts'
+import { run } from './schema.ts'
 import { cleanUp, failure, setup } from './testing.ts'
 
 afterEach(() => {
@@ -98,6 +99,38 @@ test('when the Terminal Session of a run ends before its claude becomes a Run, t
 
   await fixture.exit(terminalSessionId)
 
+  expect(await fixture.client.run({ ref })).toMatchObject({ ref, resumed: null })
+})
+
+test('once the Tab of a run is closed before its claude becomes a Run, the next run passes and the button is not running, before the exit is recorded', async () => {
+  const fixture = await tracked()
+  const { terminalSessionId } = await fixture.client.run({ ref, inPlace: true })
+
+  await fixture.closeTab(terminalSessionId)
+
+  expect(await fixture.client.runButtons({ refs: [ref] })).toEqual({
+    buttons: [{ ref, button: { kind: 'tackle', run: 'new' }, reason: null }],
+  })
+  expect(await fixture.client.run({ ref })).toMatchObject({ ref, resumed: null })
+})
+
+test('once the Tab of a run is closed before its claude becomes a Run, close without --force passes before the exit is recorded', async () => {
+  const fixture = await tracked()
+  const { terminalSessionId } = await fixture.client.run({ ref, inPlace: true })
+
+  await fixture.closeTab(terminalSessionId)
+
+  expect(await fixture.client.close({ ref })).toMatchObject({ ref, warnings: [] })
+})
+
+test('a claude whose Tab was closed does not become a Run when its SessionStart comes before the exit', async () => {
+  const fixture = await tracked()
+  const { terminalSessionId } = await fixture.client.run({ ref, inPlace: true })
+  await fixture.closeTab(terminalSessionId)
+
+  await fixture.hook(terminalSessionId, 's-1', 'SessionStart', { source: 'startup' })
+
+  expect(fixture.db.select().from(run).all()).toEqual([])
   expect(await fixture.client.run({ ref })).toMatchObject({ ref, resumed: null })
 })
 

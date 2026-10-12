@@ -143,6 +143,23 @@ test("a claude that becomes a Run while close removes the worktree keeps its Tab
   expect((await client.list({ closed: true })).tasks).toMatchObject([{ ref }])
 })
 
+test('a claude that becomes a Run while close removes the worktree and then has its Tab closed is no late Run, and close completes', async () => {
+  const fixture = await withWorktreeBench()
+  const { db, client, claudeTab } = fixture
+  const pause = pauseBranchDeletion(fixture)
+  const closing = client.close({ ref })
+  await until(() => existsSync(pause.started))
+
+  await fixture.hook(claudeTab, 's-1', 'SessionStart', { source: 'startup' })
+  await fixture.closeTab(claudeTab)
+  writeFileSync(pause.release, '')
+  const output = await closing
+
+  expect(output).toMatchObject({ ref, spared: false, warnings: [] })
+  expect(db.select().from(runspace).all()).toEqual([])
+  expect(tabsOf(fixture)).toEqual([])
+})
+
 test('close returns before ptyd answers the Terminate of the Bench, and the Task reopens right after', async () => {
   const fixture = await withWorktreeBench()
   const finish = fixture.ptyd.holdNext('terminate')

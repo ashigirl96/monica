@@ -244,6 +244,43 @@ test('a live Run stops close of an in-place Bench', async () => {
   expect(benchOf(fixture)).toBeDefined()
 })
 
+test('a Run whose Tab was closed does not stop close before its exit is recorded, so only the git guard does', async () => {
+  const fixture = await tracked({ origin: {} })
+  const { client, cwd } = fixture
+  const { terminalSessionId } = await client.run({ ref })
+  await fixture.hook(terminalSessionId, 's-1', 'SessionStart', { source: 'startup' })
+  await fixture.closeTab(terminalSessionId)
+  writeFileSync(join(cwd, 'draft.txt'), 'draft\n')
+
+  const error = await failure(client.close({ ref }))
+
+  expect(await fixture.workbenchClient.agentSession.list()).toMatchObject([{ sessionId: 's-1' }])
+  expect(error.data).toEqual({ reasons: [{ kind: 'uncommitted_changes', worktree: cwd }] })
+})
+
+test('a Run whose Tab was moved out of the Bench still stops close', async () => {
+  const fixture = await tracked()
+  mkdirSync(fixture.ghq.checkout('acme/app'), { recursive: true })
+  const { terminalSessionId } = await fixture.client.run({ ref, inPlace: true })
+  await fixture.hook(terminalSessionId, 's-1', 'SessionStart', { source: 'startup' })
+  const outside = await fixture.workbenchClient.runspace.create({
+    cwd: '/work',
+    rows: 24,
+    cols: 80,
+  })
+  await fixture.workbenchClient.tab.move({
+    id: fixture.tabIdOf(terminalSessionId),
+    runspaceId: outside.runspaceId,
+    index: 0,
+  })
+
+  const error = await failure(fixture.client.close({ ref }))
+
+  expect(error.data).toEqual({
+    reasons: [{ kind: 'active_run', agentSessionId: 's-1', state: 'waiting' }],
+  })
+})
+
 test('close of a Task without a Bench syncs it first, so list --closed shows the Issue as it was on GitHub', async () => {
   const fixture = await tracked()
   fixture.github.issue(ref, { title: 'Ship it now' })
