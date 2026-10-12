@@ -5,13 +5,17 @@ import { StickToBottom, useStickToBottomContext } from 'use-stick-to-bottom'
 export function ChatScroll({
   children,
   contentClassName,
+  zoom,
 }: {
   children: ReactNode
   contentClassName?: string
+  zoom?: number
 }) {
   return (
     <StickToBottom className="relative min-h-0 flex-1" resize="smooth" initial="instant">
-      <StickToBottom.Content className={contentClassName}>{children}</StickToBottom.Content>
+      <StickToBottom.Content className={contentClassName} style={{ zoom }}>
+        {children}
+      </StickToBottom.Content>
       <BackToLatest />
     </StickToBottom>
   )
