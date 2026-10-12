@@ -34,11 +34,16 @@ export type ChatEntry = {
   screenshot?: string
   /** API の再試行を待つ間、答えの代わりに出す 1 行。 */
   retrying?: string
+  /** claude が Web を検索している間、答えの下に淡く出す 1 行。 */
+  searching?: string
   /** 答えの場所に出す失敗。 */
   failure?: Failure
   /** plan の使用量の警告。答えの下に淡く出す。 */
   usage?: string
 }
+
+// 答えの代わりや下に出す一時の 1 行は、答えが進むか終わったら消す。
+const NO_PASSING_LINES = { retrying: undefined, searching: undefined }
 
 // oRPC が input を包む分の余白。
 const BODY_MARGIN_BYTES = 1024 * 1024
@@ -307,12 +312,23 @@ export function createChatStore(client: ChatClient, storage: ChoiceStorage): Cha
           if (notice) patch(id, { notice })
         } else if (event.type === 'text') {
           current.answer += event.text
-          patch(id, { answer: current.answer, status: 'answering', retrying: undefined })
+          patch(id, { ...NO_PASSING_LINES, answer: current.answer, status: 'answering' })
         } else if (event.type === 'retry') {
           // CLI は答えを最初からやり直すので、途中までの答えを消す。
           current.answer = ''
           current.retried = true
-          patch(id, { answer: '', status: 'answering', retrying: retryingLine(event.attempt) })
+          patch(id, {
+            ...NO_PASSING_LINES,
+            answer: '',
+            status: 'answering',
+            retrying: retryingLine(event.attempt),
+          })
+        } else if (event.type === 'search') {
+          patch(id, {
+            ...NO_PASSING_LINES,
+            status: 'answering',
+            searching: `検索中: ${event.query}`,
+          })
         } else {
           patch(id, { usage: usageLine(event, new Date()) })
         }
@@ -320,7 +336,7 @@ export function createChatStore(client: ChatClient, storage: ChoiceStorage): Cha
       if (!live()) return
       history = [...history, { question, page: current.page, answer: current.answer }]
       asking = undefined
-      patch(id, { status: 'answered' })
+      patch(id, { ...NO_PASSING_LINES, status: 'answered' })
     } catch (error) {
       if (!live()) return
       if (isUnreachable(error)) reach?.failed()
@@ -328,8 +344,8 @@ export function createChatStore(client: ChatClient, storage: ChoiceStorage): Cha
       asking = undefined
       failed = { id, question, input: current.input, shown: current.shown }
       patch(id, {
+        ...NO_PASSING_LINES,
         status: 'failed',
-        retrying: undefined,
         failure: failureOf(error, current, new Date()),
       })
     }
@@ -429,8 +445,8 @@ export function createChatStore(client: ChatClient, storage: ChoiceStorage): Cha
       start(sent)
       patch(sent.id, {
         answer: '',
+        ...NO_PASSING_LINES,
         status: 'waiting',
-        retrying: undefined,
         failure: undefined,
         usage: undefined,
       })
@@ -445,7 +461,7 @@ export function createChatStore(client: ChatClient, storage: ChoiceStorage): Cha
         ...history,
         { question, page, answer: text ? `${text}\n\n${STOPPED_MARK}` : STOPPED_MARK },
       ]
-      patch(id, { status: 'stopped', retrying: undefined })
+      patch(id, { ...NO_PASSING_LINES, status: 'stopped' })
     },
     toggleScreenshot() {
       withScreenshot = !withScreenshot

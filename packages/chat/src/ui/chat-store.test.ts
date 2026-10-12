@@ -14,7 +14,7 @@ import {
   type SnapshotEvent,
   type Unreadable,
 } from '../contract.ts'
-import { type ChatClient, createChatStore } from './chat-store.ts'
+import { type ChatClient, type ChatEntry, type ChatStore, createChatStore } from './chat-store.ts'
 import type { CurrentPage } from './current-page.ts'
 import { BackendUnreachable } from './native-host.ts'
 
@@ -946,6 +946,82 @@ test('a retry of the API drops the answer so far for a line that counts the retr
     answer: 'Two',
     status: 'answering',
   })
+})
+
+test('a search shows its query under the answer so far until the next text, which goes on with the answer', async () => {
+  const { client, store } = openChat()
+  store.ask('When was he born?')
+  await settled()
+  const { answer } = client.asked[0]!
+  answer.event({ type: 'search', query: 'Claude Shannon birthday' })
+  await settled()
+  const firstSearch = store.snapshot().entries[0]
+  answer.text('Let me look again. ')
+  answer.event({ type: 'search', query: 'Claude Shannon born 1916' })
+  await settled()
+  const secondSearch = store.snapshot().entries[0]
+
+  answer.text('He was born in 1916.')
+  await settled()
+
+  expect(firstSearch).toMatchObject({
+    status: 'answering',
+    answer: '',
+    searching: '検索中: Claude Shannon birthday',
+  })
+  expect(secondSearch).toMatchObject({
+    answer: 'Let me look again. ',
+    searching: '検索中: Claude Shannon born 1916',
+  })
+  expect(store.snapshot().entries[0]).toEqual({
+    id: 0,
+    question: 'When was he born?',
+    answer: 'Let me look again. He was born in 1916.',
+    status: 'answering',
+  })
+})
+
+async function searchingThen(
+  then: (answer: FakeAnswer, store: ChatStore) => void,
+): Promise<ChatEntry | undefined> {
+  const { client, store } = openChat()
+  store.ask('When was he born?')
+  await settled()
+  const { answer } = client.asked[0]!
+  answer.event({ type: 'search', query: 'Claude Shannon birthday' })
+  await settled()
+  then(answer, store)
+  await settled()
+  return store.snapshot().entries[0]
+}
+
+test('a search after a retry of the API takes the place of the retry line', async () => {
+  const { client, store } = openChat()
+  store.ask('When was he born?')
+  await settled()
+  const { answer } = client.asked[0]!
+  answer.event({ type: 'retry', attempt: 1 })
+  answer.event({ type: 'search', query: 'Claude Shannon birthday' })
+  await settled()
+
+  const entry = store.snapshot().entries[0]
+  expect(entry?.retrying).toBeUndefined()
+  expect(entry?.searching).toBe('検索中: Claude Shannon birthday')
+})
+
+test('the search line goes away when the answer ends, is stopped, fails or is retried by the API', async () => {
+  const ended = await searchingThen((answer) => answer.end())
+  const stopped = await searchingThen((_, store) => store.stop())
+  const failedOne = await searchingThen((answer) => answer.fail(declared('AGENT_FAILED')))
+  const retried = await searchingThen((answer) => answer.event({ type: 'retry', attempt: 1 }))
+
+  expect(ended).toMatchObject({ status: 'answered' })
+  expect(stopped).toMatchObject({ status: 'stopped' })
+  expect(failedOne).toMatchObject({ status: 'failed' })
+  expect(retried).toMatchObject({ retrying: expect.any(String) })
+  for (const entry of [ended, stopped, failedOne, retried]) {
+    expect(entry?.searching).toBeUndefined()
+  }
 })
 
 async function usageLine(event: Omit<Extract<ChatEvent, { type: 'usage' }>, 'type'>) {

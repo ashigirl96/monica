@@ -132,6 +132,12 @@ export const ChatEventSchema = z.discriminatedUnion('type', [
   }),
   z
     .object({
+      type: z.literal('search'),
+      query: z.string().describe('what claude searches the web for'),
+    })
+    .describe('claude is searching the web; the next text goes on with the answer'),
+  z
+    .object({
       type: z.literal('retry'),
       attempt: z.number().int().describe('which retry this is, from 1'),
     })

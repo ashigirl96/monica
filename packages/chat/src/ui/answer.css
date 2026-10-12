@@ -3,8 +3,10 @@
   contain: inline-size;
 }
 
+/* typeset は本文を muted-foreground で描くので、回答が主役の画面では dark の背景に沈む。 */
 .typeset {
   overflow-wrap: anywhere;
+  color: color-mix(in oklab, var(--foreground) 88%, transparent);
 }
 
 /* typeset は太さを font-variation-settings だけで付けるので、可変軸の無い日本語のフォントでは太字と見出しが太くならない。 */

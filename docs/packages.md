@@ -152,6 +152,7 @@ package ごとに in-memory の SQLite に自分の migration を当てる（tas
   - 子の process の timer はテストの process から spy できないので、子を `bun --preload <テスト用の file>` で起こし、preload で差し替える（hook の `AbortSignal.timeout`、`apps/cli/src/hook.test.ts`）。
   - 偽の GitHub に request が届くのは、`requests` を poll せず `received(count)` を await する。固定の sleep でも待たない。
 - 手元の暦日や時刻で切る処理は、テストの中で `process.env.TZ` を UTC 以外（`Asia/Tokyo` など）にして確かめ、`finally` で戻す。`bun test` は TZ を UTC にするので、UTC の日付で切る誤りも通る（`packages/usage/src/usage.test.ts`）。
+- 受けた値を `toMatchObject` に渡した後で読み直さない。Bun の `toMatchObject` は、受けた object の中で `expect.stringContaining` などの matcher に当たった値を、その matcher に置き換える（Bun 1.4.2）。後で読む値は、`toMatchObject` より前に取り出す。
 - 終わった行のように procedure に出ない行は、`@monica/<d>/schema` の table を SELECT して確かめてよい。他の domain が読むのと同じ面だから。
 
 ## contract の規約

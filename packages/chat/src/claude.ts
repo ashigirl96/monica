@@ -76,7 +76,9 @@ export function claudeOptions(deps: {
     settingSources: [],
     skills: [],
     strictMcpConfig: true,
-    tools: [],
+    tools: ['WebSearch'],
+    // 入れないと permissionPrompts: 'none' が WebSearch を聞かずに拒否する（ADR-0038）。
+    allowedTools: ['WebSearch'],
     disallowedTools: ['mcp__*'],
     permissionPrompts: 'none',
     persistSession: false,

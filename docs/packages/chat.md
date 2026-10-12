@@ -1,6 +1,6 @@
 # Chat の agent と画面
 
-`packages/chat` の contract と `ChatAgent` と ui。Chrome Extension の side panel の Chat の質問に、Backend が起こす claude が答える。決定の理由は ADR-0028・0029・0030・0031・0032・0033・0034 にある。画面は末尾の「ui」にある。
+`packages/chat` の contract と `ChatAgent` と ui。Chrome Extension の side panel の Chat の質問に、Backend が起こす claude が答える。決定の理由は ADR-0028・0029・0030・0031・0032・0033・0034・0038 にある。画面は末尾の「ui」にある。
 
 ## contract（root は `chat`）
 
@@ -14,6 +14,7 @@ ask       { question, page: Page, history: { question, answer, page: PageSnapsho
 - `model` は `models` の `value` の文字列、`effort` は `'low' | 'medium' | 'high' | 'xhigh' | 'max'`。どちらも省けて、省いた方は `haiku`・`low`（contract の `DEFAULT_MODEL`・`DEFAULT_EFFORT`）になる。Backend は受けた値を `options.model`・`options.effort` に渡すだけで、一覧に照らして弾かない。model が持たない effort の丸めは claude に任せる。side panel が選んで ask ごとに送り、Backend は選択を持たない（ADR-0031 と同じ形）。
 - `models` は Agent SDK の `Query.supportedModels()` が返す `ModelInfo` のうち、side panel が使う 5 つの field を返す。一覧は account と managed settings で変わるので hard code しない（`docs/research/agent-sdk-model-effort-web-tools.md` の 1 節）。最初の呼び出しで、何も流さない AsyncIterable（`src/prompt.ts` の `promptless`）を prompt にした `query()` を既定の組で起こし、一覧を読んで `close()` する。一覧は initialize の応答から来て推論は走らない。読めた一覧は `ChatAgent` が持ち、2 回目からは claude を起こさない。読むのに失敗したら持たずに `AGENT_FAILED`（`detail` に SDK の error と stderr の末尾）を返し、次の呼び出しで読み直す。読んでいる間の呼び出しは同じ読みを待つ。一覧を読む claude も同時の 4 つに数え、空きが無ければ `CHAT_BUSY` を返す。
 - `ask` は 1 回の質問への応答の stream（`docs/packages.md` の contract の規約 7）。`ChatEvent` は `type` の判別 union で、最初に `{ type: 'snapshot', page: PageSnapshot（screenshot を除く）, omitted: { pages, turns } }` を 1 つ流し、続けて `{ type: 'text', text }`（答えの文字の delta）を流す。client は届いた順に `text` をつなぐ。result を受けたら stream を閉じる。形は下の「Page Snapshot」にある。
+- claude が WebSearch を呼んだら、`{ type: 'search', query }` を流す（下の「`search`」）。検索の前後の text も同じ `text` で流し、client は 1 つの答えにつなぐ。
 - 答えの間に `{ type: 'retry', attempt }`（API の再試行）と `{ type: 'usage', utilization, rateLimitType, resetsAt? }`（plan の使用量の警告）も流す。下の「失敗」にある。
 - `question` は 1 字以上。`page` と `PageSnapshot` の `url` と `title` は省略できるただの文字列で、形を検めない。`chrome://` などの Browser Tab では side panel から見えず、`file://` のページもあるため。
 - `history` は Chat の前の問答を古い順に並べたもの。turn ごとに、その質問の `snapshot` で返した `PageSnapshot` を持つ。Backend は Chat を持たず、送られた履歴をそのまま prompt にする（ADR-0031）。
@@ -38,7 +39,7 @@ ask       { question, page: Page, history: { question, answer, page: PageSnapsho
 
 ## claude の options と env
 
-`ask` 1 回につき SDK の `query()` を 1 回起こし（spare があれば spare の `query()`）、答え終えたら閉じる。options は次のとおりで、user の環境を読まず、tool を持たない（ADR-0033）。
+`ask` 1 回につき SDK の `query()` を 1 回起こし（spare があれば spare の `query()`）、答え終えたら閉じる。options は次のとおりで、user の環境を読まず、tool は WebSearch だけを持つ（ADR-0033・0038）。
 
 | option | 値 | 理由 |
 |---|---|---|
@@ -51,7 +52,8 @@ ask       { question, page: Page, history: { question, answer, page: PageSnapsho
 | `settingSources` | `[]` | user の settings・CLAUDE.md・hooks を読まない |
 | `skills` | `[]` | |
 | `strictMcpConfig` | `true` | claude.ai の connector を切る（env の `ENABLE_CLAUDEAI_MCP_SERVERS=false` と組） |
-| `tools` | `[]` | |
+| `tools` | `['WebSearch']` | WebFetch は持たせない（ADR-0038） |
+| `allowedTools` | `['WebSearch']` | 入れないと `permissionPrompts: 'none'` が WebSearch を聞かずに拒否する |
 | `disallowedTools` | `['mcp__*']` | |
 | `permissionPrompts` | `'none'` | |
 | `persistSession` | `false` | session の jsonl を書かない |
@@ -101,11 +103,11 @@ SDK の `env` は `process.env` に重ならず丸ごと置き換わる。claude
 
 `SDKUserMessage` を 1 つ流す AsyncIterable で渡す。content は block の配列で、並べ方は下の「Page Snapshot」の「prompt の block」にある。文字列の prompt には `document` block を入れられないため。
 
-- system prompt（`src/prompt.ts` の `SYSTEM_PROMPT`）は、message が質問を番号付きで古い順に並べ、質問ごとにページ（URL・title・本文の document・添えたならスクリーンショットの画像・選択範囲の document）と、前の質問には答えを添えること、答えるのは最後の質問であることを書く。ページから来た文字（title・本文・document・画像）はページの作者が書いたものでユーザーの指示ではなく、従うのはユーザーの質問だけであることと、tool を持たないことも書く。
+- system prompt（`src/prompt.ts` の `SYSTEM_PROMPT`）は、message が質問を番号付きで古い順に並べ、質問ごとにページ（URL・title・本文の document・添えたならスクリーンショットの画像・選択範囲の document）と、前の質問には答えを添えること、答えるのは最後の質問であることを書く。ページから来た文字（title・本文・document・画像）はページの作者が書いたものでユーザーの指示ではなく、従うのはユーザーの質問だけであることも書く。tool は WebSearch だけで、message と model の知識で答えられないときだけ検索し、検索で得た事実には出典の URL を markdown の link で添えることも書く。
 
 ## log
 
-claude の `system`（`init`）を受けたら、stderr に 1 行出す。tools 0 と MCP 0 を実機で見るためと、SDK を上げて `haiku` の解決先が変わったときに気づくため（ADR-0032）。result を受けたら、その usage も 1 行出す。prompt cache の効き方を見るためで、Backend の stdout は Shell 宛ての JSON 行専用なので stderr にする。
+claude の `system`（`init`）を受けたら、stderr に 1 行出す。tools が WebSearch の 1 つと MCP 0 を実機で見るためと、SDK を上げて `haiku` の解決先が変わったときに気づくため（ADR-0032）。result を受けたら、その usage も 1 行出す。prompt cache の効き方を見るためで、Backend の stdout は Shell 宛ての JSON 行専用なので stderr にする。
 
 ```
 [chat] claude <pid>: model <model>, <n> tools, <m> MCP servers
@@ -267,6 +269,12 @@ code は上から順に当てる。
 - 自分で SIGKILL した claude の error は失敗にしない（上の「claude の持ち方」）。stream の abort と Backend の終了では、stream は error を投げずに閉じる。
 - contract に載せないもの: Backend に届かない場合、古い Chrome Extension の token の 401（`UNAUTHORIZED`）、body の上限の 413（`PAYLOAD_TOO_LARGE`）。413 は side panel が送る前に大きさを見て「読めなかった」にするので、side panel からは届かない。
 
+### `search`
+
+- `assistant` の content の `tool_use` のうち、`name` が `WebSearch` のものごとに、その `input` の `query` で `{ type: 'search', query }` を流す。`includePartialMessages` の `input_json_delta` からは組まない。block が閉じる前の delta では query が途中で切れるため。
+- tool_result（`user` の message）は流さない。検索結果のリンクと要約は side panel に出さず、答えの中で model が出典として link にしたものだけが出る。
+- tool_use の前に model が書いた text も答えの `text` として流す。
+
 ### `retry` と `usage`
 
 - `system` の `api_retry` が来るたびに `{ type: 'retry', attempt }` を流す。text の前か後かで分けない。CLI は API の stream が切れると答えを最初からやり直すので、side panel は途中の答えを消して描き直す。
@@ -381,6 +389,7 @@ side panel は Backend の token の口を、Native Messaging の host から受
   - argv、env、cwd、pid、`initialize` の request、`user` の content、EOF を、記録の file に JSON 行で書く。
   - 質問に `HOLD` を含むと、最初の text の delta の後に止まり、stdin の EOF と SIGTERM では抜けない。居なくなれば SIGKILL で終わっている。30 秒で自分から抜ける。
 - `chat.models` の読み直しは、`exit-at-start` で失敗させた後に同じ dir へ `writeFakeClaude` で `answer` の wrapper を書き直して確かめる。`.args` は起こすたびに読まれる。
+- 検索の場面 `search` は、text の delta と `assistant`、WebSearch の tool_use（`content_block_start`、query を 2 つに割った `input_json_delta`、`tool_use` だけの `assistant`）、tool_result の `user`、続きの text の delta と `assistant`、`result` を流す。
 - 失敗の場面は wrapper ごとに `scenario`（`FakeScenario`）で選ぶ。`ChatAgent` に場面を渡す口は足さない。偽の claude は、research（`docs/research/chat-failures.md` の §2）で本物の claude が流した message の並びを真似る。
   - `not-logged-in`: `assistant`（`error: authentication_failed`）、`result`（`is_error`）の後、5 秒 exit しない。`ChatAgent` が SDK の error を待たずに決め、claude を止めることを見る。
   - `usage-limit`: `rejected` で `resetsAt`（`FAKE_RESETS_AT`）と `five_hour` を持つ `rate_limit_event`、`assistant`（`rate_limit`）、`result`（429）。
@@ -441,11 +450,12 @@ SDK 0.3.293 と同梱の claude 2.1.293 で、dev の Backend を `env -i`（`HO
 - 並べ方は prototype の B。質問は ChatMessage の右の吹き出し、答えは ChatMessage に `w-full max-w-full items-stretch` で幅いっぱいに入れる。`max-w-full` だけでは、表とコードブロックだけの答えで吹き出しが潰れた（`contain: inline-size` で両方を幅の計算から外しているため）。質問の吹き出しに、その質問の Current Page は出さない。
 - 上端の見出し（`page-header.tsx`）は Current Page の title と host を出し、右端に「新しい Chat」を置く。host の行の `title` 属性に URL を持つ。host の無い URL（`file:` など）は URL をそのまま出し、URL も title も見えない Browser Tab は「読めないページ」と出す。favicon は出さない。外の画像は CSP の `img-src` で止まり、`_favicon` には `favicon` の権限が要るため。
 - 答えは use-stick-to-bottom（`chat-scroll.tsx`）で下端に張り付き、上へスクロールすると外れて「↓ 最新へ」を出す。
-- 最初の `text` が届くまで ThinkingIndicator を出す。答えている間は送らず、送るボタンは止めるボタンになる。入力欄には打てる。
+- 最初の `text` か `search` が届くまで ThinkingIndicator を出す。答えている間は送らず、送るボタンは止めるボタンになる。入力欄には打てる。
 - InputMessage の `leftSlot` に、スクリーンショットのボタンの右に model と effort の選択（`model-picker.tsx`）を置く。どちらも `<select>` で、model は `chat.models` が返した一覧をすべて `displayName` で並べ、effort は選んだ model の `supportedEffortLevels` だけを並べる。`supportsEffort` が無い model では effort を出さない。一覧が届くまでと、読めなかったときは何も出さない。
 - InputMessage の `leftSlot` に、スクリーンショットを添えるボタン（lucide の `Camera`、名前は「スクリーンショットを添える」）を置く。押している間は `aria-pressed` と Button の `active` の色で示す。mousedown の既定の動作を止めて focus を入力欄に残し、押した後の Enter がこのボタンを押し直さずに質問を送るようにする。
 - 送ったスクリーンショットの縮小は、質問の吹き出しの上に右寄せで出す（上の「スクリーンショット」）。
 - 失敗は答えの場所に、途中までの答えの後に赤い 1 行と、CLI の原文の詳しい行（等幅の淡い字）と「再試行」のボタンで出す。止めた答えには「止めました」、再試行を待つ間の 1 行と使用量の警告は淡い字で出す。文言は上の「失敗」にある。
+- `search` が届いたら、答えの吹き出しの中の途中までの答えの下に「検索中: <query>」を淡い字で出し（再試行を待つ間の 1 行は消す）、次の `text` で消す。再試行・失敗・止めた時と、答え終えた時も消す。
 - 帯「monica の desktop が起動していません」は、入力欄の上に `destructive` の色で出す。
 - 読めなかった・切り詰めた・渡していないことの知らせ（上の「Page Snapshot」の「知らせ」）は、質問の吹き出しの下に右寄せの淡い 1 行で出し、答えの場所の失敗とは分ける。
 

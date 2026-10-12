@@ -12,6 +12,7 @@ import { useIcons } from './fluid/lib/icon-context.tsx'
 import { ThinkingIndicator } from './fluid/thinking-indicator.tsx'
 import { ModelPicker } from './model-picker.tsx'
 import { PageHeader } from './page-header.tsx'
+import { usePinchZoom } from './pinch-zoom.ts'
 import { readCurrentPage } from './read-current-page.ts'
 
 function Faint({ children }: { children: string }) {
@@ -58,6 +59,7 @@ function Reply({ entry, onRetry }: { entry: ChatEntry; onRetry: (() => void) | u
     <ChatMessage from="assistant" className="w-full max-w-full items-stretch">
       <div className="flex flex-col gap-2">
         {entry.answer && <Answer text={entry.answer} />}
+        {entry.searching && <Faint>{entry.searching}</Faint>}
         {entry.status === 'stopped' && <Faint>止めました</Faint>}
         <FailureLines entry={entry} onRetry={onRetry} />
         {entry.usage && <Faint>{entry.usage}</Faint>}
@@ -90,10 +92,11 @@ function ChatBody({ store }: { store: ChatStore }) {
   const { entries, picker, answering, withScreenshot, unreachable, retryable } =
     useSyncExternalStore(store.subscribe, store.snapshot)
   const [draft, setDraft] = useState('')
+  const zoom = usePinchZoom()
 
   return (
     <>
-      <ChatScroll contentClassName="flex flex-col gap-5 px-3 py-4">
+      <ChatScroll contentClassName="flex flex-col gap-5 px-3 py-4" zoom={zoom}>
         {entries.length === 0 && (
           <p className="pt-10 text-center text-[13px] text-muted-foreground">
             このページについて質問できます

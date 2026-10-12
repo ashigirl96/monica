@@ -1,9 +1,10 @@
 import { rmSync, symlinkSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 
-/** 偽の claude の場面。answer のほかは、research で本物の claude が流した失敗の並びを真似る。 */
+/** 偽の claude の場面。answer と search のほかは、research で本物の claude が流した失敗の並びを真似る。 */
 export type FakeScenario =
   | 'answer'
+  | 'search'
   | 'usage-warning'
   | 'not-logged-in'
   | 'usage-limit'
