@@ -16,8 +16,9 @@ Workbench で Bench の最後の Tab を閉じると、task の ui が `force` �
 
 ## Consequences
 
-- 止めた理由は、`CLOSE_REFUSED` を受けたときに task の ui が Bench ごとに memory に覚える。Backend の contract は変えない。app を再起動した後は理由が無く、「Close anyway」だけを出す。
+- 止めた理由は、`CLOSE_REFUSED` を受けたときに task の ui が Bench ごとに memory に覚える。Backend の contract は変えない。app を再起動した後は理由が無く、理由の無い Bench と同じく「Close」を出す。
 - 覚えた理由は、その Bench で次に強制でない close を始めたときと close が通ったときに捨てる。Tab を開いてまた閉じれば、強制でない close が走り直して理由を取り直す。Tab が開いたことは workbench の外の task の ui から見えないので、Tab を開いた時点では捨てない。開いた Tab を外へ移して Bench を空にしたときは close が走らないので、前の理由が残る。
 - 「Close anyway」は guard で止まった Bench にだけ出す。close の途中の Tab の無い Bench には出さない。
+- 理由を覚えていない Tab の無い Bench（最後の Tab を外へ移して空にした、準備中に空になって close を呼ばなかった、app を再起動した）には、1 度の押下で強制でない close を呼ぶ「Close」を出す。強制でない close は guard が守るので 2 度押しにしない。断られれば理由を覚え、「Close anyway」に替わる。準備中に空になった Bench の close を、準備が終わった時に自分でやり直すことはしない。
 - 強制の意味は CLI の `--force` と同じで、ActiveRun も越える。強制でも断られたとき（準備中の `CONFLICT`、git の失敗の `PRECONDITION_FAILED`）は今までどおり error の toast に出す。
 - workbench は task を知らないので（ADR-0005）、Tab の無い Bench の画面に出す中身は、apps/desktop が task の ui の component を slot ではめる。
