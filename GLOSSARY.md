@@ -11,7 +11,7 @@
 _Avoid_: work item, ticket
 
 **Issue**:
-GitHub Issue のローカルの写し（title、state、labels、parent、blocker）。body は写さない。Task が無くても存在できる（parent や Blocker として写しただけの issue）。open / closed は GitHub 側の事実で、Task の close とは独立。
+GitHub Issue のローカルの写し（title、state、labels、sub-issue の数、parent、blocker）。body は写さない。Task が無くても存在できる（parent や Blocker として写しただけの issue）。open / closed は GitHub 側の事実で、Task の close とは独立。
 _Avoid_: ExternalReference, external ref
 
 **Blocker**:

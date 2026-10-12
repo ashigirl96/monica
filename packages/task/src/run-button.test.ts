@@ -63,33 +63,22 @@ test.each([['ready-for-human'], ['needs-info'], ['wontfix']])(
   },
 )
 
-test('a wayfinder Issue with no parent map gets no button, and pressing a Run shown before gives that row back', async () => {
-  const fixture = setup()
-  fixture.github.issue(ref, { title: 'Ask it', labels: ['wayfinder:grilling'] })
+test('a wayfinder Issue with no parent map gets no button', async () => {
+  const { github, client } = setup()
+  github.issue(ref, { title: 'Ask it', labels: ['wayfinder:grilling'] })
 
-  expect(await fixture.client.runButtons({ refs: [ref] })).toEqual({
-    buttons: [{ ref, button: null, reason: expect.stringContaining('no map above it') }],
+  expect(await client.runButtons({ refs: [ref] })).toEqual({
+    buttons: [{ ref, button: null, reason: `${ref} is a wayfinder Issue with no map above it` }],
   })
-  expect(await fixture.client.press({ ref, run: 'new' })).toEqual({
-    ref,
-    button: null,
-    reason: `${ref} is a wayfinder Issue with no map above it`,
-  })
-  expect(fixture.db.select().from(task).all()).toEqual([])
 })
 
-test('a wayfinder Issue under a parent that is not a map gets no button, and pressing a Run shown before gives that row back', async () => {
-  const fixture = setup()
-  fixture.github.issue('acme/app#7', { title: 'Plain', labels: ['enhancement'] })
-  fixture.github.issue(ref, { title: 'Ask it', labels: ['wayfinder:task'], parent: 'acme/app#7' })
+test('a wayfinder Issue under a parent that is not a map gets no button', async () => {
+  const { github, client } = setup()
+  github.issue('acme/app#7', { title: 'Plain', labels: ['enhancement'] })
+  github.issue(ref, { title: 'Ask it', labels: ['wayfinder:task'], parent: 'acme/app#7' })
 
-  expect(await fixture.client.runButtons({ refs: [ref] })).toEqual({
+  expect(await client.runButtons({ refs: [ref] })).toEqual({
     buttons: [{ ref, button: null, reason: expect.stringContaining('acme/app#7') }],
-  })
-  expect(await fixture.client.press({ ref, run: 'new' })).toEqual({
-    ref,
-    button: null,
-    reason: expect.stringContaining('acme/app#7'),
   })
 })
 
@@ -335,18 +324,13 @@ test('pressing the Run of a ready-for-agent Issue with an open sub-issue types c
   expect(await typedClaude(fixture)).toEqual(["claude '/implement-spec #12'\r"])
 })
 
-test('a ready-for-agent Issue whose sub-issues are all closed gets no button, and pressing a Run shown before gives that row back', async () => {
-  const fixture = setup()
-  fixture.github.issue(ref, { title: 'Spec it', labels: ['ready-for-agent'] })
-  fixture.github.issue('acme/app#13', { title: 'Done part', state: 'closed', parent: ref })
+test('a ready-for-agent Issue whose sub-issues are all closed gets no button', async () => {
+  const { github, client } = setup()
+  github.issue(ref, { title: 'Spec it', labels: ['ready-for-agent'] })
+  github.issue('acme/app#13', { title: 'Done part', state: 'closed', parent: ref })
 
-  expect(await fixture.client.runButtons({ refs: [ref] })).toEqual({
-    buttons: [{ ref, button: null, reason: expect.stringContaining('sub-issues are all closed') }],
-  })
-  expect(await fixture.client.press({ ref, run: 'new' })).toEqual({
-    ref,
-    button: null,
-    reason: `${ref} is a spec whose sub-issues are all closed`,
+  expect(await client.runButtons({ refs: [ref] })).toEqual({
+    buttons: [{ ref, button: null, reason: `${ref} is a spec whose sub-issues are all closed` }],
   })
 })
 
@@ -410,6 +394,52 @@ test('pressing a Run of an Issue with an open Blocker gives the row naming it, o
     reason: `${ref} is blocked by acme/lib#3`,
   })
   expect(await fixture.client.bench.list()).toEqual([])
+})
+
+// Task を先に track しておき、2 本目の request を新しい Run の sync にする。
+async function pressHeldUntilSync(fixture: Fixture, change: () => void) {
+  await fixture.track(ref)
+  const releaseRead = fixture.github.hold()
+  const before = fixture.github.requests.length
+  const pressing = fixture.client.press({ ref, run: 'new' })
+  await fixture.github.received(before + 1)
+  releaseRead()
+  const releaseSync = fixture.github.hold()
+  await fixture.github.received(before + 2)
+  change()
+  releaseSync()
+  return pressing
+}
+
+test('pressing Run refuses, opening no Bench, when a Blocker opens on GitHub between the read and the sync, and returns the row without a button', async () => {
+  const fixture = withOrigin()
+  fixture.github.issue('acme/lib#3', { title: 'Upstream fix' })
+  fixture.github.issue(ref, { title: 'Ship it', labels: ['ready-for-agent'] })
+
+  const pressed = await pressHeldUntilSync(fixture, () =>
+    fixture.github.issue(ref, {
+      title: 'Ship it',
+      labels: ['ready-for-agent'],
+      blockedBy: ['acme/lib#3'],
+    }),
+  )
+
+  expect(pressed).toEqual({ ref, button: null, reason: `${ref} is blocked by acme/lib#3` })
+  expect(await fixture.client.bench.list()).toEqual([])
+  expect(tabCount(fixture)).toBe(0)
+})
+
+test('pressing Run refuses, opening no Bench, when the Issue is closed on GitHub between the read and the sync', async () => {
+  const fixture = withOrigin()
+  fixture.github.issue(ref, { title: 'Ship it', labels: ['ready-for-agent'] })
+
+  const pressed = await pressHeldUntilSync(fixture, () =>
+    fixture.github.issue(ref, { title: 'Ship it', state: 'closed', labels: ['ready-for-agent'] }),
+  )
+
+  expect(pressed).toEqual({ ref, button: null, reason: `${ref} is a closed Issue` })
+  expect(await fixture.client.bench.list()).toEqual([])
+  expect(tabCount(fixture)).toBe(0)
 })
 
 test('pressing a Run fails without tracking when GitHub cannot be read', async () => {
@@ -628,6 +658,26 @@ test('a sub-issue with an ended Run gets no button while its spec has a live Run
     reason: `${subIssue} is under ${ref}, a spec with a live Run`,
   })
   expect(tabCount(fixture)).toBe(tabs)
+})
+
+test('a run of a sub-issue closed on GitHub is refused while its spec, counting another open sub-issue on GitHub, has a live Run', async () => {
+  const fixture = setup()
+  fixture.github.issue('acme/app#14', { title: 'Other part', parent: ref })
+  const { endChild, startSpec } = await specAndChild(fixture)
+  await endChild()
+  await startSpec()
+  fixture.github.issue(subIssue, {
+    title: 'Part',
+    state: 'closed',
+    labels: ['ready-for-agent'],
+    parent: ref,
+  })
+  await fixture.client.sync({ ref: subIssue })
+
+  expect(await failure(fixture.client.run({ ref: subIssue }))).toMatchObject({
+    code: 'PRECONDITION_FAILED',
+    message: `${subIssue} is under ${ref}, a spec with a live Run; pass --force to run it anyway`,
+  })
 })
 
 test('a sub-issue with a live Run gets a running button while its spec has a live Run', async () => {

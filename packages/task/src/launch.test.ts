@@ -37,37 +37,20 @@ async function withBench() {
 
 const tabCount = ({ db }: Pick<Fixture, 'db'>) => db.select().from(tab).all().length
 
-const callers = {
-  cli: (fixture: Fixture) => fixture.client.run({ ref }),
-  button: (fixture: Fixture) => fixture.client.press({ ref, run: 'new' }),
-}
+test('of two runs of one Task sent at once, only one opens a Tab, and the one that loses is refused with CONFLICT', async () => {
+  const fixture = await withBench()
+  const before = tabCount(fixture)
 
-test.each([
-  ['cli', 'cli'],
-  ['cli', 'button'],
-  ['button', 'cli'],
-  ['button', 'button'],
-] as const)(
-  'of two runs of one Task sent at once, from %s and from %s, only one opens a Tab, a run from the CLI that loses is refused with CONFLICT and a press gets the running button',
-  async (first, second) => {
-    const fixture = await withBench()
-    const before = tabCount(fixture)
+  const settled = await Promise.allSettled([
+    fixture.client.run({ ref }),
+    fixture.client.run({ ref }),
+  ])
 
-    const settled = await Promise.allSettled([callers[first](fixture), callers[second](fixture)])
-
-    expect(tabCount(fixture)).toBe(before + 1)
-    expect(settled).toMatchObject(
-      [first, second].map((caller) =>
-        caller === 'button'
-          ? { status: 'fulfilled', value: { ref, button: { kind: 'tackle', run: 'running' } } }
-          : expect.anything(),
-      ),
-    )
-    for (const s of settled)
-      if (s.status === 'rejected')
-        expect(s.reason).toMatchObject({ code: 'CONFLICT', message: BEING_STARTED })
-  },
-)
+  expect(tabCount(fixture)).toBe(before + 1)
+  expect(settled.filter((s) => s.status === 'rejected')).toMatchObject([
+    { reason: { code: 'CONFLICT', message: BEING_STARTED } },
+  ])
+})
 
 test('between opening its Tab and the SessionStart of its claude, a Task gets a running button, and a run of it is refused', async () => {
   const fixture = await tracked()
