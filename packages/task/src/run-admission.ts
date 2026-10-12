@@ -107,15 +107,10 @@ async function admitFromCli(
   try {
     const { found, tracked } = await findOrTrack(deps, parseRef(ref))
     if (found.bench) refuseInPlace(found.bench, inPlace, formatRef(found.issue))
-    const decided = fromLedger(
-      deps.db,
-      deps.reservations,
-      found,
-      copyFacts(deps.db, found.issue.id),
-      rules,
-    )
+    const facts = copyFacts(deps.db, found.issue.id)
+    const decided = fromLedger(deps.db, deps.reservations, found, facts, rules)
     if (decided && decided.type !== 'resume') throw new Refused(decided)
-    const starting = decided ?? (await syncForNewRun(deps, found))
+    const starting = decided ? { ...decided, facts } : await syncForNewRun(deps, found)
     return await launch(deps, { found, tracked }, rules, starting, { prompt, inPlace })
   } catch (error) {
     if (error instanceof Refused) throw cliError(error.refusal, errors)
@@ -137,9 +132,12 @@ async function press(deps: Deps, ref: string, shown: Pressable): Promise<RunButt
       if (found) await reopenFromButton(deps, found)
     } else if (isLaunchable(decided)) {
       const admitted = await findOrTrack(deps, read, read.nodeId)
+      // resume は sync しないので、押した時に読んだ答えで当て直す。
       const starting =
-        decided.type === 'resume' ? decided : await syncForNewRun(deps, admitted.found, read)
-      if ('facts' in starting) judged = starting.facts
+        decided.type === 'resume'
+          ? { ...decided, facts: read }
+          : await syncForNewRun(deps, admitted.found, read)
+      judged = starting.facts
       await launch(deps, admitted, BUTTON, starting, {})
     }
   } catch (error) {
@@ -176,19 +174,17 @@ async function launch(
   deps: Deps,
   admitted: Admitted,
   rules: Rules,
-  starting: Resuming | Synced,
+  starting: (Resuming & { facts: IssueFacts }) | Synced,
   { prompt, inPlace }: { prompt?: string; inPlace?: boolean },
 ): Promise<RunOutput> {
   let launching: Launchable
   let opening: Launch
-  let facts: IssueFacts
+  const { facts } = starting
   let typed = prompt
   if (starting.type === 'resume') {
     launching = starting
-    facts = copyFacts(deps.db, admitted.found.issue.id)
     opening = resumeOf(admitted.found, starting.resumable)
   } else {
-    facts = starting.facts
     const decided = decideNew(facts, rules)
     if (!isLaunchable(decided)) throw new Refused(decided)
     launching = decided

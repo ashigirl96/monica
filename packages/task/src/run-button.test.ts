@@ -693,6 +693,21 @@ test('a run of a sub-issue closed on GitHub is refused while its spec, counting 
   })
 })
 
+test('pressing Resume of a sub-issue whose parent has stopped being a spec on GitHub resumes it, though the copy still holds the parent as a spec with a live Run', async () => {
+  const fixture = setup()
+  const { endChild, startSpec } = await specAndChild(fixture)
+  await endChild()
+  await startSpec()
+  fixture.github.issue(ref, { title: 'Spec it', labels: ['ready-for-human'] })
+
+  expect(await fixture.client.press({ ref: subIssue, run: 'resume' })).toEqual({
+    ref: subIssue,
+    button: { kind: 'tackle', run: 'running' },
+    reason: null,
+  })
+  expect((await typedClaude(fixture, 3)).at(-1)).toBe("claude --resume 's-part'\r")
+})
+
 test('a sub-issue with a live Run gets a running button while its spec has a live Run', async () => {
   const fixture = setup()
   const { startSpec } = await specAndChild(fixture)
