@@ -10,6 +10,7 @@ import { ChatMessage } from './fluid/chat-message.tsx'
 import { InputMessage } from './fluid/input-message.tsx'
 import { useIcons } from './fluid/lib/icon-context.tsx'
 import { ThinkingIndicator } from './fluid/thinking-indicator.tsx'
+import { ModelPicker } from './model-picker.tsx'
 import { PageHeader } from './page-header.tsx'
 import { readCurrentPage } from './read-current-page.ts'
 
@@ -86,10 +87,8 @@ function ScreenshotToggle({ store, pressed }: { store: ChatStore; pressed: boole
 }
 
 function ChatBody({ store }: { store: ChatStore }) {
-  const { entries, answering, withScreenshot, unreachable, retryable } = useSyncExternalStore(
-    store.subscribe,
-    store.snapshot,
-  )
+  const { entries, picker, answering, withScreenshot, unreachable, retryable } =
+    useSyncExternalStore(store.subscribe, store.snapshot)
   const [draft, setDraft] = useState('')
 
   return (
@@ -141,7 +140,12 @@ function ChatBody({ store }: { store: ChatStore }) {
           }}
           status={answering ? 'streaming' : 'idle'}
           onStop={store.stop}
-          leftSlot={<ScreenshotToggle store={store} pressed={withScreenshot} />}
+          leftSlot={
+            <>
+              <ScreenshotToggle store={store} pressed={withScreenshot} />
+              {picker && <ModelPicker store={store} picker={picker} />}
+            </>
+          }
           history={entries.map(({ question }) => question)}
           placeholder="このページについて質問"
           sendLabel="送る"
@@ -154,7 +158,7 @@ function ChatBody({ store }: { store: ChatStore }) {
 /** side panel の Chat の画面。 */
 export function ChatApp({ client }: { client: ChatClient }) {
   const [page, setPage] = useState<CurrentPage>()
-  const [store] = useState(() => createChatStore(client))
+  const [store] = useState(() => createChatStore(client, localStorage))
 
   // side panel を閉じると document ごと Chat が終わる。片付けが走るのは dev の StrictMode の付け直しだけ。
   useEffect(() => {

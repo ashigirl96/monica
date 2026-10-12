@@ -82,7 +82,30 @@ export const TurnSchema = z.object({
   page: PageSnapshotSchema,
 })
 
-export const AskInputSchema = z.object({
+export const DEFAULT_MODEL = 'haiku'
+export const DEFAULT_EFFORT = 'low'
+
+export const EffortSchema = z.enum(['low', 'medium', 'high', 'xhigh', 'max'])
+
+// Backend は一覧に照らさずに claude へ渡し、model が持たない effort の丸めも claude に任せる。
+export const ChoiceSchema = z.object({
+  model: z
+    .string()
+    .min(1)
+    .optional()
+    .describe(`the value of a model from chat.models; ${DEFAULT_MODEL} when left out`),
+  effort: EffortSchema.optional().describe(`${DEFAULT_EFFORT} when left out`),
+})
+
+export const ModelSchema = z.object({
+  value: z.string().describe('what to pass as the model of chat.prepare and chat.ask'),
+  displayName: z.string(),
+  description: z.string(),
+  supportsEffort: z.boolean().optional(),
+  supportedEffortLevels: z.array(EffortSchema).optional(),
+})
+
+export const AskInputSchema = ChoiceSchema.extend({
   question: z.string().min(1),
   page: PageSchema.describe('the Current Page when the question was sent'),
   history: z
@@ -150,6 +173,14 @@ export const askErrors = {
   },
 }
 
+export const modelsErrors = {
+  CHAT_BUSY: askErrors.CHAT_BUSY,
+  AGENT_FAILED: askErrors.AGENT_FAILED,
+}
+
+export type Effort = z.infer<typeof EffortSchema>
+export type Choice = z.infer<typeof ChoiceSchema>
+export type Model = z.infer<typeof ModelSchema>
 export type Unreadable = z.infer<typeof UnreadableSchema>
 export type Page = z.infer<typeof PageSchema>
 export type PageSnapshot = z.infer<typeof PageSnapshotSchema>
@@ -163,9 +194,17 @@ export const contract = {
   prepare: meta
     .meta({
       description:
-        'Start a spare claude so that the next question is answered sooner; returns without waiting for it',
+        'Start a spare claude with the model and effort so that the next question with the same pair is answered sooner; returns without waiting for it',
     })
+    .input(ChoiceSchema.optional())
     .output(z.void()),
+  models: meta
+    .meta({
+      description:
+        'List the models that claude offers, each with the effort levels it supports; the Backend reads them once and keeps them',
+    })
+    .errors(modelsErrors)
+    .output(z.array(ModelSchema)),
   ask: meta
     .meta({
       description:

@@ -5,11 +5,14 @@
 ## contract（root は `chat`）
 
 ```
-prepare   → void
-ask       { question, page: Page, history: { question, answer, page: PageSnapshot }[] } → event iterator of ChatEvent   errors: CHAT_BUSY, NOT_AUTHENTICATED, USAGE_LIMIT, AGENT_FAILED
+prepare   { model?, effort? }? → void
+models    → { value, displayName, description, supportsEffort?, supportedEffortLevels? }[]   errors: CHAT_BUSY, AGENT_FAILED
+ask       { question, page: Page, history: { question, answer, page: PageSnapshot }[], model?, effort? } → event iterator of ChatEvent   errors: CHAT_BUSY, NOT_AUTHENTICATED, USAGE_LIMIT, AGENT_FAILED
 ```
 
-- `prepare` は spare（下の「spare」）を起こし、その initialize を待たずに返る。spare が既にあるか、claude を 4 つ持っていれば何もしない。Chrome Extension は Backend の不在の確かめにもこれを呼ぶので、速く返す。
+- `prepare` は受けた model と effort で spare（下の「spare」）を起こし、その initialize を待たずに返る。同じ組の spare が既にあるか、claude を 4 つ持っていれば何もしない。違う組の spare は捨てて起こし直す。Chrome Extension は Backend の不在の確かめにもこれを呼ぶので、速く返す。
+- `model` は `models` の `value` の文字列、`effort` は `'low' | 'medium' | 'high' | 'xhigh' | 'max'`。どちらも省けて、省いた方は `haiku`・`low`（contract の `DEFAULT_MODEL`・`DEFAULT_EFFORT`）になる。Backend は受けた値を `options.model`・`options.effort` に渡すだけで、一覧に照らして弾かない。model が持たない effort の丸めは claude に任せる。side panel が選んで ask ごとに送り、Backend は選択を持たない（ADR-0031 と同じ形）。
+- `models` は Agent SDK の `Query.supportedModels()` が返す `ModelInfo` のうち、side panel が使う 5 つの field を返す。一覧は account と managed settings で変わるので hard code しない（`docs/research/agent-sdk-model-effort-web-tools.md` の 1 節）。最初の呼び出しで、何も流さない AsyncIterable（`src/prompt.ts` の `promptless`）を prompt にした `query()` を既定の組で起こし、一覧を読んで `close()` する。一覧は initialize の応答から来て推論は走らない。読めた一覧は `ChatAgent` が持ち、2 回目からは claude を起こさない。読むのに失敗したら持たずに `AGENT_FAILED`（`detail` に SDK の error と stderr の末尾）を返し、次の呼び出しで読み直す。読んでいる間の呼び出しは同じ読みを待つ。一覧を読む claude も同時の 4 つに数え、空きが無ければ `CHAT_BUSY` を返す。
 - `ask` は 1 回の質問への応答の stream（`docs/packages.md` の contract の規約 7）。`ChatEvent` は `type` の判別 union で、最初に `{ type: 'snapshot', page: PageSnapshot（screenshot を除く）, omitted: { pages, turns } }` を 1 つ流し、続けて `{ type: 'text', text }`（答えの文字の delta）を流す。client は届いた順に `text` をつなぐ。result を受けたら stream を閉じる。形は下の「Page Snapshot」にある。
 - 答えの間に `{ type: 'retry', attempt }`（API の再試行）と `{ type: 'usage', utilization, rateLimitType, resetsAt? }`（plan の使用量の警告）も流す。下の「失敗」にある。
 - `question` は 1 字以上。`page` と `PageSnapshot` の `url` と `title` は省略できるただの文字列で、形を検めない。`chrome://` などの Browser Tab では side panel から見えず、`file://` のページもあるため。
@@ -30,7 +33,7 @@ ask       { question, page: Page, history: { question, answer, page: PageSnapsho
 - `htmlWorker` と `pdfWorker` は HTML と PDF を本文にする Worker の module の URL、`cMaps` は pdf.js の cMap の folder（下の「Page Snapshot」の「本文への変換」と「PDF の本文」）。省けば、Worker は packages/chat の `src/html-worker.ts` と `src/pdf-worker.ts`、`cMaps` は packages/chat から解いた node_modules の `pdfjs-dist/cmaps` になる（`src/page/snapshot.ts` の `defaultReaders`）。`bun test` はどれも省いて動く。
   - compile した Backend はどれも解けないので、Backend は自分の隣の `html-worker.ts` と `pdf-worker.ts`（build の entrypoint）と、`--asset` で同梱した `cmaps` を渡す（`docs/packages/backend.md` の「起動と終了」）。
 - `stop()` は同期で、持っている claude すべて（spare を含む）に SIGKILL を送り、spare の時限を消す。Backend の `exit()` は `process.exit(0)` まで await を挟まずに進むため。
-- procedure の handler が使う `prepare` と `ask` は、型に出さずに `internals(chatAgent)` で引く（`docs/packages.md` の「server entry の形」）。router の context は `{ chatAgent }`。
+- procedure の handler が使う `prepare`・`models`・`ask` は、型に出さずに `internals(chatAgent)` で引く（`docs/packages.md` の「server entry の形」）。router の context は `{ chatAgent }`。
 - chat は他の domain を import せず、他の domain からも import されない。前者は `.oxlintrc.json` の override が、後者は package.json が守る。table は持たないが、空の journal を持つ（`docs/packages/migration.md`）。
 
 ## claude の options と env
@@ -39,8 +42,8 @@ ask       { question, page: Page, history: { question, answer, page: PageSnapsho
 
 | option | 値 | 理由 |
 |---|---|---|
-| `model` | `'haiku'` | |
-| `effort` | `'low'` | |
+| `model` | ask・prepare の `model`。省けば `'haiku'` | side panel が選ぶ（上の「contract」） |
+| `effort` | ask・prepare の `effort`。省けば `'low'` | 同上 |
 | `thinking` | 渡さない | Haiku 5.5 は thinking を切れない。thinking の delta は流さない |
 | `systemPrompt` | 文字列 | Claude Code の preset を置き換える（ADR-0033）。SDK は 1 要素の配列にして initialize で渡す |
 | `title` | `'Chat'` | 渡さないと CLI が最初の user message を丸ごと入れた title 生成の request を別に出し、使用量が倍になる。`persistSession: false` なのでどこにも残らない |
@@ -89,7 +92,9 @@ SDK の `env` は `process.env` に重ならず丸ごと置き換わる。claude
 ### spare
 
 - Backend 全体で 1 つまで。`startup()` で起こし、`prepare` と、result を受けて答えを閉じた時に起こす。abort と失敗の後には起こさない。abort はたいてい side panel を閉じたときで、次の質問が来ない見込みが高いため。
-- `ask` は spare があればそれを使う。起動中の spare は `startup()` の resolve を待って使い、2 つ目の claude を起こさない。`startup()` が失敗していたか、spare の child が既に終わっていたら、stderr に 1 行出して spare を捨て、`query()` で起こし直す。
+- spare は起こした model と effort の組を覚える。`prepare` はその組で、答えを閉じた時はその答えの組で起こす。組ごとに持つと同時の 4 つを圧迫するので、組が違っても 1 つのままにする。
+- `ask` の組が spare の組と違えば、spare を捨てて（initialize を終えていれば `WarmQuery.close()`、起動中なら SIGKILL）、ask の組で `query()` を起こす。選択を変えた直後の 1 問だけ spare の速さを失う。捨てた spare は抜けるまで同時の 4 つに数える。
+- `ask` は同じ組の spare があればそれを使う。起動中の spare は `startup()` の resolve を待って使い、2 つ目の claude を起こさない。`startup()` が失敗していたか、spare の child が既に終わっていたら、stderr に 1 行出して spare を捨て、`query()` で起こし直す。
 - 起こした時から 5 分使われなければ `WarmQuery.close()` で閉じる。使われていない spare は stdin の EOF で自分から抜ける。
 
 ## prompt
@@ -370,11 +375,12 @@ side panel は Backend の token の口を、Native Messaging の host から受
 - PDF の本文は `src/page/pdf.test.ts` が、Worker を通して確かめる。PDF は `src/page/test-pdf.ts` の `testPdf(pages)` が bytes を組み、binary の file を repo に置かない。`latin` のページは埋め込まない Helvetica、`japanese` のページは埋め込まない `HeiseiKakuGo-W5` と `UniJIS-UCS2-H` で書き、cMap が無いと日本語が落ちる。`'missing'` のページは無い object を指し、読めば pdf.js が例外を投げるので、残りのページを読まないことをそれで確かめる。ページの大きさは行の長さと数に合わせて広げる。pdf.js はページの外の字を本文に入れないため。
 - claude は `src/fake-claude.ts` の偽の claude に差し替える。テストは拡張子の無い `/bin/sh` の wrapper を一時 directory に置いて `claudePath` に渡す。wrapper は `@monica/chat/testing` の `writeFakeClaude(dir, recordPath, scenario?)` が置き、Backend のテスト（`apps/backend/src/main.test.ts`）も使う。置くのは repo の `src/fake-claude.sh` を指す symlink の `<dir>/claude` と、起こす bun・`fake-claude.ts` の path・記録の file・場面を 1 行ずつ書いた `<dir>/claude.args` で、`fake-claude.sh` は `$0.args` を読んで `exec "<bun>" "<fake-claude.ts>" "<記録の file>" <場面> "$@"` する。macOS は新しく書いた実行 file を初めて exec するたびに検査を挟み（1 回 0.1〜1 秒、system で 1 列に並ぶ）、exec 済みの file を指す symlink では挟まないため（`docs/packages/dev-loop.md` の「検査と CI」）。SDK は path が `.js`・`.mjs`・`.ts`・`.tsx`・`.jsx` で終わると `bun` か `node` を名前で起こすが、claude の env には `PATH` が無い。拡張子の無い path は直に起こす。wrapper の `/bin/sh` は env に `PWD`・`SHLVL`・`_` を足す。
 - 偽の claude は次のように話す。
-  - stdin の `control_request` に `control_response`（`subtype: success`、`response: {}`）を返す。
+  - stdin の `control_request` に `control_response`（`subtype: success`）を返す。`initialize` には `response` に `@monica/chat/testing` の `FAKE_MODELS`（effort を持つ `haiku` と持たない Haiku 4.5）を `models` で入れ、ほかは `response: {}`。
   - `user` の message を受けたら、`system`（`init`）、`stream_event`（`content_block_delta` の `text_delta` を 3 つと `thinking_delta` を 1 つ）、`assistant`、`result`（`subtype: success`）を 1 行ずつ書く。
   - stdin の EOF で抜ける。
   - argv、env、cwd、pid、`initialize` の request、`user` の content、EOF を、記録の file に JSON 行で書く。
   - 質問に `HOLD` を含むと、最初の text の delta の後に止まり、stdin の EOF と SIGTERM では抜けない。居なくなれば SIGKILL で終わっている。30 秒で自分から抜ける。
+- `chat.models` の読み直しは、`exit-at-start` で失敗させた後に同じ dir へ `writeFakeClaude` で `answer` の wrapper を書き直して確かめる。`.args` は起こすたびに読まれる。
 - 失敗の場面は wrapper ごとに `scenario`（`FakeScenario`）で選ぶ。`ChatAgent` に場面を渡す口は足さない。偽の claude は、research（`docs/research/chat-failures.md` の §2）で本物の claude が流した message の並びを真似る。
   - `not-logged-in`: `assistant`（`error: authentication_failed`）、`result`（`is_error`）の後、5 秒 exit しない。`ChatAgent` が SDK の error を待たずに決め、claude を止めることを見る。
   - `usage-limit`: `rejected` で `resetsAt`（`FAKE_RESETS_AT`）と `five_hour` を持つ `rate_limit_event`、`assistant`（`rate_limit`）、`result`（429）。
@@ -436,6 +442,7 @@ SDK 0.3.293 と同梱の claude 2.1.293 で、dev の Backend を `env -i`（`HO
 - 上端の見出し（`page-header.tsx`）は Current Page の title と host を出し、右端に「新しい Chat」を置く。host の行の `title` 属性に URL を持つ。host の無い URL（`file:` など）は URL をそのまま出し、URL も title も見えない Browser Tab は「読めないページ」と出す。favicon は出さない。外の画像は CSP の `img-src` で止まり、`_favicon` には `favicon` の権限が要るため。
 - 答えは use-stick-to-bottom（`chat-scroll.tsx`）で下端に張り付き、上へスクロールすると外れて「↓ 最新へ」を出す。
 - 最初の `text` が届くまで ThinkingIndicator を出す。答えている間は送らず、送るボタンは止めるボタンになる。入力欄には打てる。
+- InputMessage の `leftSlot` に、スクリーンショットのボタンの右に model と effort の選択（`model-picker.tsx`）を置く。どちらも `<select>` で、model は `chat.models` が返した一覧をすべて `displayName` で並べ、effort は選んだ model の `supportedEffortLevels` だけを並べる。`supportsEffort` が無い model では effort を出さない。一覧が届くまでと、読めなかったときは何も出さない。
 - InputMessage の `leftSlot` に、スクリーンショットを添えるボタン（lucide の `Camera`、名前は「スクリーンショットを添える」）を置く。押している間は `aria-pressed` と Button の `active` の色で示す。mousedown の既定の動作を止めて focus を入力欄に残し、押した後の Enter がこのボタンを押し直さずに質問を送るようにする。
 - 送ったスクリーンショットの縮小は、質問の吹き出しの上に右寄せで出す（上の「スクリーンショット」）。
 - 失敗は答えの場所に、途中までの答えの後に赤い 1 行と、CLI の原文の詳しい行（等幅の淡い字）と「再試行」のボタンで出す。止めた答えには「止めました」、再試行を待つ間の 1 行と使用量の警告は淡い字で出す。文言は上の「失敗」にある。
@@ -444,13 +451,16 @@ SDK 0.3.293 と同梱の claude 2.1.293 で、dev の Backend を `env -i`（`HO
 
 ### Chat の状態（`chat-store.ts`）
 
-React に依らない `createChatStore(client)` が Chat を持ち、`ChatApp` は `useSyncExternalStore` で描くだけにする。DOM の無い bun test で送受信を確かめるため。
+React に依らない `createChatStore(client, storage)` が Chat を持ち、`ChatApp` は `useSyncExternalStore` で描くだけにする。DOM の無い bun test で送受信を確かめるため。
 
 - Chat は side panel の document の memory にだけあり、window ごとに 1 つ。「新しい Chat」を押すか side panel を閉じると終わり、どこにも残さない。Backend が居なくなっても終わらない（ADR-0030・0031）。
 - `open(readPage, focus)` は side panel を開いた時に `ChatApp` の effect が 1 回呼び、`chat.prepare` を呼んで spare を起こさせる。届かなければ帯を出す（上の「失敗」の「Backend の不在の帯」）。`focus` は `ChatApp` が渡す `window` で、帯の間はその `focus` の event でも確かめ直す。返す関数で確かめ直しを止める。dev の StrictMode で 2 回呼ばれても、Backend が spare を 1 つに保つので害は無い。
 - `ask` は、送る時に `readPage({ screenshot, maxPdfBytes, signal })` で Current Page を読み直して `page` に入れ、答え終えた問答を古い順に `history` に入れて `chat.ask` を呼ぶ。`readPage` は await を挟まずに呼び、送る操作の user gesture の中で撮り始める。`ChatApp` が渡す `readPage` は `read-current-page.ts` の `readCurrentPage` で、撮り始めてから Browser Tab を取り直して `read-page.ts` で読む（上の「Page Snapshot」）。`maxPdfBytes` は PDF を読む上限（上の「PDF の取り方」）で、Current Page のスクリーンショットは読むのと並べて撮るので数えず、送る前の大きさの確かめが数える。答えている間は送らずに false を返し、スクリーンショットのボタンも外さない。答えの途中で Current Page が替わっても、delta はその質問の答えに足す。
 - 送った input は、答えが返るか次の質問を送るまで持ち、`retry` が `readPage` を呼ばずにそのまま送り直す。`stop` は stream を abort し、止めた印を付けて履歴に入れる（上の「失敗」の「再試行と履歴」）。
 - `snapshot()` の `withScreenshot` がボタンの状態で、`toggleScreenshot` が切り替える。`ask` が送ったら外す。
+- `createChatStore(client, storage)` の `storage` は選んだ model と effort を残す場所で、`ChatApp` が `localStorage` を渡す。key は `monica-chat-choice`、値は `{ model?, effort? }` の JSON。1 台の Chrome の 1 人の好みなので、Backend や monica.db には持たない。読めない値と、storage が投げるときは、何も選んでいないことにする。
+- `open` は `chat.models` も呼ぶ。`snapshot()` の `picker` が選択の UI の状態で、一覧と、選んでいる model と effort（何も選んでいなければ `haiku`・`low`）と、選べる effort を持つ。`chooseModel`・`chooseEffort` が選んで storage に残し、次の `prepare` と `ask` から付ける。会話の途中で変えてよい。
+- 付ける組: 一覧を読んでいる間は残した組をそのまま付け、spare をその組で起こさせる。一覧が届いたら、残した model が一覧に無ければ選択を外す（storage は消さない）。一覧を読めなければ何も付けない。effort は、その model が `supportsEffort` を持ち `supportedEffortLevels` に含むときだけ付ける。付けない field は Backend が既定にする。一覧を読めなかった side panel は、Backend の不在の帯が消えた時に読み直す。
 - 送ったスクリーンショットは、読み終えた時に質問の entry の `screenshot` に入れて縮小を出す。
 - 届いた `snapshot` の `page` に送ったスクリーンショットを足して、その問答の turn の `page` として履歴に入れ、`snapshot` から作った知らせを質問の entry の `notice` に入れる。
 - `startNewChat` は流れている stream を `signal` で abort し、問答と履歴を空にし、スクリーンショットのボタンを外す。abort の後に届いた delta は描かない。Backend は abort でその claude を止める。
@@ -478,7 +488,7 @@ React に依らない `createChatStore(client)` が Chat を持ち、`ChatApp` �
 - `current-page.test.ts` は `fake-chrome.ts` の偽の `chrome.tabs` で確かめる。偽物は `globalThis.chrome` に置いてテストの後に外し、`query` の `active`・`windowId`・`currentWindow` を本物と同じく絞る。chrome:// へ移ったときの url も title も無い `onUpdated` も出せる。
 - `read-page.test.ts` は同じ偽物の `chrome.scripting.executeScript` で確かめる。偽物は注入された関数を走らせず、`readings` に置いた結果を返すか、reject するか、返らない。省いた `contentType` は `text/html` になる。渡された injection は `injections` に残る。注入する関数そのもの（shadow root と選択範囲）は DOM が要るので、実機で確かめる。3 秒と 30 秒の打ち切りは `setTimeout` を `spyOn` して callback を手で呼ぶ。PDF の fetch は `fetch` を `spyOn` した偽物で、読まれた chunk の数を数える body を返す。打ち切りと止める操作は、`signal` にも応えずに返らない偽物で確かめる（`CODING_STANDARDS.md` の「テスト」）。`signal` で reject する偽物では、fetch の終わりを待つ実装でも通る。
 - `read-current-page.test.ts` は同じ偽物の `chrome.tabs.captureVisibleTab` と、偽の `createImageBitmap`・`OffscreenCanvas`・`devicePixelRatio` で、撮る時機・大きさと形式・撮れないとき・読めずに撮れたときを確かめる。偽の `captureVisibleTab` は `screenshots` に置いた大きさの偽の PNG を返すか、reject するか、返らない。呼ばれた引数は `captures` に残る。偽の canvas は画像を描かず、書き出した形式と quality と大きさを JSON にした Blob を返す。本物の縮小は bun test に canvas が無いので実機で確かめ、大きさの計算（`shrunkSize`）は `screenshot.test.ts` が純関数として確かめる。撮るのの 3 秒の打ち切りは、`executeScript` の 3 秒の timer と混ざらないよう、`screenshot.test.ts` が `takeScreenshot` を直に呼んで確かめる。
-- `chat-store.test.ts` は偽の client で確かめる。偽の答えの stream は `signal` に応えず、test が流した delta をそのまま渡すので、abort の後に届いた delta を描かないことを確かめられる。RPCLink の client と同じく、`@orpc/client` の `AsyncIteratorClass` で返す。偽の `readPage` は渡された `{ screenshot }` と PDF の上限と `signal` を記録し、`ask` が返る前に呼ばれたかと、再試行が読み直さないことと、止めたら読むのをやめさせたかを見られる。読み終えない `page` も返せる。
+- `chat-store.test.ts` は偽の client で確かめる。偽の答えの stream は `signal` に応えず、test が流した delta をそのまま渡すので、abort の後に届いた delta を描かないことを確かめられる。RPCLink の client と同じく、`@orpc/client` の `AsyncIteratorClass` で返す。偽の `readPage` は渡された `{ screenshot }` と PDF の上限と `signal` を記録し、`ask` が返る前に呼ばれたかと、再試行が読み直さないことと、止めたら読むのをやめさせたかを見られる。読み終えない `page` も返せる。偽の client の `models` は置いた一覧を返すか、置いていなければ届かない error を投げる。storage はテストの中の偽物（Map）を渡す。
   - 偽の client は、Backend の宣言した error を `@orpc/client` の `ORPCError`（`defined: true`、contract の `askErrors` の status と message）で、届かないことを `TypeError` で投げ分ける。ui の entry は server を import できないので、router を in-process で呼べないため。
   - 失敗の文言は store の entry の `failure` で確かめる。時刻の期待値は local の `Date` から作り、時刻帯に依らせない。
   - 帯の 5 秒おきの確かめ直しは `setInterval` を `spyOn` で捕まえて callback を手で呼び、focus は `open` に渡した `EventTarget` に `focus` の event を出す。

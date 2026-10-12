@@ -19,6 +19,15 @@ export function userMessage(content: Block[]): SDKUserMessage {
   }
 }
 
+/** 何も流さずに ended まで開けておく prompt。claude は initialize を済ませて prompt を待つ。 */
+export function promptless(ended: Promise<void>): AsyncIterable<SDKUserMessage> {
+  return {
+    [Symbol.asyncIterator]: () => ({
+      next: () => ended.then(() => ({ done: true, value: undefined })),
+    }),
+  }
+}
+
 // prompt が終わると SDK は claude の stdin を閉じるので、答えを受けるまで開けておく。
 export function singleTurn(message: SDKUserMessage): {
   prompt: AsyncIterable<SDKUserMessage>

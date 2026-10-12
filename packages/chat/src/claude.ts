@@ -3,6 +3,7 @@ import type { Readable, Writable } from 'node:stream'
 
 import type { Options } from '@anthropic-ai/claude-agent-sdk'
 
+import type { Choice } from './contract.ts'
 import { SYSTEM_PROMPT } from './prompt.ts'
 
 export type Claude = ChildProcessByStdio<Writable, Readable, Readable>
@@ -62,11 +63,12 @@ function claudeEnv(): { [key: string]: string } {
 export function claudeOptions(deps: {
   cwd: string
   claudePath: string | undefined
+  choice: Required<Choice>
   spawned(claude: Claude): void
 }): Options {
   return {
-    model: 'haiku',
-    effort: 'low',
+    model: deps.choice.model,
+    effort: deps.choice.effort,
     systemPrompt: SYSTEM_PROMPT,
     // 渡さないと CLI が最初の user message を丸ごと入れた title 生成の request を別に出す。
     title: 'Chat',

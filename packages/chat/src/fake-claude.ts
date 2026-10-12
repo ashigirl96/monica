@@ -4,7 +4,7 @@
 import { appendFileSync } from 'node:fs'
 import { createInterface } from 'node:readline'
 
-import { FAKE_RESETS_AT as RESETS_AT, type FakeScenario } from './testing.ts'
+import { FAKE_MODELS, FAKE_RESETS_AT as RESETS_AT, type FakeScenario } from './testing.ts'
 
 const [recordPath, scenario, ...argv] = process.argv.slice(2) as [string, FakeScenario, ...string[]]
 if (!recordPath || !scenario) {
@@ -228,12 +228,15 @@ const lines = createInterface({ input: process.stdin })
 lines.on('line', (line) => {
   const message = JSON.parse(line) as Incoming
   if (message.type === 'control_request' && 'request_id' in message) {
-    if (message.request.subtype === 'initialize') {
-      record({ kind: 'initialize', request: message.request })
-    }
+    const initialize = message.request.subtype === 'initialize'
+    if (initialize) record({ kind: 'initialize', request: message.request })
     send({
       type: 'control_response',
-      response: { subtype: 'success', request_id: message.request_id, response: {} },
+      response: {
+        subtype: 'success',
+        request_id: message.request_id,
+        response: initialize ? { models: FAKE_MODELS } : {},
+      },
     })
   } else if (message.type === 'user' && 'message' in message) {
     const { content } = message.message

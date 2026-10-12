@@ -2,6 +2,7 @@ import { mkdirSync } from 'node:fs'
 import { join } from 'node:path'
 
 import {
+  type ModelInfo,
   type Options,
   query,
   type Query,
@@ -17,10 +18,19 @@ import {
 import type { z } from 'zod'
 
 import { type Claude, claudeOptions, stderrTail } from './claude.ts'
-import type { askErrors, AskInput, ChatEvent, SnapshotEvent } from './contract.ts'
+import {
+  type askErrors,
+  type AskInput,
+  type ChatEvent,
+  type Choice,
+  DEFAULT_EFFORT,
+  DEFAULT_MODEL,
+  type Model,
+  type SnapshotEvent,
+} from './contract.ts'
 import { askContent } from './page/prompt.ts'
 import { defaultReaders, type Readers, snapshotOf } from './page/snapshot.ts'
-import { singleTurn, userMessage } from './prompt.ts'
+import { promptless, singleTurn, userMessage } from './prompt.ts'
 
 // 1 つ 270〜290MB の claude を token の無い口から起こせるので、spare も含めてこの数で止める（ADR-0031）。
 const MAX_CLAUDES = 4
@@ -49,11 +59,10 @@ export class ChatFailure extends Error {
   }
 }
 
+export const shortDetail = (detail: string) => detail.slice(0, MAX_DETAIL_CHARS)
+
 export function agentFailed(detail: string): ChatFailure {
-  return new ChatFailure({
-    code: 'AGENT_FAILED',
-    data: { detail: detail.slice(0, MAX_DETAIL_CHARS) },
-  })
+  return new ChatFailure({ code: 'AGENT_FAILED', data: { detail: shortDetail(detail) } })
 }
 
 async function withStderr(message: string, claude: Claude | undefined): Promise<string> {
@@ -94,7 +103,9 @@ export type ChatAgent = {
 
 type Internals = {
   /** spare の initialize を待たずに返る。 */
-  prepare(): void
+  prepare(choice: Choice | undefined): void
+  /** 最初に読めた一覧を持ち、2 回目からは claude を起こさない。空きが無ければ undefined を返す。 */
+  models(): Promise<Model[] | undefined>
   /** 空きが無ければ undefined を返す。 */
   ask(
     input: AskInput,
@@ -112,7 +123,35 @@ export function internals(chatAgent: ChatAgent): Internals {
 }
 
 type Started<T> = { started: T; claude: Claude | undefined }
-type Spare = Started<Promise<WarmQuery>> & { timer: ReturnType<typeof setTimeout> }
+type Spare = Started<Promise<WarmQuery>> & {
+  choice: Required<Choice>
+  timer: ReturnType<typeof setTimeout>
+  ready: boolean
+}
+
+const resolved = ({ model, effort }: Choice = {}): Required<Choice> => ({
+  model: model ?? DEFAULT_MODEL,
+  effort: effort ?? DEFAULT_EFFORT,
+})
+
+const sameChoice = (a: Required<Choice>, b: Required<Choice>) =>
+  a.model === b.model && a.effort === b.effort
+
+function modelOf({
+  value,
+  displayName,
+  description,
+  supportsEffort,
+  supportedEffortLevels,
+}: ModelInfo): Model {
+  return {
+    value,
+    displayName,
+    description,
+    ...(supportsEffort !== undefined && { supportsEffort }),
+    ...(supportedEffortLevels && { supportedEffortLevels }),
+  }
+}
 
 export function createChatAgent(
   deps: {
@@ -129,6 +168,8 @@ export function createChatAgent(
   // SIGKILL した claude について SDK が投げる error は、claude が自分で落ちたときと同じ文なので、止めたことを覚えておく。
   const killed = new WeakSet<Claude>()
   let spare: Spare | undefined
+  let models: Model[] | undefined
+  let readingModels: Promise<Model[]> | undefined
 
   function kill(claude: Claude | undefined) {
     if (!claude) return
@@ -137,12 +178,13 @@ export function createChatAgent(
   }
 
   // SDK は query() と startup() の呼び出しの中で同期に spawn するので、空きを確かめてから呼ぶまでに await を挟まない。
-  function spawnWith<T>(start: (options: Options) => T): Started<T> {
+  function spawnWith<T>(choice: Required<Choice>, start: (options: Options) => T): Started<T> {
     let claude: Claude | undefined
     const started = start(
       claudeOptions({
         cwd,
         claudePath: deps.claudePath,
+        choice,
         spawned: (spawned) => {
           claude = spawned
           claudes.add(spawned)
@@ -155,21 +197,49 @@ export function createChatAgent(
     return { started, claude }
   }
 
-  function prepare() {
-    if (spare || claudes.size >= MAX_CLAUDES) return
-    const started = spawnWith((options) => startup({ options }))
-    // 失敗は ask が spare を使うときに受ける。
-    started.started.catch(() => {})
+  // 起動中の spare は close() しても initialize を待ってから閉じるので、すぐに止める。
+  function discard(dropped: Spare) {
+    if (spare === dropped) spare = undefined
+    clearTimeout(dropped.timer)
+    if (!dropped.ready) {
+      kill(dropped.claude)
+      return
+    }
+    void dropped.started.then((warm) => warm.close())
+  }
+
+  function prepare(choice: Required<Choice>) {
+    if (spare && sameChoice(spare.choice, choice)) return
+    if (spare) discard(spare)
+    if (claudes.size >= MAX_CLAUDES) return
+    const started = spawnWith(choice, (options) => startup({ options }))
     const timer = setTimeout(() => {
-      if (spare !== prepared) return
-      spare = undefined
-      void prepared.started.then(
-        (warm) => warm.close(),
-        () => kill(prepared.claude),
-      )
+      if (spare === prepared) discard(prepared)
     }, SPARE_LIFETIME_MS)
-    const prepared: Spare = { ...started, timer }
+    const prepared: Spare = { ...started, choice, timer, ready: false }
+    // 失敗は ask が spare を使うときに受ける。
+    started.started.then(
+      () => (prepared.ready = true),
+      () => {},
+    )
     spare = prepared
+  }
+
+  function readModels(): Promise<Model[]> {
+    const { promise: ended, resolve: end } = Promise.withResolvers<void>()
+    const { started: q, claude } = spawnWith(resolved(), (options) =>
+      query({ prompt: promptless(ended), options }),
+    )
+    return q
+      .supportedModels()
+      .then((found) => found.map(modelOf))
+      .catch(async (error: unknown) => {
+        throw new Error(await withStderr((error as Error).message, claude))
+      })
+      .finally(() => {
+        end()
+        q.close()
+      })
   }
 
   // 起動中の spare は initialize を待って使い、2 つ目の claude を起こさない。
@@ -190,11 +260,12 @@ export function createChatAgent(
       )
       kill(claude)
     }
-    return spawnWith((options) => query({ prompt, options }))
+    return spawnWith(claimed.choice, (options) => query({ prompt, options }))
   }
 
   async function* answer(
     { started: q, claude }: Started<Query>,
+    choice: Required<Choice>,
     end: () => void,
     signal: AbortSignal | undefined,
     snapshot: SnapshotEvent,
@@ -273,7 +344,7 @@ export function createChatAgent(
       // prompt が終わると SDK が stdin を閉じ、答え終えた claude は自分から抜ける。
       end()
       if (answered) {
-        prepare()
+        prepare(choice)
       } else {
         // abort はたいてい side panel を閉じたときで次の質問は来ないので、spare を起こさない。
         // 失敗を決めた claude も、自分で抜けるのを待つと同時の 4 つに数えたまま残るので止める。
@@ -290,8 +361,18 @@ export function createChatAgent(
     },
   }
   internalsOf.set(chatAgent, {
-    prepare,
-    async ask({ question, page, history }, signal) {
+    prepare: (choice) => prepare(resolved(choice)),
+    async models() {
+      if (models) return models
+      if (!readingModels) {
+        if (claudes.size >= MAX_CLAUDES) return undefined
+        readingModels = readModels().finally(() => (readingModels = undefined))
+      }
+      models = await readingModels
+      return models
+    },
+    async ask({ question, page, history, ...asked }, signal) {
+      const choice = resolved(asked)
       // 変換の Worker は最長 30 秒 CPU と memory を使うので、claude と同じく同時の数を抑える。
       if (reading >= MAX_CLAUDES) return undefined
       reading++
@@ -302,14 +383,16 @@ export function createChatAgent(
       const event: SnapshotEvent = { type: 'snapshot', page: snapshot, omitted }
       const { prompt, end } = singleTurn(userMessage(content))
       const claimed = spare
-      if (claimed) {
+      if (claimed && sameChoice(claimed.choice, choice)) {
         spare = undefined
         clearTimeout(claimed.timer)
-        return answer(await fromSpare(claimed, prompt), end, signal, event)
+        return answer(await fromSpare(claimed, prompt), choice, end, signal, event)
       }
+      if (claimed) discard(claimed)
       if (claudes.size >= MAX_CLAUDES) return undefined
       return answer(
-        spawnWith((options) => query({ prompt, options })),
+        spawnWith(choice, (options) => query({ prompt, options })),
+        choice,
         end,
         signal,
         event,
