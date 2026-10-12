@@ -396,9 +396,8 @@ test('pressing a Run of an Issue with an open Blocker gives the row naming it, o
   expect(await fixture.client.bench.list()).toEqual([])
 })
 
-// Task を先に track しておき、2 本目の request を新しい Run の sync にする。
+// 呼び手が Task を先に track しておき、2 本目の request を新しい Run の sync にする。
 async function pressHeldUntilSync(fixture: Fixture, change: () => void) {
-  await fixture.track(ref)
   const releaseRead = fixture.github.hold()
   const before = fixture.github.requests.length
   const pressing = fixture.client.press({ ref, run: 'new' })
@@ -415,6 +414,7 @@ test('pressing Run refuses, opening no Bench, when a Blocker opens on GitHub bet
   const fixture = withOrigin()
   fixture.github.issue('acme/lib#3', { title: 'Upstream fix' })
   fixture.github.issue(ref, { title: 'Ship it', labels: ['ready-for-agent'] })
+  await fixture.track(ref)
 
   const pressed = await pressHeldUntilSync(fixture, () =>
     fixture.github.issue(ref, {
@@ -432,6 +432,7 @@ test('pressing Run refuses, opening no Bench, when a Blocker opens on GitHub bet
 test('pressing Run refuses, opening no Bench, when the Issue is closed on GitHub between the read and the sync', async () => {
   const fixture = withOrigin()
   fixture.github.issue(ref, { title: 'Ship it', labels: ['ready-for-agent'] })
+  await fixture.track(ref)
 
   const pressed = await pressHeldUntilSync(fixture, () =>
     fixture.github.issue(ref, { title: 'Ship it', state: 'closed', labels: ['ready-for-agent'] }),
@@ -440,6 +441,18 @@ test('pressing Run refuses, opening no Bench, when the Issue is closed on GitHub
   expect(pressed).toEqual({ ref, button: null, reason: `${ref} is a closed Issue` })
   expect(await fixture.client.bench.list()).toEqual([])
   expect(tabCount(fixture)).toBe(0)
+})
+
+test('pressing Run picks the prompt from the Issue read when the sync that follows fails, not from the older copy', async () => {
+  const fixture = withOrigin()
+  fixture.github.issue(ref, { title: 'Ship it', labels: ['needs-triage'] })
+  await fixture.track(ref)
+  fixture.github.issue(ref, { title: 'Ship it', labels: ['ready-for-agent'] })
+
+  const pressed = await pressHeldUntilSync(fixture, () => fixture.github.fail('acme/app'))
+
+  expect(pressed).toEqual({ ref, button: { kind: 'tackle', run: 'running' }, reason: null })
+  expect(await typedClaude(fixture)).toEqual(["claude '/tackle'\r"])
 })
 
 test('pressing a Run fails without tracking when GitHub cannot be read', async () => {

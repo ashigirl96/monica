@@ -115,7 +115,8 @@ async function admitFromCli(
       rules,
     )
     if (decided && decided.type !== 'resume') throw new Refused(decided)
-    return await launch(deps, { found, tracked }, rules, decided, { prompt, inPlace })
+    const starting = decided ?? (await syncForNewRun(deps, found))
+    return await launch(deps, { found, tracked }, rules, starting, { prompt, inPlace })
   } catch (error) {
     if (error instanceof Refused) throw cliError(error.refusal, errors)
     throw error
@@ -130,19 +131,21 @@ async function press(deps: Deps, ref: string, shown: Pressable): Promise<RunButt
   const decided = decide(deps.db, deps.reservations, found, read, BUTTON)
   const now = rowOf(decided)
   if (now.button?.run !== shown) return { ref, ...now }
+  let judged: IssueFacts = read
   try {
     if (decided.type === 'reopen') {
       if (found) await reopenFromButton(deps, found)
     } else if (isLaunchable(decided)) {
       const admitted = await findOrTrack(deps, read, read.nodeId)
-      await launch(deps, admitted, BUTTON, decided.type === 'resume' ? decided : undefined, {})
+      const starting =
+        decided.type === 'resume' ? decided : await syncForNewRun(deps, admitted.found, read)
+      if ('facts' in starting) judged = starting.facts
+      await launch(deps, admitted, BUTTON, starting, {})
     }
   } catch (error) {
     if (!(error instanceof Refused || error instanceof TaskStateRefusal)) throw error
   }
   const after = taskIfTracked(deps.db, isLinkedIssue(read))
-  // 新しい Run は sync した写しで断りうるので、その写しで決める。resume と reopen は読んだ答えで決めたまま進む。
-  const judged = decided.type === 'new' && after ? copyFacts(deps.db, after.issue.id) : read
   return { ref, ...rowOf(decide(deps.db, deps.reservations, after, judged, BUTTON)) }
 }
 
@@ -173,25 +176,24 @@ async function launch(
   deps: Deps,
   admitted: Admitted,
   rules: Rules,
-  resuming: Resuming | undefined,
+  starting: Resuming | Synced,
   { prompt, inPlace }: { prompt?: string; inPlace?: boolean },
 ): Promise<RunOutput> {
   let launching: Launchable
   let opening: Launch
   let facts: IssueFacts
   let typed = prompt
-  if (resuming) {
-    launching = resuming
+  if (starting.type === 'resume') {
+    launching = starting
     facts = copyFacts(deps.db, admitted.found.issue.id)
-    opening = resumeOf(admitted.found, resuming.resumable)
+    opening = resumeOf(admitted.found, starting.resumable)
   } else {
-    const synced = await syncForNewRun(deps, admitted.found)
-    facts = copyFacts(deps.db, synced.found.issue.id)
+    facts = starting.facts
     const decided = decideNew(facts, rules)
     if (!isLaunchable(decided)) throw new Refused(decided)
     launching = decided
     typed = rules.via === 'button' ? decided.kind && promptOf(decided.kind, facts) : prompt
-    opening = await newRun(deps, synced.found, inPlace, synced.warnings)
+    opening = await newRun(deps, starting.found, inPlace, starting.warnings)
   }
   return openRun(deps, opening, { prompt: typed, tracked: admitted.tracked }, (tx, current) => {
     // GitHub と Bench の準備を待つ間に、この Task か spec の Run が起動しうる。
@@ -251,11 +253,15 @@ async function findOrTrack(deps: SyncDeps, asked: IssueRef, nodeId?: string): Pr
   return { found: findOpenTask(deps.db, isIssue(parseRef(ref)), ref), tracked: !alreadyTracked }
 }
 
-async function syncForNewRun(deps: SyncDeps, found: FoundTask) {
+type Synced = { type: 'synced'; found: FoundTask; warnings: string[]; facts: IssueFacts }
+
+async function syncForNewRun(deps: SyncDeps, found: FoundTask, read?: IssueFacts): Promise<Synced> {
   const warnings = await syncOrUseCopy(deps, found.issue)
   // sync は repo の改名を写すので、名前でなく行の id で引き直す。
   const synced = findOpenTask(deps.db, eq(issue.id, found.issue.id), formatRef(found.issue))
-  return { found: synced, warnings }
+  // sync が失敗すると写しは押す前のままなので、押した時に読んだ答えのほうが新しい。
+  const facts = read && warnings.length > 0 ? read : copyFacts(deps.db, synced.issue.id)
+  return { type: 'synced', found: synced, warnings, facts }
 }
 
 const isAsked = ({ nodeId, ...asked }: IssueRef & { nodeId?: string | null }) =>
