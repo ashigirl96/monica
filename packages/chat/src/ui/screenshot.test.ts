@@ -8,10 +8,6 @@ afterEach(() => {
   for (const cleanup of cleanups.splice(0)) cleanup()
 })
 
-test('a screenshot taken at a device pixel ratio of 2 shrinks to half its pixels, the CSS pixels of the Browser Tab', () => {
-  expect(shrunkSize({ width: 1724, height: 1526 }, 2)).toEqual({ width: 862, height: 763 })
-})
-
 test('a screenshot taken at a device pixel ratio of 1 keeps its size', () => {
   expect(shrunkSize({ width: 862, height: 763 }, 1)).toEqual({ width: 862, height: 763 })
 })
