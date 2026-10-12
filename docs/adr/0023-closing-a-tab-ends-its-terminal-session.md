@@ -25,5 +25,8 @@ status: accepted
   - SIGKILL は足さない。SessionEnd の hook の持ち時間（1.5 秒から）を切らないため。
 - reconcile は、ptyd にだけある live な Terminal Session を取り込まずに終了させ、Tab に指されていない live な行も終了させる（ADR-0011 の規則を置き換える）。後者は、Terminate を送る前に Backend が止まった場合（ADR-0015）を拾う。この版に上げた最初の起動で、それまで detached だった Terminal Session は終わる。
 - Bench の最後の Tab を閉じたときの Task の close（ADR-0012）は、閉じた Tab の claude では ActiveRun の guard に当たらず、git の guard だけが止める。
+  - Tab の無い live な Terminal Session は、Terminate を予約した後の終わりかけと読む。ActiveRun の guard はその Agent Session の Run を数えず、Run の起動中の予約はその Terminal Session の Tab が無くなった時点で外れる。これで Exit の記録を待たずに close できる。Tab を閉じた側が Exit を待つ形にしないのは、待ちが呼び手ごとに要り、打ち切った後の close が黙って断られるため。
+  - 印は DB の行（Tab が無いこと）だけで決め、ptyd が Terminate を受けたかは見ない。ptyd が切れている間や Terminate を断られたときは、claude が Tab の無いまま次の reconcile まで動き、その間に通った close は動いている claude の下で worktree を消す。git の guard が close の時点の変更を止め、Tab を閉じたこと自体が止める意思なので、この間のずれは受け入れる。
+  - Run と Agent Session の live は変えない。表示状態や Run Button は、SIGHUP から Exit までの間、終わりかけの Run を live と読む。起動中の予約は Run の前の印なので、外れれば `run` も Run Button もすぐに新しい Run を起こせる。終わりかけの claude が遅れて SessionStart を送っても、Tab が無いので Run にはならない。
 - Tab より長生きする agent がいなくなるので、ADR-0008 の「Tab より長生きした agent は観測しない」がそのまま成り立つ。
 - ptyd の protocol の detach は残す。これは接続ごとに出力の配信を止める op で、Tab の寿命とは別のもの。
