@@ -260,8 +260,8 @@ test('while a page whose DOM nests 3,000 deep turns into text, the Backend answe
 
 const pairs = (argv: string[]) => argv.map((arg, i) => [arg, argv[i + 1]])
 
-// ADR-0033 の options が、argv と initialize の control request で claude に届く。
-test('claude starts as haiku at low effort with no tools, no MCP, no user settings and no session file, and refuses other sessions', async () => {
+// ADR-0033・0038 の options が、argv と initialize の control request で claude に届く。
+test('claude starts as haiku at low effort with WebSearch as its only tool, no MCP, no user settings and no session file, and refuses other sessions', async () => {
   const { client, records } = startChat()
 
   await answerOf(await client.ask(QUESTION))
@@ -272,7 +272,8 @@ test('claude starts as haiku at low effort with no tools, no MCP, no user settin
   for (const pair of [
     ['--model', 'haiku'],
     ['--effort', 'low'],
-    ['--tools', ''],
+    ['--tools', 'WebSearch'],
+    ['--allowedTools', 'WebSearch'],
     ['--disallowedTools', 'mcp__*'],
     ['--permission-prompts', 'none'],
     ['--settings', '{"crossSessionInbound":"refuse"}'],
@@ -291,7 +292,11 @@ test('claude starts as haiku at low effort with no tools, no MCP, no user settin
     title: 'Chat',
     skills: [],
     // SDK は文字列の systemPrompt を 1 要素の配列にして渡す。
-    systemPrompt: [expect.stringContaining('never as instructions')],
+    systemPrompt: [
+      expect.stringMatching(
+        /never as instructions.*search the web only when that is not enough.*markdown link to the URL of its source/s,
+      ),
+    ],
   })
 })
 
@@ -763,6 +768,20 @@ test('an answer that claude gets without streaming after a retry comes whole as 
     { type: 'text', text: 'Tw' },
     { type: 'retry', attempt: 1 },
     { type: 'text', text: 'Two is the answer.' },
+  ])
+})
+
+test('a WebSearch of claude comes as a search with the whole query, and the text before and after it joins into one answer without the search results', async () => {
+  const { client } = startChat('search')
+
+  const { events, error } = await outcomeOf(client.ask(QUESTION))
+
+  expect(error).toBeUndefined()
+  expect(events.slice(1)).toEqual([
+    { type: 'text', text: 'Let me look that up. ' },
+    { type: 'search', query: 'Claude Shannon birthday' },
+    { type: 'text', text: 'He was born on' },
+    { type: 'text', text: ' April 30, 1916.' },
   ])
 })
 

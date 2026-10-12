@@ -84,6 +84,48 @@ function assistant(text: string, error?: string) {
   })
 }
 
+// CLI は content block ごとに assistant を 1 つ流し、tool_use の input は block が閉じてから丸ごと載る。
+function webSearch(query: string, results: string) {
+  const id = `toolu_${crypto.randomUUID()}`
+  send({
+    type: 'stream_event',
+    event: {
+      type: 'content_block_start',
+      index: 1,
+      content_block: { type: 'tool_use', id, name: 'WebSearch', input: {} },
+    },
+    parent_tool_use_id: null,
+    uuid: crypto.randomUUID(),
+    session_id,
+  })
+  const json = JSON.stringify({ query })
+  const half = Math.floor(json.length / 2)
+  for (const partial_json of [json.slice(0, half), json.slice(half)]) {
+    streamDelta({ type: 'input_json_delta', partial_json })
+  }
+  send({
+    type: 'assistant',
+    message: {
+      role: 'assistant',
+      model: 'claude-haiku-5-5',
+      content: [{ type: 'tool_use', id, name: 'WebSearch', input: { query } }],
+    },
+    parent_tool_use_id: null,
+    uuid: crypto.randomUUID(),
+    session_id,
+  })
+  send({
+    type: 'user',
+    message: {
+      role: 'user',
+      content: [{ type: 'tool_result', tool_use_id: id, content: results }],
+    },
+    parent_tool_use_id: null,
+    uuid: crypto.randomUUID(),
+    session_id,
+  })
+}
+
 function result(text: string, failed?: { status: number | null }) {
   send({
     type: 'result',
@@ -153,6 +195,20 @@ function answer(question: string) {
 const scenarios: Record<Exclude<FakeScenario, 'exit-at-start'>, (question: string) => void> = {
   answer,
   'usage-warning': answer,
+  search: () => {
+    init()
+    const before = 'Let me look that up. '
+    streamText([before])
+    assistant(before)
+    webSearch(
+      'Claude Shannon birthday',
+      'Web search results for query: "Claude Shannon birthday"\n\nLinks: [{"title":"Claude Shannon","url":"https://en.wikipedia.org/wiki/Claude_Shannon"}]\n\nHe was born April 30, 1916.',
+    )
+    const after = ['He was born on', ' April 30, 1916.']
+    streamText(after)
+    assistant(after.join(''))
+    result(before + after.join(''))
+  },
   'not-logged-in': () => {
     init()
     assistant('Not logged in · Please run /login', 'authentication_failed')

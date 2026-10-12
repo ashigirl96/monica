@@ -87,6 +87,15 @@ function textOf(message: SDKAssistantMessage): string {
     .join('')
 }
 
+// stream_event の input_json_delta から組むと途中で切れた query になるので、閉じた tool_use の input から読む。
+function searchesOf(message: SDKAssistantMessage): string[] {
+  return message.message.content.flatMap((block) => {
+    if (block.type !== 'tool_use' || block.name !== 'WebSearch') return []
+    const { query: searched } = block.input as { query?: unknown }
+    return typeof searched === 'string' ? [searched] : []
+  })
+}
+
 export type ChatAgent = {
   /** 持っている claude すべてに SIGKILL を送る。Backend の exit() は await を挟まずに抜けるので同期にする。 */
   stop(): void
@@ -243,6 +252,7 @@ export function createChatAgent(
           assistantError = message.error
           const text = textOf(message)
           if (!message.error && !streamedSinceRetry && text) yield { type: 'text', text }
+          for (const searched of searchesOf(message)) yield { type: 'search', query: searched }
         } else if (message.type === 'rate_limit_event') {
           rateLimit = message.rate_limit_info
           const { status, utilization, rateLimitType, resetsAt } = rateLimit
