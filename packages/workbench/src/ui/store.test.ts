@@ -4,7 +4,7 @@ import { join } from 'node:path'
 
 import type { Store } from 'jotai'
 
-import type { Tab, TerminalSession } from '../contract.ts'
+import type { Tab } from '../contract.ts'
 import { OUTSIDE } from './tile-assignment.ts'
 
 // Shell の command は Tauri の外では呼べないので、呼ばれた command だけを記録する。
@@ -28,8 +28,8 @@ await mock.module('@monica/ui', () => ({
 }))
 
 const { createStore } = await import('jotai')
-const { cleanUp, onCleanup, setup, until } = await import('../testing.ts')
-const { agentDotOfTerminalSessionAtom, layoutAtom } = await import('./backend-copy.ts')
+const { cleanUp, onCleanup, setup } = await import('../testing.ts')
+const { agentDotOfTerminalSessionAtom } = await import('./backend-copy.ts')
 const {
   activateRunspaceAtom,
   activateTerminalTabAtom,
@@ -353,15 +353,7 @@ test('closing the last Tab of the last Runspace leaves a fresh Runspace', async 
 
 // Exit は ptyd から Shell と Backend の両方に届く。
 test.each([
-  [
-    'closed',
-    async ({ ptyd, store }: Backend, tab: Tab) => {
-      const closing = store.set(closeTerminalTabAtom, tab.id)
-      await ptyd.received((op) => op.op === 'terminate' && op.session_id === tab.terminalSessionId)
-      ptyd.exit(tab.terminalSessionId, null)
-      await closing
-    },
-  ],
+  ['closed', ({ store }: Backend, tab: Tab) => store.set(closeTerminalTabAtom, tab.id)],
   [
     'exited',
     ({ ptyd, store }: Backend, tab: Tab) => {
@@ -380,66 +372,19 @@ test.each([
     await store.set(reloadAtom)
     const calls = lastTabClosedCalls(store)
 
-    await close(backend, tab)
+    // fake の ptyd は Terminate を受けても Exit を送らないので、Exit を待てば打ち切るまで返らない。
+    const closed = await Promise.race([
+      close(backend, tab).then(() => true),
+      Bun.sleep(1000).then(() => false),
+    ])
 
+    expect(closed).toBe(true)
     expect(calls).toEqual([runspaceId])
     expect((await client.layout.get()).runspaces).toMatchObject([
       { id: runspaceId, owned: true, tabs: [] },
     ])
   },
 )
-
-test('the last Tab of an owned Runspace, closed, hands the slot a wait that ends once the Backend records the exit, so the claude stopped there is no longer live', async () => {
-  const backend = bench()
-  const { client, store, ptyd, settled } = backend
-  const runspaceId = ownedRunspace(backend)
-  const tab = await client.tab.open({ runspaceId, ...size })
-  await settled(tab.terminalSessionId)
-  await store.set(reloadAtom)
-  const listedOnceRecorded: Promise<TerminalSession[]>[] = []
-  store.set(
-    lastTabClosedAtom,
-    () => (_: string, exitRecorded: Promise<void>) =>
-      void listedOnceRecorded.push(exitRecorded.then(() => client.terminalSession.list())),
-  )
-
-  const closing = store.set(closeTerminalTabAtom, tab.id)
-  await until(store, layoutAtom, (layout) => layout?.runspaces[0]?.tabs.length === 0)
-  expect(listedOnceRecorded).toHaveLength(1)
-  ptyd.exit(tab.terminalSessionId, null)
-  await closing
-
-  expect(listedOnceRecorded).toHaveLength(1)
-  expect((await listedOnceRecorded[0])!.map((s) => s.id)).not.toContain(tab.terminalSessionId)
-})
-
-test('the wait handed to the slot resolves, not rejects, when the Backend cannot list the Terminal Sessions', async () => {
-  const backend = bench()
-  const { client, store, settled } = backend
-  const runspaceId = ownedRunspace(backend)
-  const tab = await client.tab.open({ runspaceId, ...size })
-  await settled(tab.terminalSessionId)
-  await store.set(reloadAtom)
-  const unlisted = {
-    list: () => Promise.reject(new Error('Backend is gone')),
-  }
-  store.set(
-    workbenchClientAtom,
-    () =>
-      new Proxy(client, {
-        get: (target, key) => (key === 'terminalSession' ? unlisted : Reflect.get(target, key)),
-      }),
-  )
-  const waits: Promise<void>[] = []
-  store.set(lastTabClosedAtom, () => (_: string, exitRecorded: Promise<void>) => {
-    waits.push(exitRecorded)
-  })
-
-  await store.set(closeTerminalTabAtom, tab.id)
-
-  expect(waits).toHaveLength(1)
-  expect(await waits[0]).toBeUndefined()
-})
 
 test('a Tab closed while others stay, the last Tab moved out, and the last Tab of a Runspace no one owns hand nothing to the slot', async () => {
   const backend = bench()

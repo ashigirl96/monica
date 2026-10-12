@@ -17,7 +17,7 @@ review で差分に当てる規則。どれも判断が要るもので、決定�
 - 外から来た id（Shell の event、通知のクリック）で webview の layout や一覧を引く処理は、今の値が古い場合を数えて閉じる。窓が隠れている間は webview の JS が止まって読み直せず、Backend の再起動中は読み直しが失敗しても値が前のまま残る。読み直してから引き、読み直せなければ次に読めた値で引く（`packages/workbench/src/ui/notification-click.ts`）。
 - 合図（listener）を購読して待つ処理は、待つと決めてから購読するまでの間に合図が過ぎた場合を、購読した後に回数や版を見直して閉じる。過ぎた合図は来ないので、そのままでは次の合図まで待ち続ける（`packages/note/src/ui/notes/note-references.ts` の `untilReached`）。
 - 画面の effect の中で一度きりの値（module に置いた飛び先など）を取り出すときは、dev の StrictMode が effect を片付けて走らせ直しても、2 度目に同じ値を得られる形にする。取り出すたびに消すと、片付けで壊れる 1 度目にだけ効く（`packages/note/src/ui/notes/block-jump.ts` の `arrivalAt`）。
-- procedure が transaction の後に送る ptyd への副作用（Create、Terminate）の結果は、procedure が返った時点ではまだ DB に無い。終わらせた shell を終わったものとして他の判定（close の ActiveRun guard など）に渡すときは、Backend が Exit を記録するのを一覧か合図で待つ（ADR-0015、`docs/packages/workbench-ledger.md` の「Runspace と Tab」）。
+- procedure が transaction の後に送る ptyd への副作用（Create、Terminate）の結果は、procedure が返った時点ではまだ DB に無い。終わらせた shell を終わったものとして他の判定に渡すときは、Backend が Exit を記録するのを一覧か合図で待つ（ADR-0015）。Tab を閉じた Terminal Session は例外で、Tab の無い行を終わりかけと読めるので、close の ActiveRun guard と Run の起動中の予約は待たずに数えない（ADR-0023、`docs/packages/task-ledger.md` の「close と reopen」）。
 - DB の行と ptyd の両方を進める処理は、workbench の `terminal-session.ts` に置く（ADR-0015）。DB の行と ptyd や fs の両方を進める処理は、commit の前後や ptyd への要求の途中のどこで Backend が止まっても、ptyd との接続が切れても、次の reconcile が正しい状態に戻せる形にする（ADR-0011）。
 - commit の後の副作用（通知など）が失敗しても、commit 済みの変更の合図（`events`）と記録は止めない（`docs/packages/notifications.md`）。
 - procedure の output が変わる経路（reconcile や他の domain の行の変化を含む）は、どれも自分の domain の `events` で合図する（`docs/packages.md` の「contract の規約」の 5）。

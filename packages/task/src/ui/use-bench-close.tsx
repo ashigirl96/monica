@@ -25,8 +25,8 @@ export function useBenchClose(
   useEffect(() => forgetGone(store, benches), [store, benches])
 
   const onLastTabClosed = useCallback<LastTabClosed>(
-    (runspaceId, exitRecorded) => {
-      if (deps) void emptied(deps, runspaceId, exitRecorded)
+    (runspaceId) => {
+      if (deps) void emptied(deps, runspaceId)
     },
     [deps],
   )

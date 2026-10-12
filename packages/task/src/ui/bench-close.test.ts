@@ -69,30 +69,26 @@ function recordCloses(fixture: Fixture) {
   return calls
 }
 
-const recorded = Promise.resolve()
-
 // in-place の Bench は checkout が在れば git を呼ばない。
-// webview は Bench の最後の Tab の Exit を Backend が記録してから close を呼ぶので、run の claude の Tab は先に終わらせる。
-async function runInPlace({ client, ghq, exit }: Pick<Fixture, 'client' | 'ghq' | 'exit'>) {
+// webview は Bench の最後の Tab を閉じるとすぐ close を呼ぶので、Run の claude の Exit はまだ記録されていない。
+async function runInPlace({ client, ghq, hook, closeTab }: Fixture) {
   mkdirSync(ghq.checkout('acme/app'), { recursive: true })
-  await exit((await client.run({ ref, inPlace: true })).terminalSessionId)
+  const { terminalSessionId } = await client.run({ ref, inPlace: true })
+  await hook(terminalSessionId, 's-1', 'SessionStart', { source: 'startup' })
+  await closeTab(terminalSessionId)
 }
 
-test('a Bench emptied of its last Tab is closed once, without force, only once the exit is recorded, and shows nothing until then and while it closes', async () => {
+test('a Bench emptied of its last Tab is closed once, without force, right away, and shows nothing while it closes', async () => {
   const fixture = await tracked()
   const { client, deps, github } = fixture
   await runInPlace(fixture)
   const { runspaceId } = await benchOf(fixture)
   github.fail('acme/app')
-  const exitRecorded = Promise.withResolvers<void>()
   const closeCalls = recordCloses(fixture)
 
-  const closing = emptied(deps, runspaceId, exitRecorded.promise)
-  const again = emptied(deps, runspaceId, recorded)
-  await again
+  const closing = emptied(deps, runspaceId)
+  await emptied(deps, runspaceId)
   expect(await shown(fixture, runspaceId)).toBeNull()
-  expect(closeCalls).toEqual([])
-  exitRecorded.resolve()
   await closing
 
   expect(closeCalls).toEqual([{ ref, force: undefined }])
@@ -117,7 +113,7 @@ test('a refused close leaves the Bench with its reasons and Close anyway, and te
   writeFileSync(join(cwd, 'draft.txt'), 'draft\n')
   const { runspaceId } = await benchOf(fixture)
 
-  await emptied(deps, runspaceId, recorded)
+  await emptied(deps, runspaceId)
 
   expect(await client.bench.list()).toMatchObject([{ runspaceId, ref }])
   expect(await shown(fixture, runspaceId)).toEqual({
@@ -139,7 +135,7 @@ async function refusedByUncommittedChanges() {
   await fixture.exit((await fixture.client.run({ ref })).terminalSessionId)
   writeFileSync(join(fixture.cwd, 'draft.txt'), 'draft\n')
   const { runspaceId } = await benchOf(fixture)
-  await emptied(fixture.deps, runspaceId, recorded)
+  await emptied(fixture.deps, runspaceId)
   toasts.length = 0
   return { ...fixture, runspaceId }
 }
@@ -193,7 +189,7 @@ test('a close run anew forgets the reasons it remembered before, even when it fa
   rmSync(join(cwd, 'draft.txt'))
   git(ghq.checkout('acme/app'), 'worktree', 'lock', cwd)
 
-  await emptied(deps, runspaceId, recorded)
+  await emptied(deps, runspaceId)
 
   expect(await shown(fixture, runspaceId)).toEqual({ reasons: null, label: 'Close' })
   expect(toasts).toEqual([
@@ -256,7 +252,7 @@ test('a Bench still preparing shows nothing and is not closed, keeps the reasons
   deps.store.set(benchClosesAtom, new Map([[runspaceId, { phase: 'refused' as const, reasons }]]))
 
   expect(await shown(fixture, runspaceId)).toBeNull()
-  await emptied(deps, runspaceId, recorded)
+  await emptied(deps, runspaceId)
   expect(benchCloseOf(deps.store, runspaceId)).toEqual({ phase: 'refused', reasons })
   deps.store.set(benchClosesAtom, new Map())
   await press(deps, runspaceId)

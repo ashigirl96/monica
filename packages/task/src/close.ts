@@ -175,6 +175,7 @@ function mergedBranchHeads(db: Db, taskIssueId: number): string[] {
 }
 
 // close を頼んだ agent の Run は、close の後も呼び手の Tab に残るので止めない。
+// Tab の無い Terminal Session は Terminate を予約した後の終わりかけなので、その Run も止めない（ADR-0023）。
 function liveRunsBesides(db: Pick<Db, 'select'>, taskIssueId: number, caller: string | undefined) {
   return db
     .select({
@@ -184,6 +185,7 @@ function liveRunsBesides(db: Pick<Db, 'select'>, taskIssueId: number, caller: st
     })
     .from(run)
     .innerJoin(agentSession, eq(agentSession.sessionId, run.agentSessionId))
+    .innerJoin(tab, eq(tab.terminalSessionId, agentSession.terminalSessionId))
     .where(
       and(
         eq(run.taskIssueId, taskIssueId),

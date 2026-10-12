@@ -7,10 +7,9 @@ import type { TaskClient } from './bench-labels.ts'
 
 type Reasons = CloseRefusal[]
 
-// handingOver と closing は、close を頼まずに戻るときのために前に覚えた理由を持つ。
+// closing は、close を頼まずに戻るときのために前に覚えた理由を持つ。
 export type BenchClose =
   | { phase: 'idle' }
-  | { phase: 'handingOver'; reasons: Reasons | null }
   | { phase: 'closing'; reasons: Reasons | null }
   | { phase: 'refused'; reasons: Reasons }
   | { phase: 'armed'; reasons: Reasons }
@@ -48,15 +47,10 @@ export function shownOf(state: BenchClose, bench: BenchItem): Shown | null {
   }
 }
 
-export async function emptied(
-  deps: BenchCloseDeps,
-  runspaceId: string,
-  exitRecorded: Promise<void>,
-): Promise<void> {
+export async function emptied(deps: BenchCloseDeps, runspaceId: string): Promise<void> {
   const before = benchCloseOf(deps.store, runspaceId)
-  if (before.phase === 'handingOver' || before.phase === 'closing') return
-  put(deps.store, runspaceId, { phase: 'handingOver', reasons: remembered(before) })
-  await exitRecorded
+  if (before.phase === 'closing') return
+  put(deps.store, runspaceId, { phase: 'closing', reasons: remembered(before) })
   await close(deps, runspaceId, { force: false })
 }
 
@@ -106,7 +100,7 @@ function settle(store: Store, runspaceId: string, reasons: Reasons | null) {
   put(store, runspaceId, reasons ? { phase: 'refused', reasons } : IDLE)
 }
 
-// 呼ぶ前に、呼び手が Runspace を handingOver か closing にしておく。
+// 呼ぶ前に、呼び手が Runspace を closing にしておく。
 async function close(
   { store, client }: BenchCloseDeps,
   runspaceId: string,

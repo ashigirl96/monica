@@ -3,7 +3,7 @@ import { mkdirSync, mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
-import { terminalSession } from '@monica/workbench/schema'
+import { tab, terminalSession } from '@monica/workbench/schema'
 import {
   createWorkbenchLedger,
   router as workbenchRouter,
@@ -112,12 +112,29 @@ export function setup() {
 
   // procedure で開く Runspace は Tab を 1 つ持って生まれるので、Bench の外の Tab は Runspace ごと開く。
   async function openTabOutsideBench(): Promise<string> {
-    const { tab } = await workbenchClient.runspace.create({ cwd: '/work', rows: 24, cols: 80 })
-    return tab.terminalSessionId
+    const { tab: opened } = await workbenchClient.runspace.create({
+      cwd: '/work',
+      rows: 24,
+      cols: 80,
+    })
+    return opened.terminalSessionId
   }
 
   const settled = (terminalSessionId: string) =>
     untilSettled(() => workbenchClient.terminalSession.list(), terminalSessionId)
+
+  function tabIdOf(terminalSessionId: string): string {
+    return db
+      .select({ id: tab.id })
+      .from(tab)
+      .where(eq(tab.terminalSessionId, terminalSessionId))
+      .get()!.id
+  }
+
+  // fake の ptyd は Terminate を受けても Exit を送らないので、閉じた Tab の Terminal Session は Exit の前のまま残る。
+  async function closeTab(terminalSessionId: string): Promise<void> {
+    await workbenchClient.tab.close({ id: tabIdOf(terminalSessionId) })
+  }
 
   // shell の Exit は ptyd から非同期に届くので、Backend が行を exited にするまで待つ。
   async function exit(terminalSessionId: string) {
@@ -164,6 +181,8 @@ export function setup() {
     openTab,
     openTabOutsideBench,
     settled,
+    tabIdOf,
+    closeTab,
     exit,
     hook,
   }
