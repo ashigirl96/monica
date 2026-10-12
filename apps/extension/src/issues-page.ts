@@ -5,11 +5,11 @@ import type { PressReply, RunButtonRequest, RunButtonsReply } from './run-button
 // github.com のどの画面にも注入され、GitHub は画面を client 側で移るので、一覧か Issue の画面かは走査のたびに URL で見る。
 const ISSUES_PATH = /^\/([^/]+)\/([^/]+)\/issues(?:\/(\d+))?\/?$/
 const TITLE_LINK = 'a[data-testid="issue-listitem-title-link"]'
-// class 名の末尾は GitHub の build ごとに変わる hash なので、前の部分で当てる。
-const METADATA = '[class*="MetadataContainer-module__container"]'
 const HEADER = '[data-testid="issue-header"]'
+// GitHub は class 名を `<Name>-module__<name>__<hash>` と `<name>__<hash>` の 2 つの形で混ぜて出し、hash は build ごとに変わるので、両方の形の hash の前までで当てる。
+const METADATA = '[class*="MetadataContainer-module__container"], [class*="metadataContainer__"]'
 // header は幅でどちらかを CSS で隠す New issue の container を 2 つ持つので、両方に差し込む。
-const HEADER_ACTIONS = '[class*="HeaderMenu-module__buttonContainer"]'
+const HEADER_ACTIONS = '[class*="HeaderMenu-module__buttonContainer"], [class*="buttonContainer__"]'
 const TITLE_NUMBER = /^#\d+$/
 
 const buttons = new WeakMap<HTMLElement, HTMLElement[]>()
