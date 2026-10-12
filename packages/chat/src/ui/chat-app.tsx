@@ -11,6 +11,7 @@ import { InputMessage } from './fluid/input-message.tsx'
 import { useIcons } from './fluid/lib/icon-context.tsx'
 import { ThinkingIndicator } from './fluid/thinking-indicator.tsx'
 import { PageHeader } from './page-header.tsx'
+import { usePinchZoom } from './pinch-zoom.ts'
 import { readCurrentPage } from './read-current-page.ts'
 
 function Faint({ children }: { children: string }) {
@@ -91,10 +92,11 @@ function ChatBody({ store }: { store: ChatStore }) {
     store.snapshot,
   )
   const [draft, setDraft] = useState('')
+  const zoom = usePinchZoom()
 
   return (
     <>
-      <ChatScroll contentClassName="flex flex-col gap-5 px-3 py-4">
+      <ChatScroll contentClassName="flex flex-col gap-5 px-3 py-4" zoom={zoom}>
         {entries.length === 0 && (
           <p className="pt-10 text-center text-[13px] text-muted-foreground">
             このページについて質問できます
