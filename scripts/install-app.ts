@@ -44,6 +44,8 @@ async function healthy({ port }: Backend, timeoutMs: number): Promise<boolean> {
   }
 }
 
+// lockfile より古い node_modules で build すると、同梱する claude も古い版になるので、先に揃える。
+await $`bun install`.cwd(repo)
 // bundle だけを入れ替えると、手元の変更より古い build が黙って入るので、毎回 build してから入れる。
 await $`bun ${join(import.meta.dir, 'build.ts')}`
 
