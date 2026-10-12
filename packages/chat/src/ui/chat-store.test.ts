@@ -955,6 +955,20 @@ async function searchingThen(
   return store.snapshot().entries[0]
 }
 
+test('a search after a retry of the API takes the place of the retry line', async () => {
+  const { client, store } = openChat()
+  store.ask('When was he born?')
+  await settled()
+  const { answer } = client.asked[0]!
+  answer.event({ type: 'retry', attempt: 1 })
+  answer.event({ type: 'search', query: 'Claude Shannon birthday' })
+  await settled()
+
+  const entry = store.snapshot().entries[0]
+  expect(entry?.retrying).toBeUndefined()
+  expect(entry?.searching).toBe('検索中: Claude Shannon birthday')
+})
+
 test('the search line goes away when the answer ends, is stopped, fails or is retried by the API', async () => {
   const ended = await searchingThen((answer) => answer.end())
   const stopped = await searchingThen((_, store) => store.stop())

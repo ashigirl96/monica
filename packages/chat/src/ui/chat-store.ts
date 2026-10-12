@@ -249,7 +249,11 @@ export function createChatStore(client: ChatClient): ChatStore {
             retrying: retryingLine(event.attempt),
           })
         } else if (event.type === 'search') {
-          patch(id, { status: 'answering', searching: `検索中: ${event.query}` })
+          patch(id, {
+            ...NO_PASSING_LINES,
+            status: 'answering',
+            searching: `検索中: ${event.query}`,
+          })
         } else {
           patch(id, { usage: usageLine(event, new Date()) })
         }
