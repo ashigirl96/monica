@@ -33,7 +33,7 @@ GitHub の Issues の一覧から Run を起こしたい。ADR-0034 は Chrome E
 - run は確認を挟まない。止めたいときは Tab を閉じ、Bench の最後の Tab で Task を close する（ADR-0012）。
 - ボタンは Task の状態を映す。live な Run があれば押せず、終わった Run があれば resume になると示す。resume では ADR-0024 のとおり `/tackle` を送らない。この 2 つは open な Blocker より先に当てる。Blocker は新しい Run だけを止め、resume は止めない（ADR-0024）ので、CLI の `run` と同じ答えになる。
 - closed な Task には reopen のボタンを出し、押すと Task を reopen するだけで Run は起こさない。
-- `press` は押した時に Issue を引き直して判定をやり直し、受け取った状態と違えば何もせずに断る。状態は `Run`・`Resume`・`Reopen` のどれかで、prompt を受け取らないので shell に届かない。
-- `press` は、押下を行っても断っても、その行に次に出す Run Button を `runButtons` の 1 行と同じ形で返し、Chrome Extension はそれで描き直す。error で返すのは Backend か GitHub に届かないときだけ。
+- `press` は押した時に Issue を引き直して判定をやり直し、受け取った状態と違えば何もせずに断る。状態は `Run`・`Resume`・`Reopen` のどれかで、`runButtons` の行の `run` の値（`new`・`resume`・`reopen`）で受け取る。kind は受け取らない。ボタンは kind を出さず、押した人が見ていた状態に入らないため。prompt を受け取らないので shell に届かない。
+- `press` は、押下を行っても断っても、その行に次に出す Run Button を `runButtons` の 1 行と同じ形で返し、Chrome Extension はそれで描き直す。規則が断ったときも、live な Run と競り負けたときも、行で返す。error で返すのは、Backend か GitHub に届かないときと、押下を受けて Bench を用意できなかったとき（checkout が無いなど）だけ。Bench を用意できなかった後の行は押す前と同じになり、描き直しでは何が起きたかが伝わらないため。
 - 古い Chrome Extension と開いたままのページの content script は、Chrome Extension とページを reload するまで消えた procedure を呼び、断られる。互換の口は残さない。
 - 守らないもの: GitHub のページの script が Chrome Extension の差し込んだボタンを押すこと。content script は `isTrusted` のクリックだけを通すが、Issue のラベルを書ける人は prompt の種類を選べる。
