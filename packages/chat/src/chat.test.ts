@@ -300,6 +300,87 @@ test('claude starts as haiku at low effort with WebSearch as its only tool, no M
   })
 })
 
+const startsOf = (records: ClaudeRecord[]) =>
+  records.flatMap((r) => (r.kind === 'start' ? [r] : []))
+
+test('an ask with a model and an effort starts claude with them', async () => {
+  const { client, records } = startChat()
+
+  await answerOf(await client.ask({ ...QUESTION, model: 'sonnet', effort: 'high' }))
+
+  const [start] = startsOf(records())
+  expect(pairs(start!.argv)).toContainEqual(['--model', 'sonnet'])
+  expect(pairs(start!.argv)).toContainEqual(['--effort', 'high'])
+})
+
+test('an ask with the model and effort of prepare goes to the spare, and one with another pair closes the spare and starts its own claude', async () => {
+  const { client, records } = startChat()
+  const choice = { model: 'sonnet', effort: 'high' } as const
+  await client.prepare(choice)
+  const [spare] = await until(() =>
+    spares(records()).length === 1 ? spares(records()) : undefined,
+  )
+  const spareArgv = startsOf(records()).find(({ pid }) => pid === spare)!.argv
+  expect(pairs(spareArgv)).toContainEqual(['--model', 'sonnet'])
+  expect(pairs(spareArgv)).toContainEqual(['--effort', 'high'])
+
+  await answerOf(await client.ask({ ...QUESTION, ...choice }))
+  expect(answeringPids(records())).toEqual([spare!])
+  const [next] = await until(() => {
+    const found = spares(records())
+    return found.length === 1 ? found : undefined
+  })
+
+  await answerOf(await client.ask({ ...QUESTION, model: 'opus', effort: 'max' }))
+
+  await gone(next!)
+  const [, answering] = answeringPids(records())
+  expect(answering).not.toBe(next)
+  const start = startsOf(records()).find(({ pid }) => pid === answering)!
+  expect(pairs(start.argv)).toContainEqual(['--model', 'opus'])
+  expect(pairs(start.argv)).toContainEqual(['--effort', 'max'])
+})
+
+test('models lists the models that claude returns in its initialize response, and a second call starts no claude', async () => {
+  const { client, records } = startChat()
+
+  const first = await client.models()
+  const second = await client.models()
+
+  expect(first).toEqual([
+    {
+      value: 'haiku',
+      displayName: 'Haiku 5.5',
+      description: 'Fastest for quick answers',
+      supportsEffort: true,
+      supportedEffortLevels: ['low', 'medium', 'high', 'xhigh', 'max'],
+    },
+    { value: 'claude-haiku-4-5-20251001', displayName: 'Haiku 4.5', description: 'Haiku 4.5' },
+  ])
+  expect(second).toEqual(first)
+  expect(startsOf(records())).toHaveLength(1)
+  expect(userContent(records())).toEqual([])
+})
+
+test('models fails as AGENT_FAILED when claude does not start, and reads the models again on the next call', async () => {
+  const { home, client, records } = startChat('exit-at-start')
+
+  const failed = client.models()
+  await expect(failed).rejects.toMatchObject({ code: 'AGENT_FAILED', defined: true })
+  writeFakeClaude(home, join(home, 'claude.jsonl'), 'answer')
+
+  expect(await client.models()).toHaveLength(2)
+  expect(startsOf(records())).toHaveLength(1)
+})
+
+test('models while four claudes answer is refused as CHAT_BUSY without starting another claude', async () => {
+  const { client, records, claudes } = startChat()
+  const held = await holdAnswers(client, records, 4)
+
+  await expect(client.models()).rejects.toMatchObject({ code: 'CHAT_BUSY', status: 429 })
+  expect(claudes().toSorted((a, b) => a - b)).toEqual(held.toSorted((a, b) => a - b))
+})
+
 function setEnv(values: { [key: string]: string }) {
   const before = Object.fromEntries(Object.keys(values).map((key) => [key, process.env[key]]))
   Object.assign(process.env, values)

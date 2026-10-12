@@ -1,6 +1,6 @@
 import { implement, ORPCError, type ORPCErrorConstructorMap } from '@orpc/server'
 
-import { agentFailed, type ChatAgent, ChatFailure, internals } from './chat-agent.ts'
+import { agentFailed, type ChatAgent, ChatFailure, internals, shortDetail } from './chat-agent.ts'
 import { type askErrors, type ChatEvent, contract } from './contract.ts'
 
 export { migrations } from '../migrations/index.ts'
@@ -40,8 +40,17 @@ async function* typedFailures(
 }
 
 export const router = os.router({
-  prepare: os.prepare.handler(({ context }) => {
-    internals(context.chatAgent).prepare()
+  prepare: os.prepare.handler(({ context, input }) => {
+    internals(context.chatAgent).prepare(input)
+  }),
+  models: os.models.handler(async ({ context, errors }) => {
+    const models = await internals(context.chatAgent)
+      .models()
+      .catch((error: unknown) => {
+        throw errors.AGENT_FAILED({ data: { detail: shortDetail((error as Error).message) } })
+      })
+    if (!models) throw errors.CHAT_BUSY()
+    return models
   }),
   // async generator の handler で投げた error は、呼び出しが resolve した後の iteration で届く。
   // CHAT_BUSY を呼び出しの reject にするため、claude を取ってから generator を返す。

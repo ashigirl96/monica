@@ -17,6 +17,24 @@ export type FakeScenario =
   | 'restart'
   | 'unstreamed'
 
+/** 偽の claude が initialize の応答で返す model の一覧。SDK の ModelInfo の形。 */
+export const FAKE_MODELS = [
+  {
+    value: 'haiku',
+    resolvedModel: 'claude-haiku-5-5',
+    displayName: 'Haiku 5.5',
+    description: 'Fastest for quick answers',
+    supportsEffort: true,
+    supportedEffortLevels: ['low', 'medium', 'high', 'xhigh', 'max'],
+    supportsAdaptiveThinking: true,
+  },
+  {
+    value: 'claude-haiku-4-5-20251001',
+    displayName: 'Haiku 4.5',
+    description: 'Haiku 4.5',
+  },
+]
+
 /** 偽の claude の rate_limit_event が持つ resetsAt（unix 秒）。 */
 export const FAKE_RESETS_AT = 1_800_000_000
 

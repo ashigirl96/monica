@@ -6,7 +6,9 @@ import {
   askErrors,
   type AskInput,
   type ChatEvent,
+  type Choice,
   MAX_ASK_BODY_BYTES,
+  type Model,
   type Page,
   type PageSnapshot,
   type SnapshotEvent,
@@ -61,16 +63,52 @@ class FakeAnswer implements AsyncIterable<ChatEvent> {
   }
 }
 
+const MODELS: Model[] = [
+  {
+    value: 'haiku',
+    displayName: 'Haiku 5.5',
+    description: 'Fastest',
+    supportsEffort: true,
+    supportedEffortLevels: ['low', 'medium', 'high', 'xhigh', 'max'],
+  },
+  {
+    value: 'claude-opus-4-6',
+    displayName: 'Opus 4.6',
+    description: 'Opus 4.6',
+    supportsEffort: true,
+    supportedEffortLevels: ['low', 'medium', 'high', 'max'],
+  },
+  { value: 'claude-haiku-4-5-20251001', displayName: 'Haiku 4.5', description: 'Haiku 4.5' },
+]
+
+class FakeStorage {
+  readonly items = new Map<string, string>()
+  getItem(key: string): string | null {
+    return this.items.get(key) ?? null
+  }
+  setItem(key: string, value: string): void {
+    this.items.set(key, value)
+  }
+}
+
 class FakeClient implements ChatClient {
   prepared = 0
+  readonly prepares: (Choice | undefined)[] = []
+  offered: Model[] | undefined = MODELS
   prepareError: unknown
   /** 在れば、prepare はここに足した返事を test が返すまで返らない。 */
   heldPrepares: PromiseWithResolvers<void>[] | undefined
   askError: unknown
   readonly asked: { input: AskInput; signal: AbortSignal; answer: FakeAnswer }[] = []
 
-  async prepare(): Promise<void> {
+  async models(): Promise<Model[]> {
+    if (!this.offered) throw unreachable()
+    return this.offered
+  }
+
+  async prepare(choice?: Choice): Promise<void> {
     this.prepared++
+    this.prepares.push(choice)
     if (this.heldPrepares) {
       const reply = Promise.withResolvers<void>()
       this.heldPrepares.push(reply)
@@ -123,7 +161,7 @@ const snapshotAt = (url: string, title: string): PageSnapshot => ({
 
 const SHOT = 'c2NyZWVuc2hvdA=='
 
-function openChat(client = new FakeClient()) {
+function openChat(client = new FakeClient(), storage = new FakeStorage()) {
   let page = pageAt('https://a.example/', 'A')
   let shown: CurrentPage = { url: page.url, title: page.title }
   let shot: Pick<Page, 'screenshot' | 'screenshotFailed'> = { screenshot: SHOT }
@@ -132,7 +170,7 @@ function openChat(client = new FakeClient()) {
   const signals: AbortSignal[] = []
   const pdfLimits: number[] = []
   const focus = new EventTarget()
-  const store = createChatStore(client)
+  const store = createChatStore(client, storage)
   store.open(({ screenshot, maxPdfBytes, signal }) => {
     reads.push({ screenshot })
     signals.push(signal)
@@ -624,6 +662,7 @@ test('a new Chat aborts the answer coming, empties the Chat and ignores the delt
   expect(coming.signal.aborted).toBe(true)
   expect(store.snapshot()).toEqual({
     entries: [],
+    picker: expect.any(Object),
     answering: false,
     withScreenshot: false,
     unreachable: false,
@@ -654,6 +693,7 @@ test('the first question of a new Chat goes without the earlier questions, even 
 
 test('subscribers hear each change of the Chat', async () => {
   const { client, store } = openChat()
+  await settled()
   const heard: string[] = []
   store.subscribe(() =>
     heard.push(
@@ -1135,6 +1175,7 @@ test('stopping aborts the stream, draws nothing that arrives later, and marks th
   expect(signal.aborted).toBe(true)
   expect(store.snapshot()).toEqual({
     entries: [{ id: 0, question: 'What is this?', answer: 'It is ', status: 'stopped' }],
+    picker: expect.any(Object),
     answering: false,
     withScreenshot: false,
     unreachable: false,
@@ -1345,4 +1386,103 @@ test('opening asks the Backend once for a spare claude', async () => {
   await settled()
 
   expect([before, client.prepared]).toEqual([0, 1])
+})
+
+const savedChoice = (choice: Choice) => {
+  const storage = new FakeStorage()
+  storage.setItem('monica-chat-choice', JSON.stringify(choice))
+  return storage
+}
+
+test('the model and effort chosen in an earlier side panel go with prepare and every ask, and a new choice goes with the next ask and stays for the next side panel', async () => {
+  const storage = savedChoice({ model: 'claude-opus-4-6', effort: 'high' })
+  const { client, store } = openChat(new FakeClient(), storage)
+  await settled()
+
+  store.ask('First?')
+  await answerWith(client, 'One.')
+  store.chooseModel('haiku')
+  store.chooseEffort('xhigh')
+  store.ask('Second?')
+  await settled()
+
+  expect(client.prepares).toEqual([{ model: 'claude-opus-4-6', effort: 'high' }])
+  expect(client.asked.map(({ input: { model, effort } }) => ({ model, effort }))).toEqual([
+    { model: 'claude-opus-4-6', effort: 'high' },
+    { model: 'haiku', effort: 'xhigh' },
+  ])
+  const reopened = openChat(new FakeClient(), storage)
+  await settled()
+  expect(reopened.store.snapshot().picker).toMatchObject({ model: 'haiku', effort: 'xhigh' })
+})
+
+test('the picker lists every model and only the effort levels of the chosen one, and a model without effort sends no effort', async () => {
+  const { client, store } = openChat()
+  await settled()
+  expect(store.snapshot().picker).toEqual({
+    models: MODELS,
+    model: 'haiku',
+    effort: 'low',
+    efforts: ['low', 'medium', 'high', 'xhigh', 'max'],
+  })
+
+  store.chooseEffort('xhigh')
+  store.chooseModel('claude-opus-4-6')
+  expect(store.snapshot().picker).toMatchObject({
+    effort: 'low',
+    efforts: ['low', 'medium', 'high', 'max'],
+  })
+  store.chooseModel('claude-haiku-4-5-20251001')
+  store.ask('What is this?')
+  await settled()
+
+  expect(store.snapshot().picker).toMatchObject({ effort: undefined, efforts: [] })
+  expect(latest(client).input).toMatchObject({ model: 'claude-haiku-4-5-20251001' })
+  expect(latest(client).input).not.toHaveProperty('effort')
+})
+
+test('a kept model that the list does not have falls back to no choice, and so does a list that could not be read', async () => {
+  const kept = { model: 'claude-gone-1', effort: 'max' } as const
+  const missing = openChat(new FakeClient(), savedChoice(kept))
+  await settled()
+  const client = new FakeClient()
+  client.offered = undefined
+  const unlisted = openChat(client, savedChoice(kept))
+  await settled()
+
+  for (const { client: asked, store } of [missing, unlisted]) {
+    store.ask('What is this?')
+    await settled()
+    expect(latest(asked).input).not.toHaveProperty('model')
+    expect(latest(asked).input).not.toHaveProperty('effort')
+  }
+  expect(missing.store.snapshot().picker).toMatchObject({ model: 'haiku', effort: 'low' })
+  expect(unlisted.store.snapshot().picker).toBeUndefined()
+})
+
+test('a list without haiku makes its first model the choice shown and sent', async () => {
+  const client = new FakeClient()
+  client.offered = MODELS.slice(1)
+  const { store } = openChat(client)
+  await settled()
+
+  store.ask('What is this?')
+  await settled()
+
+  expect(store.snapshot().picker).toMatchObject({ model: 'claude-opus-4-6', effort: 'low' })
+  expect(latest(client).input).toMatchObject({ model: 'claude-opus-4-6' })
+})
+
+test('a list that could not be read is read again when the side panel gets focus, while the Backend is reachable', async () => {
+  const client = new FakeClient()
+  client.offered = undefined
+  const { store, focus } = openChat(client)
+  await settled()
+  expect(store.snapshot().picker).toBeUndefined()
+
+  client.offered = MODELS
+  focus.dispatchEvent(new Event('focus'))
+  await settled()
+
+  expect(store.snapshot().picker).toMatchObject({ model: 'haiku' })
 })

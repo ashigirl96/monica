@@ -24,6 +24,7 @@ function fakeBackend(extensionToken: string) {
   const handler = new RPCHandler({
     chat: os.router({
       prepare: os.prepare.handler(() => {}),
+      models: os.models.handler(() => []),
       ask: os.ask.handler(async function* () {}),
     }),
   })
@@ -55,7 +56,7 @@ function sidePanel() {
 }
 
 function openChat(client: ContractRouterClient<{ chat: typeof contract }>) {
-  const store = createChatStore(client.chat)
+  const store = createChatStore(client.chat, { getItem: () => null, setItem: () => {} })
   const stop = store.open(
     () => ({ shown: {}, page: new Promise<never>(() => {}) }),
     new EventTarget(),
@@ -122,5 +123,12 @@ test('a banner put up for a stale Chrome Extension token comes down at the next 
   check()
 
   await untilBanner(store, false)
-  expect(backend.authorizations).toEqual(['Bearer stale', 'Bearer restarted'])
+  // prepare と models が 1 つずつ。一覧を読めなかった side panel は、届いた時に読み直す。
+  for (let i = 0; i < 200 && backend.authorizations.length < 4; i++) await Bun.sleep(5)
+  expect(backend.authorizations).toEqual([
+    'Bearer stale',
+    'Bearer stale',
+    'Bearer restarted',
+    'Bearer restarted',
+  ])
 })

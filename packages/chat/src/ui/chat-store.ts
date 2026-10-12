@@ -3,8 +3,14 @@ import type { ContractRouterClient } from '@orpc/contract'
 
 import {
   type AskInput,
+  type Choice,
+  ChoiceSchema,
   type contract,
+  DEFAULT_EFFORT,
+  DEFAULT_MODEL,
+  type Effort,
   MAX_ASK_BODY_BYTES,
+  type Model,
   type Page,
   type PageSnapshot,
   type Turn,
@@ -126,8 +132,18 @@ function withinBodyLimit(input: AskInput): AskInput {
   )
 }
 
+/** 入力欄の左に出す model と effort の選択。一覧が届くまでは無い。 */
+export type Picker = {
+  models: readonly Model[]
+  model: string
+  /** 選んだ model が effort を持たなければ undefined。 */
+  effort: Effort | undefined
+  efforts: readonly Effort[]
+}
+
 export type ChatSnapshot = {
   entries: readonly ChatEntry[]
+  picker: Picker | undefined
   answering: boolean
   /** スクリーンショットのボタンが押されていて、次に送る質問に添える。 */
   withScreenshot: boolean
@@ -164,6 +180,9 @@ export type ChatStore = {
   /** 答えの stream を abort し、途中までの答えを止めた印を付けて履歴に入れる。 */
   stop: () => void
   toggleScreenshot: () => void
+  /** 選んだものを残し、次の prepare と ask から付ける。 */
+  chooseModel: (model: string) => void
+  chooseEffort: (effort: Effort) => void
   /** 今の Chat を終える。答えの途中なら、その stream を abort する。 */
   startNewChat: () => void
 }
@@ -181,7 +200,41 @@ type Asking = Sent & {
   page: PageSnapshot
 }
 
-export function createChatStore(client: ChatClient): ChatStore {
+export type ChoiceStorage = Pick<Storage, 'getItem' | 'setItem'>
+
+const CHOICE_KEY = 'monica-chat-choice'
+
+// 読めない値と、private な窓などで storage が投げるときは、何も選んでいないことにする。
+function readChoice(storage: ChoiceStorage): Choice {
+  try {
+    const parsed = ChoiceSchema.safeParse(JSON.parse(storage.getItem(CHOICE_KEY) ?? '{}'))
+    return parsed.success ? parsed.data : {}
+  } catch {
+    return {}
+  }
+}
+
+function writeChoice(storage: ChoiceStorage, choice: Choice) {
+  try {
+    storage.setItem(CHOICE_KEY, JSON.stringify(choice))
+  } catch {}
+}
+
+const modelIn = (models: readonly Model[], model: string) =>
+  models.find(({ value }) => value === model)
+
+// managed settings が haiku を一覧から外したときは、Backend の既定に任せず一覧の先頭を付ける。
+const defaultModelIn = (models: readonly Model[]) =>
+  modelIn(models, DEFAULT_MODEL) ? undefined : models[0]?.value
+
+type Listing =
+  | { state: 'loading' }
+  | { state: 'failed' }
+  | { state: 'ready'; models: readonly Model[] }
+
+export function createChatStore(client: ChatClient, storage: ChoiceStorage): ChatStore {
+  let saved = readChoice(storage)
+  let listing: Listing = { state: 'loading' }
   let entries: readonly ChatEntry[] = []
   let history: readonly Turn[] = []
   let asking: Asking | undefined
@@ -190,6 +243,7 @@ export function createChatStore(client: ChatClient): ChatStore {
   let withScreenshot = false
   let snapshot: ChatSnapshot = {
     entries,
+    picker: undefined,
     answering: false,
     withScreenshot,
     unreachable: false,
@@ -199,10 +253,31 @@ export function createChatStore(client: ChatClient): ChatStore {
   let nextId = 0
   const listeners = new Set<() => void>()
 
+  // 一覧を読む間も残した組を付けるのは、spare をその組で起こさせるため。
+  function chosen(): Choice {
+    if (listing.state === 'loading') return saved
+    if (listing.state === 'failed') return {}
+    const model = saved.model ?? defaultModelIn(listing.models)
+    const entry = modelIn(listing.models, model ?? DEFAULT_MODEL)
+    const { effort } = saved
+    const offered = effort && entry?.supportsEffort && entry.supportedEffortLevels?.includes(effort)
+    return { ...(model && { model }), ...(offered && { effort }) }
+  }
+
+  function picker(): Picker | undefined {
+    if (listing.state !== 'ready' || listing.models.length === 0) return undefined
+    const { models } = listing
+    const { model = DEFAULT_MODEL, effort = DEFAULT_EFFORT } = chosen()
+    const entry = modelIn(models, model)
+    const efforts = (entry?.supportsEffort && entry.supportedEffortLevels) || []
+    return { models, model, effort: efforts.length > 0 ? effort : undefined, efforts }
+  }
+
   const publish = (next: readonly ChatEntry[] = entries) => {
     entries = next
     snapshot = {
       entries,
+      picker: picker(),
       answering: asking !== undefined,
       withScreenshot,
       unreachable: reach?.unreachable() ?? false,
@@ -276,6 +351,28 @@ export function createChatStore(client: ChatClient): ChatStore {
     }
   }
 
+  const loadModels = () => {
+    listing = { state: 'loading' }
+    client.models().then(
+      (models) => {
+        listing = { state: 'ready', models }
+        // 一覧に無い model は選んでいないことにし、次に選んだ effort が既定の model に付くようにする。
+        if (saved.model && !modelIn(models, saved.model)) saved = {}
+        publish()
+      },
+      () => {
+        listing = { state: 'failed' }
+        publish()
+      },
+    )
+  }
+
+  const choose = (choice: Choice) => {
+    saved = choice
+    writeChoice(storage, saved)
+    publish()
+  }
+
   const start = (sent: Sent, controller = new AbortController()) => {
     const current: Asking = {
       ...sent,
@@ -297,15 +394,24 @@ export function createChatStore(client: ChatClient): ChatStore {
     },
     open(read, focus) {
       readPage = read
+      // 一覧は claude が埋まっている間や一時的な失敗でも読めないので、Backend に届いていても focus で読み直す。
+      const retryModels = () => listing.state === 'failed' && loadModels()
+      focus.addEventListener('focus', retryModels)
       const watching = watchReach(
-        () => client.prepare(),
+        () => client.prepare(chosen()),
         focus,
-        () => publish(),
+        () => {
+          // desktop が起きる前に開いた side panel にも、届いた時に一覧を出す。
+          if (!watching.unreachable() && listing.state === 'failed') loadModels()
+          publish()
+        },
       )
       reach = watching
       // spare の claude を起こさせ、最初の質問の答えを早める（ADR-0031）。届かなければ帯を出す。
       watching.check()
+      loadModels()
       return () => {
+        focus.removeEventListener('focus', retryModels)
         watching.dispose()
         if (reach === watching) reach = undefined
       }
@@ -316,6 +422,7 @@ export function createChatStore(client: ChatClient): ChatStore {
       failed = undefined
       const id = nextId++
       const turns = [...history]
+      const choice = chosen()
       const controller = new AbortController()
       // captureVisibleTab は送る操作の user gesture の中で呼ばないと quota にかかるので、await を挟まずに読み始める。
       const { shown, page } = readPage({
@@ -323,7 +430,9 @@ export function createChatStore(client: ChatClient): ChatStore {
         maxPdfBytes: pdfBudget(question, turns),
         signal: controller.signal,
       })
-      const input = page.then((read) => withinBodyLimit({ question, page: read, history: turns }))
+      const input = page.then((read) =>
+        withinBodyLimit({ question, page: read, history: turns, ...choice }),
+      )
       withScreenshot = false
       start({ id, question, input, shown }, controller)
       publish([...entries, { id, question, answer: '', status: 'waiting' }])
@@ -358,6 +467,8 @@ export function createChatStore(client: ChatClient): ChatStore {
       withScreenshot = !withScreenshot
       publish()
     },
+    chooseModel: (model) => choose({ ...saved, model }),
+    chooseEffort: (effort) => choose({ ...saved, effort }),
     startNewChat() {
       asking?.controller.abort()
       asking = undefined
