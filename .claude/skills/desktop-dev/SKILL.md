@@ -19,6 +19,8 @@ dev の desktop は `MONICA_HOME` ごとに identifier と vite の port が分�
 
 起動できたのは、log に `MCP Bridge plugin initialized` と `[backend] listening on` が出たとき。待つのは、Bash の `run_in_background` で `until grep -qE '^\[backend\] listening on|^\[desktop exited\]' $SCRATCH/desktop.log; do sleep 0.5; done` を走らせる（前景の `sleep` は harness が止める）。MCP の WebSocket の行も `listening on` を含むので、`[backend]` まで含めて探す。`[desktop exited]` で抜けたら log を読む。
 
+起動を待つ間（desktop の crate の build）は `bun run check:brief` を流さない。build が CPU を取り、変更と関係の無いテストが 5 秒の timeout で落ちる。
+
 自分の desktop の pid は、`bun run dev:list` の `monica-<名前>` の行の DESKTOP から引く。`pgrep -f target/debug/monica-desktop` はユーザーや別の worktree の desktop にも当たる。
 
 ## 確かめる
@@ -54,6 +56,7 @@ dev の desktop は `MONICA_HOME` ごとに identifier と vite の port が分�
   - 最小化した窓は `focus` だけでは戻らず、`document.visibilityState` が `hidden` のまま残る。`osascript -e 'tell application "System Events" to set frontmost of (first process whose unix id is <DESKTOP の pid>) to true'` で前に出してから `focus` する。前面に来たかは webview の `document.hasFocus()` で確かめる。
 - **Dock の数**（icon の badge）は webview の外なので screenshot に写らない。`lsappinfo info -only StatusLabel "$(lsappinfo find pid=<DESKTOP の pid>)"` で読む。数があれば `{ "label"="3" }`、無ければ `[ NULL ]` か `kCFNULL` になる。Backend の落ちと respawn のように一瞬で変わるものは、50ms おきに読んで変わった時刻だけを残す。Rust の file を直すと dev の desktop が Shell を build し直して pid が変わるので、読む前に `bun run dev:list` で引き直す。
 - **メニューの項目**（Tab のメニュー、そこから開く picker）: Tab のメニューは、`[data-tab-id]` の button に `clientX`・`clientY` を付けた `contextmenu` を dispatch して開く。項目には `pointerdown` を dispatch してから `click()` する。メニューは window の pointerdown で外側の押下を判定するので、pointerdown を出さない tauri-mcp の click ではその判定を通らない。
+- **Repo の Tile**は、window に ⌥P の keydown（`{ key: 'π', code: 'KeyP', altKey: true }`）を dispatch して Runspace を作り、その Tab に上の「書き込み」で `cd <ghq の checkout>\r` を送って作る。Runspace を作る procedure は CLI に出ていない。
 - **Tile の drag**（Rail の Repo の Tile を並べ替える）は、Tile の button（`[data-reorder-id]`）に `pointerdown`（`button: 0, buttons: 1, clientX, clientY`）、`document` に 5px を超えて動く `pointermove`（`buttons: 1`）を落とし先の Tile の上の座標で、最後に `document` に `pointerup` を、この順に dispatch する。落とし先は pointermove の座標で決まる。写しと線は drag の間だけ `document.body` に出るので、screenshot は pointerup の前に撮る。
 - **端末の link**: 端末は WebGL で描くので、行の DOM は無い。座標を screenshot で読み、`document.elementFromPoint(x, y)` に `metaKey: true` の `mousemove` を送る。xterm は同じ cell への mousemove を無視するので、先に別の cell へ動かしてから狙う。link が付いたかは、見えている `.xterm-screen` の class に `xterm-cursor-pointer` があるかで分かる。⌘-click は、hover の後に `metaKey: true, buttons: 0` の `pointerdown` を送る。
 - **画像の drop**: OS の drag は起こせないので、`window.__TAURI__.event.emitTo({ kind: "Webview", label: "main" }, "tauri://drag-drop", { paths, position: { x, y } })` で Tauri の drop と同じ handler を動かす。キーボードの Ctrl+V で貼るのを確かめるときは、`osascript -e 'set the clipboard to (read (POSIX file "<png>") as «class PNGf»)'` で画像を clipboard に置く。
