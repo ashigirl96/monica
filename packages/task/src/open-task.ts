@@ -5,6 +5,9 @@ import { eq, type SQL } from 'drizzle-orm'
 import { formatRef } from './ref.ts'
 import { bench, issue, task } from './schema.ts'
 
+/** Task が閉じている・開いている・close の途中で断る error。Run Button の press は押した後に変わった状態として次の行で返す。 */
+export class TaskStateRefusal extends ORPCError<'BAD_REQUEST' | 'CONFLICT', undefined> {}
+
 export function taskIfTracked(db: Pick<Db, 'select'>, where: SQL | undefined) {
   return db
     .select({ task, issue, bench })
@@ -30,7 +33,7 @@ export function findOpenTask(db: Pick<Db, 'select'>, where: SQL | undefined, ask
 export function refuseClosed(found: FoundTask): FoundTask {
   const ref = formatRef(found.issue)
   if (found.task.closedAt) {
-    throw new ORPCError('BAD_REQUEST', {
+    throw new TaskStateRefusal('BAD_REQUEST', {
       message: `${ref} is closed, so run \`monica task reopen ${ref}\``,
     })
   }
@@ -39,7 +42,7 @@ export function refuseClosed(found: FoundTask): FoundTask {
 
 export function refuseOpen(found: FoundTask): FoundTask {
   if (!found.task.closedAt) {
-    throw new ORPCError('BAD_REQUEST', { message: `${formatRef(found.issue)} is open` })
+    throw new TaskStateRefusal('BAD_REQUEST', { message: `${formatRef(found.issue)} is open` })
   }
   return found
 }

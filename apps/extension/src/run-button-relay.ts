@@ -1,5 +1,10 @@
 import { viaNativeHost } from '@monica/chat/native-host'
-import type { contract as taskContract, RunButtonsOutput } from '@monica/task/contract'
+import type {
+  contract as taskContract,
+  Pressable,
+  RunButtonRow,
+  RunButtonsOutput,
+} from '@monica/task/contract'
 import { createORPCClient, ORPCError } from '@orpc/client'
 import { RPCLink } from '@orpc/client/fetch'
 import type { ContractRouterClient } from '@orpc/contract'
@@ -7,17 +12,17 @@ import type { ContractRouterClient } from '@orpc/contract'
 /** content script が service worker に送る message。content script は Native Messaging を呼べないため。 */
 export type RunButtonRequest =
   | { type: 'monica.runButtons'; refs: string[] }
-  | { type: 'monica.runFromButton'; ref: string }
-  | { type: 'monica.reopenFromButton'; ref: string }
+  | { type: 'monica.press'; ref: string; run: Pressable }
 
 /** null なら Backend に届かなかった。 */
 export type RunButtonsReply = RunButtonsOutput | null
 
-export type PressReply = { accepted: true } | { accepted: false; reason: string }
+/** 押下の後に出す行か、Backend に届かなかったか error が返った理由。 */
+export type PressReply = { row: RunButtonRow } | { failed: string }
 
-type Client = ContractRouterClient<{
-  task: Pick<typeof taskContract, 'runButtons' | 'runFromButton' | 'reopenFromButton'>
-}>
+type Client = ContractRouterClient<{ task: Pick<typeof taskContract, 'runButtons' | 'press'> }>
+
+const PRESSABLE: unknown[] = ['new', 'resume', 'reopen'] satisfies Pressable[]
 
 /** 自分宛てでない message には undefined を返し、他の listener に任せる。 */
 export function relayRunButton(
@@ -29,10 +34,8 @@ export function relayRunButton(
   switch (message.type) {
     case 'monica.runButtons':
       return tellButtons(client, message.refs)
-    case 'monica.runFromButton':
-      return press(() => client.task.runFromButton({ ref: message.ref }))
-    case 'monica.reopenFromButton':
-      return press(() => client.task.reopenFromButton({ ref: message.ref }))
+    case 'monica.press':
+      return press(client, message.ref, message.run)
   }
 }
 
@@ -45,13 +48,12 @@ async function tellButtons(client: Client, refs: string[]): Promise<RunButtonsRe
   }
 }
 
-async function press(call: () => Promise<unknown>): Promise<PressReply> {
+async function press(client: Client, ref: string, run: Pressable): Promise<PressReply> {
   try {
-    await call()
-    return { accepted: true }
+    return { row: await client.task.press({ ref, run }) }
   } catch (error) {
-    if (error instanceof ORPCError) return { accepted: false, reason: error.message }
-    return { accepted: false, reason: 'the monica desktop is not running' }
+    if (error instanceof ORPCError) return { failed: error.message }
+    return { failed: 'the monica desktop is not running' }
   }
 }
 
@@ -60,8 +62,13 @@ function isRequest(message: unknown): message is RunButtonRequest {
   if (message.type === 'monica.runButtons') {
     return 'refs' in message && Array.isArray(message.refs)
   }
-  if (message.type === 'monica.runFromButton' || message.type === 'monica.reopenFromButton') {
-    return 'ref' in message && typeof message.ref === 'string'
+  if (message.type === 'monica.press') {
+    return (
+      'ref' in message &&
+      typeof message.ref === 'string' &&
+      'run' in message &&
+      PRESSABLE.includes(message.run)
+    )
   }
   return false
 }

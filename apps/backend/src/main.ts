@@ -137,11 +137,7 @@ const handler = new RPCHandler(os.$context<TokenContext>().router(tokenRouter), 
 const extensionHandler = new RPCHandler(
   os.$context<TokenContext>().router({
     chat: chatRouter,
-    task: {
-      runButtons: taskRouter.runButtons,
-      runFromButton: taskRouter.runFromButton,
-      reopenFromButton: taskRouter.reopenFromButton,
-    },
+    task: { runButtons: taskRouter.runButtons, press: taskRouter.press },
   }),
   { clientInterceptors },
 )

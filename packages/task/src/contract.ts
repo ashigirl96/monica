@@ -122,22 +122,24 @@ export const RunButtonSchema = z.union([
   }),
 ])
 
-export const RunButtonsOutputSchema = z.object({
-  buttons: z.array(
-    z.object({
-      ref: z.string().describe('the ref as asked'),
-      button: RunButtonSchema.nullable().describe(
-        'null when the Run Button is refused by a rule or the Issue could not be read from GitHub',
-      ),
-      reason: z
-        .string()
-        .nullable()
-        .describe(
-          'why a rule refuses the Run Button, shown on an unpressable one, or null when a rule does not refuse it or the Issue could not be read from GitHub',
-        ),
-    }),
+export const PressableSchema = z
+  .enum(['new', 'resume', 'reopen'])
+  .describe('the run of the Run Button shown when it was pressed')
+
+export const RunButtonRowSchema = z.object({
+  ref: z.string().describe('the ref as asked'),
+  button: RunButtonSchema.nullable().describe(
+    'null when the Run Button is refused by a rule or the Issue could not be read from GitHub',
   ),
+  reason: z
+    .string()
+    .nullable()
+    .describe(
+      'why a rule refuses the Run Button, shown on an unpressable one, or null when a rule does not refuse it or the Issue could not be read from GitHub',
+    ),
 })
+
+export const RunButtonsOutputSchema = z.object({ buttons: z.array(RunButtonRowSchema) })
 
 export const CurrentOutputSchema = z.object({
   ref: z.string(),
@@ -200,6 +202,8 @@ export type ListOutput = z.infer<typeof ListOutputSchema>
 export type RunOutput = z.infer<typeof RunOutputSchema>
 export type PromptKind = z.infer<typeof PromptKindSchema>
 export type RunButton = z.infer<typeof RunButtonSchema>
+export type Pressable = z.infer<typeof PressableSchema>
+export type RunButtonRow = z.infer<typeof RunButtonRowSchema>
 export type RunButtonsOutput = z.infer<typeof RunButtonsOutputSchema>
 export type CurrentOutput = z.infer<typeof CurrentOutputSchema>
 export type AttachOutput = z.infer<typeof AttachOutputSchema>
@@ -255,21 +259,18 @@ export const contract = {
     })
     .input(z.object({ refs: z.array(z.string()).max(100) }))
     .output(RunButtonsOutputSchema),
-  runFromButton: meta
+  press: meta
     .meta({
       description:
-        'Run the Task of an Issue with the prompt its Run Button has now, reading the Issue from GitHub anew, or refuse with PRECONDITION_FAILED and the reason when a rule refuses its Run Button',
+        'Press the Run Button of an Issue as it was shown, reading the Issue from GitHub anew and doing nothing when its Run Button is no longer the one shown, and tell the Run Button to show next',
     })
-    .errors(runErrors)
-    .input(z.object({ ref }))
-    .output(RunOutputSchema),
-  reopenFromButton: meta
-    .meta({
-      description:
-        'Reopen the closed Task of an Issue whose Run Button is a reopen one now, reading the Issue from GitHub anew, or refuse with PRECONDITION_FAILED and the reason when it is not',
-    })
-    .input(z.object({ ref }))
-    .output(ReopenOutputSchema),
+    .input(
+      z.object({
+        ref,
+        run: PressableSchema,
+      }),
+    )
+    .output(RunButtonRowSchema),
   current: meta
     .meta({ description: 'Show the Task of the Tab this runs in', cli: true })
     .input(z.object({ terminalSessionId: z.string().optional() }))

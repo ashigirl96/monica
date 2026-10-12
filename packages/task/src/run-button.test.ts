@@ -2,6 +2,8 @@ import { afterEach, expect, mock, test } from 'bun:test'
 import { mkdirSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 
+import { tab } from '@monica/workbench/schema'
+
 import { issue, task } from './schema.ts'
 import { cleanUp, failure, setup } from './testing.ts'
 
@@ -14,7 +16,7 @@ const ref = 'acme/app#12'
 
 type Fixture = ReturnType<typeof setup>
 
-// runFromButton は worktree の Bench を開くので、新しい Bench まで進むテストだけが origin を要る。
+// press は worktree の Bench を開くので、新しい Bench まで進むテストだけが origin を要る。
 function withOrigin() {
   const fixture = setup()
   fixture.ghq.origin('acme/app', {})
@@ -61,21 +63,22 @@ test.each([['ready-for-human'], ['needs-info'], ['wontfix']])(
   },
 )
 
-test('a wayfinder Issue with no parent map gets no button, and running it is refused', async () => {
+test('a wayfinder Issue with no parent map gets no button, and pressing a Run shown before gives that row back', async () => {
   const fixture = setup()
   fixture.github.issue(ref, { title: 'Ask it', labels: ['wayfinder:grilling'] })
 
   expect(await fixture.client.runButtons({ refs: [ref] })).toEqual({
     buttons: [{ ref, button: null, reason: expect.stringContaining('no map above it') }],
   })
-  const refused = await failure(fixture.client.runFromButton({ ref }))
-  expect([refused.code, refused.message]).toEqual([
-    'PRECONDITION_FAILED',
-    `${ref} is a wayfinder Issue with no map above it`,
-  ])
+  expect(await fixture.client.press({ ref, run: 'new' })).toEqual({
+    ref,
+    button: null,
+    reason: `${ref} is a wayfinder Issue with no map above it`,
+  })
+  expect(fixture.db.select().from(task).all()).toEqual([])
 })
 
-test('a wayfinder Issue under a parent that is not a map gets no button, and running it is refused', async () => {
+test('a wayfinder Issue under a parent that is not a map gets no button, and pressing a Run shown before gives that row back', async () => {
   const fixture = setup()
   fixture.github.issue('acme/app#7', { title: 'Plain', labels: ['enhancement'] })
   fixture.github.issue(ref, { title: 'Ask it', labels: ['wayfinder:task'], parent: 'acme/app#7' })
@@ -83,9 +86,11 @@ test('a wayfinder Issue under a parent that is not a map gets no button, and run
   expect(await fixture.client.runButtons({ refs: [ref] })).toEqual({
     buttons: [{ ref, button: null, reason: expect.stringContaining('acme/app#7') }],
   })
-  const refused = await failure(fixture.client.runFromButton({ ref }))
-  expect(refused.code).toBe('PRECONDITION_FAILED')
-  expect(refused.message).toContain('acme/app#7')
+  expect(await fixture.client.press({ ref, run: 'new' })).toEqual({
+    ref,
+    button: null,
+    reason: expect.stringContaining('acme/app#7'),
+  })
 })
 
 test.each([[[]], [['bug', 'enhancement']]])(
@@ -118,7 +123,7 @@ test('telling the buttons tracks no Issue', async () => {
   expect(db.select().from(task).all()).toEqual([])
 })
 
-test('a closed Task gets a reopen button, running from it is refused, and once reopened it gets its Run button back', async () => {
+test('a closed Task gets a reopen button, pressing a Run shown before gives the reopen button back, and pressing Reopen gives its Run button back', async () => {
   const { github, client, track } = setup()
   github.issue(ref, { title: 'Ship it', labels: ['ready-for-agent'] })
   await track(ref)
@@ -127,34 +132,37 @@ test('a closed Task gets a reopen button, running from it is refused, and once r
   expect(await client.runButtons({ refs: [ref] })).toEqual({
     buttons: [{ ref, button: { run: 'reopen' }, reason: null }],
   })
-  const refusal = await failure(client.runFromButton({ ref }))
-  expect([refusal.code, refusal.message]).toEqual([
-    'PRECONDITION_FAILED',
-    `${ref} is a closed Task; reopen it to run it`,
-  ])
-
-  await client.reopenFromButton({ ref })
-  expect(await client.runButtons({ refs: [ref] })).toEqual({
-    buttons: [{ ref, button: { kind: 'tackle', run: 'new' }, reason: null }],
+  expect(await client.press({ ref, run: 'new' })).toEqual({
+    ref,
+    button: { run: 'reopen' },
+    reason: null,
   })
+  expect((await client.list({ closed: true })).tasks.map((t) => t.ref)).toEqual([ref])
+
+  expect(await client.press({ ref, run: 'reopen' })).toEqual({
+    ref,
+    button: { kind: 'tackle', run: 'new' },
+    reason: null,
+  })
+  expect((await client.list({})).tasks.map((t) => t.ref)).toEqual([ref])
 })
 
-test('reopening from a button reads the Issue anew and refuses a Task whose Issue was closed since, leaving it closed', async () => {
+test('pressing Reopen reads the Issue anew and leaves a Task whose Issue was closed since closed, giving the row with no button', async () => {
   const { github, client, track } = setup()
   github.issue(ref, { title: 'Ship it', labels: ['ready-for-agent'] })
   await track(ref)
   await client.close({ ref })
   github.issue(ref, { title: 'Ship it', state: 'closed', labels: ['ready-for-agent'] })
 
-  const refusal = await failure(client.reopenFromButton({ ref }))
-  expect([refusal.code, refusal.message]).toEqual([
-    'PRECONDITION_FAILED',
-    `${ref} is a closed Issue`,
-  ])
+  expect(await client.press({ ref, run: 'reopen' })).toEqual({
+    ref,
+    button: null,
+    reason: `${ref} is a closed Issue`,
+  })
   expect((await client.list({ closed: true })).tasks.map((t) => t.ref)).toEqual([ref])
 })
 
-test('a closed Task whose repo was renamed before any sync gets its reopen button by the new name, and reopens from it', async () => {
+test('a closed Task whose repo was renamed before any sync gets its reopen button by the new name, and pressing it reopens the Task', async () => {
   const { github, client, track } = setup()
   github.issue(ref, { title: 'Ship it', labels: ['ready-for-agent'] })
   await track(ref)
@@ -165,13 +173,17 @@ test('a closed Task whose repo was renamed before any sync gets its reopen butto
   expect(await client.runButtons({ refs: [renamed] })).toEqual({
     buttons: [{ ref: renamed, button: { run: 'reopen' }, reason: null }],
   })
-  expect((await client.reopenFromButton({ ref: renamed })).ref).toBe(renamed)
+  expect(await client.press({ ref: renamed, run: 'reopen' })).toEqual({
+    ref: renamed,
+    button: { kind: 'tackle', run: 'new' },
+    reason: null,
+  })
   expect(await client.runButtons({ refs: [renamed] })).toEqual({
     buttons: [{ ref: renamed, button: { kind: 'tackle', run: 'new' }, reason: null }],
   })
 })
 
-test('reopening from a button refuses a Task whose Issue is closed between the button and the sync of reopen, leaving it closed', async () => {
+test('pressing Reopen leaves a Task whose Issue is closed between the read and the sync of reopen closed, giving the reopen button back', async () => {
   const fixture = setup()
   fixture.github.issue(ref, { title: 'Ship it', labels: ['ready-for-agent'] })
   await fixture.track(ref)
@@ -179,7 +191,7 @@ test('reopening from a button refuses a Task whose Issue is closed between the b
 
   const releaseRead = fixture.github.hold()
   const before = fixture.github.requests.length
-  const reopening = failure(fixture.client.reopenFromButton({ ref }))
+  const reopening = fixture.client.press({ ref, run: 'reopen' })
   await fixture.github.received(before + 1)
   releaseRead()
   const releaseSync = fixture.github.hold()
@@ -187,24 +199,27 @@ test('reopening from a button refuses a Task whose Issue is closed between the b
   fixture.github.issue(ref, { title: 'Ship it', state: 'closed', labels: ['ready-for-agent'] })
   releaseSync()
 
-  const refusal = await reopening
-  expect([refusal.code, refusal.message]).toEqual([
-    'PRECONDITION_FAILED',
-    `${ref} is a closed Issue`,
-  ])
+  expect(await reopening).toEqual({ ref, button: { run: 'reopen' }, reason: null })
   expect((await fixture.client.list({ closed: true })).tasks.map((t) => t.ref)).toEqual([ref])
 })
 
-test('reopening from a button refuses an open Task', async () => {
-  const { github, client, track } = setup()
+test('pressing Reopen of a Task reopened since does nothing and gives its Run button', async () => {
+  const fixture = withOrigin()
+  const { github, client, db, track } = fixture
   github.issue(ref, { title: 'Ship it', labels: ['ready-for-agent'] })
   await track(ref)
+  await client.close({ ref })
+  await client.reopen({ ref })
+  const before = db.select().from(task).all()
 
-  const refusal = await failure(client.reopenFromButton({ ref }))
-  expect([refusal.code, refusal.message]).toEqual([
-    'PRECONDITION_FAILED',
-    `${ref} is not a closed Task`,
-  ])
+  expect(await client.press({ ref, run: 'reopen' })).toEqual({
+    ref,
+    button: { kind: 'tackle', run: 'new' },
+    reason: null,
+  })
+  expect(db.select().from(task).all()).toEqual(before)
+  expect(await client.bench.list()).toEqual([])
+  expect(tabCount(fixture)).toBe(0)
 })
 
 test('a closed Task of a closed Issue gets no reopen button', async () => {
@@ -237,39 +252,59 @@ test('an Issue GitHub does not return, one of a failing repo and a malformed ref
   })
 })
 
-// run は Tab を書いて commit したら返り、Write はその後で ptyd に届く。
-async function typedInto(fixture: Fixture, terminalSessionId: string) {
-  await fixture.ptyd.received((op) => op.op === 'write' && op.session_id === terminalSessionId)
-  return fixture.ptyd.sessionRequests().filter((op) => op.session_id === terminalSessionId)
+const typesClaude = (data: string) => data.startsWith('claude ')
+
+// press は Terminal Session を返さないので、ptyd に届いた Write から打った claude を読む。Write は commit の後で届く。
+async function typedClaude(fixture: Fixture, count = 1) {
+  await fixture.ptyd.receivedAtLeast(
+    count,
+    (op) => op.op === 'write' && typesClaude(Buffer.from(op.data, 'base64').toString()),
+  )
+  return fixture.ptyd
+    .sessionRequests()
+    .flatMap((op) => (op.op === 'write' && typesClaude(op.data) ? [op.data] : []))
 }
 
-test('running from a tackle button tracks the Issue and types claude with /tackle into a Tab of its Bench', async () => {
+const tabCount = ({ db }: Pick<Fixture, 'db'>) => db.select().from(tab).all().length
+
+test('pressing a tackle Run tracks the Issue, types claude with /tackle into a Tab of its Bench and gives the running button', async () => {
   const fixture = withOrigin()
   fixture.github.issue(ref, { title: 'Ship it', labels: ['ready-for-agent'] })
 
-  const output = await fixture.client.runFromButton({ ref })
-
-  expect(output).toMatchObject({ ref, tracked: true, benchCreated: true, resumed: null })
-  expect((await typedInto(fixture, output.terminalSessionId)).at(-1)).toMatchObject({
-    data: "claude '/tackle'\r",
+  expect(await fixture.client.press({ ref, run: 'new' })).toEqual({
+    ref,
+    button: { kind: 'tackle', run: 'running' },
+    reason: null,
   })
+  expect(await typedClaude(fixture)).toEqual(["claude '/tackle'\r"])
+  expect((await fixture.client.list({})).tasks.map((t) => t.ref)).toEqual([ref])
+  expect(await fixture.client.bench.list()).toHaveLength(1)
 })
 
-test('running from a triage button types claude with /triage and the Issue number', async () => {
+test('pressing a Run whose Bench cannot be prepared fails, opening no Tab', async () => {
+  const fixture = setup()
+  fixture.github.issue(ref, { title: 'Ship it', labels: ['ready-for-agent'] })
+
+  const error = await failure(fixture.client.press({ ref, run: 'new' }))
+
+  expect(error.code).toBe('PRECONDITION_FAILED')
+  expect(error.message).toContain('could not prepare the Bench')
+  expect(tabCount(fixture)).toBe(0)
+})
+
+test('pressing a triage Run types claude with /triage and the Issue number', async () => {
   const fixture = withOrigin()
   fixture.github.issue(ref, { title: 'Ship it', labels: ['needs-triage'] })
 
   expect(await fixture.client.runButtons({ refs: [ref] })).toEqual({
     buttons: [{ ref, button: { kind: 'triage', run: 'new' }, reason: null }],
   })
-  const output = await fixture.client.runFromButton({ ref })
+  await fixture.client.press({ ref, run: 'new' })
 
-  expect((await typedInto(fixture, output.terminalSessionId)).at(-1)).toMatchObject({
-    data: "claude '/triage #12'\r",
-  })
+  expect(await typedClaude(fixture)).toEqual(["claude '/triage #12'\r"])
 })
 
-test('running from a wayfinder map button types claude with /wayfinder and the map, even when it has open sub-issues', async () => {
+test('pressing the Run of a wayfinder map types claude with /wayfinder and the map, even when it has open sub-issues', async () => {
   const fixture = withOrigin()
   fixture.github.issue(ref, { title: 'Map it', labels: ['wayfinder:map'] })
   fixture.github.issue('acme/app#13', {
@@ -281,14 +316,12 @@ test('running from a wayfinder map button types claude with /wayfinder and the m
   expect(await fixture.client.runButtons({ refs: [ref] })).toEqual({
     buttons: [{ ref, button: { kind: 'wayfinder', run: 'new' }, reason: null }],
   })
-  const output = await fixture.client.runFromButton({ ref })
+  await fixture.client.press({ ref, run: 'new' })
 
-  expect((await typedInto(fixture, output.terminalSessionId)).at(-1)).toMatchObject({
-    data: "claude '/wayfinder 12'\r",
-  })
+  expect(await typedClaude(fixture)).toEqual(["claude '/wayfinder 12'\r"])
 })
 
-test('running from the button of a ready-for-agent Issue with an open sub-issue types claude with /implement-spec and the Issue number', async () => {
+test('pressing the Run of a ready-for-agent Issue with an open sub-issue types claude with /implement-spec and the Issue number', async () => {
   const fixture = withOrigin()
   fixture.github.issue(ref, { title: 'Spec it', labels: ['ready-for-agent'] })
   fixture.github.issue('acme/app#13', { title: 'Done part', state: 'closed', parent: ref })
@@ -297,14 +330,12 @@ test('running from the button of a ready-for-agent Issue with an open sub-issue 
   expect(await fixture.client.runButtons({ refs: [ref] })).toEqual({
     buttons: [{ ref, button: { kind: 'implement-spec', run: 'new' }, reason: null }],
   })
-  const output = await fixture.client.runFromButton({ ref })
+  await fixture.client.press({ ref, run: 'new' })
 
-  expect((await typedInto(fixture, output.terminalSessionId)).at(-1)).toMatchObject({
-    data: "claude '/implement-spec #12'\r",
-  })
+  expect(await typedClaude(fixture)).toEqual(["claude '/implement-spec #12'\r"])
 })
 
-test('a ready-for-agent Issue whose sub-issues are all closed gets no button, and running it is refused', async () => {
+test('a ready-for-agent Issue whose sub-issues are all closed gets no button, and pressing a Run shown before gives that row back', async () => {
   const fixture = setup()
   fixture.github.issue(ref, { title: 'Spec it', labels: ['ready-for-agent'] })
   fixture.github.issue('acme/app#13', { title: 'Done part', state: 'closed', parent: ref })
@@ -312,11 +343,11 @@ test('a ready-for-agent Issue whose sub-issues are all closed gets no button, an
   expect(await fixture.client.runButtons({ refs: [ref] })).toEqual({
     buttons: [{ ref, button: null, reason: expect.stringContaining('sub-issues are all closed') }],
   })
-  const refused = await failure(fixture.client.runFromButton({ ref }))
-  expect([refused.code, refused.message]).toEqual([
-    'PRECONDITION_FAILED',
-    `${ref} is a spec whose sub-issues are all closed`,
-  ])
+  expect(await fixture.client.press({ ref, run: 'new' })).toEqual({
+    ref,
+    button: null,
+    reason: `${ref} is a spec whose sub-issues are all closed`,
+  })
 })
 
 test.each([
@@ -334,7 +365,7 @@ test.each([
   })
 })
 
-test('running from the button of a wayfinder Issue under a map types claude with /wayfinder, its map and itself into a Bench of its own Task', async () => {
+test('pressing the Run of a wayfinder Issue under a map types claude with /wayfinder, its map and itself into a Bench of its own Task', async () => {
   const fixture = withOrigin()
   fixture.github.issue('acme/app#7', { title: 'Map it', labels: ['wayfinder:map'] })
   fixture.github.issue(ref, {
@@ -343,30 +374,28 @@ test('running from the button of a wayfinder Issue under a map types claude with
     parent: 'acme/app#7',
   })
 
-  const output = await fixture.client.runFromButton({ ref })
+  await fixture.client.press({ ref, run: 'new' })
 
-  expect(output).toMatchObject({ ref, tracked: true, benchCreated: true })
-  expect((await typedInto(fixture, output.terminalSessionId)).at(-1)).toMatchObject({
-    data: "claude '/wayfinder 7 12'\r",
-  })
+  expect(await typedClaude(fixture)).toEqual(["claude '/wayfinder 7 12'\r"])
   expect((await fixture.client.list({})).tasks.map((t) => t.ref)).toEqual([ref])
 })
 
-test('running from a button reads the labels anew and refuses an Issue that has lost its button, opening no Bench', async () => {
+test('pressing a Run reads the labels anew and gives the row of an Issue that has lost its button, opening no Bench', async () => {
   const fixture = setup()
   fixture.github.issue(ref, { title: 'Ship it', labels: ['ready-for-agent'] })
   await fixture.client.runButtons({ refs: [ref] })
   fixture.github.issue(ref, { title: 'Ship it', labels: ['ready-for-human'] })
 
-  const error = await failure(fixture.client.runFromButton({ ref }))
-
-  expect(error.code).toBe('PRECONDITION_FAILED')
-  expect(error.message).toContain(ref)
+  expect(await fixture.client.press({ ref, run: 'new' })).toEqual({
+    ref,
+    button: null,
+    reason: `${ref} has no label that picks a prompt`,
+  })
   expect(await fixture.client.bench.list()).toEqual([])
   expect(fixture.db.select().from(task).all()).toEqual([])
 })
 
-test('running from a button refuses an Issue with an open Blocker, naming it', async () => {
+test('pressing a Run of an Issue with an open Blocker gives the row naming it, opening no Bench', async () => {
   const fixture = setup()
   fixture.github.issue('acme/lib#3', { title: 'Upstream fix' })
   fixture.github.issue(ref, {
@@ -375,21 +404,34 @@ test('running from a button refuses an Issue with an open Blocker, naming it', a
     blockedBy: ['acme/lib#3'],
   })
 
-  const error = await failure(fixture.client.runFromButton({ ref }))
-
-  expect(error.code).toBe('BLOCKED')
-  expect(error.data).toEqual({ blockers: ['acme/lib#3'] })
+  expect(await fixture.client.press({ ref, run: 'new' })).toEqual({
+    ref,
+    button: null,
+    reason: `${ref} is blocked by acme/lib#3`,
+  })
   expect(await fixture.client.bench.list()).toEqual([])
 })
 
-test('running from a button fails without tracking when GitHub cannot be read', async () => {
+test('pressing a Run fails without tracking when GitHub cannot be read', async () => {
   const fixture = setup()
   fixture.github.issue(ref, { title: 'Ship it', labels: ['ready-for-agent'] })
   fixture.github.fail('acme/app')
 
-  const error = await failure(fixture.client.runFromButton({ ref }))
+  const error = await failure(fixture.client.press({ ref, run: 'new' }))
 
   expect(error.code).toBe('BAD_GATEWAY')
+  expect(fixture.db.select().from(task).all()).toEqual([])
+})
+
+test('pressing a Run of an Issue GitHub does not return gives the row with no button, tracking nothing', async () => {
+  const fixture = setup()
+  fixture.github.issue(ref, { title: 'Ship it', labels: ['ready-for-agent'] })
+
+  expect(await fixture.client.press({ ref: 'acme/app#99', run: 'new' })).toEqual({
+    ref: 'acme/app#99',
+    button: null,
+    reason: null,
+  })
   expect(fixture.db.select().from(task).all()).toEqual([])
 })
 
@@ -418,17 +460,64 @@ async function liveRun(fixture: Fixture, labels = ['ready-for-agent']) {
   return claudeStarted(fixture, started.terminalSessionId)
 }
 
-test('an Issue whose Task has a live Run gets a running button, and running from it is refused', async () => {
+test('an Issue whose Task has a live Run gets a running button, and pressing a Run shown before gives that button back, opening no Tab', async () => {
   const fixture = setup()
   await liveRun(fixture)
+  const tabs = tabCount(fixture)
 
-  expect(await fixture.client.runButtons({ refs: [ref] })).toEqual({
-    buttons: [{ ref, button: { kind: 'tackle', run: 'running' }, reason: null }],
-  })
-  expect((await failure(fixture.client.runFromButton({ ref }))).code).toBe('CONFLICT')
+  const running = { ref, button: { kind: 'tackle', run: 'running' }, reason: null } as const
+  expect(await fixture.client.runButtons({ refs: [ref] })).toEqual({ buttons: [running] })
+  expect(await fixture.client.press({ ref, run: 'new' })).toEqual(running)
+  expect(tabCount(fixture)).toBe(tabs)
 })
 
-test('an Issue whose Task has an ended Run gets a resume button, and running from it resumes claude sending no prompt', async () => {
+test('pressing Resume of a Task whose Run is live again does nothing and gives the running button', async () => {
+  const fixture = setup()
+  const end = await liveRun(fixture)
+  await end()
+  await fixture.client.run({ ref })
+  const tabs = tabCount(fixture)
+
+  expect(await fixture.client.press({ ref, run: 'resume' })).toEqual({
+    ref,
+    button: { kind: 'tackle', run: 'running' },
+    reason: null,
+  })
+  expect(tabCount(fixture)).toBe(tabs)
+})
+
+test('pressing a Run of a Task whose Run has ended since does not resume it and gives the resume button', async () => {
+  const fixture = setup()
+  const end = await liveRun(fixture)
+  await end()
+  const tabs = tabCount(fixture)
+
+  expect(await fixture.client.press({ ref, run: 'new' })).toEqual({
+    ref,
+    button: { kind: 'tackle', run: 'resume' },
+    reason: null,
+  })
+  expect(tabCount(fixture)).toBe(tabs)
+})
+
+test('pressing Resume of a Task whose Bench was opened anew since starts no Run and gives the Run button', async () => {
+  const fixture = setup()
+  const end = await liveRun(fixture)
+  await end()
+  await fixture.client.close({ ref, force: true })
+  await fixture.client.reopen({ ref })
+  const tabs = tabCount(fixture)
+
+  expect(await fixture.client.press({ ref, run: 'resume' })).toEqual({
+    ref,
+    button: { kind: 'tackle', run: 'new' },
+    reason: null,
+  })
+  expect(tabCount(fixture)).toBe(tabs)
+  expect(await fixture.client.bench.list()).toEqual([])
+})
+
+test('an Issue whose Task has an ended Run gets a resume button, and pressing it resumes claude sending no prompt and gives the running button', async () => {
   const fixture = setup()
   const end = await liveRun(fixture)
   await end()
@@ -436,11 +525,12 @@ test('an Issue whose Task has an ended Run gets a resume button, and running fro
   expect(await fixture.client.runButtons({ refs: [ref] })).toEqual({
     buttons: [{ ref, button: { kind: 'tackle', run: 'resume' }, reason: null }],
   })
-  const output = await fixture.client.runFromButton({ ref })
-  expect(output.resumed).toBe('s-1')
-  expect((await typedInto(fixture, output.terminalSessionId)).at(-1)).toMatchObject({
-    data: "claude --resume 's-1'\r",
+  expect(await fixture.client.press({ ref, run: 'resume' })).toEqual({
+    ref,
+    button: { kind: 'tackle', run: 'running' },
+    reason: null,
   })
+  expect((await typedClaude(fixture, 2)).at(-1)).toBe("claude --resume 's-1'\r")
 })
 
 function blockOnGitHub(fixture: Fixture) {
@@ -462,7 +552,7 @@ test('an Issue with an open Blocker whose Task has a live Run gets a running but
   })
 })
 
-test('an Issue with an open Blocker whose Task has an ended Run gets a resume button, and running from it resumes claude sending no prompt', async () => {
+test('an Issue with an open Blocker whose Task has an ended Run gets a resume button, and pressing it resumes claude sending no prompt', async () => {
   const fixture = setup()
   const end = await liveRun(fixture)
   await end()
@@ -472,12 +562,10 @@ test('an Issue with an open Blocker whose Task has an ended Run gets a resume bu
     buttons: [{ ref, button: { kind: 'tackle', run: 'resume' }, reason: null }],
   })
   const requested = fixture.github.requests.length
-  const output = await fixture.client.runFromButton({ ref })
+  await fixture.client.press({ ref, run: 'resume' })
   // 押した時に Issue を引き直す 1 本だけで、resume は sync しない。
   expect(fixture.github.requests).toHaveLength(requested + 1)
-  expect((await typedInto(fixture, output.terminalSessionId)).at(-1)).toMatchObject({
-    data: "claude --resume 's-1'\r",
-  })
+  expect((await typedClaude(fixture, 2)).at(-1)).toBe("claude --resume 's-1'\r")
 })
 
 test('a closed Issue whose open Task has a live Run gets a running button, and one with an ended Run gets a resume button', async () => {
@@ -518,7 +606,7 @@ async function specAndChild(fixture: Fixture) {
   return { endChild, startSpec: () => claudeStarted(fixture, specRun.terminalSessionId, 's-spec') }
 }
 
-test('a sub-issue with an ended Run gets no button while its spec has a live Run, and running from it is refused', async () => {
+test('a sub-issue with an ended Run gets no button while its spec has a live Run, and pressing a Resume shown before gives that row back', async () => {
   const fixture = setup()
   const { endChild, startSpec } = await specAndChild(fixture)
   await endChild()
@@ -533,11 +621,13 @@ test('a sub-issue with an ended Run gets no button while its spec has a live Run
       },
     ],
   })
-  const refused = await failure(fixture.client.runFromButton({ ref: subIssue }))
-  expect([refused.code, refused.message]).toEqual([
-    'PRECONDITION_FAILED',
-    `${subIssue} is under ${ref}, a spec with a live Run`,
-  ])
+  const tabs = tabCount(fixture)
+  expect(await fixture.client.press({ ref: subIssue, run: 'resume' })).toEqual({
+    ref: subIssue,
+    button: null,
+    reason: `${subIssue} is under ${ref}, a spec with a live Run`,
+  })
+  expect(tabCount(fixture)).toBe(tabs)
 })
 
 test('a sub-issue with a live Run gets a running button while its spec has a live Run', async () => {
@@ -560,13 +650,11 @@ test('a Task whose repo was renamed before any sync still gets its resume button
   expect(await fixture.client.runButtons({ refs: [renamed] })).toEqual({
     buttons: [{ ref: renamed, button: { kind: 'triage', run: 'resume' }, reason: null }],
   })
-  const output = await fixture.client.runFromButton({ ref: renamed })
-  expect((await typedInto(fixture, output.terminalSessionId)).at(-1)).toMatchObject({
-    data: "claude --resume 's-1'\r",
-  })
+  await fixture.client.press({ ref: renamed, run: 'resume' })
+  expect((await typedClaude(fixture, 2)).at(-1)).toBe("claude --resume 's-1'\r")
 })
 
-test('an Issue that GitHub now gives another node ID under the same name and number does not take the button state of the Task tracked there, and running it is refused instead of resuming that Task', async () => {
+test('an Issue that GitHub now gives another node ID under the same name and number does not take the button state of the Task tracked there, and pressing its Run fails instead of resuming that Task', async () => {
   const fixture = setup()
   const end = await liveRun(fixture, ['needs-triage'])
   await end()
@@ -575,7 +663,7 @@ test('an Issue that GitHub now gives another node ID under the same name and num
   expect(await fixture.client.runButtons({ refs: [ref] })).toEqual({
     buttons: [{ ref, button: { kind: 'triage', run: 'new' }, reason: null }],
   })
-  const refused = await failure(fixture.client.runFromButton({ ref }))
+  const refused = await failure(fixture.client.press({ ref, run: 'new' }))
   expect(refused.message).toContain('now another issue on GitHub')
   expect(
     fixture.ptyd.sessionRequests().some((op) => op.op === 'write' && op.data.includes('--resume')),
@@ -613,9 +701,11 @@ test('no sub-issue of a spec gets a button while the spec has a live Run, whatev
       })),
     ],
   })
-  const refused = await failure(fixture.client.runFromButton({ ref: children[1]! }))
-  expect(refused.code).toBe('PRECONDITION_FAILED')
-  expect(refused.message).toContain(ref)
+  expect(await fixture.client.press({ ref: children[1]!, run: 'new' })).toEqual({
+    ref: children[1]!,
+    button: null,
+    reason: `${children[1]} is under ${ref}, a spec with a live Run`,
+  })
 })
 
 test.each([
@@ -636,28 +726,32 @@ test.each([
   },
 )
 
-test('a sub-issue whose run started before its spec got a live Run is refused once the spec has one', async () => {
+test('pressing the Run of a sub-issue whose spec gets a live Run while it is being started gives the row with no button', async () => {
   const fixture = withOrigin()
   const child = 'acme/app#13'
   fixture.github.issue(ref, { title: 'Spec it', labels: ['ready-for-agent'] })
   fixture.github.issue(child, { title: 'Part', labels: ['ready-for-agent'], parent: ref })
   fixture.taskLedger.start()
-  const spec = await fixture.client.runFromButton({ ref })
+  await fixture.client.press({ ref, run: 'new' })
+  const [specTab] = fixture.db.select().from(tab).all()
 
   // 子が GitHub の答えを見て決めた後、track の往復の間に spec の claude が起動する。
   const releaseRead = fixture.github.hold()
   const before = fixture.github.requests.length
-  const running = failure(fixture.client.runFromButton({ ref: child }))
+  const pressing = fixture.client.press({ ref: child, run: 'new' })
   await fixture.github.received(before + 1)
   releaseRead()
   const releaseTrack = fixture.github.hold()
   await fixture.github.received(before + 2)
-  await claudeStarted(fixture, spec.terminalSessionId)
+  await claudeStarted(fixture, specTab!.terminalSessionId)
   releaseTrack()
 
-  const refused = await running
-  expect(refused.code).toBe('PRECONDITION_FAILED')
-  expect(refused.message).toContain(ref)
+  expect(await pressing).toEqual({
+    ref: child,
+    button: null,
+    reason: `${child} is under ${ref}, a spec with a live Run`,
+  })
+  expect(tabCount(fixture)).toBe(1)
 })
 
 test('a sub-issue of a spec whose Run has ended gets a tackle button', async () => {
