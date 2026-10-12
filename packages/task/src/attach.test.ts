@@ -55,8 +55,7 @@ function tabIdOf({ db }: Fixture, terminalSessionId: string) {
     .get()!.id
 }
 
-// webview の drag は tab.move を呼ぶ。
-function drag(fixture: Fixture, terminalSessionId: string, runspaceId: string) {
+function moveByTabMove(fixture: Fixture, terminalSessionId: string, runspaceId: string) {
   return fixture.workbenchClient.tab.move({
     id: tabIdOf(fixture, terminalSessionId),
     runspaceId,
@@ -64,24 +63,24 @@ function drag(fixture: Fixture, terminalSessionId: string, runspaceId: string) {
   })
 }
 
-test('a claude in a Tab dragged into the Bench becomes a Run of the Task, attached', async () => {
+test('a claude in a Tab moved into the Bench by tab.move becomes a Run of the Task, attached', async () => {
   const fixture = started()
   const benchRunspace = await fixture.openBench(ref)
   const outside = await fixture.openTabOutsideBench()
   await fixture.hook(outside, 's-1', 'SessionStart', { source: 'startup' })
 
-  await drag(fixture, outside, benchRunspace)
+  await moveByTabMove(fixture, outside, benchRunspace)
 
   expect(runsOf(fixture)).toEqual([{ number: 12, agentSessionId: 's-1', origin: 'attached' }])
 })
 
-test('a Tab dragged into the Bench moves even when its claude is a Run of another Task, which stays its only Run', async () => {
+test('a Tab moved into the Bench by tab.move moves even when its claude is a Run of another Task, which stays its only Run', async () => {
   const fixture = started()
   const other = await fixture.openTab(await fixture.openBench('acme/app#13', 'Next'))
   const benchRunspace = await fixture.openBench(ref)
   await fixture.hook(other, 's-1', 'SessionStart', { source: 'startup' })
 
-  await drag(fixture, other, benchRunspace)
+  await moveByTabMove(fixture, other, benchRunspace)
 
   expect(runspaceOfTab(fixture, other)).toBe(benchRunspace)
   expect(runsOf(fixture)).toEqual([{ number: 13, agentSessionId: 's-1', origin: 'started' }])
@@ -162,7 +161,7 @@ test('attach brings back a Tab whose claude is already a Run of the Task without
   const benchRunspace = await fixture.openBench(ref)
   const tabbed = await fixture.openTab(benchRunspace)
   await fixture.hook(tabbed, 's-1', 'SessionStart', { source: 'startup' })
-  await drag(fixture, tabbed, runspaceOfTab(fixture, await fixture.openTabOutsideBench())!)
+  await moveByTabMove(fixture, tabbed, runspaceOfTab(fixture, await fixture.openTabOutsideBench())!)
 
   const output = await fixture.client.attach({ ref, terminalSessionId: tabbed })
 

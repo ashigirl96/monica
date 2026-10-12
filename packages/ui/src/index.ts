@@ -10,4 +10,4 @@ export {
 export { pushErrorToast, pushInfoToast } from './toast.ts'
 export { Toaster } from './toaster.tsx'
 export { TRAFFIC_LIGHT_ZONE_HEIGHT, TRAFFIC_LIGHT_ZONE_WIDTH } from './traffic-lights.ts'
-export { useDragReorder } from './use-drag-reorder.ts'
+export { type DragPhase, useDragReorder } from './use-drag-reorder.ts'

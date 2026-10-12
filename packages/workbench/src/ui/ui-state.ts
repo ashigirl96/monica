@@ -21,6 +21,7 @@ export type UiState = {
   uiZoom: number
   tile: string | null
   collapsedSections: string[]
+  tileOrder: string[]
 }
 
 const UI_STATE_KEY = 'monica.workbench.ui-state'
@@ -33,10 +34,17 @@ const DEFAULT_UI_STATE: UiState = {
   uiZoom: UI_ZOOM_DEFAULT,
   tile: null,
   collapsedSections: [],
+  tileOrder: [],
 }
 
 function numberIn(value: unknown, min: number, max: number, fallback: number): number {
   return typeof value === 'number' && Number.isFinite(value) ? clamp(value, min, max) : fallback
+}
+
+function stringsIn(value: unknown): string[] {
+  return Array.isArray(value)
+    ? value.filter((item): item is string => typeof item === 'string')
+    : []
 }
 
 function parseUiState(text: string | null): UiState {
@@ -55,9 +63,8 @@ function parseUiState(text: string | null): UiState {
     ),
     uiZoom: numberIn(r.uiZoom, UI_ZOOM_MIN, UI_ZOOM_MAX, UI_ZOOM_DEFAULT),
     tile: typeof r.tile === 'string' ? r.tile : null,
-    collapsedSections: Array.isArray(r.collapsedSections)
-      ? r.collapsedSections.filter((key): key is string => typeof key === 'string')
-      : [],
+    collapsedSections: stringsIn(r.collapsedSections),
+    tileOrder: stringsIn(r.tileOrder),
   }
 }
 
@@ -84,6 +91,10 @@ export const sidebarResizingAtom = atom(false)
 
 export const collapsedSectionsAtom = atomWithDefault(
   (get): ReadonlySet<string> => new Set(get(savedUiStateAtom).collapsedSections),
+)
+
+export const tileOrderAtom = atomWithDefault(
+  (get): readonly string[] => get(savedUiStateAtom).tileOrder,
 )
 
 // メインコンテンツ領域だけに CSS zoom として適用する係数。chrome (sidebar/header)

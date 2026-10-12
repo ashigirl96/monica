@@ -1,4 +1,4 @@
-import { cn, PinIcon, PlusIcon, useDragReorder } from '@monica/ui'
+import { cn, PinIcon, PlusIcon } from '@monica/ui'
 import { useAtomValue, useSetAtom } from 'jotai'
 import { useEffect, useRef } from 'react'
 
@@ -9,14 +9,8 @@ import { agentDotOfTerminalSessionAtom, unreadOfTerminalSessionAtom } from './ba
 import { JumpHint } from './jump-hint.tsx'
 import { jumpHintTargetsAtom, pendingCloseTabIdAtom } from './keys.ts'
 import { activateTerminalTabAtom, activeRunspaceAtom, activeTerminalTabAtom } from './navigation.ts'
-import {
-  createTerminalTabAtom,
-  deadTabsAtom,
-  draggedTabIdAtom,
-  reorderTabsAtom,
-  tabMenuAtom,
-  tabTitlesAtom,
-} from './store.ts'
+import { pointerPress } from './press.ts'
+import { createTerminalTabAtom, deadTabsAtom, tabMenuAtom, tabTitlesAtom } from './store.ts'
 
 const TERMINAL_SESSION_STATUS_DOT: Record<string, string> = {
   exited: 'bg-zinc-500',
@@ -34,11 +28,8 @@ export function WorkbenchHeader() {
   const setTabMenu = useSetAtom(tabMenuAtom)
   const activateTab = useSetAtom(activateTerminalTabAtom)
   const createTab = useSetAtom(createTerminalTabAtom)
-  const reorder = useSetAtom(reorderTabsAtom)
-  const setDraggedTab = useSetAtom(draggedTabIdAtom)
   const jumpHints = useAtomValue(jumpHintTargetsAtom)
   const pendingCloseTabId = useAtomValue(pendingCloseTabIdAtom)
-  const { dragOverId, handlersFor } = useDragReorder(reorder, setDraggedTab)
   const activeTabRef = useRef<HTMLButtonElement>(null)
 
   useEffect(() => {
@@ -66,7 +57,7 @@ export function WorkbenchHeader() {
             key={tab.id}
             ref={isActive ? activeTabRef : undefined}
             data-tab-id={tab.id}
-            {...handlersFor(tab.id, () => activateTab(tab.id))}
+            {...pointerPress(() => activateTab(tab.id))}
             onContextMenu={(e) => {
               e.preventDefault()
               const rect = e.currentTarget.getBoundingClientRect()
@@ -82,7 +73,6 @@ export function WorkbenchHeader() {
               isActive
                 ? 'bg-[var(--content-bg)] text-foreground shadow-sm focus-visible:ring-white/50'
                 : 'bg-white/[0.06] text-muted-foreground hover:bg-white/[0.1] hover:text-foreground',
-              dragOverId === tab.id && 'ring-1 ring-sky-400/60',
             )}
           >
             {hint && <JumpHint hint={hint} className="mr-1.5" />}

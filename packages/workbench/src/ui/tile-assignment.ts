@@ -2,6 +2,7 @@ import { atom } from 'jotai'
 
 import type { Layout, RepoPlace } from '../contract.ts'
 import { placesAtom, runspacesAtom } from './backend-copy.ts'
+import { tileOrderAtom } from './ui-state.ts'
 
 type Runspace = Layout['runspaces'][number]
 
@@ -43,6 +44,7 @@ export type TileAssignmentInput = {
   runspaces: Runspace[]
   places: Record<string, RepoPlace | undefined>
   benchLabelOf: BenchLabelOf
+  tileOrder?: readonly string[]
 }
 
 function holdsPin(runspace: Runspace): boolean {
@@ -64,7 +66,8 @@ export function assignTiles(input: TileAssignmentInput): TileAssignment {
   const listed = entries.filter((e) => !holdsPin(e.runspace))
   const keys = new Set(listed.map((e) => e.key))
   keys.delete(OUTSIDE)
-  const tiles = [...keys, OUTSIDE].map((key): AssignedTile => {
+  const ordered = (input.tileOrder ?? []).filter((key) => keys.has(key))
+  const tiles = [...new Set([...ordered, ...keys]), OUTSIDE].map((key): AssignedTile => {
     const under = listed.filter((e) => e.key === key)
     const sections = [
       {
@@ -100,8 +103,23 @@ export const tileAssignmentAtom = atom((get) =>
     runspaces: get(runspacesAtom),
     places: get(placesAtom),
     benchLabelOf: get(benchLabelOfAtom) ?? (() => null),
+    tileOrder: get(tileOrderAtom),
   }),
 )
+
+// 今は出ていない Tile も order に残し、その Repo の Runspace がまた現れたら並べた位置へ戻す。
+export function reorderTiles(
+  order: readonly string[],
+  shown: readonly string[],
+  from: string,
+  to: string,
+): string[] {
+  const keys = [...new Set([...order, ...shown])]
+  const toIndex = keys.indexOf(to)
+  const moved = keys.filter((key) => key !== from)
+  moved.splice(toIndex, 0, from)
+  return moved
+}
 
 export function sectionKey(tileKey: string, kind: SectionKind): string {
   return `${tileKey}:${kind}`

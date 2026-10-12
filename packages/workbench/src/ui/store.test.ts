@@ -46,11 +46,8 @@ const {
   handingOverRunspaceIdsAtom,
   lastTabClosedAtom,
   moveActiveRunspaceAtom,
-  moveTabToRunspaceAtom,
   reloadAgentSessionsAtom,
   reloadAtom,
-  reorderRunspacesAtom,
-  reorderTabsAtom,
   sidebarAtom,
   startNewShellForTabAtom,
   tabExitedAtom,
@@ -451,7 +448,8 @@ test('a Tab closed while others stay, the last Tab moved out, and the last Tab o
   const calls = lastTabClosedCalls(store)
 
   await store.set(closeTerminalTabAtom, a.id)
-  await store.set(moveTabToRunspaceAtom, b.id, other.runspaceId)
+  await client.tab.move({ id: b.id, runspaceId: other.runspaceId, index: 1 })
+  await store.set(reloadAtom)
   await store.set(closeTerminalTabAtom, lone.tab.id)
 
   expect(calls).toEqual([])
@@ -510,56 +508,6 @@ test('a new Tab in an owned Runspace with no Tabs starts in its cwd and becomes 
   expect(store.get(activeTerminalTabAtom)?.id).toBe(tabs[0]!.id)
 })
 
-test("dragging a Runspace onto another puts it in that one's place", async () => {
-  const { client, store } = bench()
-  const [a, b, c] = [
-    await client.runspace.create(size),
-    await client.runspace.create(size),
-    await client.runspace.create(size),
-  ].map((r) => r.runspaceId)
-  await store.set(reloadAtom)
-  const order = async () => (await client.layout.get()).runspaces.map((r) => r.id)
-
-  await store.set(reorderRunspacesAtom, a!, c!)
-  expect(await order()).toEqual([b!, c!, a!])
-
-  await store.set(reorderRunspacesAtom, a!, b!)
-  expect(await order()).toEqual([a!, b!, c!])
-})
-
-test("dragging a Tab onto another in the header puts it in that one's place", async () => {
-  const { client, store } = bench()
-  const { runspaceId, tab: a } = await client.runspace.create(size)
-  const b = await client.tab.open({ runspaceId, ...size })
-  const c = await client.tab.open({ runspaceId, ...size })
-  await store.set(reloadAtom)
-
-  await store.set(reorderTabsAtom, c.id, a.id)
-
-  expect((await client.layout.get()).runspaces[0]!.tabs.map((t) => t.id)).toEqual([
-    c.id,
-    a.id,
-    b.id,
-  ])
-})
-
-test('dropping a Tab on another Runspace moves it to the end there', async () => {
-  const { client, store } = bench()
-  const from = await client.runspace.create(size)
-  const kept = await client.tab.open({ runspaceId: from.runspaceId, ...size })
-  const to = await client.runspace.create(size)
-  await store.set(reloadAtom)
-
-  await store.set(moveTabToRunspaceAtom, from.tab.id, to.runspaceId)
-
-  expect(
-    (await client.layout.get()).runspaces.map((r) => ({ id: r.id, tabs: r.tabs.map((t) => t.id) })),
-  ).toEqual([
-    { id: from.runspaceId, tabs: [kept.id] },
-    { id: to.runspaceId, tabs: [to.tab.id, from.tab.id] },
-  ])
-})
-
 test('the view follows the front Tab when the Backend moves it to another Runspace on its own, as an Attach does', async () => {
   const { db, workbenchLedger, client, store } = bench()
   const from = await client.runspace.create(size)
@@ -596,7 +544,7 @@ test('pinning the front Tab of a Runspace with siblings splits it into its own R
   expect(pinnedAndListed(store)).toEqual({ pinned: [], listed: [shells.runspaceId, split.id] })
 })
 
-test('a Runspace moves only within its sidebar group, by drag or by key', async () => {
+test('a Runspace moves by key only within its sidebar group', async () => {
   const { client, store } = bench()
   const [a, p, b] = [
     await client.runspace.create(size),
@@ -605,11 +553,7 @@ test('a Runspace moves only within its sidebar group, by drag or by key', async 
   ].map((r) => r.runspaceId)
   await client.tab.pin({ id: (await client.layout.get()).runspaces[1]!.tabs[0]!.id })
   await store.set(reloadAtom)
-  const ledgerOrder = async () => (await client.layout.get()).runspaces.map((r) => r.id)
   const sidebar = () => store.get(shownRunspaceIdsAtom)
-
-  await store.set(reorderRunspacesAtom, a!, p!)
-  expect(await ledgerOrder()).toEqual([a!, p!, b!])
 
   store.set(activateRunspaceAtom, b!)
   await store.set(moveActiveRunspaceAtom, 'up')

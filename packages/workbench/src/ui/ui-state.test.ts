@@ -12,7 +12,9 @@ import {
   selectedTileAtom,
 } from './navigation.ts'
 import {
+  moveTileAtom,
   reloadAtom,
+  sidebarAtom,
   toggleSectionAtom,
   type WorkbenchClient,
   workbenchClientAtom,
@@ -24,6 +26,7 @@ import {
   setUiZoomAtom,
   sidebarOpenAtom,
   sidebarWidthAtom,
+  tileOrderAtom,
   uiZoomAtom,
 } from './ui-state.ts'
 
@@ -207,6 +210,62 @@ test('the Tile kept is saved as tile, and one saved as rail is not read, leaving
   stored.set(key, JSON.stringify({ ...rest, rail: OUTSIDE }))
 
   expect((await storeAfterRestart(client, benchLabelOf)).get(selectedTileAtom)).toBe('acme/app')
+})
+
+function benchesAcross(byRunspaceId: Record<string, string>): BenchLabelOf {
+  return (runspaceId) => {
+    const repo = byRunspaceId[runspaceId]
+    return repo ? { repo, number: 1, title: 'Issue 1', setup: null } : null
+  }
+}
+
+function tileKeysOf(store: Store) {
+  return store.get(sidebarAtom).tiles.map((tile) => tile.key)
+}
+
+test('a Tile dragged onto another takes its place and stays there after a restart, while the Tile for outside the Repos neither moves nor is moved onto', async () => {
+  const backend = setup()
+  const { client } = backend
+  const [app, lib, web] = [benchRunspace(backend), benchRunspace(backend), benchRunspace(backend)]
+  for (const runspaceId of [app, lib, web]) await client.tab.open({ runspaceId, ...size })
+  const benchLabelOf = benchesAcross({ [app]: 'acme/app', [lib]: 'acme/lib', [web]: 'acme/web' })
+
+  await saveFrom(
+    client,
+    (store) => {
+      store.set(moveTileAtom, 'acme/web', 'acme/app')
+      store.set(moveTileAtom, OUTSIDE, 'acme/app')
+      store.set(moveTileAtom, 'acme/lib', OUTSIDE)
+      expect(tileKeysOf(store)).toEqual(['acme/web', 'acme/app', 'acme/lib', OUTSIDE])
+    },
+    benchLabelOf,
+  )
+
+  const store = await storeAfterRestart(client, benchLabelOf)
+  expect(tileKeysOf(store)).toEqual(['acme/web', 'acme/app', 'acme/lib', OUTSIDE])
+})
+
+test('a saved Tile order that is not a list is read as empty, and the entries in it that are not strings are dropped', async () => {
+  const backend = setup()
+  const { client } = backend
+  const [app, lib] = [benchRunspace(backend), benchRunspace(backend)]
+  for (const runspaceId of [app, lib]) await client.tab.open({ runspaceId, ...size })
+  const benchLabelOf = benchesAcross({ [app]: 'acme/app', [lib]: 'acme/lib' })
+  await saveFrom(client, (store) => store.set(moveTileAtom, 'acme/lib', 'acme/app'), benchLabelOf)
+  const key = [...stored.keys()][0]!
+  const saved = JSON.parse(stored.get(key)!)
+
+  stored.set(key, JSON.stringify({ ...saved, tileOrder: 'acme/lib' }))
+  expect(tileKeysOf(await storeAfterRestart(client, benchLabelOf))).toEqual([
+    'acme/app',
+    'acme/lib',
+    OUTSIDE,
+  ])
+
+  stored.set(key, JSON.stringify({ ...saved, tileOrder: [7, null, 'acme/lib'] }))
+  const restarted = await storeAfterRestart(client, benchLabelOf)
+  expect(restarted.get(tileOrderAtom)).toEqual(['acme/lib'])
+  expect(tileKeysOf(restarted)).toEqual(['acme/lib', 'acme/app', OUTSIDE])
 })
 
 test('a change made just before the page goes away is saved without waiting for the debounce', async () => {
