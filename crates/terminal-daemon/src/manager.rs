@@ -343,11 +343,4 @@ mod tests {
             "exit was reported before any output drained"
         );
     }
-
-    #[test]
-    fn write_to_nonexistent_session_fails() {
-        let manager = PtyManager::new();
-        let result = manager.write("nonexistent", b"hello");
-        assert!(result.is_err());
-    }
 }

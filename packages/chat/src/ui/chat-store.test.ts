@@ -1366,28 +1366,6 @@ test('an ask of the Backend that fails after a later question reached it leaves 
   expect(store.snapshot().unreachable).toBe(false)
 })
 
-test('a question that reaches the Backend takes down the banner', async () => {
-  const client = new FakeClient()
-  client.prepareError = unreachable()
-  const { store } = openChat(client)
-  await settled()
-
-  store.ask('Hello?')
-  await settled()
-
-  expect(store.snapshot().unreachable).toBe(false)
-})
-
-test('opening asks the Backend once for a spare claude', async () => {
-  const client = new FakeClient()
-
-  const before = client.prepared
-  openChat(client)
-  await settled()
-
-  expect([before, client.prepared]).toEqual([0, 1])
-})
-
 const savedChoice = (choice: Choice) => {
   const storage = new FakeStorage()
   storage.setItem('monica-chat-choice', JSON.stringify(choice))

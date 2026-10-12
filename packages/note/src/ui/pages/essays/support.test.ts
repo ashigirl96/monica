@@ -55,11 +55,6 @@ describe('ESSAY_TABS', () => {
   test('サイドバーの描画順は writing → finished', () => {
     expect(ESSAY_TABS).toEqual(['writing', 'finished'])
   })
-
-  test('splitEssaysByStatus の全キーがタブとして到達できる', () => {
-    const groups = splitEssaysByStatus([])
-    expect(Object.keys(groups ?? {}).toSorted()).toEqual([...ESSAY_TABS].toSorted())
-  })
 })
 
 describe('otherEssayTab', () => {

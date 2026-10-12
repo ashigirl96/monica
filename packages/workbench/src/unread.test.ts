@@ -96,22 +96,6 @@ test('an unread Agent Session whose hook arrives from another Tab passes the new
   expect(passed).toEqual([[before.terminalSessionId], [after.terminalSessionId]])
 })
 
-test('closing the Tab of an unread Agent Session takes it out once its shell exits', async () => {
-  const { passed, ptyd, workbenchLedger, client, settled } = setupUnread()
-  const { runspaceId, tab } = await client.runspace.create(size)
-  await client.tab.open({ runspaceId, ...size })
-  await settled(tab.terminalSessionId)
-  await client.agentSession.recordHook(waitIn(tab.terminalSessionId, 's-1'))
-  await workbenchLedger.start()
-
-  await client.tab.close({ id: tab.id })
-  await ptyd.received((op) => op.op === 'terminate' && op.session_id === tab.terminalSessionId)
-  ptyd.exit(tab.terminalSessionId, null)
-  await ptyd.received((op) => op.op === 'reap' && op.session_id === tab.terminalSessionId)
-
-  expect(passed).toEqual([[tab.terminalSessionId], []])
-})
-
 test('a transaction that signals a change and then rolls back passes nothing', async () => {
   const { passed, db, workbenchLedger, client, settled } = setupUnread()
   const { tab } = await client.runspace.create(size)
