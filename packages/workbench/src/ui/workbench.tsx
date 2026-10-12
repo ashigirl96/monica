@@ -11,6 +11,7 @@ import { ResizeHandle } from './resize-handle.tsx'
 import { TileHeading, WorkbenchSidebar } from './sidebar.tsx'
 import {
   appendRunspacesJoiningTile,
+  type LastTabClosed,
   lastTabClosedAtom,
   reloadAgentSessionsAtom,
   reloadAtom,
@@ -68,7 +69,7 @@ export function Workbench({
   client: WorkbenchClient | null
   benchLabelOf?: BenchLabelOf
   tabMenuItems?: TabMenuItems
-  onLastTabClosed?: (runspaceId: string) => void
+  onLastTabClosed?: LastTabClosed
   emptyBenchContent?: EmptyBenchContent
 }) {
   useWorkbenchChanges(client)

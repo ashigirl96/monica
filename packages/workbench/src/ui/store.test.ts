@@ -43,7 +43,6 @@ const {
   createRunspaceAtom,
   createTerminalTabAtom,
   deadTabsAtom,
-  handingOverRunspaceIdsAtom,
   lastTabClosedAtom,
   moveActiveRunspaceAtom,
   reloadAgentSessionsAtom,
@@ -390,50 +389,56 @@ test.each([
   },
 )
 
-test('the last Tab of an owned Runspace, closed, reaches the slot only once the Backend records the exit, so the claude stopped there is no longer live', async () => {
+test('the last Tab of an owned Runspace, closed, hands the slot a wait that ends once the Backend records the exit, so the claude stopped there is no longer live', async () => {
   const backend = bench()
   const { client, store, ptyd, settled } = backend
   const runspaceId = ownedRunspace(backend)
   const tab = await client.tab.open({ runspaceId, ...size })
   await settled(tab.terminalSessionId)
   await store.set(reloadAtom)
-  const listedWhenCalled: Promise<TerminalSession[]>[] = []
+  const listedOnceRecorded: Promise<TerminalSession[]>[] = []
   store.set(
     lastTabClosedAtom,
-    () => () => void listedWhenCalled.push(client.terminalSession.list()),
+    () => (_: string, exitRecorded: Promise<void>) =>
+      void listedOnceRecorded.push(exitRecorded.then(() => client.terminalSession.list())),
   )
 
   const closing = store.set(closeTerminalTabAtom, tab.id)
   await until(store, layoutAtom, (layout) => layout?.runspaces[0]?.tabs.length === 0)
+  expect(listedOnceRecorded).toHaveLength(1)
   ptyd.exit(tab.terminalSessionId, null)
   await closing
 
-  expect(listedWhenCalled).toHaveLength(1)
-  expect((await listedWhenCalled[0])!.map((s) => s.id)).not.toContain(tab.terminalSessionId)
+  expect(listedOnceRecorded).toHaveLength(1)
+  expect((await listedOnceRecorded[0])!.map((s) => s.id)).not.toContain(tab.terminalSessionId)
 })
 
-test('an owned Runspace whose last Tab closed is handing over to the slot from the moment it shows no Tabs until the slot is called', async () => {
+test('the wait handed to the slot resolves, not rejects, when the Backend cannot list the Terminal Sessions', async () => {
   const backend = bench()
-  const { client, store, ptyd, settled } = backend
+  const { client, store, settled } = backend
   const runspaceId = ownedRunspace(backend)
   const tab = await client.tab.open({ runspaceId, ...size })
   await settled(tab.terminalSessionId)
   await store.set(reloadAtom)
-  const handingOverWhenCalled: boolean[] = []
+  const unlisted = {
+    list: () => Promise.reject(new Error('Backend is gone')),
+  }
   store.set(
-    lastTabClosedAtom,
-    () => (id: string) =>
-      void handingOverWhenCalled.push(store.get(handingOverRunspaceIdsAtom).has(id)),
+    workbenchClientAtom,
+    () =>
+      new Proxy(client, {
+        get: (target, key) => (key === 'terminalSession' ? unlisted : Reflect.get(target, key)),
+      }),
   )
+  const waits: Promise<void>[] = []
+  store.set(lastTabClosedAtom, () => (_: string, exitRecorded: Promise<void>) => {
+    waits.push(exitRecorded)
+  })
 
-  const closing = store.set(closeTerminalTabAtom, tab.id)
-  await until(store, layoutAtom, (layout) => layout?.runspaces[0]?.tabs.length === 0)
-  expect(store.get(handingOverRunspaceIdsAtom).has(runspaceId)).toBe(true)
-  ptyd.exit(tab.terminalSessionId, null)
-  await closing
+  await store.set(closeTerminalTabAtom, tab.id)
 
-  expect(handingOverWhenCalled).toEqual([true])
-  expect(store.get(handingOverRunspaceIdsAtom).has(runspaceId)).toBe(false)
+  expect(waits).toHaveLength(1)
+  expect(await waits[0]).toBeUndefined()
 })
 
 test('a Tab closed while others stay, the last Tab moved out, and the last Tab of a Runspace no one owns hand nothing to the slot', async () => {
