@@ -1,7 +1,8 @@
 import { implement, ORPCError, type ORPCErrorConstructorMap } from '@orpc/server'
 
-import { agentFailed, type ChatAgent, ChatFailure, internals, shortDetail } from './chat-agent.ts'
+import { type ChatAgent, internals } from './chat-agent.ts'
 import { type askErrors, type ChatEvent, contract } from './contract.ts'
+import { agentFailed, ChatFailure, shortDetail } from './failure.ts'
 
 export { migrations } from '../migrations/index.ts'
 export { type ChatAgent, createChatAgent } from './chat-agent.ts'

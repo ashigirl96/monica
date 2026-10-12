@@ -6,20 +6,13 @@ import {
   type Options,
   query,
   type Query,
-  type SDKAssistantMessage,
-  type SDKAssistantMessageError,
-  type SDKMessage,
-  type SDKRateLimitInfo,
-  type SDKResultMessage,
   type SDKUserMessage,
   startup,
   type WarmQuery,
 } from '@anthropic-ai/claude-agent-sdk'
-import type { z } from 'zod'
 
 import { type Claude, claudeOptions, stderrTail } from './claude.ts'
 import {
-  type askErrors,
   type AskInput,
   type ChatEvent,
   type Choice,
@@ -28,81 +21,19 @@ import {
   type Model,
   type SnapshotEvent,
 } from './contract.ts'
+import { agentFailed } from './failure.ts'
 import { askContent } from './page/prompt.ts'
 import { defaultReaders, type Readers, snapshotOf } from './page/snapshot.ts'
 import { promptless, singleTurn, userMessage } from './prompt.ts'
+import { EndedEarly, translate } from './translate.ts'
 
 // 1 つ 270〜290MB の claude を token の無い口から起こせるので、spare も含めてこの数で止める（ADR-0031）。
 const MAX_CLAUDES = 4
 const SPARE_LIFETIME_MS = 5 * 60_000
-// side panel は detail をそのまま詳しい行に出すので、長い stderr で画面を埋めない。
-const MAX_DETAIL_CHARS = 2000
-
-const NOT_AUTHENTICATED_ERRORS: SDKAssistantMessageError[] = [
-  'authentication_failed',
-  'oauth_org_not_allowed',
-  'verification_required',
-]
-
-/** claude が答えを返せなかった理由。chat.ask の `.errors()` で宣言した code と data。 */
-export type Failure =
-  | { code: 'NOT_AUTHENTICATED' }
-  | { code: 'USAGE_LIMIT'; data: z.infer<typeof askErrors.USAGE_LIMIT.data> }
-  | { code: 'AGENT_FAILED'; data: z.infer<typeof askErrors.AGENT_FAILED.data> }
-
-export class ChatFailure extends Error {
-  readonly failure: Failure
-
-  constructor(failure: Failure) {
-    super(failure.code)
-    this.failure = failure
-  }
-}
-
-export const shortDetail = (detail: string) => detail.slice(0, MAX_DETAIL_CHARS)
-
-export function agentFailed(detail: string): ChatFailure {
-  return new ChatFailure({ code: 'AGENT_FAILED', data: { detail: shortDetail(detail) } })
-}
 
 async function withStderr(message: string, claude: Claude | undefined): Promise<string> {
   const stderr = claude ? (await stderrTail(claude)).trim() : ''
   return stderr ? `${message}\n${stderr}` : message
-}
-
-// 上限の header の無い 429 も rejected になるが resetsAt を持たないので、plan の上限とは resetsAt の有無で分ける。
-function failureOf(
-  result: SDKResultMessage,
-  rateLimit: SDKRateLimitInfo | undefined,
-  assistantError: SDKAssistantMessageError | undefined,
-): ChatFailure {
-  if (
-    rateLimit?.status === 'rejected' &&
-    rateLimit.resetsAt !== undefined &&
-    rateLimit.rateLimitType !== undefined
-  ) {
-    const { rateLimitType, resetsAt } = rateLimit
-    return new ChatFailure({ code: 'USAGE_LIMIT', data: { rateLimitType, resetsAt } })
-  }
-  if (assistantError && NOT_AUTHENTICATED_ERRORS.includes(assistantError)) {
-    return new ChatFailure({ code: 'NOT_AUTHENTICATED' })
-  }
-  return agentFailed(result.subtype === 'success' ? result.result : result.errors.join('\n'))
-}
-
-function textOf(message: SDKAssistantMessage): string {
-  return message.message.content
-    .flatMap((block) => (block.type === 'text' ? [block.text] : []))
-    .join('')
-}
-
-// stream_event の input_json_delta から組むと途中で切れた query になるので、閉じた tool_use の input から読む。
-function searchesOf(message: SDKAssistantMessage): string[] {
-  return message.message.content.flatMap((block) => {
-    if (block.type !== 'tool_use' || block.name !== 'WebSearch') return []
-    const { query: searched } = block.input as { query?: unknown }
-    return typeof searched === 'string' ? [searched] : []
-  })
 }
 
 export type ChatAgent = {
@@ -289,71 +220,19 @@ export function createChatAgent(
     signal?.addEventListener('abort', stop)
     if (signal?.aborted) stop()
     let answered = false
-    let rateLimit: SDKRateLimitInfo | undefined
-    let assistantError: SDKAssistantMessageError | undefined
-    // CLI は API の stream が切れると答えを最初からやり直し、stream しない request に替えると答えを assistant 1 つで返す。
-    let streamedSinceRetry = false
     try {
       yield snapshot
-      // for await を抜けると SDK は claude の終了を最大 2 秒待つので、result を受けたら iterator を閉じずに返す。
-      const messages = q[Symbol.asyncIterator]()
-      for (;;) {
-        let next: IteratorResult<SDKMessage, void>
-        try {
-          next = await messages.next()
-        } catch (error) {
-          if (claude && killed.has(claude)) return
-          throw agentFailed(await withStderr((error as Error).message, claude))
-        }
-        if (next.done) {
-          if (claude && killed.has(claude)) return
-          throw agentFailed(await withStderr('claude exited before it answered', claude))
-        }
-        const message = next.value
-        if (message.type === 'system' && message.subtype === 'init') {
-          console.error(
-            `[chat] claude ${claude?.pid}: model ${message.model}, ${message.tools.length} tools, ${message.mcp_servers.length} MCP servers`,
-          )
-        } else if (message.type === 'system' && message.subtype === 'api_retry') {
-          streamedSinceRetry = false
-          yield { type: 'retry', attempt: message.attempt }
-        } else if (
-          message.type === 'stream_event' &&
-          message.event.type === 'content_block_delta' &&
-          message.event.delta.type === 'text_delta'
-        ) {
-          streamedSinceRetry = true
-          yield { type: 'text', text: message.event.delta.text }
-        } else if (message.type === 'assistant') {
-          assistantError = message.error
-          const text = textOf(message)
-          if (!message.error && !streamedSinceRetry && text) yield { type: 'text', text }
-          for (const searched of searchesOf(message)) yield { type: 'search', query: searched }
-        } else if (message.type === 'rate_limit_event') {
-          rateLimit = message.rate_limit_info
-          const { status, utilization, rateLimitType, resetsAt } = rateLimit
-          if (status === 'allowed_warning' && utilization !== undefined && rateLimitType) {
-            yield {
-              type: 'usage',
-              utilization,
-              rateLimitType,
-              ...(resetsAt !== undefined && { resetsAt }),
-            }
-          }
-        } else if (message.type === 'result') {
-          // Backend の stdout は Shell 宛ての JSON 行だけなので、prompt cache の観察に使う usage は stderr に出す。
-          const { usage } = message
-          console.error(
-            `[chat] claude ${claude?.pid}: usage input ${usage.input_tokens}, cache creation ${usage.cache_creation_input_tokens ?? 0}, cache read ${usage.cache_read_input_tokens ?? 0}, output ${usage.output_tokens}`,
-          )
-          // SDK はこの 0.5〜1.4 秒後に error result を投げ直すが、それを待たずに決め、finally で claude を止める。
-          if (message.is_error || message.subtype !== 'success') {
-            throw failureOf(message, rateLimit, assistantError)
-          }
-          answered = true
-          return
-        }
+      try {
+        // Backend の stdout は Shell 宛ての JSON 行だけなので、prompt cache の観察に使う usage も stderr に出す。
+        yield* translate(q[Symbol.asyncIterator](), (line) =>
+          console.error(`[chat] claude ${claude?.pid}: ${line}`),
+        )
+      } catch (error) {
+        if (!(error instanceof EndedEarly)) throw error
+        if (claude && killed.has(claude)) return
+        throw agentFailed(await withStderr(error.message, claude))
       }
+      answered = true
     } finally {
       signal?.removeEventListener('abort', stop)
       // prompt が終わると SDK が stdin を閉じ、答え終えた claude は自分から抜ける。

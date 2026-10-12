@@ -4,7 +4,7 @@
 import { appendFileSync } from 'node:fs'
 import { createInterface } from 'node:readline'
 
-import { FAKE_MODELS, FAKE_RESETS_AT as RESETS_AT, type FakeScenario } from './testing.ts'
+import { FAKE_MODELS, type FakeScenario } from './testing.ts'
 
 const [recordPath, scenario, ...argv] = process.argv.slice(2) as [string, FakeScenario, ...string[]]
 if (!recordPath || !scenario) {
@@ -84,48 +84,6 @@ function assistant(text: string, error?: string) {
   })
 }
 
-// CLI は content block ごとに assistant を 1 つ流し、tool_use の input は block が閉じてから丸ごと載る。
-function webSearch(query: string, results: string) {
-  const id = `toolu_${crypto.randomUUID()}`
-  send({
-    type: 'stream_event',
-    event: {
-      type: 'content_block_start',
-      index: 1,
-      content_block: { type: 'tool_use', id, name: 'WebSearch', input: {} },
-    },
-    parent_tool_use_id: null,
-    uuid: crypto.randomUUID(),
-    session_id,
-  })
-  const json = JSON.stringify({ query })
-  const half = Math.floor(json.length / 2)
-  for (const partial_json of [json.slice(0, half), json.slice(half)]) {
-    streamDelta({ type: 'input_json_delta', partial_json })
-  }
-  send({
-    type: 'assistant',
-    message: {
-      role: 'assistant',
-      model: 'claude-haiku-5-5',
-      content: [{ type: 'tool_use', id, name: 'WebSearch', input: { query } }],
-    },
-    parent_tool_use_id: null,
-    uuid: crypto.randomUUID(),
-    session_id,
-  })
-  send({
-    type: 'user',
-    message: {
-      role: 'user',
-      content: [{ type: 'tool_result', tool_use_id: id, content: results }],
-    },
-    parent_tool_use_id: null,
-    uuid: crypto.randomUUID(),
-    session_id,
-  })
-}
-
 function result(text: string, failed?: { status: number | null }) {
   send({
     type: 'result',
@@ -144,24 +102,6 @@ function result(text: string, failed?: { status: number | null }) {
   })
 }
 
-function apiRetry(attempt: number, status: number | null, error: string) {
-  send({
-    type: 'system',
-    subtype: 'api_retry',
-    attempt,
-    max_retries: 4,
-    retry_delay_ms: 1,
-    error_status: status,
-    error,
-    session_id,
-    uuid: crypto.randomUUID(),
-  })
-}
-
-function rateLimit(info: object) {
-  send({ type: 'rate_limit_event', rate_limit_info: info, session_id, uuid: crypto.randomUUID() })
-}
-
 const ANSWER = FAKE_TEXT.join('')
 
 function answer(question: string) {
@@ -177,71 +117,17 @@ function answer(question: string) {
   streamDelta({ type: 'thinking_delta', thinking: 'Adding one and one.' })
   streamText(rest)
   assistant(ANSWER)
-  if (scenario === 'usage-warning') {
-    rateLimit({
-      status: 'allowed_warning',
-      resetsAt: RESETS_AT,
-      rateLimitType: 'five_hour',
-      utilization: 0.91,
-      surpassedThreshold: 0.9,
-    })
-  } else {
-    rateLimit({ status: 'allowed', resetsAt: RESETS_AT, rateLimitType: 'five_hour' })
-  }
   result(ANSWER)
 }
 
 // research（docs/research/chat-failures.md の §2）で本物の claude が流した並び。
 const scenarios: Record<Exclude<FakeScenario, 'exit-at-start'>, (question: string) => void> = {
   answer,
-  'usage-warning': answer,
-  search: () => {
-    init()
-    const before = 'Let me look that up. '
-    streamText([before])
-    assistant(before)
-    webSearch(
-      'Claude Shannon birthday',
-      'Web search results for query: "Claude Shannon birthday"\n\nLinks: [{"title":"Claude Shannon","url":"https://en.wikipedia.org/wiki/Claude_Shannon"}]\n\nHe was born April 30, 1916.',
-    )
-    const after = ['He was born on', ' April 30, 1916.']
-    streamText(after)
-    assistant(after.join(''))
-    result(before + after.join(''))
-  },
   'not-logged-in': () => {
     init()
     assistant('Not logged in · Please run /login', 'authentication_failed')
     result('Not logged in · Please run /login', { status: null })
     hold(LINGER_MS)
-  },
-  'usage-limit': () => {
-    init()
-    rateLimit({ status: 'rejected', resetsAt: RESETS_AT, rateLimitType: 'five_hour' })
-    const text = "You've hit your session limit · resets 10am (Asia/Tokyo)"
-    assistant(text, 'rate_limit')
-    result(text, { status: 429 })
-  },
-  throttled: () => {
-    init()
-    apiRetry(1, 429, 'rate_limit')
-    rateLimit({ status: 'rejected', rateLimitType: 'five_hour' })
-    const text = 'API Error: Server is temporarily limiting requests (not your usage limit)'
-    assistant(text, 'rate_limit')
-    result(text, { status: 429 })
-  },
-  overloaded: () => {
-    init()
-    for (let attempt = 1; attempt <= 4; attempt++) apiRetry(attempt, 529, 'overloaded')
-    const text = 'API Error: 529 Overloaded. This is a server-side issue, usually temporary'
-    assistant(text, 'server_error')
-    result(text, { status: 529 })
-  },
-  billing: () => {
-    init()
-    const text = 'Credit balance is too low'
-    assistant(text, 'billing_error')
-    result(text, { status: 400 })
   },
   'max-output-tokens': () => {
     init()
@@ -255,23 +141,6 @@ const scenarios: Record<Exclude<FakeScenario, 'exit-at-start'>, (question: strin
     streamText(FAKE_TEXT.slice(0, 1))
     process.stderr.write('claude: out of memory\n')
     process.exit(1)
-  },
-  // API の stream が切れると、CLI は答えを最初からやり直す。
-  restart: () => {
-    init()
-    streamText(['Tw', 'o'])
-    apiRetry(1, null, 'unknown')
-    streamText(FAKE_TEXT)
-    assistant(ANSWER)
-    result(ANSWER)
-  },
-  // stream を毎回切られると、CLI は 2 回目から stream しない request に替え、答えを assistant 1 つで返す。
-  unstreamed: () => {
-    init()
-    streamText(['Tw'])
-    apiRetry(1, null, 'unknown')
-    assistant(ANSWER)
-    result(ANSWER)
   },
 }
 

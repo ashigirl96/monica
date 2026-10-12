@@ -1,21 +1,13 @@
 import { rmSync, symlinkSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 
-/** 偽の claude の場面。answer と search のほかは、research で本物の claude が流した失敗の並びを真似る。 */
+/** 偽の claude の場面。answer のほかは、research で本物の claude が流した失敗の並びを真似る。 */
 export type FakeScenario =
   | 'answer'
-  | 'search'
-  | 'usage-warning'
   | 'not-logged-in'
-  | 'usage-limit'
-  | 'throttled'
-  | 'overloaded'
-  | 'billing'
   | 'max-output-tokens'
   | 'exit-at-start'
   | 'exit-mid-answer'
-  | 'restart'
-  | 'unstreamed'
 
 /** 偽の claude が initialize の応答で返す model の一覧。SDK の ModelInfo の形。 */
 export const FAKE_MODELS = [
@@ -34,9 +26,6 @@ export const FAKE_MODELS = [
     description: 'Haiku 4.5',
   },
 ]
-
-/** 偽の claude の rate_limit_event が持つ resetsAt（unix 秒）。 */
-export const FAKE_RESETS_AT = 1_800_000_000
 
 /**
  * dir に書いた偽の claude（wrapper の sh と、exec した後の bun）が、すべて居なくなるまで待つ。
