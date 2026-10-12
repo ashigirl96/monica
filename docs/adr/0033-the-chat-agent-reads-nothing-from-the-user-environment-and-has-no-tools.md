@@ -7,7 +7,7 @@ status: accepted
 ページの本文は、そのサイトを書いた人なら誰でも書ける入力で、agent への指示を紛れ込ませられる。Agent SDK は options を省くと、user の settings（allow の rule を含む）・CLAUDE.md・hooks・skills を読む。claude.ai の login で動かすと claude.ai の connector（Slack など）も載り、built-in の tool も 27 個持つ（#257）。user の他の Claude Code の session から届く message も受け、受けると自分で turn を起こす（#271）。Chat の agent は答えを文字で返せればよいので、指示が届く先を空にして起こす。
 
 - 読まない: `settingSources: []`、`skills: []`、`CLAUDE_CODE_DISABLE_AUTO_MEMORY=1`、`persistSession: false`。connector は `strictMcpConfig: true` と env の `ENABLE_CLAUDEAI_MCP_SERVERS=false` で切る。`mcpServers: {}` では切れない。
-- tool: `tools: []`、`disallowedTools: ["mcp__*"]`、`permissionPrompts: "none"`。
+- tool: `tools: []`、`disallowedTools: ["mcp__*"]`、`permissionPrompts: "none"`。ADR-0038 で `WebSearch` だけを足した。
 - 他の session の message: `settings` に `{ crossSessionInbound: "refuse" }` を渡し、env に `CLAUDE_CODE_RESTRICTED=1` を足す。
 - system prompt: 文字列で渡し、Claude Code の preset を置き換える。
 - cwd: 空の `$MONICA_HOME/chat`。
