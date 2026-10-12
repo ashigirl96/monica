@@ -58,6 +58,7 @@ function Reply({ entry, onRetry }: { entry: ChatEntry; onRetry: (() => void) | u
     <ChatMessage from="assistant" className="w-full max-w-full items-stretch">
       <div className="flex flex-col gap-2">
         {entry.answer && <Answer text={entry.answer} />}
+        {entry.searching && <Faint>{entry.searching}</Faint>}
         {entry.status === 'stopped' && <Faint>止めました</Faint>}
         <FailureLines entry={entry} onRetry={onRetry} />
         {entry.usage && <Faint>{entry.usage}</Faint>}
