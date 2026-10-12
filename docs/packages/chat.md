@@ -460,7 +460,7 @@ React に依らない `createChatStore(client, storage)` が Chat を持ち、`C
 - `snapshot()` の `withScreenshot` がボタンの状態で、`toggleScreenshot` が切り替える。`ask` が送ったら外す。
 - `createChatStore(client, storage)` の `storage` は選んだ model と effort を残す場所で、`ChatApp` が `localStorage` を渡す。key は `monica-chat-choice`、値は `{ model?, effort? }` の JSON。1 台の Chrome の 1 人の好みなので、Backend や monica.db には持たない。読めない値と、storage が投げるときは、何も選んでいないことにする。
 - `open` は `chat.models` も呼ぶ。`snapshot()` の `picker` が選択の UI の状態で、一覧と、選んでいる model と effort（何も選んでいなければ `haiku`・`low`）と、選べる effort を持つ。`chooseModel`・`chooseEffort` が選んで storage に残し、次の `prepare` と `ask` から付ける。会話の途中で変えてよい。
-- 付ける組: 一覧を読んでいる間は残した組をそのまま付け、spare をその組で起こさせる。一覧が届いたら、残した model が一覧に無ければ選択を外す（storage は消さない）。一覧を読めなければ何も付けない。effort は、その model が `supportsEffort` を持ち `supportedEffortLevels` に含むときだけ付ける。付けない field は Backend が既定にする。一覧を読めなかった side panel は、Backend の不在の帯が消えた時に読み直す。
+- 付ける組: 一覧を読んでいる間は残した組をそのまま付け、spare をその組で起こさせる。一覧が届いたら、残した model が一覧に無ければ選択を外す（storage は消さない）。一覧を読めなければ何も付けない。effort は、その model が `supportsEffort` を持ち `supportedEffortLevels` に含むときだけ付ける。付けない field は Backend が既定にする。managed settings が `haiku` を一覧から外したときは、何も選んでいなければ一覧の先頭を出して付ける。Backend の既定の `haiku` で起こすと、画面に無い model で失敗するため。一覧を読めなかった side panel は、Backend の不在の帯が消えた時と、side panel が focus を得た時に読み直す。claude が 4 つ埋まっていて `CHAT_BUSY` が返ったときは、帯は出ないため。
 - 送ったスクリーンショットは、読み終えた時に質問の entry の `screenshot` に入れて縮小を出す。
 - 届いた `snapshot` の `page` に送ったスクリーンショットを足して、その問答の turn の `page` として履歴に入れ、`snapshot` から作った知らせを質問の entry の `notice` に入れる。
 - `startNewChat` は流れている stream を `signal` で abort し、問答と履歴を空にし、スクリーンショットのボタンを外す。abort の後に届いた delta は描かない。Backend は abort でその claude を止める。

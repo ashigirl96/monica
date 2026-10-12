@@ -1383,3 +1383,30 @@ test('a kept model that the list does not have falls back to no choice, and so d
   expect(missing.store.snapshot().picker).toMatchObject({ model: 'haiku', effort: 'low' })
   expect(unlisted.store.snapshot().picker).toBeUndefined()
 })
+
+test('a list without haiku makes its first model the choice shown and sent', async () => {
+  const client = new FakeClient()
+  client.offered = MODELS.slice(1)
+  const { store } = openChat(client)
+  await settled()
+
+  store.ask('What is this?')
+  await settled()
+
+  expect(store.snapshot().picker).toMatchObject({ model: 'claude-opus-4-6', effort: 'low' })
+  expect(latest(client).input).toMatchObject({ model: 'claude-opus-4-6' })
+})
+
+test('a list that could not be read is read again when the side panel gets focus, while the Backend is reachable', async () => {
+  const client = new FakeClient()
+  client.offered = undefined
+  const { store, focus } = openChat(client)
+  await settled()
+  expect(store.snapshot().picker).toBeUndefined()
+
+  client.offered = MODELS
+  focus.dispatchEvent(new Event('focus'))
+  await settled()
+
+  expect(store.snapshot().picker).toMatchObject({ model: 'haiku' })
+})

@@ -215,6 +215,13 @@ function writeChoice(storage: ChoiceStorage, choice: Choice) {
   } catch {}
 }
 
+const modelIn = (models: readonly Model[], model: string) =>
+  models.find(({ value }) => value === model)
+
+// managed settings が haiku を一覧から外したときは、Backend の既定に任せず一覧の先頭を付ける。
+const defaultModelIn = (models: readonly Model[]) =>
+  modelIn(models, DEFAULT_MODEL) ? undefined : models[0]?.value
+
 type Listing =
   | { state: 'loading' }
   | { state: 'failed' }
@@ -241,24 +248,22 @@ export function createChatStore(client: ChatClient, storage: ChoiceStorage): Cha
   let nextId = 0
   const listeners = new Set<() => void>()
 
-  const shownModel = (models: readonly Model[]) =>
-    models.find(({ value }) => value === (saved.model ?? DEFAULT_MODEL))
-
   // 一覧を読む間も残した組を付けるのは、spare をその組で起こさせるため。
   function chosen(): Choice {
     if (listing.state === 'loading') return saved
     if (listing.state === 'failed') return {}
-    const entry = shownModel(listing.models)
-    const { model, effort } = saved
+    const model = saved.model ?? defaultModelIn(listing.models)
+    const entry = modelIn(listing.models, model ?? DEFAULT_MODEL)
+    const { effort } = saved
     const offered = effort && entry?.supportsEffort && entry.supportedEffortLevels?.includes(effort)
     return { ...(model && { model }), ...(offered && { effort }) }
   }
 
   function picker(): Picker | undefined {
-    if (listing.state !== 'ready') return undefined
+    if (listing.state !== 'ready' || listing.models.length === 0) return undefined
     const { models } = listing
     const { model = DEFAULT_MODEL, effort = DEFAULT_EFFORT } = chosen()
-    const entry = shownModel(models)
+    const entry = modelIn(models, model)
     const efforts = (entry?.supportsEffort && entry.supportedEffortLevels) || []
     return { models, model, effort: efforts.length > 0 ? effort : undefined, efforts }
   }
@@ -336,7 +341,7 @@ export function createChatStore(client: ChatClient, storage: ChoiceStorage): Cha
       (models) => {
         listing = { state: 'ready', models }
         // 一覧に無い model は選んでいないことにし、次に選んだ effort が既定の model に付くようにする。
-        if (!shownModel(models)) saved = {}
+        if (saved.model && !modelIn(models, saved.model)) saved = {}
         publish()
       },
       () => {
@@ -373,6 +378,9 @@ export function createChatStore(client: ChatClient, storage: ChoiceStorage): Cha
     },
     open(read, focus) {
       readPage = read
+      // 一覧は claude が埋まっている間や一時的な失敗でも読めないので、Backend に届いていても focus で読み直す。
+      const retryModels = () => listing.state === 'failed' && loadModels()
+      focus.addEventListener('focus', retryModels)
       const watching = watchReach(
         () => client.prepare(chosen()),
         focus,
@@ -387,6 +395,7 @@ export function createChatStore(client: ChatClient, storage: ChoiceStorage): Cha
       watching.check()
       loadModels()
       return () => {
+        focus.removeEventListener('focus', retryModels)
         watching.dispose()
         if (reach === watching) reach = undefined
       }

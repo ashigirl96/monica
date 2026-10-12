@@ -214,7 +214,12 @@ export function createChatAgent(
     if (claudes.size >= MAX_CLAUDES) return
     const started = spawnWith(choice, (options) => startup({ options }))
     const timer = setTimeout(() => {
-      if (spare === prepared) discard(prepared)
+      if (spare !== prepared) return
+      spare = undefined
+      void prepared.started.then(
+        (warm) => warm.close(),
+        () => kill(prepared.claude),
+      )
     }, SPARE_LIFETIME_MS)
     const prepared: Spare = { ...started, choice, timer, ready: false }
     // 失敗は ask が spare を使うときに受ける。
