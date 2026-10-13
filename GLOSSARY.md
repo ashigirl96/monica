@@ -182,6 +182,10 @@ _Avoid_: ページの情報, page context, capture（スクリーンショット
 Chrome Extension が GitHub の Issues の一覧の行と Issue の画面の header に差し込む、その Issue の Task の Run を起こすボタン。Task が closed なら、Run の代わりに Task を reopen する。出すか、どの prompt で起こすか、押せない理由は、Backend が GitHub の今の Issue と Task Ledger から決める。状態は、新しい Run を起こす（`Run`）、終了した Run を resume する（`Resume`）、live な Run があるか、Run を起こしている途中（claude の Tab を開いてから Run が付くまで）で押せない（`Running`）、closed な Task を reopen するだけで Run は起こさない（`Reopen`）、規則が断り押せない（closed な Issue や open な Blocker などの理由を tooltip に出す）のどれか。closed な Issue と open な Blocker が止めるのは新しい Run だけで、live な Run や終了した Run があれば `Running` か `Resume` になる。押した時に Backend の決める状態が、画面に出ていた状態と違えば、何もせずに今の状態に描き直す。GitHub から読めなかった Issue には出さない。
 _Avoid_: Run（単独ではボタンを指さない）, 押せない Run（押せない状態の Run Button）
 
+**Backend Unreachable**:
+Chrome Extension の呼び出しが、Backend の答えを受け取る前に Backend に届かなくなったこと。desktop が動いていない、起き直した Backend が前の呼び出しの資格を受け付けない、答えの途中で切れた、のどれも含む。Backend が受け取ったうえで断るか失敗したことは含まない。Chat と Run Button は同じ判定で、desktop が動いていないと出す。
+_Avoid_: offline, 接続エラー, Backend が居ない（不在の一部しか指さない）
+
 ### Process
 
 **Shell**:
