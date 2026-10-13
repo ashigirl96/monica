@@ -9,7 +9,6 @@ test('localTime writes the date and the time of the local time zone', () => {
   try {
     expect(localTime(new Date(Date.UTC(2026, 9, 13, 15, 4, 5)))).toBe('2026-10-14 00:04:05')
   } finally {
-    // bun test は TZ を設定せずに UTC で動き、undefined の代入と delete は手元の時間帯に落ちる。
     process.env.TZ = tz ?? 'UTC'
   }
 })
