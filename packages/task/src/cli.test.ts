@@ -244,8 +244,8 @@ const runItem = (overrides: Partial<RunItem>): RunItem => ({
   ...overrides,
 })
 
-test('runs heads the table with the Task and marks a Run whose transcript is gone', () => {
-  const text = formatters.runs({
+test('show heads the table with the Task and marks a Run whose transcript is gone', () => {
+  const text = formatters.show({
     ref: 'acme/app#12',
     title: 'Ship it',
     closedAt: null,
@@ -266,8 +266,8 @@ test('runs heads the table with the Task and marks a Run whose transcript is gon
   )
 })
 
-test('runs says when a closed Task was closed and when it has no Runs', () => {
-  const text = formatters.runs({
+test('show says when a closed Task was closed and when it has no Runs', () => {
+  const text = formatters.show({
     ref: 'acme/app#12',
     title: 'Ship it',
     closedAt: new Date(Date.UTC(2026, 9, 13, 9, 3, 0)),

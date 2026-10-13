@@ -48,13 +48,13 @@ async function claudeIn(
   return terminalSessionId
 }
 
-test('runs lists the Runs of an open Task by their last event, newest first, live ones included', async () => {
+test('show lists the Runs of an open Task by their last event, newest first, live ones included', async () => {
   const fixture = await withBench()
   await claudeIn(fixture, 's-old', { startedAt: 1, endedAt: 2 })
   await claudeIn(fixture, 's-live', { startedAt: 3 })
   await claudeIn(fixture, 's-new', { startedAt: 4, endedAt: 5 })
 
-  const listed = await fixture.client.runs({ ref })
+  const listed = await fixture.client.show({ ref })
 
   expect(listed).toMatchObject({ ref, title: 'Ship it', closedAt: null })
   expect(listed.runs).toEqual([
@@ -79,36 +79,36 @@ test('runs lists the Runs of an open Task by their last event, newest first, liv
   ])
 })
 
-test('runs puts the later Run first among Runs whose last events came at the same time', async () => {
+test('show puts the later Run first among Runs whose last events came at the same time', async () => {
   const fixture = await withBench()
   await claudeIn(fixture, 's-first', { startedAt: 1, endedAt: 3 })
   await claudeIn(fixture, 's-second', { startedAt: 2, endedAt: 3 })
 
-  const { runs } = await fixture.client.runs({ ref })
+  const { runs } = await fixture.client.show({ ref })
 
   expect(runs.map((r) => r.agentSessionId)).toEqual(['s-second', 's-first'])
 })
 
-test('runs lists the Runs of a closed Task with the time it was closed', async () => {
+test('show lists the Runs of a closed Task with the time it was closed', async () => {
   const fixture = await withBench()
   await claudeIn(fixture, 's-1', { startedAt: 1, endedAt: 2 })
   setSystemTime(at(3))
   await fixture.client.close({ ref, force: true })
 
-  const listed = await fixture.client.runs({ ref: 'https://github.com/acme/app/issues/12' })
+  const listed = await fixture.client.show({ ref: 'https://github.com/acme/app/issues/12' })
 
   expect(listed.closedAt).toEqual(at(3))
   expect(listed.runs.map((r) => r.agentSessionId)).toEqual(['s-1'])
 })
 
-test('runs tells a Run whose transcript is gone from one that can be resumed', async () => {
+test('show tells a Run whose transcript is gone from one that can be resumed', async () => {
   const fixture = await withBench()
   const gone = { transcript_path: transcriptOf(fixture, 's-gone', { written: false }) }
   const kept = { transcript_path: transcriptOf(fixture, 's-kept') }
   await claudeIn(fixture, 's-gone', { startedAt: 1, endedAt: 2, fields: gone })
   await claudeIn(fixture, 's-kept', { startedAt: 3, endedAt: 4, fields: kept })
 
-  const { runs } = await fixture.client.runs({ ref })
+  const { runs } = await fixture.client.show({ ref })
 
   expect(runs.map((r) => [r.agentSessionId, r.transcriptPath, r.resumable])).toEqual([
     ['s-kept', kept.transcript_path, true],
@@ -116,10 +116,10 @@ test('runs tells a Run whose transcript is gone from one that can be resumed', a
   ])
 })
 
-test('runs refuses an Issue with no Task as not tracked', async () => {
+test('show refuses an Issue with no Task as not tracked', async () => {
   const fixture = setup()
 
-  const error = await failure(fixture.client.runs({ ref }))
+  const error = await failure(fixture.client.show({ ref }))
 
   expect(error).toMatchObject({ code: 'NOT_FOUND', message: `${ref} is not tracked` })
 })
