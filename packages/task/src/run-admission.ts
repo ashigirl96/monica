@@ -99,7 +99,7 @@ async function admitFromCli(
   try {
     const { found, tracked } = await findOrTrack(deps, parseRef(ref))
     if (found.bench) refuseInPlace(found.bench, inPlace, formatRef(found.issue))
-    const facts = copyFacts(deps.db, found.issue.id)
+    const facts = freshestFacts(deps.db, found.issue.id, { sync: 'skipped' })
     const decided = fromLedger(deps.db, deps.reservations, found, facts, rules)
     if (decided && decided.type !== 'resume') throw new Refused(decided)
     const starting = decided ? { ...decided, facts } : await syncForNewRun(deps, found)
@@ -118,26 +118,43 @@ async function press(deps: Deps, ref: string, shown: Pressable): Promise<RunButt
   const decided = decide(deps.db, deps.reservations, found, read, BUTTON)
   const now = rowOf(decided)
   if (now.button?.run !== shown) return { ref, ...now }
-  let judged: IssueFacts = read
-  try {
-    if (decided.type === 'reopen') {
-      if (found) await reopenFromButton(deps, found)
-    } else if (isLaunchable(decided)) {
-      const admitted = await findOrTrack(deps, read, read.nodeId)
-      // resume は sync しないので、押した時に読んだ答えで当て直す。
-      const starting =
-        decided.type === 'resume'
-          ? { ...decided, facts: read }
-          : await syncForNewRun(deps, admitted.found, read)
-      judged = starting.facts
-      await launch(deps, admitted, BUTTON, starting, {})
-    }
-  } catch (error) {
-    if (!(error instanceof Refused || error instanceof TaskStateRefusal)) throw error
-  }
+  const judged = await performPress(deps, found, decided, read).catch((error: unknown) => {
+    if (isRefusal(error)) return read
+    throw error
+  })
   const after = taskIfTracked(deps.db, isLinkedIssue(read))
   return { ref, ...rowOf(decide(deps.db, deps.reservations, after, judged, BUTTON)) }
 }
+
+/** 押下を行い、最後に判定に使った Issue Facts を返す。Issue Facts を決める前の断りは投げる。 */
+async function performPress(
+  deps: Deps,
+  found: FoundTask | undefined,
+  decided: Decision,
+  read: GitHubIssue,
+): Promise<IssueFacts> {
+  if (decided.type === 'reopen') {
+    if (found) await reopenFromButton(deps, found)
+    return read
+  }
+  if (!isLaunchable(decided)) return read
+  const admitted = await findOrTrack(deps, read, read.nodeId)
+  const starting =
+    decided.type === 'resume'
+      ? {
+          ...decided,
+          facts: freshestFacts(deps.db, admitted.found.issue.id, { read, sync: 'skipped' }),
+        }
+      : await syncForNewRun(deps, admitted.found, read)
+  try {
+    await launch(deps, admitted, BUTTON, starting, {})
+  } catch (error) {
+    if (!isRefusal(error)) throw error
+  }
+  return starting.facts
+}
+
+const isRefusal = (error: unknown) => error instanceof Refused || error instanceof TaskStateRefusal
 
 export async function runButtons(
   deps: SyncDeps & Pick<BenchDeps, 'reservations'>,
@@ -236,9 +253,20 @@ async function syncForNewRun(deps: SyncDeps, found: FoundTask, read?: IssueFacts
   const warnings = await syncOrUseCopy(deps, found.issue)
   // sync は repo の改名を写すので、名前でなく行の id で引き直す。
   const synced = findOpenTask(deps.db, eq(issue.id, found.issue.id), formatRef(found.issue))
-  // sync が失敗すると写しは押す前のままなので、押した時に読んだ答えのほうが新しい。
-  const facts = read && warnings.length > 0 ? read : copyFacts(deps.db, synced.issue.id)
+  const facts = freshestFacts(deps.db, synced.issue.id, { read, sync: { warnings } })
   return { type: 'synced', found: synced, warnings, facts }
+}
+
+type SyncOutcome = 'skipped' | { warnings: string[] }
+
+function freshestFacts(
+  db: Db,
+  issueId: number,
+  { read, sync }: { read?: IssueFacts; sync: SyncOutcome },
+): IssueFacts {
+  // sync が失敗するか sync しなければ写しは押す前のまま。時刻で比べないのは、in-process の fake が読みと sync を同じミリ秒で返すため。
+  const copyIsSynced = sync !== 'skipped' && sync.warnings.length === 0
+  return read && !copyIsSynced ? read : copyFacts(db, issueId)
 }
 
 type Launches = Pick<BenchDeps['reservations'], 'launchingRun'>
