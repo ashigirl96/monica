@@ -1,3 +1,4 @@
+import { localTime } from '@monica/ui/local-time'
 import { table } from '@monica/ui/table'
 import type { ContractRouterClient } from '@orpc/contract'
 
@@ -10,6 +11,7 @@ import type {
   ListOutput,
   ReopenOutput,
   RunOutput,
+  RunsOutput,
   SyncOutput,
 } from './contract.ts'
 import { stateText } from './state-text.ts'
@@ -32,6 +34,15 @@ export const completers = {
   attach: { ref: taskRefs({ closed: false }) },
   close: { ref: taskRefs({ closed: false }) },
   reopen: { ref: taskRefs({ closed: true }) },
+  runs: {
+    ref: async (client: Client, signal: AbortSignal) =>
+      (
+        await Promise.all([
+          taskRefs({ closed: false })(client, signal),
+          taskRefs({ closed: true })(client, signal),
+        ])
+      ).flat(),
+  },
 }
 
 export const formatters = {
@@ -76,6 +87,24 @@ export const formatters = {
       ['REF', 'TITLE', 'STATE'],
       [ref, title, stateText(displayState)],
     ])
+  },
+  runs({ ref, title, closedAt, runs }: RunsOutput): string {
+    const head = [`${ref} ${title}`, ...(closedAt ? [`closed at ${localTime(closedAt)}`] : [])]
+    const body =
+      runs.length === 0
+        ? 'No Runs'
+        : table([
+            ['SESSION ID', 'STATE', 'ORIGIN', 'STARTED', 'LAST EVENT', 'CWD'],
+            ...runs.map((r) => [
+              r.resumable ? r.agentSessionId : `${r.agentSessionId} (transcript gone)`,
+              r.state,
+              r.origin,
+              localTime(r.startedAt),
+              localTime(r.lastEventAt),
+              r.cwd,
+            ]),
+          ])
+    return [...head, '', body].join('\n')
   },
   list({ tasks, backgroundSyncError }: ListOutput): string {
     const lines =

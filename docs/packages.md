@@ -56,7 +56,7 @@ monica/
 
 - apps は packages を組み立てるだけでロジックを持たない（ADR-0002）。apps どうしは互いを import しない。
 - Rust の `target/` と `Cargo.lock` は root に 1 つ。crate 名は `monica-<dir>`（`monica-ptyd` など）。terminal 5 crate は旧 Monica から持ち込んだもの（#11）。
-- `packages/ui` は popover・icon・toast・fuzzy picker・drag reorder のような、domain の語を持たない部品を置く。CLI の整形関数が使う表（`@monica/ui/table`）もここに置く。cli entry は apps/cli だけが import するので、domain の cli entry どうしでは共有できないため。domain の UI は各 domain package の `ui` entry に置く。
+- `packages/ui` は popover・icon・toast・fuzzy picker・drag reorder のような、domain の語を持たない部品を置く。CLI の整形関数が使う表（`@monica/ui/table`）と手元の時刻（`@monica/ui/local-time`）もここに置く。cli entry は apps/cli だけが import するので、domain の cli entry どうしでは共有できないため。domain の UI は各 domain package の `ui` entry に置く。
 
 ### ドメイン package の中
 
@@ -152,7 +152,7 @@ package ごとに in-memory の SQLite に自分の migration を当てる（tas
   - 子の process の timer はテストの process から spy できないので、子を `bun --preload <テスト用の file>` で起こし、preload で差し替える（hook の `AbortSignal.timeout`、`apps/cli/src/hook.test.ts`）。
   - 待たずに進むことは、待てば打ち切りまで返らない場面（Exit を送らない fake の ptyd など）を作り、操作を打ち切りより短い `Bun.sleep` と `Promise.race` して確かめる。テストの既定の timeout は打ち切りより長いことがあり、待ちを戻す変異も通すため（`packages/workbench/src/ui/store.test.ts`）。
   - 偽の GitHub に request が届くのは、`requests` を poll せず `received(count)` を await する。固定の sleep でも待たない。
-- 手元の暦日や時刻で切る処理は、テストの中で `process.env.TZ` を UTC 以外（`Asia/Tokyo` など）にして確かめ、`finally` で戻す。`bun test` は TZ を UTC にするので、UTC の日付で切る誤りも通る（`packages/usage/src/usage.test.ts`）。
+- 手元の暦日や時刻で切る処理は、テストの中で `process.env.TZ` を UTC 以外（`Asia/Tokyo` など）にして確かめ、`finally` で `process.env.TZ = tz ?? 'UTC'` と戻す。`bun test` は `process.env.TZ` を設定せずに UTC で動くので、UTC の日付で切る誤りも通る。`undefined` の代入と `delete` は手元の時間帯に落ち、同じ process で後に走るテストに漏れる（`packages/usage/src/usage.test.ts`・`packages/ui/src/local-time.test.ts`）。
 - oRPC の client の procedure は `spyOn` で差し替えられない。client は property を読むたびに新しい Proxy を返すため。呼び出しを記録するか差し替えるときは、client を `new Proxy` で包み、`get` でその key だけを替えて、呼び手に渡す（`packages/task/src/ui/bench-close.test.ts`）。
 - 受けた値を `toMatchObject` に渡した後で読み直さない。Bun の `toMatchObject` は、受けた object の中で `expect.stringContaining` などの matcher に当たった値を、その matcher に置き換える（Bun 1.4.2）。後で読む値は、`toMatchObject` より前に取り出す。
 - 終わった行のように procedure に出ない行は、`@monica/<d>/schema` の table を SELECT して確かめてよい。他の domain が読むのと同じ面だから。

@@ -132,7 +132,7 @@ test('the day is the local calendar day of the Backend, not the UTC one', async 
 
     expect(db.all(sql`SELECT date FROM usage`)).toEqual([{ date: '2026-10-12' }])
   } finally {
-    process.env.TZ = tz
+    process.env.TZ = tz ?? 'UTC'
   }
 })
 

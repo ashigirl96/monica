@@ -1,3 +1,5 @@
+import { existsSync } from 'node:fs'
+
 import { agentSession, tab } from '@monica/workbench/schema'
 import type { Db, Tx } from '@monica/workbench/server'
 import { and, eq, inArray, isNull, ne } from 'drizzle-orm'
@@ -7,6 +9,11 @@ import { formatRef } from './ref.ts'
 import { bench, issue, run } from './schema.ts'
 
 export const liveAgentSession = ne(agentSession.state, 'ended')
+
+// Claude Code は古い Agent Session Transcript を消すので、path を持たない Agent Session だけを無条件に resume できるとみなす。
+export function isResumable({ transcriptPath }: { transcriptPath: string | null }): boolean {
+  return transcriptPath === null || existsSync(transcriptPath)
+}
 
 export type RunOrigin = (typeof run.$inferInsert)['origin']
 

@@ -23,6 +23,7 @@ test('__complete lists the subcommands with their descriptions for zsh', async (
       "attach:Move the Tab this runs in into the Bench of an open Task, opening the Bench in place when it has none, and make the Tab's claude a Run of the Task\n" +
       'close:Close a Task and take down its Bench: the worktree, the branch issue-n, the Runspace and its Tabs, all but the Tab this runs in\n' +
       'reopen:Reopen a closed Task; the next run or attach opens its Bench anew\n' +
+      'runs:List the Runs of a Task, open or closed, with the Agent Session ids claude --resume takes\n' +
       'help:display help for command\n',
     stderr: '',
   })
@@ -61,6 +62,12 @@ test('__complete lists the open Tasks with their titles for the ref, and the clo
 
   expect(run).toEqual({ code: 0, stdout: 'acme/app#12:Ship it\n', stderr: '' })
   expect(reopen.stdout).toBe('acme/app#1:Shipped\n')
+})
+
+test('__complete lists both the open and the closed Tasks for the ref of runs', async () => {
+  const runs = await monica(['__complete', '--', 'task', 'runs', 'acme/'], backendWithTasks())
+
+  expect(runs.stdout).toBe('acme/app#12:Ship it\nacme/app#1:Shipped\n')
 })
 
 test('__complete lists nothing without a Backend, when it fails, after the last argument, or for the value of a boolean option', async () => {

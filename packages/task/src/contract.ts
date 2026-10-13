@@ -3,13 +3,14 @@ import { eventIterator, oc } from '@orpc/contract'
 import { createSchemaFactory } from 'drizzle-zod'
 import { z } from 'zod'
 
-import { bench, issue } from './schema.ts'
+import { bench, issue, run } from './schema.ts'
 
 const meta = oc.$meta<{ description?: string; cli?: boolean }>({})
 const { createSelectSchema } = createSchemaFactory({ coerce: { date: true } })
 
 const IssueStateSchema = createSelectSchema(issue).shape.state
 const BenchSchema = createSelectSchema(bench)
+const RunSchema = createSelectSchema(run)
 const WaitReasonSchema = AgentSessionSchema.shape.waitReason.unwrap()
 const LiveStateSchema = AgentSessionSchema.shape.state.exclude(['ended'])
 
@@ -190,6 +191,29 @@ export const ReopenOutputSchema = z.object({
   warnings: z.array(z.string()),
 })
 
+export const RunItemSchema = z.object({
+  agentSessionId: z.string(),
+  state: AgentSessionSchema.shape.state,
+  origin: RunSchema.shape.origin,
+  startedAt: z.date().describe('when the Agent Session became a Run of the Task'),
+  lastEventAt: z.date(),
+  endedAt: z.date().nullable(),
+  cwd: z.string(),
+  transcriptPath: z.string().nullable(),
+  resumable: z
+    .boolean()
+    .describe(
+      'false when the Agent Session Transcript it names is gone, so --resume cannot find it',
+    ),
+})
+
+export const RunsOutputSchema = z.object({
+  ref: z.string(),
+  title: z.string(),
+  closedAt: z.date().nullable(),
+  runs: z.array(RunItemSchema).describe('the latest last event first'),
+})
+
 export const BenchItemSchema = z.object({
   runspaceId: z.string(),
   ref: z.string(),
@@ -210,6 +234,8 @@ export type AttachOutput = z.infer<typeof AttachOutputSchema>
 export type CloseRefusal = z.infer<typeof CloseRefusalSchema>
 export type CloseOutput = z.infer<typeof CloseOutputSchema>
 export type ReopenOutput = z.infer<typeof ReopenOutputSchema>
+export type RunItem = z.infer<typeof RunItemSchema>
+export type RunsOutput = z.infer<typeof RunsOutputSchema>
 export type BenchItem = z.infer<typeof BenchItemSchema>
 
 export const contract = {
@@ -308,6 +334,14 @@ export const contract = {
     })
     .input(z.object({ ref }))
     .output(ReopenOutputSchema),
+  runs: meta
+    .meta({
+      description:
+        'List the Runs of a Task, open or closed, with the Agent Session ids claude --resume takes',
+      cli: true,
+    })
+    .input(z.object({ ref }))
+    .output(RunsOutputSchema),
   bench: {
     list: meta
       .meta({ description: 'List the Benches with the labels of their Tasks' })

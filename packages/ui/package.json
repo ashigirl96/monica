@@ -4,7 +4,8 @@
   "type": "module",
   "exports": {
     ".": "./src/index.ts",
-    "./table": "./src/table.ts"
+    "./table": "./src/table.ts",
+    "./local-time": "./src/local-time.ts"
   },
   "dependencies": {
     "clsx": "catalog:",

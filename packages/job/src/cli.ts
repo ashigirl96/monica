@@ -1,3 +1,4 @@
+import { localTime } from '@monica/ui/local-time'
 import { table } from '@monica/ui/table'
 import type { ContractRouterClient } from '@orpc/contract'
 
@@ -130,13 +131,6 @@ function durationText({ startedAt, endedAt }: JobExecution): string {
   const seconds = Math.floor(ms / 1000)
   if (seconds < 3600) return `${Math.floor(seconds / 60)}m${pad(seconds % 60)}s`
   return `${Math.floor(seconds / 3600)}h${pad(Math.floor(seconds / 60) % 60)}m`
-}
-
-function localTime(date: Date): string {
-  return (
-    `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ` +
-    `${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`
-  )
 }
 
 function pad(n: number): string {
