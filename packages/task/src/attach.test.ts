@@ -100,12 +100,15 @@ test('attach moves the calling Tab into the Bench and makes its claude a Run tha
   const benchRunspace = await fixture.openBench(ref)
   const outside = await fixture.openTabOutsideBench()
   await fixture.hook(outside, 's-1', 'SessionStart', { source: 'startup' })
+  const requestsBefore = fixture.github.requests.length
 
   const output = await fixture.client.attach({ ref, terminalSessionId: outside })
 
+  expect(fixture.github.requests).toHaveLength(requestsBefore)
   expect(output).toEqual({
     ref,
     title: 'Ship it',
+    tracked: false,
     benchCreated: false,
     runCreated: true,
     agentSessionId: 's-1',
@@ -236,7 +239,7 @@ test('attach refuses a Tab whose claude is a Run of another Task, changing nothi
   expect(runsOf(fixture)).toEqual([{ number: 13, agentSessionId: 's-1', origin: 'started' }])
 })
 
-test('attach refuses a Terminal Session whose Tab was closed, a call from outside a Tab, a closed Task, and an untracked one', async () => {
+test('attach refuses a Terminal Session whose Tab was closed, a call from outside a Tab, a closed Task, and a ref GitHub does not return', async () => {
   const fixture = started()
   await fixture.openBench(ref)
   const closed = await fixture.openTabOutsideBench()
@@ -254,4 +257,127 @@ test('attach refuses a Terminal Session whose Tab was closed, a call from outsid
   expect((await failure(fixture.client.attach({ ref, terminalSessionId: outside }))).code).toBe(
     'BAD_REQUEST',
   )
+})
+
+async function untrackedWithCheckout(repo = 'acme/app') {
+  const fixture = started()
+  fixture.github.issue('acme/app#4', { title: 'Schema first' })
+  fixture.github.issue('acme/app#10', { title: 'Epic' })
+  fixture.github.issue(ref, {
+    title: 'Ship it',
+    labels: ['bug'],
+    parent: 'acme/app#10',
+    blockedBy: ['acme/app#4'],
+  })
+  mkdirSync(fixture.ghq.checkout(repo), { recursive: true })
+  return fixture
+}
+
+test("attach of an untracked Issue tracks it, opens its Bench in place on the Repo's checkout and makes the Tab's claude a Run, attached", async () => {
+  const fixture = await untrackedWithCheckout()
+  const outside = await fixture.openTabOutsideBench()
+  await fixture.hook(outside, 's-1', 'SessionStart', { source: 'startup' })
+  const changes: unknown[] = []
+  fixture.taskLedger.events.subscribe('change', (change) => changes.push(change))
+
+  const output = await fixture.client.attach({ ref, terminalSessionId: outside })
+
+  expect(output).toEqual({
+    ref,
+    title: 'Ship it',
+    tracked: true,
+    benchCreated: true,
+    runCreated: true,
+    agentSessionId: 's-1',
+  })
+  expect(fixture.db.select().from(bench).get()).toMatchObject({
+    runspaceId: runspaceOfTab(fixture, outside),
+    cwd: fixture.ghq.checkout('acme/app'),
+    mode: 'in_place',
+  })
+  expect(runsOf(fixture)).toEqual([{ number: 12, agentSessionId: 's-1', origin: 'attached' }])
+  expect((await fixture.client.list({})).tasks).toMatchObject([
+    { ref, title: 'Ship it', blockers: ['acme/app#4'] },
+  ])
+  const copied = fixture.db.select().from(issue).where(eq(issue.number, 12)).get()!
+  expect(copied.labels).toEqual(['bug'])
+  expect(
+    fixture.db
+      .select({ number: issue.number })
+      .from(issue)
+      .where(eq(issue.id, copied.parentId!))
+      .get(),
+  ).toEqual({ number: 10 })
+  expect(await fixture.client.current({ terminalSessionId: outside })).toMatchObject({ ref })
+  expect(changes).toContainEqual({ type: 'task', ref })
+})
+
+test('attach of an untracked Issue moves a Tab with no claude into its new Bench', async () => {
+  const fixture = await untrackedWithCheckout()
+  const outside = await fixture.openTabOutsideBench()
+
+  const output = await fixture.client.attach({ ref, terminalSessionId: outside })
+
+  expect(output).toMatchObject({ tracked: true, benchCreated: true, agentSessionId: null })
+  expect(runspaceOfTab(fixture, outside)).toBe(fixture.db.select().from(bench).get()!.runspaceId)
+})
+
+test("attach asked by a repo's old name for an untracked Issue tracks it under the new name and opens the Bench on that name's checkout", async () => {
+  const fixture = await untrackedWithCheckout('acme/renamed')
+  fixture.github.renameRepo('acme/app', 'acme/renamed')
+  const outside = await fixture.openTabOutsideBench()
+
+  const output = await fixture.client.attach({ ref, terminalSessionId: outside })
+
+  expect(output).toMatchObject({ ref: 'acme/renamed#12', tracked: true, benchCreated: true })
+  expect(fixture.db.select().from(bench).get()).toMatchObject({
+    cwd: fixture.ghq.checkout('acme/renamed'),
+  })
+})
+
+test('attach refuses a ref GitHub does not return with NOT_FOUND, and neither tracks nor copies it', async () => {
+  const fixture = started()
+  const outside = await fixture.openTabOutsideBench()
+
+  const error = await failure(fixture.client.attach({ ref, terminalSessionId: outside }))
+
+  expect(error.code).toBe('NOT_FOUND')
+  expect((await fixture.client.list({})).tasks).toEqual([])
+  expect(fixture.db.select().from(issue).all()).toEqual([])
+})
+
+test('attach refuses an untracked Issue whose Repo is not cloned, and the Issue stays tracked', async () => {
+  const fixture = started()
+  fixture.github.issue(ref, { title: 'Ship it' })
+  const outside = await fixture.openTabOutsideBench()
+  const before = runspaceOfTab(fixture, outside)
+
+  const error = await failure(fixture.client.attach({ ref, terminalSessionId: outside }))
+
+  expect(error.code).toBe('BAD_REQUEST')
+  expect((await fixture.client.list({})).tasks).toMatchObject([{ ref }])
+  expect(fixture.db.select().from(bench).all()).toEqual([])
+  expect(runspaceOfTab(fixture, outside)).toBe(before)
+})
+
+test('attach refuses an untracked Issue for a Tab whose claude is a Run of another Task, and the Issue stays tracked', async () => {
+  const fixture = await untrackedWithCheckout()
+  const other = await fixture.openTab(await fixture.openBench('acme/app#13', 'Next'))
+  await fixture.hook(other, 's-1', 'SessionStart', { source: 'startup' })
+
+  const error = await failure(fixture.client.attach({ ref, terminalSessionId: other }))
+
+  expect(error.code).toBe('CONFLICT')
+  expect((await fixture.client.list({})).tasks.map((t) => t.ref)).toContain(ref)
+  expect(runsOf(fixture)).toEqual([{ number: 13, agentSessionId: 's-1', origin: 'started' }])
+})
+
+test('attach from outside a Tab refuses an untracked Issue with BAD_REQUEST before it asks GitHub', async () => {
+  const fixture = await untrackedWithCheckout()
+
+  const error = await failure(fixture.client.attach({ ref }))
+
+  expect(error.code).toBe('BAD_REQUEST')
+  expect(fixture.github.requests).toEqual([])
+  expect((await fixture.client.list({})).tasks).toEqual([])
 })

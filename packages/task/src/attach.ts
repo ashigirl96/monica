@@ -6,24 +6,23 @@ import { and, eq } from 'drizzle-orm'
 
 import { type BenchDeps, insertBench } from './bench.ts'
 import type { AttachOutput } from './contract.ts'
-import { isIssue } from './copy.ts'
 import { callerTerminalSession } from './current.ts'
-import { findOpenTask } from './open-task.ts'
 import { checkoutUnder, type Ghq, messageOf } from './prepare.ts'
 import { formatRef, type IssueRef, parseRef } from './ref.ts'
 import { insertRuns, liveAgentSession } from './run.ts'
 import { issue, run } from './schema.ts'
+import { findOrTrack, type SyncDeps } from './sync.ts'
 
 type GhqRoot = { path: string } | { error: string }
 
 export async function attachTab(
-  deps: BenchDeps,
+  deps: SyncDeps & BenchDeps,
   input: { ref: string; terminalSessionId?: string },
 ): Promise<AttachOutput> {
-  const { db, workbenchLedger } = deps
+  const { workbenchLedger } = deps
   const terminalSessionId = callerTerminalSession(input.terminalSessionId)
-  const asked = parseRef(input.ref)
-  const requested = findOpenTask(db, isIssue(asked), formatRef(asked))
+  // Tab の検査で断っても track は巻き戻さない（ADR-0024）。
+  const { found: requested, tracked } = await findOrTrack(deps, parseRef(input.ref))
   // ghq root は async なので transaction の前に引く。待つ間に run が Bench を作ることも、sync が repo の改名を写すこともある。
   const ghqRoot = requested.bench ? null : await lookUpGhqRoot(deps.ghq)
   const attached = deps.reservations.writeOpenTask(
@@ -68,7 +67,15 @@ export async function attachTab(
       }
       // 同じ Runspace への moveTab は末尾へ並べ替えるので、既に Bench にある Tab には呼ばない。
       if (callerTab.runspaceId === target.runspaceId) {
-        return { ref, title, benchCreated: false, runCreated: false, agentSessionId, moved: false }
+        return {
+          ref,
+          title,
+          tracked,
+          benchCreated: false,
+          runCreated: false,
+          agentSessionId,
+          moved: false,
+        }
       }
       workbenchLedger.moveTab(tx, callerTab.id, target.runspaceId)
       const orphan = agent && !agent.runTask ? agent : null
@@ -80,6 +87,7 @@ export async function attachTab(
       return {
         ref,
         title,
+        tracked,
         benchCreated: !found.bench,
         runCreated: orphan !== null,
         agentSessionId,
@@ -100,7 +108,7 @@ function lookUpGhqRoot(ghq: Ghq): Promise<GhqRoot> {
   )
 }
 
-// attach は network を使わないので、checkout が無くても clone しない。
+// attach は Bench を準備しないので、checkout が無くても clone しない。
 function checkoutOnDisk(ghqRoot: GhqRoot | null, forIssue: IssueRef): string {
   const ref = formatRef(forIssue)
   if (!ghqRoot || 'error' in ghqRoot) {

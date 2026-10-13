@@ -3,7 +3,7 @@ import { ORPCError } from '@orpc/server'
 import { and, eq, inArray, isNull, type SQL } from 'drizzle-orm'
 
 import type { SyncOutput, TaskChange } from './contract.ts'
-import { isIssue, isRepo, writeIssues, writePullRequests } from './copy.ts'
+import { isIssue, isLinkedIssue, isRepo, writeIssues, writePullRequests } from './copy.ts'
 import {
   BATCH,
   type GitHub,
@@ -12,6 +12,7 @@ import {
   queryIssues,
   RepositoryNotFound,
 } from './github.ts'
+import { findOpenTask, type FoundTask, refuseClosed, taskIfTracked } from './open-task.ts'
 import { formatRef, type IssueRef, parseRef } from './ref.ts'
 import { bench, issue, task } from './schema.ts'
 
@@ -55,6 +56,24 @@ export async function trackIssue(deps: SyncDeps, input: string): Promise<TrackRe
   if (!alreadyTracked) deps.publish({ type: 'task', ref: formatRef(row) })
   return { ref: formatRef(row), alreadyTracked }
 }
+
+export type FoundOrTracked = { found: FoundTask; tracked: boolean }
+
+// track は GitHub の今の名前で Task を書くので、改名前の名前で頼まれても track の返す ref で引き直す。
+// 呼び手が GitHub から node ID を引いてあれば、名前と番号が別の issue に移っていても取り違えない。
+export async function findOrTrack(
+  deps: SyncDeps,
+  asked: IssueRef,
+  nodeId?: string,
+): Promise<FoundOrTracked> {
+  const found = taskIfTracked(deps.db, isAsked({ ...asked, nodeId }))
+  if (found) return { found: refuseClosed(found), tracked: false }
+  const { ref, alreadyTracked } = await trackIssue(deps, formatRef(asked))
+  return { found: findOpenTask(deps.db, isIssue(parseRef(ref)), ref), tracked: !alreadyTracked }
+}
+
+export const isAsked = ({ nodeId, ...asked }: IssueRef & { nodeId?: string | null }) =>
+  nodeId ? isLinkedIssue({ ...asked, nodeId }) : isIssue(asked)
 
 export async function syncCommand(deps: SyncDeps, input: string | undefined): Promise<SyncOutput> {
   if (input === undefined) return outputOrThrow(await syncOpenTasks(deps, SYNC_TIMEOUT_MS))

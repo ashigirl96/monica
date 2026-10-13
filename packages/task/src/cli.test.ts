@@ -161,6 +161,7 @@ test('attach names the claude of the Tab and whether attach made it a Run', () =
   const output = {
     ref: 'acme/app#12',
     title: 'Ship it',
+    tracked: false,
     benchCreated: false,
     runCreated: true,
     agentSessionId: 's-1',
@@ -171,6 +172,29 @@ test('attach names the claude of the Tab and whether attach made it a Run', () =
   )
   expect(formatters.attach({ ...output, runCreated: false })).toBe(
     'this Tab is in the Bench of acme/app#12 Ship it\nclaude s-1 is a Run of acme/app#12',
+  )
+})
+
+test('attach says first that it tracked the Issue only when it did', () => {
+  const output = {
+    ref: 'acme/app#12',
+    title: 'Ship it',
+    tracked: true,
+    benchCreated: true,
+    runCreated: false,
+    agentSessionId: null,
+  }
+
+  expect(formatters.attach(output)).toBe(
+    [
+      'tracked acme/app#12 (Ship it)',
+      'opened the Bench of acme/app#12 in place',
+      'this Tab is in the Bench of acme/app#12 Ship it',
+      'no claude runs in this Tab; the one you start here becomes a Run of acme/app#12',
+    ].join('\n'),
+  )
+  expect(formatters.attach({ ...output, tracked: false }).split('\n')[0]).toBe(
+    'opened the Bench of acme/app#12 in place',
   )
 })
 

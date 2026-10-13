@@ -153,6 +153,7 @@ export const CurrentOutputSchema = z.object({
 export const AttachOutputSchema = z.object({
   ref: z.string(),
   title: z.string(),
+  tracked: z.boolean().describe('whether this attach tracked the Issue'),
   benchCreated: z.boolean().describe('whether the Bench was opened in place to take the Tab'),
   runCreated: z.boolean(),
   agentSessionId: z
@@ -304,7 +305,7 @@ export const contract = {
   attach: meta
     .meta({
       description:
-        "Move the Tab this runs in into the Bench of an open Task, opening the Bench in place when it has none, and make the Tab's claude a Run of the Task",
+        "Move the Tab this runs in into the Bench of an open Task, tracking the Issue when it is not tracked and opening the Bench in place when it has none, and make the Tab's claude a Run of the Task",
       cli: true,
     })
     .input(z.object({ ref, terminalSessionId: z.string().optional() }))

@@ -12,7 +12,7 @@ run         { ref, prompt?, inPlace?, force? } → { ref, title, tracked, cwd, m
 runButtons  { refs } → { buttons: { ref, button: { kind?, run } | { run: 'reopen' } | null, reason: string | null }[] }
 press       { ref, run: 'new' | 'resume' | 'reopen' } → { ref, button, reason }（runButtons の 1 行）
 current     { terminalSessionId? } → { ref, title, displayState, agentSessionId, source }   cli
-attach      { ref, terminalSessionId? } → { ref, title, benchCreated, runCreated,               cli
+attach      { ref, terminalSessionId? } → { ref, title, tracked, benchCreated, runCreated,      cli
               agentSessionId }
 close       { ref, force?, terminalSessionId? } → { ref, removedWorktree, deletedBranch,        cli
               spared, warnings }  errors: CLOSE_REFUSED { reasons }
@@ -66,17 +66,18 @@ createTaskLedger(deps: {
 
 `GLOSSARY.md` の Attach。CLI の `monica task attach <ref>` は呼び手の Tab を、Tab のメニューの picker は選んだ Tab を、同じ `attach` で移す。`tab.move` の procedure で Bench へ移った Tab の Run は、「Run」の節の `layout` の経路が作る。
 
-- `terminalSessionId` が無ければ `BAD_REQUEST`、未 track は `NOT_FOUND`、closed な Task は `BAD_REQUEST`（`run` と同じ）。
+- `terminalSessionId` が無ければ、GitHub を読む前に `BAD_REQUEST`。closed な Task は `BAD_REQUEST`（`run` と同じ）。
+- 未 track の ref は、`run` と同じく（`sync.ts` の `findOrTrack`）写しと Task の行を 1 つの transaction で書いて track してから、下の手順に進む。GitHub が issue を返さなければ `NOT_FOUND` で、何も書かない。track は GitHub の今の名前で Task を書くので、track の後は GitHub の今の名前の ref で Task を引き直し、Bench はその名前の checkout に作る。track は Tab の検査より前に走るので、後の手順で断っても（Tab が無い、別の Task の Run、checkout が無い）track は巻き戻さない（ADR-0024）。output の `tracked` は、この `attach` で track したかを示す。track 済みの Task への attach は network を使わない。
 - 1 つの transaction で次の順に進める。
   1. その Terminal Session を表示している Tab を引く。無ければ（Tab を閉じて shell が終わるのを待っている、または Workbench Ledger に無い）`BAD_REQUEST`。
   2. その Terminal Session の live な Agent Session が別の Task の Run なら `CONFLICT`。message にはその Task の ref を出す。`tab.move` はこれを断らず、Tab だけが移る。
   3. Tab が既にその Bench に居れば、何も変えずに返す（`moveTab` は同じ Runspace でも末尾へ並べ替えるので呼ばない）。
-  4. Bench が無ければ、in_place の Bench を作る（`createRunspace` を含む）。cwd は Repo の checkout（`$(ghq root)/github.com/<owner>/<repo>`）で、setup は走らせず、`setup_state` は最初から `ready`（`prepared_at` は作った時刻）。checkout が無いか ghq root が引けなければ `BAD_REQUEST`。attach は network を使わないので clone しない。ghq root は async なので transaction の前に引き、transaction の中で Bench がまだ無いときだけ使う。待つ間に `run` が Bench を作っていれば、そちらに移す。checkout の path は transaction の中で引き直した repo の名前から作る。待つ間に sync が repo の改名を写すと、前に引いた名前の path は古い checkout を指すか、clone されていないことになるため。
+  4. Bench が無ければ、in_place の Bench を作る（`createRunspace` を含む）。cwd は Repo の checkout（`$(ghq root)/github.com/<owner>/<repo>`）で、setup は走らせず、`setup_state` は最初から `ready`（`prepared_at` は作った時刻）。checkout が無いか ghq root が引けなければ `BAD_REQUEST`。attach は Bench を準備しないので clone しない。ghq root は async なので transaction の前に引き、transaction の中で Bench がまだ無いときだけ使う。待つ間に `run` が Bench を作っていれば、そちらに移す。checkout の path は transaction の中で引き直した repo の名前から作る。待つ間に sync が repo の改名を写すと、前に引いた名前の path は古い checkout を指すか、clone されていないことになるため。
   5. `moveTab(tx, tabId, bench.runspaceId)`。pin は外れる。
   6. live な Agent Session がどの Run でもなければ、Run を `origin = attached` で insert する。agent の居ない Tab も移せて、その後その Tab で起こした claude は「Run」の節の不変条件で Run になる。
 - commit の後の `layout` の合図では、Agent Session が既に Run なので何も起きない。
 - Tab を移したら `{ type: "task", ref }` で知らせる。Run を作らない移動でも `current` の output は変わるため。
-- CLI の text は、Bench を作ったこと、Tab がどの Task の Bench に居るか、Tab の claude がその Task の Run になったか（agent が居なければ、次に起こした claude が Run になること）を 1 行ずつ出す。
+- CLI の text は、track したこと（`tracked <ref> (<title>)`、`run` と同じ書き方）、Bench を作ったこと、Tab がどの Task の Bench に居るか、Tab の claude がその Task の Run になったか（agent が居なければ、次に起こした claude が Run になること）を 1 行ずつ出す。
 
 ## Bench
 

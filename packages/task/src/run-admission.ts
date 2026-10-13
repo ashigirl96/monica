@@ -13,21 +13,15 @@ import type {
   RunOutput,
   runErrors,
 } from './contract.ts'
-import { isIssue, isLinkedIssue, openBlockersOf } from './copy.ts'
+import { isLinkedIssue, openBlockersOf } from './copy.ts'
 import type { GitHubIssue } from './github.ts'
-import {
-  type FoundTask,
-  findOpenTask,
-  refuseClosed,
-  TaskStateRefusal,
-  taskIfTracked,
-} from './open-task.ts'
+import { type FoundTask, findOpenTask, TaskStateRefusal, taskIfTracked } from './open-task.ts'
 import { key, parsedOrNull, readIssue, readIssues } from './read-issues.ts'
 import { formatRef, type IssueRef, parseRef } from './ref.ts'
 import { type Launch, newRun, openRun, refuseUnsendable, resumeOf } from './run-claude.ts'
 import { isResumable, runAgentSessionsByTask } from './run.ts'
 import { issue, run } from './schema.ts'
-import { type SyncDeps, syncOrUseCopy, trackIssue } from './sync.ts'
+import { type FoundOrTracked, findOrTrack, isAsked, type SyncDeps, syncOrUseCopy } from './sync.ts'
 
 type Deps = SyncDeps & BenchDeps
 
@@ -166,11 +160,9 @@ export async function runButtons(
 
 const BUTTON: Rules = { via: 'button', force: false }
 
-type Admitted = { found: FoundTask; tracked: boolean }
-
 async function launch(
   deps: Deps,
-  admitted: Admitted,
+  admitted: FoundOrTracked,
   rules: Rules,
   starting: (Resuming & { facts: IssueFacts }) | Synced,
   { prompt, inPlace }: { prompt?: string; inPlace?: boolean },
@@ -238,15 +230,6 @@ async function reopenFromButton(deps: Deps, tracked: FoundTask) {
   )
 }
 
-// track は GitHub の今の名前で Task を書くので、改名前の名前で頼まれても track の返す ref で引き直す。
-// 呼び手が GitHub から node ID を引いてあれば、名前と番号が別の issue に移っていても取り違えない。
-async function findOrTrack(deps: SyncDeps, asked: IssueRef, nodeId?: string): Promise<Admitted> {
-  const found = taskIfTracked(deps.db, isAsked({ ...asked, nodeId }))
-  if (found) return { found: refuseClosed(found), tracked: false }
-  const { ref, alreadyTracked } = await trackIssue(deps, formatRef(asked))
-  return { found: findOpenTask(deps.db, isIssue(parseRef(ref)), ref), tracked: !alreadyTracked }
-}
-
 type Synced = { type: 'synced'; found: FoundTask; warnings: string[]; facts: IssueFacts }
 
 async function syncForNewRun(deps: SyncDeps, found: FoundTask, read?: IssueFacts): Promise<Synced> {
@@ -257,9 +240,6 @@ async function syncForNewRun(deps: SyncDeps, found: FoundTask, read?: IssueFacts
   const facts = read && warnings.length > 0 ? read : copyFacts(deps.db, synced.issue.id)
   return { type: 'synced', found: synced, warnings, facts }
 }
-
-const isAsked = ({ nodeId, ...asked }: IssueRef & { nodeId?: string | null }) =>
-  nodeId ? isLinkedIssue({ ...asked, nodeId }) : isIssue(asked)
 
 type Launches = Pick<BenchDeps['reservations'], 'launchingRun'>
 
