@@ -26,6 +26,7 @@ function copies(db: ReturnType<typeof setup>['db']) {
       title: issue.title,
       state: issue.state,
       labels: issue.labels,
+      subIssues: issue.subIssues,
       parentId: issue.parentId,
     })
     .from(issue)
@@ -33,7 +34,7 @@ function copies(db: ReturnType<typeof setup>['db']) {
     .all()
 }
 
-test('track copies the Issue with its parent and Blockers and makes it a Task', async () => {
+test('track copies the Issue with its parent, with the labels and sub-issue counts of both, and Blockers and makes it a Task', async () => {
   const { db, github, track } = setup()
   github.issue('acme/app#10', { title: 'Epic', labels: ['epic'] })
   github.issue('acme/lib#3', { title: 'Upstream fix', state: 'closed' })
@@ -58,15 +59,25 @@ test('track copies the Issue with its parent and Blockers and makes it a Task', 
       title: 'Ship it',
       state: 'open',
       labels: ['bug', 'p1'],
+      subIssues: { open: 0, total: 0 },
       parentId: idOf('acme/app', 10),
     },
-    { repo: 'acme/app', number: 10, title: 'Epic', state: 'open', labels: [], parentId: null },
+    {
+      repo: 'acme/app',
+      number: 10,
+      title: 'Epic',
+      state: 'open',
+      labels: ['epic'],
+      subIssues: { open: 1, total: 1 },
+      parentId: null,
+    },
     {
       repo: 'acme/lib',
       number: 3,
       title: 'Upstream fix',
       state: 'closed',
       labels: [],
+      subIssues: { open: 0, total: 0 },
       parentId: null,
     },
     {
@@ -75,6 +86,7 @@ test('track copies the Issue with its parent and Blockers and makes it a Task', 
       title: 'Schema first',
       state: 'open',
       labels: [],
+      subIssues: { open: 0, total: 0 },
       parentId: null,
     },
   ])

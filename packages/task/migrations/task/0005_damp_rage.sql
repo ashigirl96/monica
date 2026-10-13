@@ -1,0 +1,1 @@
+ALTER TABLE `issue` ADD `sub_issues` text DEFAULT '{"open":0,"total":0}' NOT NULL;

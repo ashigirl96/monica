@@ -46,7 +46,7 @@ export function writeIssues(
       tx,
       one,
       {},
-      { title: one.title, state: one.state, labels: one.labels, parentId: null, syncedAt },
+      { ...copiedFields(one), parentId: null, syncedAt },
       { repo: askedRepo, number: one.number },
     ),
     copied: one,
@@ -55,10 +55,21 @@ export function writeIssues(
   return written
 }
 
+type LabelledIssue = NonNullable<GitHubIssue['parent']>
+
+const copiedFields = ({ title, state, labels, subIssues }: LabelledIssue) => ({
+  title,
+  state,
+  labels,
+  subIssues,
+})
+
 function writeCopy(tx: Tx, id: number, copied: GitHubIssue, syncedAt: Date) {
-  const parentId = copied.parent && writeLinkedIssue(tx, copied.parent, syncedAt)
-  const { title, state, labels } = copied
-  tx.update(issue).set({ title, state, labels, parentId, syncedAt }).where(eq(issue.id, id)).run()
+  const parentId = copied.parent && writeParent(tx, copied.parent, syncedAt)
+  tx.update(issue)
+    .set({ ...copiedFields(copied), parentId, syncedAt })
+    .where(eq(issue.id, id))
+    .run()
   tx.delete(issueBlocker).where(eq(issueBlocker.issueId, id)).run()
   const blockerIds = copied.blockers.map((blocker) => writeLinkedIssue(tx, blocker, syncedAt))
   if (blockerIds.length > 0) {
@@ -68,7 +79,13 @@ function writeCopy(tx: Tx, id: number, copied: GitHubIssue, syncedAt: Date) {
   }
 }
 
-// その issue 自身が Task なら labels と parent はその Task の sync が書くので、ここでは触らない。
+// parent の parent は query に無いので、parent の行の parent はその Issue の Task の sync が書く。
+function writeParent(tx: Tx, parent: LabelledIssue, syncedAt: Date): number {
+  const fields = copiedFields(parent)
+  return upsert(tx, parent, { ...fields, syncedAt }, { ...fields, parentId: null, syncedAt })
+}
+
+// Blocker は labels と sub-issue の数を query に持たないので、その issue 自身が Task ならその Task の sync が書く。
 function writeLinkedIssue(tx: Tx, linked: LinkedIssue, syncedAt: Date): number {
   const { title, state } = linked
   return upsert(

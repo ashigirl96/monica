@@ -1,28 +1,14 @@
 import { existsSync } from 'node:fs'
 
-import { ORPCError, type ORPCErrorConstructorMap } from '@orpc/server'
-import { eq } from 'drizzle-orm'
+import type { Tx } from '@monica/workbench/server'
+import { ORPCError } from '@orpc/server'
 
-import { type Bench, type BenchDeps, prepareBench, refuseInPlace } from './bench.ts'
-import type { RunOutput, runErrors } from './contract.ts'
-import { isIssue, isLinkedIssue } from './copy.ts'
-import { type FoundTask, findOpenTask, refuseClosed, taskIfTracked } from './open-task.ts'
-import { formatRef, type IssueRef, parseRef } from './ref.ts'
-import {
-  copyFacts,
-  type IssueFacts,
-  type Launchable,
-  planFromLedger,
-  planNewRun,
-  replan,
-  type Refusal,
-  type Resumable,
-  type RunPlan,
-} from './run-plan.ts'
-import { issue } from './schema.ts'
-import { type SyncDeps, syncOrUseCopy, trackIssue } from './sync.ts'
+import { type Bench, type BenchDeps, prepareBench } from './bench.ts'
+import type { RunOutput } from './contract.ts'
+import type { FoundTask } from './open-task.ts'
+import { formatRef } from './ref.ts'
 
-type Launch = {
+export type Launch = {
   ref: string
   title: string
   bench: Bench
@@ -32,77 +18,22 @@ type Launch = {
   resumed: string | null
 }
 
-type RunErrors = ORPCErrorConstructorMap<typeof runErrors>
-
-type Request = { prompt?: string; inPlace?: boolean; force?: boolean }
-
-type Planned = {
-  found: FoundTask
-  tracked: boolean
-  facts: IssueFacts
-  plan: RunPlan
-  warnings: string[]
-}
-
-export async function runTask(
-  deps: SyncDeps & BenchDeps,
-  input: Request & { ref: string },
-  errors: RunErrors,
-): Promise<RunOutput> {
-  refuseUnsendable(input.prompt)
-  const { found, tracked } = await findOrTrack(deps, parseRef(input.ref))
-  if (found.bench) refuseInPlace(found.bench, input.inPlace, formatRef(found.issue))
-  const facts = copyFacts(deps.db, found.issue.id)
-  const fromLedger = planFromLedger(deps.db, deps.reservations, found, facts, input)
-  const refuse = (refusal: Refusal) => refusalOf(refusal, errors)
-  if (fromLedger)
-    return start(deps, { found, tracked, facts, plan: fromLedger, warnings: [] }, input, refuse)
-  const synced = await syncForNewRun(deps, found)
-  const syncedFacts = copyFacts(deps.db, synced.found.issue.id)
-  const plan = planNewRun(syncedFacts, input)
-  return start(deps, { ...synced, tracked, facts: syncedFacts, plan }, input, refuse)
-}
-
-export async function runPlanned(
-  deps: SyncDeps & BenchDeps,
-  {
-    facts,
-    nodeId,
-    plan,
-    prompt,
-  }: { facts: IssueFacts; nodeId: string; plan: Launchable; prompt?: string },
-  refuse: (refusal: Refusal) => Error,
-): Promise<RunOutput> {
-  const { found, tracked } = await findOrTrack(deps, facts, nodeId)
-  const launching =
-    plan.type === 'resume'
-      ? { found, tracked, facts, plan, warnings: [] }
-      : { ...(await syncForNewRun(deps, found)), tracked, facts, plan }
-  return start(deps, launching, { prompt }, refuse)
-}
-
-async function start(
-  deps: SyncDeps & BenchDeps,
-  { found, tracked, facts, plan, warnings }: Planned,
-  request: Request,
-  refuse: (refusal: Refusal) => Error,
-): Promise<RunOutput> {
-  if (plan.type !== 'new' && plan.type !== 'resume') throw refuse(plan)
-  const launch =
-    plan.type === 'resume'
-      ? resumeOf(found, plan.resumable)
-      : await newRun(deps, found, request.inPlace, warnings)
+/** Bench の新しい Tab で claude を打つ。`recheck` は Tab を開く transaction の中で呼び、throw すれば Tab を開かない。 */
+export function openRun(
+  deps: BenchDeps,
+  launch: Launch,
+  { prompt, tracked }: { prompt: string | undefined; tracked: boolean },
+  recheck: (tx: Tx, current: FoundTask) => void,
+): RunOutput {
   const opened = deps.reservations.openRunTab(
     launch.bench.taskIssueId,
     launch.ref,
     (tx, current) => {
-      // GitHub と Bench の準備を待つ間に、この Task か spec の Run が起動しうる。
-      const changed = replan(tx, deps.reservations, current, facts, plan, request)
-      if (changed) throw refuse(changed)
+      recheck(tx, current)
       return deps.workbenchLedger.openTab(tx, {
         runspaceId: launch.bench.runspaceId,
         cwd: launch.tabCwd,
-        input: `${claudeCommand(launch, request.prompt)}\r`,
+        input: `${claudeCommand(launch, prompt)}\r`,
       })
     },
   )
@@ -119,36 +50,10 @@ async function start(
   }
 }
 
-function refusalOf(refusal: Refusal, errors: RunErrors): Error {
-  switch (refusal.type) {
-    case 'running':
-      return new ORPCError('CONFLICT', { message: refusal.message })
-    case 'reopen':
-      return new ORPCError('PRECONDITION_FAILED', { message: refusal.message })
-    case 'refused': {
-      const message = refusal.forceHint
-        ? `${refusal.message}; ${refusal.forceHint}`
-        : refusal.message
-      return refusal.blockers
-        ? errors.BLOCKED({ message, data: { blockers: refusal.blockers } })
-        : new ORPCError('PRECONDITION_FAILED', { message })
-    }
-  }
-}
-
-// track は GitHub の今の名前で Task を書くので、改名前の名前で頼まれても track の返す ref で引き直す。
-// 呼び手が GitHub から node ID を引いてあれば、名前と番号が別の issue に移っていても取り違えない。
-async function findOrTrack(deps: SyncDeps, asked: IssueRef, nodeId?: string) {
-  const found = taskIfTracked(
-    deps.db,
-    nodeId ? isLinkedIssue({ ...asked, nodeId }) : isIssue(asked),
-  )
-  if (found) return { found: refuseClosed(found), tracked: false }
-  const { ref, alreadyTracked } = await trackIssue(deps, formatRef(asked))
-  return { found: findOpenTask(deps.db, isIssue(parseRef(ref)), ref), tracked: !alreadyTracked }
-}
-
-function resumeOf({ issue: forIssue, bench: row }: FoundTask, last: Resumable): Launch {
+export function resumeOf(
+  { issue: forIssue, bench: row }: FoundTask,
+  last: { agentSessionId: string; cwd: string },
+): Launch {
   if (!row) throw new Error(`${formatRef(forIssue)} has a Run to resume but no Bench`)
   return {
     ref: formatRef(forIssue),
@@ -161,15 +66,8 @@ function resumeOf({ issue: forIssue, bench: row }: FoundTask, last: Resumable): 
   }
 }
 
-async function syncForNewRun(deps: SyncDeps, found: FoundTask) {
-  const warnings = await syncOrUseCopy(deps, found.issue)
-  // sync は repo の改名を写すので、名前でなく行の id で引き直す。
-  const synced = findOpenTask(deps.db, eq(issue.id, found.issue.id), formatRef(found.issue))
-  return { found: synced, warnings }
-}
-
-async function newRun(
-  deps: SyncDeps & BenchDeps,
+export async function newRun(
+  deps: BenchDeps,
   synced: FoundTask,
   inPlace: boolean | undefined,
   warnings: string[],
@@ -189,7 +87,7 @@ async function newRun(
 const DEFAULT_PROMPT = '/tackle'
 
 // 空の prompt は素の claude を起こす抜け道になり、shell に打鍵した制御文字は Enter や Ctrl-C として働く。
-function refuseUnsendable(prompt: string | undefined) {
+export function refuseUnsendable(prompt: string | undefined) {
   if (prompt === undefined) return
   if (prompt.trim() === '') throw unsendable(`is empty; leave it out to send ${DEFAULT_PROMPT}`)
   if (/\p{Cc}/u.test(prompt)) {

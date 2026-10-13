@@ -22,6 +22,10 @@ export const issue = sqliteTable(
     title: text('title').notNull(),
     state: text('state', { enum: ['open', 'closed'] }).notNull(),
     labels: text('labels', { mode: 'json' }).$type<string[]>().notNull().default([]),
+    subIssues: text('sub_issues', { mode: 'json' })
+      .$type<{ open: number; total: number }>()
+      .notNull()
+      .default({ open: 0, total: 0 }),
     parentId: integer('parent_id').references((): AnySQLiteColumn => issue.id),
     syncedAt: timestamp('synced_at').notNull(),
   },
