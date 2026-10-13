@@ -20,7 +20,7 @@ test('__complete lists the subcommands with their descriptions for zsh', async (
       'list:List open Tasks in the order they were tracked\n' +
       'run:Start claude with a first prompt (/tackle if left out) in a new Tab of the Bench of an open Task, tracking the Issue and opening and preparing the Bench first, or resume the last claude of the Bench once it has ended\n' +
       'current:Show the Task of the Tab this runs in\n' +
-      "attach:Move the Tab this runs in into the Bench of an open Task, opening the Bench in place when it has none, and make the Tab's claude a Run of the Task\n" +
+      "attach:Move the Tab this runs in into the Bench of an open Task, tracking the Issue when it is not tracked and opening the Bench in place when it has none, and make the Tab's claude a Run of the Task\n" +
       'close:Close a Task and take down its Bench: the worktree, the branch issue-n, the Runspace and its Tabs, all but the Tab this runs in\n' +
       'reopen:Reopen a closed Task; the next run or attach opens its Bench anew\n' +
       'show:Show a Task, open or closed, and its Runs with the Agent Session ids claude --resume takes\n' +

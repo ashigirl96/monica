@@ -61,8 +61,9 @@ export const formatters = {
       ...warningLines(warnings),
     ].join('\n')
   },
-  attach({ ref, title, benchCreated, runCreated, agentSessionId }: AttachOutput): string {
+  attach({ ref, title, tracked, benchCreated, runCreated, agentSessionId }: AttachOutput): string {
     return [
+      ...(tracked ? [`tracked ${ref} (${title})`] : []),
       ...(benchCreated ? [`opened the Bench of ${ref} in place`] : []),
       `this Tab is in the Bench of ${ref} ${title}`,
       agentSessionId === null
