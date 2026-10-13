@@ -17,6 +17,10 @@ _Avoid_: ExternalReference, external ref
 **Blocker**:
 Task の Issue を block している Issue。open な Blocker が 1 つでもあると、その Task では新しい Run を始められない。
 
+**Issue Facts**:
+Run を起こすか、どう起こすか、Run Button に何を出すかを決めるときに当てる Issue の事実。Issue の state・labels・sub-issue の数、parent の labels と sub-issue の数、open な Blocker から成る。Issue の写しから取るか、GitHub から今読んだ答えから取り、手元で最も新しいほうを使う。どちらが新しいかは時刻ではなく、Sync が通ったかで決める。
+_Avoid_: Issue Snapshot（Page Snapshot と紛れる）, Issue State（Issue の open / closed と紛れる）, 写し（Issue Facts は写しからも読んだ答えからも取る）
+
 **Pull Request**:
 GitHub の Pull Request のローカルの写し（title、state、draft、head の branch と commit）。Task との対応は保存した事実ではなく、branch 名の一致か GitHub 上の closing reference から sync のたびに導いて記録したもの。手で繋ぐ操作は無い。
 _Avoid_: PR ref, external ref
