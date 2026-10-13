@@ -31,7 +31,7 @@ notes の ui は旧 Monica の `web/` と `shared/` を移して作る。
 ### markdown の copy と paste
 
 - `NoteBlockEditor` は `renderMarkdown` に `@monica/note/body` の `toMarkdown` を、`parseMarkdown` に `fromMarkdown` を渡す。どちらも手元で同期に呼ぶ。
-- copy は text/plain に markdown を載せる。block 選択の copy は選んだ block を、文字選択の copy と drag は選んだ範囲の slice を書き出す。block 選択の copy は、ほかに `BLOCKS_MIME` と text/html も載せる。
+- copy は text/plain に markdown を載せる。block 選択の copy は選んだ block を、文字選択の copy と drag は選んだ範囲の slice を書き出す。1 つの textblock（表のセルを含む）の中の文字選択は、block の記号（`- `・`> `・`# ` など）を付けず、選んだ inline だけを書き出す。code block の中なら素の文字のまま書き出す。記号付きで出したいときは block を選んで copy する。block 選択の copy は、ほかに `BLOCKS_MIME` と text/html も載せる。
 - paste は、text/html を持たない text/plain だけを markdown として読む。code block の中では読まない。読んだ doc が schema に合わなければ素のテキストで入れ、paragraph 1 つだけなら block を割らずにカーソル位置へ入れる。
 - 旧 Monica は変換を Backend に頼んでいたので、copy に備えて選択が変わるたびに 150ms 後に変換を先読みして cache し、paste は変換を待つ間の貼り先を plugin state で追っていた。手元で同期に呼べるので、どちらも持ち込まない。
 - Note Mention の表示名は、開いている Note の cache から解決し終えたものを `toMarkdown` に渡す（`notes/note-references.ts` の `noteName`）。copy の handler は同期で、解決を待てないため。まだ解決していない Note Mention と、削除した Note を指す Note Mention は `[[note-N]]` で書く。
