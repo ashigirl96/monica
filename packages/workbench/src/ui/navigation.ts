@@ -168,12 +168,21 @@ export function navigate(state: Navigation, entry: Entry, world: World): Step {
   }
 }
 
-function pressTile(state: Navigation, world: World, key: string): Step {
+function lastActiveUnder(
+  world: World,
+  key: string,
+  recent: readonly (string | undefined)[],
+): string | undefined {
   const underTile = (id: string | undefined): id is string =>
     id !== undefined && world.tiles.tileKeys[id] === key
-  const runspaceId =
-    [activeRunspaceOf(state, world.runspaces)?.id, ...state.recentRunspaceIds].find(underTile) ??
-    world.runspaces.map((r) => r.id).find(underTile)
+  return recent.find(underTile) ?? world.runspaces.map((r) => r.id).find(underTile)
+}
+
+function pressTile(state: Navigation, world: World, key: string): Step {
+  const runspaceId = lastActiveUnder(world, key, [
+    activeRunspaceOf(state, world.runspaces)?.id,
+    ...state.recentRunspaceIds,
+  ])
   // Runspace が無いことがあり得る Tile は「その他」だけで、端末の中身を勝手に替えないよう Tile だけを出す。
   if (!runspaceId) return withoutFocus({ ...state, keptTile: key })
   return withFocus(reveal(state, world, runspaceId))
@@ -197,13 +206,10 @@ function cycle<T>(items: T[], current: T | null | undefined, step: 1 | -1): T | 
 function closeTab(state: Navigation, runspace: Runspace, tabId: string): Navigation {
   if (activeTabOf(state, runspace)?.id !== tabId) return state
   const rest = runspace.tabs.filter((t) => t.id !== tabId)
-  const next =
-    rest[
-      Math.min(
-        runspace.tabs.findIndex((t) => t.id === tabId),
-        rest.length - 1,
-      )
-    ]
+  const next = atOrAbove(
+    rest,
+    runspace.tabs.findIndex((t) => t.id === tabId),
+  )
   if (!next) return state
   return { ...state, activeTabIds: { ...state.activeTabIds, [runspace.id]: next.id } }
 }
@@ -217,6 +223,9 @@ function readLayout(state: Navigation, previous: World, world: World): Navigatio
     front &&
     world.runspaces.find((r) => r.id !== before.id && r.tabs.some((t) => t.id === front.id))
   if (moved) return moveTo(state, { from: previous, to: world }, moved.id, front.id)
+  const closed = closedActiveId(state, previous, world)
+  const successor = closed && successorOf(state, closed, previous, world)
+  if (successor) return moveTo(state, { from: previous, to: world }, successor)
   const after = activeRunspaceOf(state, world.runspaces)
   const wasPinned = before !== null && isPinned(previous, before.id)
   const pinned = after !== null && isPinned(world, after.id)
@@ -225,6 +234,40 @@ function readLayout(state: Navigation, previous: World, world: World): Navigatio
   // pin を外した Runspace は元の Tile に戻るので、その Tile を出して active な行を見せる。
   if (wasPinned && !pinned) return { ...state, keptTile: null }
   return state
+}
+
+function atOrAbove<T>(items: readonly T[], index: number): T | undefined {
+  return items[Math.min(index, items.length - 1)]
+}
+
+// 起動時に戻した id が layout に無かった場合は、閉じたのではないので Ledger の先頭に任せる。
+function closedActiveId(state: Navigation, previous: World, world: World): string | undefined {
+  const id = state.activeRunspaceId
+  const has = (w: World) => w.runspaces.some((r) => r.id === id)
+  return id !== null && has(previous) && !has(world) ? id : undefined
+}
+
+function rowsOf(world: World, key: string): string[] {
+  return world.tiles.tiles.find((t) => t.key === key)?.sections.flatMap((s) => s.runspaceIds) ?? []
+}
+
+function successorOf(
+  state: Navigation,
+  closedId: string,
+  previous: World,
+  world: World,
+): string | undefined {
+  // Pinned はどの Tile にも入らないので、見えていた Tile を閉じた Runspace の Tile とみなす。
+  const key = previous.tiles.tileKeys[closedId] ?? selectedTileOf(state, previous)
+  const index = rowsOf(previous, key).indexOf(closedId)
+  const sibling = index === -1 ? undefined : atOrAbove(rowsOf(world, key), index)
+  if (sibling) return sibling
+  // 閉じた Tile は読み直した Rail から消えていることがあるので、読み直す前の Rail で隣を数える。
+  const rail = previous.tiles.tiles.map((t) => t.key)
+  const closedAt = rail.indexOf(key)
+  return [...rail.slice(closedAt), ...rail.slice(0, closedAt).toReversed()]
+    .map((tile) => lastActiveUnder(world, tile, state.recentRunspaceIds))
+    .find((id) => id !== undefined)
 }
 
 function restore(state: Navigation, world: World): Navigation {
