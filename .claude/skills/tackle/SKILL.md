@@ -23,3 +23,5 @@ spec または ticket でユーザーが記述した作業を実装する。tick
 `gh pr view --json mergeable` で PR が `MERGEABLE` であることを確かめる。`CONFLICTING` なら origin/main を merge して衝突を解き、`bun run check:brief` が通ったら push する。衝突している PR では CI が走らず、`gh pr checks` は古い commit の結果を返すため。
 
 最後に、`gh pr checks --watch --required` で CI が通ったのを確かめてから、merge してよいかをユーザーに尋ね、了承を得たら merge する。`--required` を付けないと、必須でない CodeQL の完了まで待つため。
+
+merge したら、`git fetch origin main` と `git switch --detach origin/main` で merge 後の main に移り、`install-app` skill で release の Monica を入れ直す。merge の了承が入れ替えの了承を兼ねる。PR の branch のまま build すると、先に main に入った他の PR の変更が抜けるため。
