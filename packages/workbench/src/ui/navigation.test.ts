@@ -18,11 +18,13 @@ type Runspace = Layout['runspaces'][number]
 
 const APP = '/src/acme/app'
 const LIB = '/src/acme/lib'
+const DOC = '/src/acme/doc'
 const HOME = '/home'
 
 const places: Record<string, RepoPlace> = {
   [APP]: { repo: 'acme/app', path: 'app', branch: null },
   [LIB]: { repo: 'acme/lib', path: 'lib', branch: null },
+  [DOC]: { repo: 'acme/doc', path: 'doc', branch: null },
 }
 
 function runspace(
@@ -331,15 +333,166 @@ test('the front Tab moved into another Runspace takes the view and the Tile alon
   expect(onScreen(moved, after)).toEqual({ tile: 'acme/lib', runspace: 'f', tab: 'e.0' })
 })
 
-test('an active Runspace gone from the layout gives way to the first Runspace and its first Tab', () => {
-  const before = worldOf([runspace('a', APP, { tabs: 2 }), runspace('g', LIB)])
-  const after = worldOf([runspace('a', APP, { tabs: 2 })])
-  const shown = run(before, [row('g')]).state
+test('closing the active Runspace in the middle of its Tile brings up the row just below it, with the Tab last shown there', () => {
+  const rows = [runspace('a1', APP), runspace('a2', APP), runspace('a3', APP, { tabs: 2 })]
+  const before = worldOf(rows)
+  const after = worldOf(rows.filter((r) => r.id !== 'a2'))
+  const shown = run(before, [row('a3'), tab('a3.1'), row('a2')]).state
 
   expect(onScreen(reload(shown, before, after), after)).toEqual({
     tile: 'acme/app',
-    runspace: 'a',
-    tab: 'a.0',
+    runspace: 'a3',
+    tab: 'a3.1',
+  })
+})
+
+test('closing the active Runspace at the bottom of its Tile brings up the row just above it, rather than a Runspace under another Tile active more recently', () => {
+  const rows = [runspace('l', LIB), runspace('a1', APP), runspace('a2', APP)]
+  const before = worldOf(rows)
+  const after = worldOf(rows.filter((r) => r.id !== 'a2'))
+  const shown = run(before, [row('a1'), row('l'), row('a2')]).state
+
+  expect(onScreen(reload(shown, before, after), after)).toEqual({
+    tile: 'acme/app',
+    runspace: 'a1',
+    tab: 'a1.0',
+  })
+})
+
+test('closing the last row of the Bench section brings up the first row of the Runspaces section under the same Tile, even when that section is collapsed', () => {
+  const benches = {
+    b1: { repo: 'acme/app', number: 1, title: 'Ship it', setup: null },
+    b2: { repo: 'acme/app', number: 2, title: 'Fix it', setup: null },
+  }
+  const rows = [
+    runspace('b1', APP, { owned: true }),
+    runspace('a1', APP),
+    runspace('a2', APP),
+    runspace('b2', APP, { owned: true }),
+  ]
+  const collapsed = ['acme/app:runspaces']
+  const before = worldOf(rows, { benches, collapsed })
+  const after = worldOf(
+    rows.filter((r) => r.id !== 'b2'),
+    { benches, collapsed },
+  )
+  const shown = run(before, [row('b2')]).state
+
+  expect(onScreen(reload(shown, before, after), after)).toEqual({
+    tile: 'acme/app',
+    runspace: 'a1',
+    tab: 'a1.0',
+  })
+})
+
+test.each([
+  [
+    'the Tile just below it on the Rail',
+    [runspace('a', APP), runspace('l1', LIB), runspace('l2', LIB)],
+    ['l2', 'a'],
+    { tile: 'acme/lib', runspace: 'l2', tab: 'l2.0' },
+  ],
+  [
+    'the Tile just above it when below is only the Tile for outside the Repos with no Runspace under it',
+    [runspace('a1', APP), runspace('a2', APP), runspace('l', LIB)],
+    ['a2', 'l'],
+    { tile: 'acme/app', runspace: 'a2', tab: 'a2.0' },
+  ],
+])(
+  'closing the last Runspace under a Tile brings up %s, with the Runspace last active under that Tile',
+  (_, rows, visited, shown) => {
+    const closed = visited.at(-1)
+    const before = worldOf(rows)
+    const after = worldOf(rows.filter((r) => r.id !== closed))
+    const opened = run(before, visited.map(row)).state
+
+    expect(onScreen(reload(opened, before, after), after)).toEqual(shown)
+  },
+)
+
+test.each([
+  ['the first', 'a', 'acme/lib'],
+  ['the middle', 'l', 'acme/doc'],
+  ['the last', 'd', 'acme/lib'],
+])(
+  'closing the last Runspace under %s of three Repo Tiles brings up the Tile next to where it was on the Rail, looking below first',
+  (_, closed, shown) => {
+    const rows = [runspace('a', APP), runspace('l', LIB), runspace('d', DOC)]
+    const before = worldOf(rows)
+    const after = worldOf(rows.filter((r) => r.id !== closed))
+    const opened = run(before, [row(closed)]).state
+
+    expect(onScreen(reload(opened, before, after), after).tile).toBe(shown)
+  },
+)
+
+test('closing the active Runspace while the Tile for outside the Repos is kept brings up the row next to it under its own Tile', () => {
+  const rows = [runspace('l', LIB), runspace('a1', APP), runspace('a2', APP)]
+  const before = worldOf(rows)
+  const after = worldOf(rows.filter((r) => r.id !== 'a1'))
+  const kept = run(before, [row('a1'), tile(OUTSIDE)]).state
+
+  expect(onScreen(reload(kept, before, after), after)).toEqual({
+    tile: 'acme/app',
+    runspace: 'a2',
+    tab: 'a2.0',
+  })
+})
+
+test('the first Runspace shown for a saved active Runspace no longer in the layout gives way to the first Runspace once it is closed', () => {
+  const rows = [runspace('a1', APP), runspace('l', LIB), runspace('a2', APP)]
+  const before = worldOf(rows)
+  const after = worldOf(rows.filter((r) => r.id !== 'a1'))
+  const restored = navigate(
+    savedNavigation({ activeRunspaceId: 'gone', activeTabId: null, tile: null }),
+    { kind: 'restore' },
+    before,
+  ).state
+
+  expect(onScreen(reload(restored, before, after), after).runspace).toBe('l')
+})
+
+test('closing the active Pinned Runspace brings up the Runspace last active under the Tile that was shown', () => {
+  const rows = [
+    runspace('l', LIB),
+    runspace('a1', APP),
+    runspace('a2', APP),
+    runspace('p', LIB, { pinned: [0] }),
+  ]
+  const before = worldOf(rows)
+  const after = worldOf(rows.filter((r) => r.id !== 'p'))
+  const shown = run(before, [row('l'), row('a2'), row('p')]).state
+
+  expect(onScreen(reload(shown, before, after), after)).toEqual({
+    tile: 'acme/app',
+    runspace: 'a2',
+    tab: 'a2.0',
+  })
+})
+
+test('a Runspace that is not active gone from the layout leaves the view as it is', () => {
+  const rows = [runspace('a1', APP), runspace('a2', APP, { tabs: 2 }), runspace('l', LIB)]
+  const before = worldOf(rows)
+  const after = worldOf(rows.filter((r) => r.id !== 'a1'))
+  const shown = run(before, [row('a2'), tab('a2.1')]).state
+
+  expect(onScreen(reload(shown, before, after), after)).toEqual({
+    tile: 'acme/app',
+    runspace: 'a2',
+    tab: 'a2.1',
+  })
+})
+
+test('closing the active Runspace when only Pinned Runspaces are left gives way to the first Runspace', () => {
+  const rows = [runspace('p', LIB, { pinned: [0] }), runspace('a', APP)]
+  const before = worldOf(rows)
+  const after = worldOf(rows.filter((r) => r.id !== 'a'))
+  const shown = run(before, [row('a')]).state
+
+  expect(onScreen(reload(shown, before, after), after)).toEqual({
+    tile: OUTSIDE,
+    runspace: 'p',
+    tab: 'p.0',
   })
 })
 
