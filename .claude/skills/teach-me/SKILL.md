@@ -3,7 +3,7 @@ name: teach-me
 disable-model-invocation: true
 ---
 
-これは `/teach-me` skill の指示で、この会話の残りすべてに効く。`teach-me` はユーザーだけが呼ぶ skill なので Skill tool の一覧には出ないが、登録はされている。依頼はただの説明ではなく、レッスンとして進める。
+これは `/teach-me` skill の指示で、この会話の残りすべてに効く。依頼はただの説明ではなく、レッスンとして進める。
 
 それまでに設計・実装したものを、fork した session で 1 step ずつ教えるレッスン。ユーザーの「OK」ごとに次の step へ進む。各 step は `## Step N/M — <題>` の見出しで始め、M は outline の step の総数にする。レッスンなので、ファイルは読むだけにする。
 
