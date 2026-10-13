@@ -207,7 +207,7 @@ export const RunItemSchema = z.object({
     ),
 })
 
-export const RunsOutputSchema = z.object({
+export const ShowOutputSchema = z.object({
   ref: z.string(),
   title: z.string(),
   closedAt: z.date().nullable(),
@@ -235,7 +235,7 @@ export type CloseRefusal = z.infer<typeof CloseRefusalSchema>
 export type CloseOutput = z.infer<typeof CloseOutputSchema>
 export type ReopenOutput = z.infer<typeof ReopenOutputSchema>
 export type RunItem = z.infer<typeof RunItemSchema>
-export type RunsOutput = z.infer<typeof RunsOutputSchema>
+export type ShowOutput = z.infer<typeof ShowOutputSchema>
 export type BenchItem = z.infer<typeof BenchItemSchema>
 
 export const contract = {
@@ -334,14 +334,14 @@ export const contract = {
     })
     .input(z.object({ ref }))
     .output(ReopenOutputSchema),
-  runs: meta
+  show: meta
     .meta({
       description:
-        'List the Runs of a Task, open or closed, with the Agent Session ids claude --resume takes',
+        'Show a Task, open or closed, and its Runs with the Agent Session ids claude --resume takes',
       cli: true,
     })
     .input(z.object({ ref }))
-    .output(RunsOutputSchema),
+    .output(ShowOutputSchema),
   bench: {
     list: meta
       .meta({ description: 'List the Benches with the labels of their Tasks' })

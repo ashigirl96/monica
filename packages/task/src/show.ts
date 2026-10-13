@@ -2,14 +2,14 @@ import { agentSession } from '@monica/workbench/schema'
 import type { Db } from '@monica/workbench/server'
 import { desc, eq } from 'drizzle-orm'
 
-import type { RunsOutput } from './contract.ts'
+import type { ShowOutput } from './contract.ts'
 import { isIssue } from './copy.ts'
 import { findTrackedTask } from './open-task.ts'
 import { formatRef, parseRef } from './ref.ts'
 import { isResumable } from './run.ts'
 import { run } from './schema.ts'
 
-export function listRuns(db: Db, asked: string): RunsOutput {
+export function showTask(db: Db, asked: string): ShowOutput {
   const ref = parseRef(asked)
   const found = findTrackedTask(db, isIssue(ref), formatRef(ref))
   const rows = db

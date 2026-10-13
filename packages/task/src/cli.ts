@@ -11,7 +11,7 @@ import type {
   ListOutput,
   ReopenOutput,
   RunOutput,
-  RunsOutput,
+  ShowOutput,
   SyncOutput,
 } from './contract.ts'
 import { stateText } from './state-text.ts'
@@ -34,7 +34,7 @@ export const completers = {
   attach: { ref: taskRefs({ closed: false }) },
   close: { ref: taskRefs({ closed: false }) },
   reopen: { ref: taskRefs({ closed: true }) },
-  runs: {
+  show: {
     ref: async (client: Client, signal: AbortSignal) =>
       (
         await Promise.all([
@@ -88,7 +88,7 @@ export const formatters = {
       [ref, title, stateText(displayState)],
     ])
   },
-  runs({ ref, title, closedAt, runs }: RunsOutput): string {
+  show({ ref, title, closedAt, runs }: ShowOutput): string {
     const head = [`${ref} ${title}`, ...(closedAt ? [`closed at ${localTime(closedAt)}`] : [])]
     const body =
       runs.length === 0
