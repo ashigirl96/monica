@@ -131,6 +131,26 @@ function parseBlocksPayload(raw: string): ParsedBlocks | null {
   }
 }
 
+function innerTextblock(slice: Slice): PMNode | null {
+  let fragment = slice.content
+  for (let depth = 0; depth < Math.min(slice.openStart, slice.openEnd); depth++) {
+    const only = fragment.childCount === 1 ? fragment.firstChild : null
+    if (!only) return null
+    if (only.isTextblock) return only
+    fragment = only.content
+  }
+  return null
+}
+
+// 1 つの block の中の文字選択は文の途中へ貼る語句なので、`- ` や `> ` のような block の記号を付けない
+function selectionToMarkdown(slice: Slice, renderMarkdown: RenderMarkdown): string {
+  const textblock = innerTextblock(slice)
+  if (!textblock) return renderMarkdown({ type: 'doc', content: slice.content.toJSON() ?? [] })
+  if (textblock.type === nodes.codeBlock) return textblock.textContent
+  const paragraph = nodes.paragraph.create(null, textblock.content)
+  return renderMarkdown(docJsonFromContainers([nodes.blockContainer.create(null, paragraph)]))
+}
+
 function selectedContainers(state: EditorState): PMNode[] {
   const selection = blockSelectionKey.getState(state)
   if (!selection || selection.selectedIds.length === 0) return []
@@ -139,7 +159,7 @@ function selectedContainers(state: EditorState): PMNode[] {
     .filter((node): node is PMNode => !!node)
 }
 
-/** block 選択の container 群を単一 blockGroup に包んだ doc JSON。 */
+/** container 群を単一 blockGroup に包んだ doc JSON。 */
 function docJsonFromContainers(containers: readonly PMNode[]): unknown {
   return {
     type: 'doc',
@@ -331,13 +351,11 @@ export function clipboardPlugin(options: ClipboardOptions = {}): Plugin {
       transformCopied: (slice) => mapSliceNodes(slice, stripIds),
       // 外部・copy 由来 paste は ID 再発行（重複 ID は normalizer の防衛もある）
       transformPasted: (slice) => mapSliceNodes(slice, preparePasted),
-      // text 選択の text/plain を markdown に差し替える。slice は selection.content() なので
-      // doc から続く形のまま doc JSON に載る。block 選択は copy ハンドラが preventDefault するので
-      // ここは通らない。
+      // text 選択の text/plain を markdown に差し替える。block 選択は copy ハンドラが
+      // preventDefault するのでここは通らない。
       ...(renderMarkdown
         ? {
-            clipboardTextSerializer: (slice: Slice) =>
-              renderMarkdown({ type: 'doc', content: slice.content.toJSON() ?? [] }),
+            clipboardTextSerializer: (slice: Slice) => selectionToMarkdown(slice, renderMarkdown),
           }
         : {}),
 

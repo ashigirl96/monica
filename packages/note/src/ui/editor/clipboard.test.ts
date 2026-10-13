@@ -16,8 +16,21 @@ import {
   type RenderMarkdown,
   serializeBlocksPayload,
 } from './clipboard.ts'
+import { nodes, schema } from './schema.ts'
 import { selectBlocks } from './selection-state.ts'
-import { block, contentPos, docOf, heading, para, paste, readDoc } from './test-fixtures.ts'
+import {
+  block,
+  bullet,
+  cellPositions,
+  code,
+  contentPos,
+  docOf,
+  heading,
+  para,
+  paste,
+  readDoc,
+  tableOf,
+} from './test-fixtures.ts'
 
 function pasteBlocks(state: EditorState, payload: string): EditorState {
   const pasted = paste(clipboardPlugin(), state, { [BLOCKS_MIME]: payload })
@@ -267,6 +280,67 @@ describe('markdown の copy と paste', () => {
     const text = copiedText(EditorState.create({ doc, selection }), toMarkdown, selection.content())
 
     expect(text).toBe('## Title\n\nbody')
+  })
+
+  test.each([
+    ['箇条書き', nodes.bullet],
+    ['番号付き', nodes.numbered],
+    ['todo', nodes.todo],
+    ['引用', nodes.quote],
+    ['callout', nodes.callout],
+    ['見出し', nodes.heading],
+    ['toggle', nodes.toggle],
+  ])('%s の文字の一部を選んで copy すると、記号を付けずに選んだ文字だけが載る', (_name, type) => {
+    const doc = docOf(block('B', type.create(null, schema.text('hogehoge'))))
+    const selection = TextSelection.create(doc, contentPos(doc, 'B', 1), contentPos(doc, 'B', 4))
+
+    const text = copiedText(EditorState.create({ doc, selection }), toMarkdown, selection.content())
+
+    expect(text).toBe('oge')
+  })
+
+  test('block の文字の一部を選んで copy すると、選んだ範囲の太字は markdown の記法のまま載る', () => {
+    const bold = schema.marks.bold.create()
+    const doc = docOf(
+      block('B', nodes.bullet.create(null, [schema.text('to '), schema.text('bold', [bold])])),
+    )
+    const selection = TextSelection.create(
+      doc,
+      contentPos(doc, 'B', 1),
+      contentPos(doc, 'B', 'end'),
+    )
+
+    const text = copiedText(EditorState.create({ doc, selection }), toMarkdown, selection.content())
+
+    expect(text).toBe('o **bold**')
+  })
+
+  test('code block の文字の一部を選んで copy すると、escape も fence も付けずに載る', () => {
+    const doc = docOf(block('C', code('# [x](y) *a*\nrest')))
+    const selection = TextSelection.create(doc, contentPos(doc, 'C', 0), contentPos(doc, 'C', 12))
+
+    const text = copiedText(EditorState.create({ doc, selection }), toMarkdown, selection.content())
+
+    expect(text).toBe('# [x](y) *a*')
+  })
+
+  test('表のセルの文字の一部を選んで copy すると、表にせず選んだ文字だけが載る', () => {
+    const doc = docOf(block('T', tableOf([['hogehoge', 'x']])))
+    const cell = cellPositions(doc)[0]! + 1
+    const selection = TextSelection.create(doc, cell + 1, cell + 4)
+
+    const text = copiedText(EditorState.create({ doc, selection }), toMarkdown, selection.content())
+
+    expect(text).toBe('oge')
+  })
+
+  test('複数の block に跨って文字を選んで copy すると、各 block の記号が載る', () => {
+    const doc = docOf(block('A', bullet('hogehoge')), block('B', bullet('fuga')))
+    const selection = TextSelection.create(doc, contentPos(doc, 'A', 4), contentPos(doc, 'B', 2))
+
+    const text = copiedText(EditorState.create({ doc, selection }), toMarkdown, selection.content())
+
+    expect(text).toBe('- hoge\n- fu')
   })
 
   test('他の app の markdown を貼ると block になり、copy すると同じ markdown に戻る', () => {
