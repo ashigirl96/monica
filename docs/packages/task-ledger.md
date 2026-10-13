@@ -17,6 +17,8 @@ attach      { ref, terminalSessionId? } → { ref, title, benchCreated, runCreat
 close       { ref, force?, terminalSessionId? } → { ref, removedWorktree, deletedBranch,        cli
               spared, warnings }  errors: CLOSE_REFUSED { reasons }
 reopen      { ref } → { ref, title, warnings }                                               cli
+runs        { ref } → { ref, title, closedAt, runs: { agentSessionId, state, origin, startedAt,   cli
+              lastEventAt, endedAt, cwd, transcriptPath, resumable }[] }
 bench.list  → { runspaceId, ref, title, setupState }[]
 changes     → { type: "task", ref } | { type: "synced" }
 ```
@@ -25,6 +27,9 @@ changes     → { type: "task", ref } | { type: "synced" }
 - `ListItem` の `displayState` は純関数 `displayState(task, issue, bench, runs)` が TS で導く（#17 の表）。`runs` はその Task の Run の Agent Session。live な Run があれば `waiting`（`reason`、許可なら `tool`、エラーなら `errorType`）/ `unobserved` / `running` に `since`（`state_changed_at`）と `liveRuns` を付け、無ければ `closed` / `issue_closed` / `not_started` / `preparing` / `setup_failed` / `ended` の 1 語にする。`liveRuns` は代表を先頭に集約の順で並べる。`ListItem` の `cwd` は Bench の cwd。
 - 人間向けの STATE の 1 マスは `waiting:permission(Bash) 12m +1`（理由、許可なら tool 名、`since` からの経過、他の live な Run の件数）。経過は 60 秒未満が `s`、60 分未満が `m`、24 時間未満が `h`、それ以上が `d` で、切り捨てる。
 - `current` は呼び手の Terminal Session の live な Agent Session が Run ならその Task を返し（`source: run`、`agentSessionId` はその Agent Session）、そうでなければ Tab → Runspace → Bench の Task を引く（`source: bench`、`agentSessionId` は null）。`terminalSessionId` が無ければ `BAD_REQUEST`、どちらでも引けなければ `NOT_FOUND`。
+- `runs` は open と closed のどちらの Task の Run も、live なものも終わったものも、Agent Session が最後に動いた順（`last_event_at` が新しいものが先）に並べる。`claude --resume <id>` は cwd を問わず全 project から会話を探すので、Task を reopen せず worktree も作り直さずに続けられる。未 track は `NOT_FOUND`。`startedAt` は Run になった時刻（`run.started_at`）。
+  - `resumable` は「Run の起動」の resume の候補と同じく、`transcript_path` が null か、その file があれば true（`run.ts` の `isResumable`）。Claude Code は古い Agent Session Transcript を消す（`cleanupPeriodDays`）。text は false の Run も行に残し、SESSION ID に `(transcript gone)` を付ける。
+  - text は 1 行目に ref と title、closed なら `closed at <手元の時刻>` を続け、空行の後に SESSION ID・STATE・ORIGIN・STARTED・LAST EVENT・CWD の表を出す。`endedAt` は普通 LAST EVENT と同じなので json にだけ出す。
 - Bench の行の変化（作成、準備の終わり）と、Run の Agent Session の変化（Run になったときを含む）は `{ type: "task", ref }` で知らせる。表示状態は Run の Agent Session から導くので、`task.changes` だけで `list` を描き直せるようにする。
 
 ## createTaskLedger

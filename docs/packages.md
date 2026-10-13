@@ -56,7 +56,7 @@ monica/
 
 - apps は packages を組み立てるだけでロジックを持たない（ADR-0002）。apps どうしは互いを import しない。
 - Rust の `target/` と `Cargo.lock` は root に 1 つ。crate 名は `monica-<dir>`（`monica-ptyd` など）。terminal 5 crate は旧 Monica から持ち込んだもの（#11）。
-- `packages/ui` は popover・icon・toast・fuzzy picker・drag reorder のような、domain の語を持たない部品を置く。CLI の整形関数が使う表（`@monica/ui/table`）もここに置く。cli entry は apps/cli だけが import するので、domain の cli entry どうしでは共有できないため。domain の UI は各 domain package の `ui` entry に置く。
+- `packages/ui` は popover・icon・toast・fuzzy picker・drag reorder のような、domain の語を持たない部品を置く。CLI の整形関数が使う表（`@monica/ui/table`）と手元の時刻（`@monica/ui/local-time`）もここに置く。cli entry は apps/cli だけが import するので、domain の cli entry どうしでは共有できないため。domain の UI は各 domain package の `ui` entry に置く。
 
 ### ドメイン package の中
 

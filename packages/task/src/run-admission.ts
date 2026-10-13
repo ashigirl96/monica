@@ -1,5 +1,3 @@
-import { existsSync } from 'node:fs'
-
 import { agentSession } from '@monica/workbench/schema'
 import type { Db } from '@monica/workbench/server'
 import { ORPCError, type ORPCErrorConstructorMap } from '@orpc/server'
@@ -27,7 +25,7 @@ import {
 import { key, parsedOrNull, readIssue, readIssues } from './read-issues.ts'
 import { formatRef, type IssueRef, parseRef } from './ref.ts'
 import { type Launch, newRun, openRun, refuseUnsendable, resumeOf } from './run-claude.ts'
-import { runAgentSessionsByTask } from './run.ts'
+import { isResumable, runAgentSessionsByTask } from './run.ts'
 import { issue, run } from './schema.ts'
 import { type SyncDeps, syncOrUseCopy, trackIssue } from './sync.ts'
 
@@ -404,7 +402,7 @@ function resumableRunOf(
     .where(and(eq(run.taskIssueId, taskIssueId), gte(run.startedAt, since.createdAt)))
     .orderBy(desc(agentSession.lastEventAt), desc(run.id))
     .all()
-    .find(({ transcriptPath }) => transcriptPath === null || existsSync(transcriptPath))
+    .find(isResumable)
 }
 
 const STATE_LABELS = ['needs-triage', 'ready-for-agent', 'ready-for-human', 'needs-info', 'wontfix']

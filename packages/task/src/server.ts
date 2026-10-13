@@ -8,6 +8,7 @@ import { contract } from './contract.ts'
 import { currentTask } from './current.ts'
 import { listTasks } from './list.ts'
 import { admitRun, runButtons } from './run-admission.ts'
+import { listRuns } from './runs.ts'
 import { syncCommand } from './sync.ts'
 import { internals, type TaskLedger } from './task.ts'
 
@@ -48,6 +49,7 @@ export const router = os.router({
   reopen: os.reopen.handler(({ context, input }) =>
     reopenTask(internals(context.taskLedger), input),
   ),
+  runs: os.runs.handler(({ context, input }) => listRuns(context.db, input.ref)),
   bench: {
     list: os.bench.list.handler(({ context }) => listBenches(context.db)),
   },

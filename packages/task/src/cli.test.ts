@@ -1,7 +1,7 @@
 import { expect, test } from 'bun:test'
 
 import { formatters } from './cli.ts'
-import type { ListItem } from './contract.ts'
+import type { ListItem, RunItem } from './contract.ts'
 
 const item = (overrides: Partial<ListItem>): ListItem => ({
   ref: 'acme/app#12',
@@ -228,5 +228,53 @@ test('current writes the state the same way as list', () => {
 
   expect(text).toBe(
     ['REF          TITLE    STATE', 'acme/app#12  Ship it  waiting:question 1m'].join('\n'),
+  )
+})
+
+const runItem = (overrides: Partial<RunItem>): RunItem => ({
+  agentSessionId: 's-1',
+  state: 'ended',
+  origin: 'started',
+  startedAt: new Date(Date.UTC(2026, 9, 13, 9, 1, 0)),
+  lastEventAt: new Date(Date.UTC(2026, 9, 13, 9, 2, 0)),
+  endedAt: new Date(Date.UTC(2026, 9, 13, 9, 2, 0)),
+  cwd: '/work/app',
+  transcriptPath: null,
+  resumable: true,
+  ...overrides,
+})
+
+test('runs heads the table with the Task and marks a Run whose transcript is gone', () => {
+  const text = formatters.runs({
+    ref: 'acme/app#12',
+    title: 'Ship it',
+    closedAt: null,
+    runs: [
+      runItem({ agentSessionId: 's-live', state: 'running', origin: 'attached', endedAt: null }),
+      runItem({ agentSessionId: 's-gone', transcriptPath: '/gone.jsonl', resumable: false }),
+    ],
+  })
+
+  expect(text).toBe(
+    [
+      'acme/app#12 Ship it',
+      '',
+      'SESSION ID                STATE    ORIGIN    STARTED              LAST EVENT           CWD',
+      's-live                    running  attached  2026-10-13 09:01:00  2026-10-13 09:02:00  /work/app',
+      's-gone (transcript gone)  ended    started   2026-10-13 09:01:00  2026-10-13 09:02:00  /work/app',
+    ].join('\n'),
+  )
+})
+
+test('runs says when a closed Task was closed and when it has no Runs', () => {
+  const text = formatters.runs({
+    ref: 'acme/app#12',
+    title: 'Ship it',
+    closedAt: new Date(Date.UTC(2026, 9, 13, 9, 3, 0)),
+    runs: [],
+  })
+
+  expect(text).toBe(
+    ['acme/app#12 Ship it', 'closed at 2026-10-13 09:03:00', '', 'No Runs'].join('\n'),
   )
 })
