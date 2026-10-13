@@ -79,8 +79,12 @@ Workbench で、sidebar に見えている Runspace と、active な Runspace �
 _Avoid_: jump hint モード, ジャンプ, hint mode
 
 **Terminal Session**:
-ptyd が持つ 1 つの PTY。app より長生きし、再 attach すると Terminal Session Transcript を replay する。生きている Terminal Session は必ず 1 つの Tab が表示している。
+ptyd が持つ 1 つの PTY。app より長生きし、再 attach すると Terminal Session Transcript を replay する。生きている Terminal Session は、Terminating なものを除いて必ず 1 つの Tab が表示している。
 _Avoid_: session（Agent Session と紛れる）, detached（Tab の無い Terminal Session は残さない）
+
+**Terminating**:
+Tab を閉じた後、終わるのを待っている Terminal Session。Tab が無くなった時点でそうなる。Task の close は、Terminating な Terminal Session にいる Agent Session の Run を、close を止める理由に数えない。Agent Session の状態は変えないので、表示状態と Run Button はその Run を終わるまで live と読む。
+_Avoid_: 終わりかけ, detached（廃止した Detached と紛れる）, orphan（まだ Run でない Agent Session と紛れる）, ending（Agent Session の終了と紛れる）
 
 **Terminal Session Transcript**:
 ptyd が Terminal Session の出力をそのまま書き残したもの。直近の分だけを持ち、再 attach ではその末尾を replay する。Terminal Session が終わると消える。
