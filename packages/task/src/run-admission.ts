@@ -15,13 +15,14 @@ import type {
 } from './contract.ts'
 import { isLinkedIssue, openBlockersOf } from './copy.ts'
 import type { GitHubIssue } from './github.ts'
-import { type FoundTask, findOpenTask, TaskStateRefusal, taskIfTracked } from './open-task.ts'
+import { type FoundTask, TaskStateRefusal, taskIfTracked } from './open-task.ts'
+import { type FoundOrTracked, isAsked, pullOpen, pullOrTrack, refresh } from './pull-task.ts'
 import { key, parsedOrNull, readIssue, readIssues } from './read-issues.ts'
 import { formatRef, type IssueRef, parseRef } from './ref.ts'
 import { type Launch, newRun, openRun, refuseUnsendable, resumeOf } from './run-claude.ts'
 import { isResumable, runAgentSessionsByTask } from './run.ts'
 import { issue, run } from './schema.ts'
-import { type FoundOrTracked, findOrTrack, isAsked, type SyncDeps, syncOrUseCopy } from './sync.ts'
+import type { SyncDeps } from './sync.ts'
 
 type Deps = SyncDeps & BenchDeps
 
@@ -97,7 +98,7 @@ async function admitFromCli(
   refuseUnsendable(prompt)
   const rules: Rules = { via: 'cli', force }
   try {
-    const { found, tracked } = await findOrTrack(deps, parseRef(ref))
+    const { found, tracked } = await pullOrTrack(deps, parseRef(ref))
     if (found.bench) refuseInPlace(found.bench, inPlace, formatRef(found.issue))
     const facts = freshestFacts(deps.db, found.issue.id, { sync: 'skipped' })
     const decided = fromLedger(deps.db, deps.reservations, found, facts, rules)
@@ -138,7 +139,7 @@ async function performPress(
     return read
   }
   if (!isLaunchable(decided)) return read
-  const admitted = await findOrTrack(deps, read, read.nodeId)
+  const admitted = await pullOrTrack(deps, read, read.nodeId)
   const starting =
     decided.type === 'resume'
       ? {
@@ -250,9 +251,7 @@ async function reopenFromButton(deps: Deps, tracked: FoundTask) {
 type Synced = { type: 'synced'; found: FoundTask; warnings: string[]; facts: IssueFacts }
 
 async function syncForNewRun(deps: SyncDeps, found: FoundTask, read?: IssueFacts): Promise<Synced> {
-  const warnings = await syncOrUseCopy(deps, found.issue)
-  // sync は repo の改名を写すので、名前でなく行の id で引き直す。
-  const synced = findOpenTask(deps.db, eq(issue.id, found.issue.id), formatRef(found.issue))
+  const { found: synced, warnings } = await refresh(deps, found, pullOpen)
   const facts = freshestFacts(deps.db, synced.issue.id, { read, sync: { warnings } })
   return { type: 'synced', found: synced, warnings, facts }
 }

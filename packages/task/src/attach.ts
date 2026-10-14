@@ -8,10 +8,11 @@ import { type BenchDeps, insertBench } from './bench.ts'
 import type { AttachOutput } from './contract.ts'
 import { callerTerminalSession } from './current.ts'
 import { checkoutUnder, type Ghq, messageOf } from './prepare.ts'
+import { pullOrTrack } from './pull-task.ts'
 import { formatRef, type IssueRef, parseRef } from './ref.ts'
 import { insertRuns, liveAgentSession } from './run.ts'
 import { issue, run } from './schema.ts'
-import { findOrTrack, type SyncDeps } from './sync.ts'
+import type { SyncDeps } from './sync.ts'
 
 type GhqRoot = { path: string } | { error: string }
 
@@ -22,7 +23,7 @@ export async function attachTab(
   const { workbenchLedger } = deps
   const terminalSessionId = callerTerminalSession(input.terminalSessionId)
   // Tab の検査で断っても track は巻き戻さない（ADR-0024）。
-  const { found: requested, tracked } = await findOrTrack(deps, parseRef(input.ref))
+  const { found: requested, tracked } = await pullOrTrack(deps, parseRef(input.ref))
   // ghq root は async なので transaction の前に引く。待つ間に run が Bench を作ることも、sync が repo の改名を写すこともある。
   const ghqRoot = requested.bench ? null : await lookUpGhqRoot(deps.ghq)
   const attached = deps.reservations.writeOpenTask(

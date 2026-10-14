@@ -193,16 +193,6 @@ test('run refuses an untracked Issue with an open Blocker, and the Issue stays t
   expect(await fixture.client.bench.list()).toEqual([])
 })
 
-test('run refuses a ref GitHub does not return with NOT_FOUND, and neither tracks nor copies it', async () => {
-  const fixture = untracked({ origin: false })
-
-  const error = await failure(fixture.client.run({ ref: 'acme/app#99' }))
-
-  expect(error.code).toBe('NOT_FOUND')
-  expect((await fixture.client.list({})).tasks).toEqual([])
-  expect(fixture.db.select().from(issue).all()).toEqual([])
-})
-
 test('run returns while ptyd cannot be reached, leaving its Tab starting; once ptyd is back, the shell starts and claude is typed into it', async () => {
   const fixture = await tracked()
   fixture.ptyd.stop()

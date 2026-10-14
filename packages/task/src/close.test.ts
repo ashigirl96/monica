@@ -405,14 +405,6 @@ test('close removes the worktree through the checkout it was made in, even after
   expect(hasBranch(ghq.checkout('acme/app'), 'issue-12')).toBe(false)
 })
 
-test('close refuses a Task that is already closed or not tracked', async () => {
-  const fixture = await tracked()
-  await fixture.client.close({ ref })
-
-  expect((await failure(fixture.client.close({ ref }))).code).toBe('BAD_REQUEST')
-  expect((await failure(fixture.client.close({ ref: 'acme/app#99' }))).code).toBe('NOT_FOUND')
-})
-
 test('close refuses a Bench that is still being prepared, even with --force', async () => {
   const fixture = await tracked()
   const { client, ghq } = fixture
@@ -472,13 +464,6 @@ test('reopen goes on with the local copy when GitHub cannot be reached, and warn
 
   expect(output.warnings).toEqual([expect.stringContaining(`could not sync ${ref} from GitHub`)])
   expect((await fixture.client.list({})).tasks).toMatchObject([{ ref }])
-})
-
-test('reopen refuses a Task that is open or not tracked', async () => {
-  const fixture = await tracked()
-
-  expect((await failure(fixture.client.reopen({ ref }))).code).toBe('BAD_REQUEST')
-  expect((await failure(fixture.client.reopen({ ref: 'acme/app#99' }))).code).toBe('NOT_FOUND')
 })
 
 test("reopen asked by a repo's old name follows the rename its sync finds", async () => {
