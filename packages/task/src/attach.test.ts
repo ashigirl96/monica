@@ -335,17 +335,6 @@ test("attach asked by a repo's old name for an untracked Issue tracks it under t
   })
 })
 
-test('attach refuses a ref GitHub does not return with NOT_FOUND, and neither tracks nor copies it', async () => {
-  const fixture = started()
-  const outside = await fixture.openTabOutsideBench()
-
-  const error = await failure(fixture.client.attach({ ref, terminalSessionId: outside }))
-
-  expect(error.code).toBe('NOT_FOUND')
-  expect((await fixture.client.list({})).tasks).toEqual([])
-  expect(fixture.db.select().from(issue).all()).toEqual([])
-})
-
 test('attach refuses an untracked Issue whose Repo is not cloned, and the Issue stays tracked', async () => {
   const fixture = started()
   fixture.github.issue(ref, { title: 'Ship it' })

@@ -1,18 +1,19 @@
 import { agentSession, tab } from '@monica/workbench/schema'
 import type { Db } from '@monica/workbench/server'
 import { ORPCError, type ORPCErrorConstructorMap } from '@orpc/server'
-import { and, eq, ne, type SQL } from 'drizzle-orm'
+import { and, eq, ne } from 'drizzle-orm'
 
-import type { Bench, BenchDeps, Issue } from './bench.ts'
+import type { Bench, BenchDeps } from './bench.ts'
 import type { CloseOutput, CloseRefusal, closeErrors, ReopenOutput } from './contract.ts'
 import { isIssue } from './copy.ts'
-import { type FoundTask, findTrackedTask, refuseOpen } from './open-task.ts'
+import { findTask, refreshTask } from './find-task.ts'
+import type { FoundTask } from './open-task.ts'
 import { messageOf } from './prepare.ts'
 import { formatRef, parseRef } from './ref.ts'
 import { describeRefusal } from './refusal.ts'
 import { liveAgentSession } from './run.ts'
 import { bench, issue, pullRequest, run, task, taskPullRequest } from './schema.ts'
-import { type SyncDeps, syncOrUseCopy } from './sync.ts'
+import type { SyncDeps } from './sync.ts'
 import { inspectWorktree, removeWorktree } from './teardown.ts'
 
 export async function closeTask(
@@ -21,25 +22,23 @@ export async function closeTask(
   errors: ORPCErrorConstructorMap<typeof closeErrors>,
 ): Promise<CloseOutput> {
   const asked = parseRef(input.ref)
-  const tracked = openTaskToClose(deps.db, isIssue(asked), formatRef(asked))
+  const tracked = findTask(deps.db, isIssue(asked), formatRef(asked), 'close')
   return deps.reservations.whileClosing(
     tracked.issue.id,
     formatRef(tracked.issue),
     input.force ?? false,
-    () => closeReserved(deps, tracked.issue, input, errors),
+    () => closeReserved(deps, tracked, input, errors),
   )
 }
 
 // 予約の間は準備も Tab も Bench に入らないので、Bench の行は git を待つ間も変わらない。
 async function closeReserved(
   deps: SyncDeps & BenchDeps,
-  tracked: Issue,
+  tracked: FoundTask,
   input: { force?: boolean; terminalSessionId?: string },
   errors: ORPCErrorConstructorMap<typeof closeErrors>,
 ): Promise<CloseOutput> {
-  const warnings = await syncOrUseCopy(deps, tracked)
-  // sync は repo の改名を写すので、名前でなく行の id で引き直す。
-  const found = openTaskToClose(deps.db, eq(issue.id, tracked.id), formatRef(tracked))
+  const { found, warnings } = await refreshTask(deps, tracked, 'close')
   const ref = formatRef(found.issue)
   const benchRow = found.bench
   const worktree =
@@ -71,7 +70,7 @@ async function closeReserved(
     ? await stopOnGitFailure(ref, () => removeWorktree(worktree, { force }))
     : { removedWorktree: null, deletedBranch: null, warnings: [] }
   const closed = deps.db.transaction((tx) => {
-    const now = openTaskToClose(tx, eq(issue.id, found.issue.id), ref)
+    const now = findTask(tx, eq(issue.id, found.issue.id), ref, 'close')
     // git を待つ間に Bench の Tab で起こした claude は hook から Run になっているので、呼び手と同じく Tab を残す。
     const lateRuns = force ? [] : liveRunsBesides(tx, found.issue.id, caller)
     tx.update(task).set({ closedAt: new Date() }).where(eq(task.issueId, found.issue.id)).run()
@@ -118,11 +117,12 @@ export async function reopenTask(
   { recheck }: { recheck?: (found: FoundTask) => void } = {},
 ): Promise<ReopenOutput> {
   const asked = parseRef(input.ref)
-  const tracked = refuseOpen(findTrackedTask(deps.db, isIssue(asked), formatRef(asked)))
-  const warnings = await syncOrUseCopy(deps, tracked.issue)
+  const tracked = findTask(deps.db, isIssue(asked), formatRef(asked), 'reopen')
+  // 状態は writeClosedTask が予約の後に断る。先に断ると、close の途中の reopen が CONFLICT でなく BAD_REQUEST になる。
+  const { found: synced, warnings } = await refreshTask(deps, tracked)
   const reopened = deps.reservations.writeClosedTask(
-    tracked.issue.id,
-    formatRef(tracked.issue),
+    synced.issue.id,
+    formatRef(synced.issue),
     (tx, found) => {
       recheck?.(found)
       tx.update(task).set({ closedAt: null }).where(eq(task.issueId, found.issue.id)).run()
@@ -132,15 +132,6 @@ export async function reopenTask(
   const ref = formatRef(reopened)
   deps.publish({ type: 'task', ref })
   return { ref, title: reopened.title, warnings }
-}
-
-function openTaskToClose(db: Pick<Db, 'select'>, where: SQL | undefined, asked: string) {
-  const found = findTrackedTask(db, where, asked)
-  const ref = formatRef(found.issue)
-  if (found.task.closedAt) {
-    throw new ORPCError('BAD_REQUEST', { message: `${ref} is already closed` })
-  }
-  return found
 }
 
 // repo の改名の後に旧名を別の repo が使うと、その Task の Bench が同じ path に worktree を作る。

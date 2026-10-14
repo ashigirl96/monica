@@ -26,15 +26,20 @@ export function findTrackedTask(db: Pick<Db, 'select'>, where: SQL | undefined, 
   return found
 }
 
-export function findOpenTask(db: Pick<Db, 'select'>, where: SQL | undefined, asked: string) {
-  return refuseClosed(findTrackedTask(db, where, asked))
-}
-
 export function refuseClosed(found: FoundTask): FoundTask {
   const ref = formatRef(found.issue)
   if (found.task.closedAt) {
     throw new TaskStateRefusal('BAD_REQUEST', {
       message: `${ref} is closed, so run \`monica task reopen ${ref}\``,
+    })
+  }
+  return found
+}
+
+export function refuseAlreadyClosed(found: FoundTask): FoundTask {
+  if (found.task.closedAt) {
+    throw new TaskStateRefusal('BAD_REQUEST', {
+      message: `${formatRef(found.issue)} is already closed`,
     })
   }
   return found

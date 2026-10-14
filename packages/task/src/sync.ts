@@ -1,9 +1,9 @@
 import type { Db, Tx } from '@monica/workbench/server'
 import { ORPCError } from '@orpc/server'
-import { and, eq, inArray, isNull, type SQL } from 'drizzle-orm'
+import { and, eq, inArray, isNull } from 'drizzle-orm'
 
 import type { SyncOutput, TaskChange } from './contract.ts'
-import { isIssue, isLinkedIssue, isRepo, writeIssues, writePullRequests } from './copy.ts'
+import { isIssue, isRepo, writeIssues, writePullRequests } from './copy.ts'
 import {
   BATCH,
   type GitHub,
@@ -12,7 +12,7 @@ import {
   queryIssues,
   RepositoryNotFound,
 } from './github.ts'
-import { findOpenTask, type FoundTask, refuseClosed, taskIfTracked } from './open-task.ts'
+import { taskIfTracked } from './open-task.ts'
 import { formatRef, type IssueRef, parseRef } from './ref.ts'
 import { bench, issue, task } from './schema.ts'
 
@@ -34,11 +34,11 @@ export type SyncOutcome = { synced: number; missing: string[]; failures: string[
 // 改名した repo の issue は旧名でも新しい名前でも引けるので、track 済みかは名前でなく Task の行の insert で決める。
 export async function trackIssue(deps: SyncDeps, input: string): Promise<TrackResult> {
   const ref = parseRef(input)
-  const tracked = findTask(deps.db, isIssue(ref))
-  let issueId = tracked?.issueId
-  let alreadyTracked = tracked !== undefined
-  const outcome = tracked
-    ? await syncTask(deps, tracked, SYNC_TIMEOUT_MS)
+  const found = taskIfTracked(deps.db, isIssue(ref))
+  let issueId = found?.issue.id
+  let alreadyTracked = found !== undefined
+  const outcome = found
+    ? await syncTask(deps, found.issue, SYNC_TIMEOUT_MS)
     : await syncRefs(deps, [ref], SYNC_TIMEOUT_MS, {
         track(tx, copiedId) {
           issueId = copiedId
@@ -52,35 +52,17 @@ export async function trackIssue(deps: SyncDeps, input: string): Promise<TrackRe
         },
       })
   outputOrThrow(outcome, { missingIsNotFound: true })
-  const row = findTask(deps.db, eq(issue.id, issueId!))!
+  const { issue: row } = taskIfTracked(deps.db, eq(issue.id, issueId!))!
   if (!alreadyTracked) deps.publish({ type: 'task', ref: formatRef(row) })
   return { ref: formatRef(row), alreadyTracked }
 }
 
-export type FoundOrTracked = { found: FoundTask; tracked: boolean }
-
-// track は GitHub の今の名前で Task を書くので、改名前の名前で頼まれても track の返す ref で引き直す。
-// 呼び手が GitHub から node ID を引いてあれば、名前と番号が別の issue に移っていても取り違えない。
-export async function findOrTrack(
-  deps: SyncDeps,
-  asked: IssueRef,
-  nodeId?: string,
-): Promise<FoundOrTracked> {
-  const found = taskIfTracked(deps.db, isAsked({ ...asked, nodeId }))
-  if (found) return { found: refuseClosed(found), tracked: false }
-  const { ref, alreadyTracked } = await trackIssue(deps, formatRef(asked))
-  return { found: findOpenTask(deps.db, isIssue(parseRef(ref)), ref), tracked: !alreadyTracked }
-}
-
-export const isAsked = ({ nodeId, ...asked }: IssueRef & { nodeId?: string | null }) =>
-  nodeId ? isLinkedIssue({ ...asked, nodeId }) : isIssue(asked)
-
 export async function syncCommand(deps: SyncDeps, input: string | undefined): Promise<SyncOutput> {
   if (input === undefined) return outputOrThrow(await syncOpenTasks(deps, SYNC_TIMEOUT_MS))
   const ref = parseRef(input)
-  const tracked = findTask(deps.db, isIssue(ref))
-  if (!tracked) throw new ORPCError('NOT_FOUND', { message: `${formatRef(ref)} is not tracked` })
-  return outputOrThrow(await syncTask(deps, tracked, SYNC_TIMEOUT_MS))
+  const found = taskIfTracked(deps.db, isIssue(ref))
+  if (!found) throw new ORPCError('NOT_FOUND', { message: `${formatRef(ref)} is not tracked` })
+  return outputOrThrow(await syncTask(deps, found.issue, SYNC_TIMEOUT_MS))
 }
 
 export function syncOpenTasks(deps: SyncDeps, timeoutMs: number): Promise<SyncOutcome> {
@@ -108,20 +90,6 @@ export function syncTask(deps: SyncDeps, ref: IssueRef, timeoutMs: number): Prom
 
 export const SYNC_BEFORE_COMMAND_TIMEOUT_MS = 5_000
 
-// GitHub に届かなくても止めず、手元の写しで続けたことを警告に残す。
-export async function syncOrUseCopy(
-  deps: SyncDeps,
-  copy: IssueRef & { syncedAt: Date },
-): Promise<string[]> {
-  const { missing, failures } = await syncTask(deps, copy, SYNC_BEFORE_COMMAND_TIMEOUT_MS)
-  const reasons = [...failures, ...missing.map((ref) => `GitHub did not return ${ref}`)]
-  if (reasons.length === 0) return []
-  const minutes = Math.floor((Date.now() - copy.syncedAt.getTime()) / 60_000)
-  return [
-    `could not sync ${formatRef(copy)} from GitHub (${reasons.join('; ')}); using the copy from ${minutes} ${minutes === 1 ? 'minute' : 'minutes'} ago`,
-  ]
-}
-
 // 後から来た呼び手は、走っている sync の timeout ではなく自分の timeout まで待つ。
 function joinRunning(
   deps: SyncDeps,
@@ -143,21 +111,6 @@ function joinRunning(
   const started = run().finally(() => deps.running.delete(scope))
   deps.running.set(scope, started)
   return started
-}
-
-function findTask(db: Db, where: SQL | undefined) {
-  return db
-    .select({
-      issueId: issue.id,
-      repo: issue.repo,
-      number: issue.number,
-      title: issue.title,
-      closedAt: task.closedAt,
-    })
-    .from(task)
-    .innerJoin(issue, eq(issue.id, task.issueId))
-    .where(where)
-    .get()
 }
 
 /**
