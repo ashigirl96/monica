@@ -30,7 +30,7 @@ export type Ghq = {
 }
 
 export const defaultGhq: Ghq = {
-  root: () => command(['ghq', 'root'], 'ghq root'),
+  root: async () => (await command(['ghq', 'root'], 'ghq root')).trim(),
   async get(repo) {
     await command(['ghq', 'get', repo], 'ghq get')
   },
@@ -243,15 +243,20 @@ function signalGroup(pid: number, signal: NodeJS.Signals | 0): boolean {
   }
 }
 
-export function git(cwd: string, ...args: string[]): Promise<string> {
-  return command(['git', '-C', cwd, ...args], `git ${args.slice(0, 2).join(' ')}`)
+export async function git(cwd: string, ...args: string[]): Promise<string> {
+  return (await gitOutput(cwd, args)).trim()
+}
+
+/** stdout を trim せずに返し、`input` があれば stdin に渡す。 */
+export function gitOutput(cwd: string, args: string[], input?: string): Promise<string> {
+  return command(['git', '-C', cwd, ...args], `git ${args.slice(0, 2).join(' ')}`, input)
 }
 
 // Backend が端末から起こされていると、git は認証を /dev/tty で尋ねて準備が止まる。
-async function command(argv: string[], name: string): Promise<string> {
+async function command(argv: string[], name: string, input?: string): Promise<string> {
   const child = Bun.spawn(argv, {
     env: { ...process.env, GIT_TERMINAL_PROMPT: '0' },
-    stdin: 'ignore',
+    stdin: input === undefined ? 'ignore' : Buffer.from(input),
     stdout: 'pipe',
     stderr: 'pipe',
   })
@@ -263,7 +268,7 @@ async function command(argv: string[], name: string): Promise<string> {
   if (code !== 0) {
     throw new Error(`${name} failed: ${stderr.trim().split('\n').at(-1) || `exit ${code}`}`)
   }
-  return stdout.trim()
+  return stdout
 }
 
 export async function succeeds(running: Promise<unknown>): Promise<boolean> {

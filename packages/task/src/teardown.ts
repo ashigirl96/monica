@@ -3,7 +3,7 @@ import { dirname } from 'node:path'
 
 import type { Bench } from './bench.ts'
 import type { CloseRefusal } from './contract.ts'
-import { branchOf, checkoutOf, type Ghq, git, succeeds } from './prepare.ts'
+import { branchOf, checkoutOf, type Ghq, git, gitOutput, succeeds } from './prepare.ts'
 import type { IssueRef } from './ref.ts'
 
 export type InspectedWorktree = {
@@ -90,23 +90,50 @@ async function hasUnpublishedCommits(
     ...mergedHeads,
   )
   if (commits === '') return false
-  const landed = await commitsWithPatchIn(checkout, branch, mergedHeads)
+  const heads = await presentCommits(checkout, mergedHeads)
+  if (heads.length === 0) return true
+  const merged = new Set(
+    (await patchIds(checkout, [...heads, '--not', `refs/heads/${branch}`])).map(
+      ({ patchId }) => patchId,
+    ),
+  )
+  const landed = new Set(
+    (await patchIds(checkout, ['--no-walk', ...commits.split('\n')]))
+      .filter(({ patchId }) => merged.has(patchId))
+      .map(({ commit }) => commit),
+  )
   return commits.split('\n').some((commit) => !landed.has(commit))
 }
 
-async function commitsWithPatchIn(
-  checkout: string,
-  branch: string,
-  mergedHeads: string[],
-): Promise<Set<string>> {
-  const landed = new Set<string>()
-  for (const head of mergedHeads) {
-    if (!(await succeeds(git(checkout, 'cat-file', '-e', `${head}^{commit}`)))) continue
-    for (const line of (await git(checkout, 'cherry', head, `refs/heads/${branch}`)).split('\n')) {
-      if (line.startsWith('- ')) landed.add(line.slice(2))
-    }
+async function presentCommits(checkout: string, commits: string[]): Promise<string[]> {
+  const present: string[] = []
+  for (const commit of commits) {
+    if (await succeeds(git(checkout, 'cat-file', '-e', `${commit}^{commit}`))) present.push(commit)
   }
-  return landed
+  return present
+}
+
+// git cherry と既定の git patch-id は空白を除いて比べるので、空白だけ違う commit まで同じ patch とみなす。
+async function patchIds(
+  checkout: string,
+  revisions: string[],
+): Promise<{ patchId: string; commit: string }[]> {
+  const log = await gitOutput(checkout, [
+    'log',
+    '--patch',
+    '--no-color',
+    '--no-ext-diff',
+    '--format=commit %H',
+    ...revisions,
+  ])
+  const ids = await gitOutput(checkout, ['patch-id', '--verbatim'], log)
+  return ids
+    .split('\n')
+    .filter((line) => line !== '')
+    .map((line) => {
+      const [patchId = '', commit = ''] = line.split(' ')
+      return { patchId, commit }
+    })
 }
 
 async function checkoutOnDisk(ghq: Ghq, repo: string): Promise<string | null> {
