@@ -1,11 +1,11 @@
-import { viaNativeHost } from '@monica/chat/native-host'
+import { isUnreachable, viaNativeHost } from '@monica/chat/native-host'
 import type {
   contract as taskContract,
   Pressable,
   RunButtonRow,
   RunButtonsOutput,
 } from '@monica/task/contract'
-import { createORPCClient, ORPCError } from '@orpc/client'
+import { createORPCClient } from '@orpc/client'
 import { RPCLink } from '@orpc/client/fetch'
 import type { ContractRouterClient } from '@orpc/contract'
 
@@ -14,8 +14,8 @@ export type RunButtonRequest =
   | { type: 'monica.runButtons'; refs: string[] }
   | { type: 'monica.press'; ref: string; run: Pressable }
 
-/** null なら Backend に届かなかった。 */
-export type RunButtonsReply = RunButtonsOutput | null
+/** null なら Backend に届かなかった。failed なら Backend が受け取ったうえで error を返した。 */
+export type RunButtonsReply = RunButtonsOutput | { failed: string } | null
 
 /** 押下の後に出す行か、Backend に届かなかったか error が返った理由。 */
 export type PressReply = { row: RunButtonRow } | { failed: string }
@@ -39,12 +39,11 @@ export function relayRunButton(
   }
 }
 
-// host が無い・Backend が居ない・古い token は、どれも desktop を起こせば直るので、まとめて null にする。
 async function tellButtons(client: Client, refs: string[]): Promise<RunButtonsReply> {
   try {
     return await client.task.runButtons({ refs })
-  } catch {
-    return null
+  } catch (error) {
+    return isUnreachable(error) ? null : { failed: messageOf(error) }
   }
 }
 
@@ -52,9 +51,12 @@ async function press(client: Client, ref: string, run: Pressable): Promise<Press
   try {
     return { row: await client.task.press({ ref, run }) }
   } catch (error) {
-    if (error instanceof ORPCError) return { failed: error.message }
-    return { failed: 'the monica desktop is not running' }
+    return { failed: isUnreachable(error) ? 'the monica desktop is not running' : messageOf(error) }
   }
+}
+
+function messageOf(error: unknown): string {
+  return error instanceof Error ? error.message : String(error)
 }
 
 function isRequest(message: unknown): message is RunButtonRequest {

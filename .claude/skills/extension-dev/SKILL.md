@@ -88,6 +88,8 @@ cdp.close();'
 - 押せない Run の tooltip は、agent-browser の `hover`（本物の mouse の経路）で出して `screenshot` で撮る。page の session に送った CDP の `Input.dispatchMouseEvent` では tooltip が出ない。focus で出すときは、先に page の空いた所を agent-browser の `mouse down`・`mouse up` で押して page に focus を移してから、agent-browser の `focus` を打つ。Chrome Extension も Backend も無しで試すときは、agent-browser で一覧か Issue の画面を開き、`bun scripts/github-page.ts <ws URL> inject '{ref} is blocked by acme/lib#3'` で、どの行（Issue の画面では header）にも押せない Run を出す `issues-page.ts` を注入する。
 - GitHub の一覧は行の中の要素に `tabindex="-1"` を付け、Tab の移動を自分の script で回すので、`tabIndex` や `focus()` の戻りでは focus が届くかを判断できない。CDP の `Input.dispatchKeyEvent` で Tab を送り、`document.activeElement` を読む。
 - manifest（`content_scripts` など）を変えると、Vite は dev の出力を書き直すが、Brave は Chrome Extension を読み直さない。service worker の target で `chrome.runtime.reload()` を呼ぶ。
+- dev では `chrome.runtime.reload()` の 1 秒ほど後に、CRXJS が github.com のページを読み込み直す。reload の前の content script（service worker に届かない）は残らないので、その振る舞いは Chrome Extension の無い agent-browser の session で確かめる。`github-page.ts` の `bundledContentScript` と同じく `issues-page.ts` を iife に bundle し、`sendMessage` が `Extension context invalidated.` で reject する偽の `chrome.runtime` と一緒にページで評価する。
+- Backend が `runButtons` や `press` に返す答え（error など）を決めて試すときは、Backend を起こさずに、偽の Backend の `Bun.serve` を起こして `$MONICA_HOME/backend.json` に `{ pid, port, token, extensionToken }` を書く。dev の host は、`pid` が生きていればその `port` と `extensionToken` を返す。偽の Backend の script は `apps/extension/` の下に一時で置く。repo の root からは `@monica/task` を解決できないため。
 
 ## 止める
 

@@ -1,7 +1,7 @@
 import { ORPCError } from '@orpc/client'
 
 import { askErrors, type UsageEvent } from '../contract.ts'
-import { BackendUnreachable } from './native-host.ts'
+import { isUnreachable } from './native-host.ts'
 
 /** 答えの場所に出す失敗。line は 1 行目、detail は CLI の原文などを出す詳しい行。 */
 export type Failure = { line: string; detail?: string }
@@ -24,18 +24,6 @@ const LIMIT_NAMES: Record<string, string> = {
 }
 
 const limitName = (rateLimitType: string) => LIMIT_NAMES[rateLimitType] ?? 'plan の'
-
-/**
- * Chromium の fetch は、Backend の居ない port でも、stream の途中で Backend が落ちても TypeError を投げる。
- * Native Messaging の host が Backend を引けないときと、起き直した Backend が古い Chrome Extension の token を 401 で断ったときも同じに数える。
- */
-export function isUnreachable(error: unknown): boolean {
-  return (
-    error instanceof TypeError ||
-    error instanceof BackendUnreachable ||
-    (error instanceof ORPCError && error.code === 'UNAUTHORIZED')
-  )
-}
 
 export function messageOf(error: unknown): string {
   return error instanceof Error ? error.message : String(error)

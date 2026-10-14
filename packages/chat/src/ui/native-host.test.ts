@@ -1,6 +1,6 @@
 import { afterEach, expect, spyOn, test } from 'bun:test'
 
-import { createORPCClient } from '@orpc/client'
+import { createORPCClient, ORPCError } from '@orpc/client'
 import { RPCLink } from '@orpc/client/fetch'
 import type { ContractRouterClient } from '@orpc/contract'
 import { implement } from '@orpc/server'
@@ -9,7 +9,7 @@ import { RPCHandler } from '@orpc/server/fetch'
 import { contract } from '../contract.ts'
 import { type ChatStore, createChatStore } from './chat-store.ts'
 import { FakeChrome } from './fake-chrome.ts'
-import { viaNativeHost } from './native-host.ts'
+import { BackendUnreachable, isUnreachable, viaNativeHost } from './native-host.ts'
 
 const cleanups: (() => void)[] = []
 afterEach(() => {
@@ -131,4 +131,31 @@ test('a banner put up for a stale Chrome Extension token comes down at the next 
     'Bearer restarted',
     'Bearer restarted',
   ])
+})
+
+async function staleTokenError(): Promise<unknown> {
+  const { chrome, client } = sidePanel()
+  chrome.nativeHost = { reply: { port: fakeBackend('restarted').port, token: 'stale' } }
+  return client.chat.prepare().then(
+    () => {
+      throw new Error('the Backend took the stale token')
+    },
+    (error: unknown) => error,
+  )
+}
+
+test.each([
+  ['fetch finds no Backend on the port', () => new TypeError('Failed to fetch')],
+  ['the native host names no Backend', () => new BackendUnreachable('not-running')],
+  ['the Backend refuses a stale Chrome Extension token', staleTokenError],
+])('a call is out of reach of the Backend when %s', async (_, error) => {
+  expect(isUnreachable(await error())).toBe(true)
+})
+
+test.each([
+  ['fails inside', new ORPCError('INTERNAL_SERVER_ERROR')],
+  ['refuses the input', new ORPCError('BAD_REQUEST')],
+  ['returns a declared error', new ORPCError('NOT_AUTHENTICATED', { defined: true })],
+])('a call reached the Backend when it %s', (_, error) => {
+  expect(isUnreachable(error)).toBe(false)
 })

@@ -17,7 +17,8 @@ import {
   type Unreadable,
 } from '../contract.ts'
 import { addressOf, type CurrentPage } from './current-page.ts'
-import { type Failure, failureOf, isUnreachable, retryingLine, usageLine } from './failure.ts'
+import { type Failure, failureOf, retryingLine, usageLine } from './failure.ts'
+import { isUnreachable } from './native-host.ts'
 import { noticeOf } from './notice.ts'
 import { type Reach, watchReach } from './reach.ts'
 

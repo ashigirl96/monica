@@ -1,4 +1,4 @@
-import { isUnreachable } from './failure.ts'
+import { isUnreachable } from './native-host.ts'
 
 const PROBE_EVERY_MS = 5000
 

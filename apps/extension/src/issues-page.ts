@@ -108,12 +108,16 @@ function refOf({ repo, number }: Issue): string {
   return `${repo}#${number}`
 }
 
-async function send<T>(request: RunButtonRequest): Promise<T | null> {
+// Chrome Extension の reload の後は、古い content script から service worker に届かない。
+const RELOADED = Symbol('monica reloaded')
+let monicaReloaded = false
+
+async function send<T>(request: RunButtonRequest): Promise<T | typeof RELOADED> {
   try {
     return (await chrome.runtime.sendMessage(request)) as T
   } catch {
-    // Chrome Extension の reload の後は、古い content script から service worker に届かない。
-    return null
+    monicaReloaded = true
+    return RELOADED
   }
 }
 
@@ -121,7 +125,7 @@ async function send<T>(request: RunButtonRequest): Promise<T | null> {
 let backendOutOfReach = false
 
 async function scan() {
-  if (backendOutOfReach) return
+  if (backendOutOfReach || monicaReloaded) return
   const asked = new Map<string, Slot[]>()
   for (const slot of slotsOnPage()) {
     const { host, ref } = slot
@@ -133,8 +137,10 @@ async function scan() {
   }
   if (asked.size === 0) return
   const reply = await send<RunButtonsReply>({ type: 'monica.runButtons', refs: [...asked.keys()] })
-  if (!reply) {
-    backendOutOfReach = true
+  if (reply === RELOADED) return
+  if (!reply) backendOutOfReach = true
+  // Backend が error を返した回は、次の DOM の変化で送り直す。error の多くは一時のもので、ページの読み込み直しを待たせないため。
+  if (!reply || 'failed' in reply) {
     for (const [ref, slots] of asked) {
       for (const { host } of slots)
         if (host.dataset.monicaRef === ref) delete host.dataset.monicaRef
@@ -282,13 +288,14 @@ function runButtonFor(
     button.textContent = PRESSED[run]
     refusal.textContent = ''
     const reply = await send<PressReply>({ type: 'monica.press', ref, run })
-    if (reply && 'row' in reply) {
+    if (reply !== RELOADED && 'row' in reply) {
       redraw(ref, reply.row)
       return
     }
     button.disabled = false
     button.textContent = LABELS[run]
-    refusal.textContent = reply ? reply.failed : 'Monica was reloaded; reload this page'
+    refusal.textContent =
+      reply === RELOADED ? 'Monica was reloaded; reload this page' : reply.failed
   })
   return { cell, refusal }
 }
