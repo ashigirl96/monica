@@ -3,7 +3,7 @@ import { dirname } from 'node:path'
 
 import type { Bench } from './bench.ts'
 import type { CloseRefusal } from './contract.ts'
-import { branchOf, checkoutOf, type Ghq, git, succeeds } from './prepare.ts'
+import { branchOf, checkoutOf, type Ghq, git, gitPiped, succeeds } from './prepare.ts'
 import type { IssueRef } from './ref.ts'
 
 export type InspectedWorktree = {
@@ -74,6 +74,7 @@ export async function removeWorktree(
 }
 
 // fetch しないので push した commit は merge されていなくても数えず、squash merge で remote から消えた commit も手元にある merged PR の head から辿れれば数えない。
+// remote で rebase してから merge された branch の commit は head から辿れないので、同じ patch が head にあるかで見る。
 async function hasUnpublishedCommits(
   checkout: string,
   branch: string,
@@ -82,14 +83,65 @@ async function hasUnpublishedCommits(
   const commits = await git(
     checkout,
     'rev-list',
-    '--max-count=1',
     '--ignore-missing',
     `refs/heads/${branch}`,
     '--not',
     '--remotes',
     ...mergedHeads,
   )
-  return commits !== ''
+  if (commits === '') return false
+  const heads = await presentCommits(checkout, mergedHeads)
+  if (heads.length === 0) return true
+  // revert して積み直した patch を head にある 1 つで 2 度免除しないよう、patch-id を数で突き合わせる。
+  const unmatched = new Map<string, number>()
+  for (const patchId of await patchIds(checkout, [...heads, '--not', `refs/heads/${branch}`])) {
+    unmatched.set(patchId, (unmatched.get(patchId) ?? 0) + 1)
+  }
+  const unreached = commits.split('\n')
+  let landed = 0
+  for (const patchId of await patchIds(checkout, ['--no-walk', ...unreached])) {
+    const left = unmatched.get(patchId) ?? 0
+    if (left === 0) continue
+    unmatched.set(patchId, left - 1)
+    landed++
+  }
+  if (landed < unreached.length) return true
+  // patch-id は行番号を見ないので、同じ文脈が繰り返す file では別の場所への変更も一致する。
+  for (const head of heads) {
+    if (await absorbs(checkout, head, branch)) return false
+  }
+  return true
+}
+
+/** branch を head に merge しても head の tree が変わらない。 */
+async function absorbs(checkout: string, head: string, branch: string): Promise<boolean> {
+  const [merged, own] = await Promise.all([
+    git(checkout, 'merge-tree', '--write-tree', head, `refs/heads/${branch}`).catch(() => null),
+    git(checkout, 'rev-parse', `${head}^{tree}`),
+  ])
+  return merged === own
+}
+
+async function presentCommits(checkout: string, commits: string[]): Promise<string[]> {
+  const present: string[] = []
+  for (const commit of commits) {
+    if (await succeeds(git(checkout, 'cat-file', '-e', `${commit}^{commit}`))) present.push(commit)
+  }
+  return present
+}
+
+// git cherry と既定の git patch-id は空白を除いて比べるので、空白だけ違う commit まで同じ patch とみなす。
+async function patchIds(checkout: string, revisions: string[]): Promise<string[]> {
+  // 文字列を経ると UTF-8 でない byte が置換文字に潰れ、違う patch が同じ patch-id になる。
+  const ids = await gitPiped(
+    checkout,
+    ['log', '--patch', '--no-color', '--no-ext-diff', '--format=commit %H', ...revisions],
+    ['patch-id', '--verbatim'],
+  )
+  return ids
+    .split('\n')
+    .filter((line) => line !== '')
+    .map((line) => line.slice(0, line.indexOf(' ')))
 }
 
 async function checkoutOnDisk(ghq: Ghq, repo: string): Promise<string | null> {

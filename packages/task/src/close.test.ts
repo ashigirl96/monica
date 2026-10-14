@@ -18,7 +18,7 @@ import {
   withWorktreeBench,
 } from './close-fixture.ts'
 import type { TaskChange } from './contract.ts'
-import { commit, git } from './fake-ghq.ts'
+import { commit, git, stackedThenRebased } from './fake-ghq.ts'
 import { issue } from './schema.ts'
 import { cleanUp, failure } from './testing.ts'
 
@@ -192,6 +192,44 @@ test('commits put on issue-n after its pull request was merged still stop close'
   commit(cwd, { 'more.txt': { content: 'more\n' } }, 'more')
 
   const error = await failure(client.close({ ref }))
+
+  expect(error.data).toEqual({ reasons: [{ kind: 'unpublished_commits', branch: 'issue-12' }] })
+})
+
+function rebasedAndMerged(
+  { cwd, ghq, github }: Awaited<ReturnType<typeof withWorktreeBench>>,
+  { mainMovedOn }: { mainMovedOn: boolean },
+) {
+  const rebasedHead = stackedThenRebased(cwd, ghq.checkout('acme/app'), { mainMovedOn })
+  github.pullRequest('acme/app#30', {
+    title: 'Ship it',
+    headRef: 'issue-12',
+    headOid: rebasedHead,
+    state: 'merged',
+  })
+}
+
+test.each([false, true])(
+  'a branch whose pull request was rebased onto main on the remote and merged passes close without --force, and close deletes it (main moved on before the rebase: %p)',
+  async (mainMovedOn) => {
+    const fixture = await withWorktreeBench()
+    rebasedAndMerged(fixture, { mainMovedOn })
+
+    expect(await fixture.client.close({ ref })).toMatchObject({
+      removedWorktree: fixture.cwd,
+      deletedBranch: 'issue-12',
+      warnings: [],
+    })
+    expect(hasBranch(fixture.ghq.checkout('acme/app'), 'issue-12')).toBe(false)
+  },
+)
+
+test('a commit whose patch no merged pull request has still stops close of a rebased branch', async () => {
+  const fixture = await withWorktreeBench()
+  rebasedAndMerged(fixture, { mainMovedOn: true })
+  commit(fixture.cwd, { 'c.txt': { content: 'c\n' } }, 'c1')
+
+  const error = await failure(fixture.client.close({ ref }))
 
   expect(error.data).toEqual({ reasons: [{ kind: 'unpublished_commits', branch: 'issue-12' }] })
 })
