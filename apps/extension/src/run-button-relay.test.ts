@@ -15,6 +15,7 @@ const HOST = 'com.ashigirl96.monica_dev'
 const TOKEN = 'extension-token'
 
 const BENCH_FAILED = 'could not find the checkout of acme/app#13'
+const BUTTONS_FAILED = 'the Task store is locked'
 
 /** token の口の task の 2 つ。違う token には hono の bearerAuth と同じく 401 を返す。届いた呼び出しを残す。 */
 function fakeBackend() {
@@ -24,6 +25,7 @@ function fakeBackend() {
     task: os.router({
       runButtons: os.runButtons.handler(({ input }) => {
         calls.push({ path: 'runButtons', input })
+        if (input.refs.some((ref) => ref.endsWith('#500'))) throw new Error(BUTTONS_FAILED)
         return {
           buttons: input.refs.map((ref) => ({
             ref,
@@ -134,8 +136,18 @@ test.each([
   ).toBeNull()
   expect(
     await relayRunButton(HOST, { type: 'monica.press', ref: 'acme/app#12', run: 'new' }),
-  ).toEqual({ failed: expect.any(String) })
+  ).toEqual({ failed: 'the monica desktop is not running' })
   expect(backend.calls).toEqual([])
+})
+
+test('the relay tells the Backend failed, not that it is out of reach, when the Backend returns an error for the buttons', async () => {
+  const backend = fakeBackend()
+  nativeHost({ port: backend.port, token: TOKEN })
+
+  const reply = await relayRunButton(HOST, { type: 'monica.runButtons', refs: ['acme/app#500'] })
+
+  expect(reply).toEqual({ failed: expect.any(String) })
+  expect(backend.calls).toEqual([{ path: 'runButtons', input: { refs: ['acme/app#500'] } }])
 })
 
 test('the relay leaves a message that is not for it to other listeners', async () => {

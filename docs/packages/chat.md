@@ -284,7 +284,7 @@ code は上から順に当てる。
 
 ### side panel の文言（`src/ui/failure.ts`）
 
-side panel は `ORPCError`（`@orpc/client`）の `code` で分け、`data` は contract の `askErrors` の schema で `safeParse` して読む（task の `bench-close.ts` と同じ形）。Backend の `message` は出さず、文は chat の ui が作る。Backend に届かないことは、`chat.prepare` と `chat.ask` の失敗が、`TypeError`、`BackendUnreachable`（host が無い・落ちた・Backend が居ない）、`ORPCError` の `UNAUTHORIZED`（古い Chrome Extension の token）のどれかであることで見分ける（`isUnreachable`、下の「Backend の探し方」）。止めるボタンの abort（`DOMException` の AbortError）は失敗にしない。
+side panel は `ORPCError`（`@orpc/client`）の `code` で分け、`data` は contract の `askErrors` の schema で `safeParse` して読む（task の `bench-close.ts` と同じ形）。Backend の `message` は出さず、文は chat の ui が作る。Backend に届かないことは、`chat.prepare` と `chat.ask` の失敗が、`TypeError`、`BackendUnreachable`（host が無い・落ちた・Backend が居ない）、`ORPCError` の `UNAUTHORIZED`（古い Chrome Extension の token）のどれかであることで見分ける（`src/ui/native-host.ts` の `isUnreachable`、下の「Backend の探し方」）。止めるボタンの abort（`DOMException` の AbortError）は失敗にしない。
 
 | 場面 | side panel が見るもの | 答えの場所に出す 1 行 | 詳しい行 |
 |---|---|---|---|
@@ -340,7 +340,7 @@ side panel は Backend の token の口を、Native Messaging の host から受
 - `viaNativeHost(host 名)` は RPCLink の `url` と `headers` を返す。どちらも RPC を呼ぶたびに `chrome.runtime.sendNativeMessage(host 名, {})` で host に問い合わせ、`{ port, token }` から `http://127.0.0.1:<port>/rpc` と `Authorization: Bearer <token>` を作る。引いた値は覚えない。Backend が起き直すと port も token も変わるため。
 - oRPC は 1 回の呼び出しの `url` と `headers` に同じ options の object を渡すので、それを key にした WeakMap で、1 回の呼び出しの問い合わせを 1 回にする。oRPC が別の object を渡すようになっても、問い合わせが 2 回になるだけで、送り先は変わらない。
 - service worker を経由せず、side panel の page から直に呼ぶ（ADR-0028 の「RPC は side panel の page から呼ぶ」と同じ）。
-- host が見つからない（`Specified native messaging host not found.`）、host が落ちた（`Native host has exited.` など）、host が `{ error: 'not-running' }` を返した（Backend が居ない）は、`BackendUnreachable` を投げる。Backend が起き直す前の Chrome Extension の token で呼んだ 401 は、client では `ORPCError` の `UNAUTHORIZED` になる。どれも `TypeError` と同じく「desktop に届かない」に数え、帯を出して 5 秒おきと focus の `chat.prepare` で確かめ直す（上の「Backend の不在の帯」）。確かめ直しも host に問い合わせ直すので、Backend が起き直していれば新しい port と token で届く。
+- host が見つからない（`Specified native messaging host not found.`）、host が落ちた（`Native host has exited.` など）、host が `{ error: 'not-running' }` を返した（Backend が居ない）は、`BackendUnreachable` を投げる。Backend が起き直す前の Chrome Extension の token で呼んだ 401 は、client では `ORPCError` の `UNAUTHORIZED` になる。どれも `TypeError` と同じく「desktop に届かない」に数え（`isUnreachable`。Run ボタンの中継も同じ判定を使う）、帯を出して 5 秒おきと focus の `chat.prepare` で確かめ直す（上の「Backend の不在の帯」）。確かめ直しも host に問い合わせ直すので、Backend が起き直していれば新しい port と token で届く。
 - 同じ 401 でも、Claude Code の login が無い `NOT_AUTHENTICATED` は宣言した error で、Backend に届いている。code で分ける。
 
 ### 確かめたこと
@@ -497,7 +497,7 @@ React に依らない `createChatStore(client, storage)` が Chat を持ち、`C
   - 偽の client は、Backend の宣言した error を `@orpc/client` の `ORPCError`（`defined: true`、contract の `askErrors` の status と message）で、届かないことを `TypeError` で投げ分ける。ui の entry は server を import できないので、router を in-process で呼べないため。
   - 失敗の文言は store の entry の `failure` で確かめる。時刻の期待値は local の `Date` から作り、時刻帯に依らせない。
   - 帯の 5 秒おきの確かめ直しは `setInterval` を `spyOn` で捕まえて callback を手で呼び、focus は `open` に渡した `EventTarget` に `focus` の event を出す。
-- `native-host.test.ts` は、`fake-chrome.ts` の偽の `chrome.runtime.sendNativeMessage` と、本物の RPCLink と `viaNativeHost` で確かめる。Backend は、oRPC の `implement(contract)` の chat を載せ、違う token には hono の `bearerAuth` と同じく 401 を返す `Bun.serve` で偽る。偽の `sendNativeMessage` は `nativeHost` に置いた返事を返し、置いていなければ host の manifest が無いときと同じ message で reject する。呼ばれた host 名と message は `nativeMessages` に残る。呼ぶたびに問い合わせ直して、その時の port と token で呼ぶこと、host が無い・落ちた・Backend が居ない・古い Chrome Extension の token のどれでも帯が出ること、帯の確かめ直しが新しい token で届いて帯を消すことを見る。
+- `native-host.test.ts` は、`fake-chrome.ts` の偽の `chrome.runtime.sendNativeMessage` と、本物の RPCLink と `viaNativeHost` で確かめる。Backend は、oRPC の `implement(contract)` の chat を載せ、違う token には hono の `bearerAuth` と同じく 401 を返す `Bun.serve` で偽る。偽の `sendNativeMessage` は `nativeHost` に置いた返事を返し、置いていなければ host の manifest が無いときと同じ message で reject する。呼ばれた host 名と message は `nativeMessages` に残る。呼ぶたびに問い合わせ直して、その時の port と token で呼ぶこと、host が無い・落ちた・Backend が居ない・古い Chrome Extension の token のどれでも帯が出ること、帯の確かめ直しが新しい token で届いて帯を消すことを見る。`isUnreachable` は、`TypeError`・`BackendUnreachable`・本物の RPCLink で受けた 401 で true に、500・`BAD_REQUEST`・宣言した error で false になることを表で見る。
 - `answer.test.tsx` は `react-dom/server` の `renderToStaticMarkup` で markdown の描画を確かめる。react-dom は devDependency。
 
 ### 実機で確かめたこと

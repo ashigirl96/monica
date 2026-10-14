@@ -1,3 +1,4 @@
+import { ORPCError } from '@orpc/client'
 import { z } from 'zod'
 
 /** Native Messaging の host が返す、Backend の token の口の port と Chrome Extension の token（ADR-0034）。 */
@@ -8,6 +9,18 @@ type Address = z.infer<typeof AddressSchema>
 /** host が無い・落ちた・Backend が居ない。fetch の TypeError と同じく「desktop に届かない」に数える。 */
 export class BackendUnreachable extends Error {
   override name = 'BackendUnreachable'
+}
+
+/**
+ * Chromium の fetch は、Backend の居ない port でも、stream の途中で Backend が落ちても TypeError を投げる。
+ * Native Messaging の host が Backend を引けないときと、起き直した Backend が古い Chrome Extension の token を 401 で断ったときも同じに数える。
+ */
+export function isUnreachable(error: unknown): boolean {
+  return (
+    error instanceof TypeError ||
+    error instanceof BackendUnreachable ||
+    (error instanceof ORPCError && error.code === 'UNAUTHORIZED')
+  )
 }
 
 /**
