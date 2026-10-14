@@ -14,14 +14,15 @@ import type {
   runErrors,
 } from './contract.ts'
 import { isLinkedIssue, openBlockersOf } from './copy.ts'
+import { type FoundOrTracked, findOrTrack, isAsked, refreshTask } from './find-task.ts'
 import type { GitHubIssue } from './github.ts'
-import { type FoundTask, findOpenTask, TaskStateRefusal, taskIfTracked } from './open-task.ts'
+import { type FoundTask, TaskStateRefusal, taskIfTracked } from './open-task.ts'
 import { key, parsedOrNull, readIssue, readIssues } from './read-issues.ts'
 import { formatRef, type IssueRef, parseRef } from './ref.ts'
 import { type Launch, newRun, openRun, refuseUnsendable, resumeOf } from './run-claude.ts'
 import { isResumable, runAgentSessionsByTask } from './run.ts'
 import { issue, run } from './schema.ts'
-import { type FoundOrTracked, findOrTrack, isAsked, type SyncDeps, syncOrUseCopy } from './sync.ts'
+import type { SyncDeps } from './sync.ts'
 
 type Deps = SyncDeps & BenchDeps
 
@@ -250,9 +251,7 @@ async function reopenFromButton(deps: Deps, tracked: FoundTask) {
 type Synced = { type: 'synced'; found: FoundTask; warnings: string[]; facts: IssueFacts }
 
 async function syncForNewRun(deps: SyncDeps, found: FoundTask, read?: IssueFacts): Promise<Synced> {
-  const warnings = await syncOrUseCopy(deps, found.issue)
-  // sync は repo の改名を写すので、名前でなく行の id で引き直す。
-  const synced = findOpenTask(deps.db, eq(issue.id, found.issue.id), formatRef(found.issue))
+  const { found: synced, warnings } = await refreshTask(deps, found, 'run')
   const facts = freshestFacts(deps.db, synced.issue.id, { read, sync: { warnings } })
   return { type: 'synced', found: synced, warnings, facts }
 }

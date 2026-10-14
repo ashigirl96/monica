@@ -7,11 +7,12 @@ import { and, eq } from 'drizzle-orm'
 import { type BenchDeps, insertBench } from './bench.ts'
 import type { AttachOutput } from './contract.ts'
 import { callerTerminalSession } from './current.ts'
+import { findOrTrack } from './find-task.ts'
 import { checkoutUnder, type Ghq, messageOf } from './prepare.ts'
 import { formatRef, type IssueRef, parseRef } from './ref.ts'
 import { insertRuns, liveAgentSession } from './run.ts'
 import { issue, run } from './schema.ts'
-import { findOrTrack, type SyncDeps } from './sync.ts'
+import type { SyncDeps } from './sync.ts'
 
 type GhqRoot = { path: string } | { error: string }
 
