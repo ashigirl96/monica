@@ -150,7 +150,7 @@ Backend を本物の ptyd に繋いで起こす。Shell の役（親として生
 
    Backend に届かないときは、Vite が proxy の接続を応答なしで切り（release の口と同じく、画面には network error に見える）、`web.log` に `http proxy error` が出る。
 
-5. 確かめる Note は、ブラウザの口に RPCLink を向けた script で入れる。router は `{ note }` の下にあり、GET 以外の request には `Sec-Fetch-Site: same-origin` か、`Sec-Fetch-Site: none` と `Sec-Fetch-Mode: cors` の組（Chrome Extension の fetch が付けるもの）が要る。script を `packages/note/` の下に置くと `@orpc/*` と `./src/contract.ts` を解決できるので、終わったら消す。
+5. 確かめる Note は、ブラウザの口に RPCLink を向けた script で入れる。ユーザーの Note で起きた不具合を再現するときは、ユーザーの口（URL の port）の `POST /rpc/note/get` で本文を読み、`repoNote.create` と `save` で同じ本文を入れる。ユーザーの Note にはキーを送らない。router は `{ note }` の下にあり、GET 以外の request には `Sec-Fetch-Site: same-origin` か、`Sec-Fetch-Site: none` と `Sec-Fetch-Mode: cors` の組（Chrome Extension の fetch が付けるもの）が要る。script を `packages/note/` の下に置くと `@orpc/*` と `./src/contract.ts` を解決できるので、終わったら消す。
 
    ```ts
    const root: ContractRouterClient<{ note: typeof contract }> = createORPCClient(
@@ -166,6 +166,12 @@ Backend を本物の ptyd に繋いで起こす。Shell の役（親として生
    agent-browser --session monica-s2 eval "(() => { const dt = new DataTransfer(); for (const [t, v] of Object.entries(window.__copied)) dt.setData(t, v); document.querySelector('.ProseMirror').dispatchEvent(new ClipboardEvent('paste', { clipboardData: dt, bubbles: true, cancelable: true })) })()"
    agent-browser --session monica-s2 eval "document.querySelector('a[data-note-mention=\"note-3\"]').dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, metaKey: true }))"
    ```
+
+   エディタのカーソル移動をキーで確かめるとき:
+
+   - フォーカスしてから 1 秒待ってキーを送る。フォーカスから 200ms 以内に選択が文書の先頭の textblock へ来ると、prosemirror-view が選択を state の位置へ戻し、移動が失敗に見える。
+   - headless の Chromium は macOS の ⌃P・⌃N などの native の行移動を起こさない（keymap の command には届く）。native の移動は矢印キーで確かめる。prosemirror-view の中で ↑ と ⌃P は同じ分岐を通る。
+   - prosemirror-view のキーの処理を外してブラウザの移動だけを見るときは、`getSelection().modify('move', 'backward', 'line')` を eval で呼ぶ。
 
    エディタの中の文字は `find text … click` では押せないので、`click '[data-block-id="<id>"] [data-block-content]'` のように CSS の selector で押す。
 
