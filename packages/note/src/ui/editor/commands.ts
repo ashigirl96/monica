@@ -1,5 +1,5 @@
 import type { Node as PMNode, NodeType, Attrs, Mark, ResolvedPos } from 'prosemirror-model'
-import { TextSelection } from 'prosemirror-state'
+import { NodeSelection, Selection, TextSelection } from 'prosemirror-state'
 import type { Command, EditorState, Transaction } from 'prosemirror-state'
 
 import {
@@ -768,6 +768,22 @@ export const exitDocStart: Command = (state, dispatch, view) => {
   }
   clearBlockSelection(tr)
   dispatch?.(tr.scrollIntoView())
+  return true
+}
+
+// prosemirror-view の既定の行移動は、先に DOM のカーソルを todo の checkbox（contenteditable=false、
+// 行の外に absolute）の前へ移し（skipIgnoredNodes）、Chrome はそこから上へ動けないため。
+export const moveUpFromBlockStart: Command = (state, dispatch, view) => {
+  const sel = state.selection
+  if (!view || !(sel instanceof TextSelection) || !sel.empty) return false
+  const { $head } = sel
+  if (!$head.parent.inlineContent || $head.parentOffset !== 0) return false
+  // 画像は native の行移動では選べず、prosemirror-view だけが NodeSelection にできる
+  const above = Selection.findFrom(state.doc.resolve($head.before()), -1)
+  if (!above || above instanceof NodeSelection) return false
+  const domSel = view.dom.ownerDocument.getSelection()
+  if (!domSel) return false
+  if (dispatch) domSel.modify('move', 'backward', 'line')
   return true
 }
 
