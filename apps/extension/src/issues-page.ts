@@ -110,18 +110,19 @@ function refOf({ repo, number }: Issue): string {
 
 // Chrome Extension の reload の後は、古い content script から service worker に届かない。
 const RELOADED = Symbol('monica reloaded')
+let monicaReloaded = false
 
 async function send<T>(request: RunButtonRequest): Promise<T | typeof RELOADED> {
   try {
     return (await chrome.runtime.sendMessage(request)) as T
   } catch {
+    monicaReloaded = true
     return RELOADED
   }
 }
 
 // Backend に届かなかったら、desktop を起こして画面に戻る（focus）まで問い直さない。DOM の変化のたびに host を起こさないため。
 let backendOutOfReach = false
-let monicaReloaded = false
 
 async function scan() {
   if (backendOutOfReach || monicaReloaded) return
@@ -136,10 +137,7 @@ async function scan() {
   }
   if (asked.size === 0) return
   const reply = await send<RunButtonsReply>({ type: 'monica.runButtons', refs: [...asked.keys()] })
-  if (reply === RELOADED) {
-    monicaReloaded = true
-    return
-  }
+  if (reply === RELOADED) return
   if (!reply) backendOutOfReach = true
   // Backend が error を返した回は、次の DOM の変化で送り直す。error の多くは一時のもので、ページの読み込み直しを待たせないため。
   if (!reply || 'failed' in reply) {
