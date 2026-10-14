@@ -1,4 +1,4 @@
-import { agentSession, tab } from '@monica/workbench/schema'
+import { tab } from '@monica/workbench/schema'
 import type { Db } from '@monica/workbench/server'
 import { ORPCError, type ORPCErrorConstructorMap } from '@orpc/server'
 import { and, eq, ne } from 'drizzle-orm'
@@ -11,8 +11,8 @@ import type { FoundTask } from './open-task.ts'
 import { messageOf } from './prepare.ts'
 import { formatRef, parseRef } from './ref.ts'
 import { describeRefusal } from './refusal.ts'
-import { liveAgentSession } from './run.ts'
-import { bench, issue, pullRequest, run, task, taskPullRequest } from './schema.ts'
+import { activeRunsBesides } from './run.ts'
+import { bench, issue, pullRequest, task, taskPullRequest } from './schema.ts'
 import type { SyncDeps } from './sync.ts'
 import { inspectWorktree, removeWorktree } from './teardown.ts'
 
@@ -56,7 +56,7 @@ async function closeReserved(
   const caller = input.terminalSessionId
   if (!force) {
     const reasons = [
-      ...liveRunsBesides(deps.db, found.issue.id, caller).map(asRefusal),
+      ...activeRunsBesides(deps.db, found.issue.id, caller).map(asRefusal),
       ...(worktree?.refusals ?? []),
     ]
     if (reasons.length > 0) {
@@ -71,8 +71,8 @@ async function closeReserved(
     : { removedWorktree: null, deletedBranch: null, warnings: [] }
   const closed = deps.db.transaction((tx) => {
     const now = findTask(tx, eq(issue.id, found.issue.id), ref, 'close')
-    // git を待つ間に Bench の Tab で起こした claude は hook から Run になっているので、呼び手と同じく Tab を残す。
-    const lateRuns = force ? [] : liveRunsBesides(tx, found.issue.id, caller)
+    // git を待つ間に live になった Run（Bench の Tab で起こしたものと、Bench の外で resume したもの）は、呼び手と同じく Tab を残す。
+    const lateRuns = force ? [] : activeRunsBesides(tx, found.issue.id, caller)
     tx.update(task).set({ closedAt: new Date() }).where(eq(task.issueId, found.issue.id)).run()
     let spared = false
     if (now.bench) {
@@ -95,7 +95,7 @@ async function closeReserved(
       ...warnings,
       ...removed.warnings,
       ...closed.lateRuns.map(
-        (r) => `claude ${r.agentSessionId} started in the Bench while closing, so its Tab stays`,
+        (r) => `claude ${r.agentSessionId} became a live Run while closing, so its Tab stays`,
       ),
     ],
   }
@@ -165,34 +165,10 @@ function mergedBranchHeads(db: Db, taskIssueId: number): string[] {
     .map((row) => row.headOid)
 }
 
-// close を頼んだ agent の Run は、close の後も呼び手の Tab に残るので止めない。
-// Tab の無い Terminal Session は Terminate を予約した後の終わりかけなので、その Run も止めない（ADR-0023）。
-function liveRunsBesides(db: Pick<Db, 'select'>, taskIssueId: number, caller: string | undefined) {
-  return db
-    .select({
-      agentSessionId: agentSession.sessionId,
-      state: agentSession.state,
-      terminalSessionId: agentSession.terminalSessionId,
-    })
-    .from(run)
-    .innerJoin(agentSession, eq(agentSession.sessionId, run.agentSessionId))
-    .innerJoin(tab, eq(tab.terminalSessionId, agentSession.terminalSessionId))
-    .where(
-      and(
-        eq(run.taskIssueId, taskIssueId),
-        liveAgentSession,
-        caller === undefined ? undefined : ne(agentSession.terminalSessionId, caller),
-      ),
-    )
-    .orderBy(run.id)
-    .all()
-    .flatMap((row) => (row.state === 'ended' ? [] : [{ ...row, state: row.state }]))
-}
-
 function asRefusal({
   agentSessionId,
   state,
-}: ReturnType<typeof liveRunsBesides>[number]): CloseRefusal {
+}: ReturnType<typeof activeRunsBesides>[number]): CloseRefusal {
   return { kind: 'active_run', agentSessionId, state }
 }
 

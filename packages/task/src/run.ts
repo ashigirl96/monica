@@ -1,9 +1,10 @@
 import { existsSync } from 'node:fs'
 
 import { agentSession, tab } from '@monica/workbench/schema'
-import type { Db, Tx } from '@monica/workbench/server'
-import { and, eq, inArray, isNull, ne } from 'drizzle-orm'
+import { type Db, terminating, type Tx } from '@monica/workbench/server'
+import { and, eq, inArray, isNull, ne, not, sql } from 'drizzle-orm'
 
+import type { LiveRun } from './contract.ts'
 import type { RunAgentSession } from './display-state.ts'
 import { formatRef } from './ref.ts'
 import { bench, issue, run } from './schema.ts'
@@ -69,6 +70,7 @@ export function refOfRunTask(db: Db, agentSessionId: string): string | null {
   return found ? formatRef(found) : null
 }
 
+// 見せる用の Run。Terminating な Terminal Session の Run も Exit の記録まで live と読む。
 export function runAgentSessionsByTask(db: Pick<Db, 'select'>, taskIssueIds: number[]) {
   const rows = db
     .select({
@@ -89,4 +91,31 @@ export function runAgentSessionsByTask(db: Pick<Db, 'select'>, taskIssueIds: num
     byTask.set(taskIssueId, [...(byTask.get(taskIssueId) ?? []), row])
   }
   return (taskIssueId: number) => byTask.get(taskIssueId) ?? []
+}
+
+// ActiveRun。呼び手の Run は close の後も呼び手の Tab に残り、Terminating な Terminal Session の Run は終わったものと読むので除く（ADR-0023）。
+export function activeRunsBesides(
+  reader: Pick<Db, 'select'>,
+  taskIssueId: number,
+  caller: string | undefined,
+) {
+  return reader
+    .select({
+      agentSessionId: agentSession.sessionId,
+      // where の liveAgentSession が ended を除く。
+      state: sql<LiveRun['state']>`${agentSession.state}`,
+      terminalSessionId: agentSession.terminalSessionId,
+    })
+    .from(run)
+    .innerJoin(agentSession, eq(agentSession.sessionId, run.agentSessionId))
+    .where(
+      and(
+        eq(run.taskIssueId, taskIssueId),
+        liveAgentSession,
+        not(terminating(reader, agentSession.terminalSessionId)),
+        caller === undefined ? undefined : ne(agentSession.terminalSessionId, caller),
+      ),
+    )
+    .orderBy(run.id)
+    .all()
 }

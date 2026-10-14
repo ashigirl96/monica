@@ -151,7 +151,7 @@ test("a claude that becomes a Run while close removes the worktree keeps its Tab
     removedWorktree: fixture.cwd,
     deletedBranch: 'issue-12',
     spared: false,
-    warnings: ['claude s-1 started in the Bench while closing, so its Tab stays'],
+    warnings: ['claude s-1 became a live Run while closing, so its Tab stays'],
   })
   expect(db.select().from(runspace).all()).toMatchObject([{ id: runspaceId, owned: false }])
   expect(tabsOf(fixture)).toEqual([{ terminalSessionId: claudeTab }])
