@@ -11,7 +11,7 @@ import { dirname, join } from 'node:path'
 
 import type { Ghq } from './prepare.ts'
 
-export type Files = Record<string, { content: string; mode?: number }>
+export type Files = Record<string, { content: string | Uint8Array; mode?: number }>
 
 // auto maintenance は git が返った後も裏で .git/objects/maintenance.lock を作っては消し、snapshot の走査と競合する。
 export function git(cwd: string, ...args: string[]): string {
@@ -43,6 +43,28 @@ export function commit(repo: string, files: Files, message: string) {
     message,
   )
   return git(repo, 'rev-parse', 'HEAD')
+}
+
+const a1: Files = { 'a.txt': { content: 'a\n' } }
+const b1: Files = { 'b.txt': { content: 'b\n' } }
+
+/**
+ * worktree の branch に `a` を入れた a1 と、その上に b1 を積む。a1 の PR は `squashOfA` で squash merge され、b1 の PR は remote で main に rebase してから merge された。
+ * rebase した b1 の commit を返す。checkout にはあるが、どの remote の branch からも辿れない。
+ */
+export function stackedThenRebased(
+  worktree: string,
+  checkout: string,
+  { mainMovedOn, a = a1, squashOfA = a }: { mainMovedOn: boolean; a?: Files; squashOfA?: Files },
+) {
+  commit(worktree, a, 'a1')
+  commit(worktree, b1, 'b1')
+  git(checkout, 'switch', '--quiet', '--detach', 'origin/main')
+  commit(checkout, squashOfA, 'A (#1)')
+  if (mainMovedOn) commit(checkout, { 'other.txt': { content: 'other\n' } }, 'other')
+  const rebasedHead = commit(checkout, b1, 'b1')
+  git(checkout, 'switch', '--quiet', '-')
+  return rebasedHead
 }
 
 type Snapshot = { dirs: string[]; files: { path: string; data: Buffer; mode: number }[] }
