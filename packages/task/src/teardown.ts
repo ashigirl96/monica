@@ -105,7 +105,21 @@ async function hasUnpublishedCommits(
     unmatched.set(patchId, left - 1)
     landed++
   }
-  return landed < unreached.length
+  if (landed < unreached.length) return true
+  // patch-id は行番号を見ないので、同じ文脈が繰り返す file では別の場所への変更も一致する。
+  for (const head of heads) {
+    if (await absorbs(checkout, head, branch)) return false
+  }
+  return true
+}
+
+/** branch を head に merge しても head の tree が変わらない。 */
+async function absorbs(checkout: string, head: string, branch: string): Promise<boolean> {
+  const [merged, own] = await Promise.all([
+    git(checkout, 'merge-tree', '--write-tree', head, `refs/heads/${branch}`).catch(() => null),
+    git(checkout, 'rev-parse', `${head}^{tree}`),
+  ])
+  return merged === own
 }
 
 async function presentCommits(checkout: string, commits: string[]): Promise<string[]> {

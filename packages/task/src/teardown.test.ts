@@ -3,7 +3,7 @@ import { existsSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
-import { commit, fakeGhq, git, stackedThenRebased } from './fake-ghq.ts'
+import { commit, fakeGhq, type Files, git, stackedThenRebased } from './fake-ghq.ts'
 import { inspectWorktree, removeWorktree } from './teardown.ts'
 
 const cleanups: (() => void)[] = []
@@ -13,11 +13,11 @@ afterEach(() => {
 
 const forIssue = { repo: 'acme/app', number: 12 }
 
-function worktreeOnIssue12() {
+function worktreeOnIssue12(files: Files = {}) {
   const scratch = mkdtempSync(join(tmpdir(), 'monica-teardown-'))
   cleanups.push(() => rmSync(scratch, { recursive: true, force: true }))
   const ghq = fakeGhq(scratch)
-  ghq.origin('acme/app')
+  ghq.origin('acme/app', files)
   ghq.clone('acme/app')
   const checkout = ghq.checkout('acme/app')
   const path = join(scratch, 'worktree')
@@ -156,6 +156,26 @@ test('a patch put back on the branch after a revert stops the removal, though th
   commit(path, { 'a.txt': { content: 'a\n' } }, 'add a again')
   git(checkout, 'switch', '--quiet', '--detach', 'origin/main')
   const mergedHead = addThenRevert(checkout)
+  git(checkout, 'switch', '--quiet', '-')
+
+  const inspected = await inspectWorktree(ghq.client, { cwd: path, branch: 'issue-12' }, forIssue, [
+    mergedHead,
+  ])
+
+  expect(inspected.refusals).toEqual([{ kind: 'unpublished_commits', branch: 'issue-12' }])
+})
+
+test('a change to one of two blocks with the same context stops the removal, though the merged head changed the other block with the same patch', async () => {
+  const block = 'a\nb\nc\nfoo\nd\ne\nf\n'
+  const { ghq, checkout, path } = worktreeOnIssue12({ 'twice.txt': { content: block + block } })
+  const changed = block.replace('foo', 'FOO')
+  commit(path, { 'twice.txt': { content: changed + block } }, 'change the first foo')
+  git(checkout, 'switch', '--quiet', '--detach', 'origin/main')
+  const mergedHead = commit(
+    checkout,
+    { 'twice.txt': { content: block + changed } },
+    'change the second foo',
+  )
   git(checkout, 'switch', '--quiet', '-')
 
   const inspected = await inspectWorktree(ghq.client, { cwd: path, branch: 'issue-12' }, forIssue, [
