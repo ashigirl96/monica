@@ -92,17 +92,20 @@ async function hasUnpublishedCommits(
   if (commits === '') return false
   const heads = await presentCommits(checkout, mergedHeads)
   if (heads.length === 0) return true
-  const merged = new Set(
-    (await patchIds(checkout, [...heads, '--not', `refs/heads/${branch}`])).map(
-      ({ patchId }) => patchId,
-    ),
-  )
-  const landed = new Set(
-    (await patchIds(checkout, ['--no-walk', ...commits.split('\n')]))
-      .filter(({ patchId }) => merged.has(patchId))
-      .map(({ commit }) => commit),
-  )
-  return commits.split('\n').some((commit) => !landed.has(commit))
+  // revert して積み直した patch を head にある 1 つで 2 度免除しないよう、patch-id を数で突き合わせる。
+  const unmatched = new Map<string, number>()
+  for (const patchId of await patchIds(checkout, [...heads, '--not', `refs/heads/${branch}`])) {
+    unmatched.set(patchId, (unmatched.get(patchId) ?? 0) + 1)
+  }
+  const unreached = commits.split('\n')
+  let landed = 0
+  for (const patchId of await patchIds(checkout, ['--no-walk', ...unreached])) {
+    const left = unmatched.get(patchId) ?? 0
+    if (left === 0) continue
+    unmatched.set(patchId, left - 1)
+    landed++
+  }
+  return landed < unreached.length
 }
 
 async function presentCommits(checkout: string, commits: string[]): Promise<string[]> {
@@ -114,10 +117,7 @@ async function presentCommits(checkout: string, commits: string[]): Promise<stri
 }
 
 // git cherry と既定の git patch-id は空白を除いて比べるので、空白だけ違う commit まで同じ patch とみなす。
-async function patchIds(
-  checkout: string,
-  revisions: string[],
-): Promise<{ patchId: string; commit: string }[]> {
+async function patchIds(checkout: string, revisions: string[]): Promise<string[]> {
   // 文字列を経ると UTF-8 でない byte が置換文字に潰れ、違う patch が同じ patch-id になる。
   const ids = await gitPiped(
     checkout,
@@ -127,10 +127,7 @@ async function patchIds(
   return ids
     .split('\n')
     .filter((line) => line !== '')
-    .map((line) => {
-      const [patchId = '', commit = ''] = line.split(' ')
-      return { patchId, commit }
-    })
+    .map((line) => line.slice(0, line.indexOf(' ')))
 }
 
 async function checkoutOnDisk(ghq: Ghq, repo: string): Promise<string | null> {

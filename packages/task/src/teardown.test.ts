@@ -144,6 +144,27 @@ test('a commit whose patch differs from the squash of its pull request only in b
   expect((await inspect()).refusals).toEqual([{ kind: 'unpublished_commits', branch: 'issue-12' }])
 })
 
+function addThenRevert(repo: string) {
+  commit(repo, { 'a.txt': { content: 'a\n' } }, 'add a')
+  git(repo, 'rm', '--quiet', 'a.txt')
+  return commit(repo, {}, 'revert a')
+}
+
+test('a patch put back on the branch after a revert stops the removal, though the merged head has the patch and the revert once', async () => {
+  const { ghq, checkout, path } = worktreeOnIssue12()
+  addThenRevert(path)
+  commit(path, { 'a.txt': { content: 'a\n' } }, 'add a again')
+  git(checkout, 'switch', '--quiet', '--detach', 'origin/main')
+  const mergedHead = addThenRevert(checkout)
+  git(checkout, 'switch', '--quiet', '-')
+
+  const inspected = await inspectWorktree(ghq.client, { cwd: path, branch: 'issue-12' }, forIssue, [
+    mergedHead,
+  ])
+
+  expect(inspected.refusals).toEqual([{ kind: 'unpublished_commits', branch: 'issue-12' }])
+})
+
 test('without force, a commit whose patch no merged head has, made after the inspection on a rebased branch, keeps the branch', async () => {
   const { checkout, path, inspect } = rebasedBench({ mainMovedOn: true })
   const inspected = await inspect()
