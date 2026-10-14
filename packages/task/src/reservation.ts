@@ -1,7 +1,7 @@
-import { agentSession, tab, terminalSession } from '@monica/workbench/schema'
-import type { Db, Tx } from '@monica/workbench/server'
+import { agentSession, terminalSession } from '@monica/workbench/schema'
+import { type Db, LIVE, terminating, type Tx } from '@monica/workbench/server'
 import { ORPCError } from '@orpc/server'
-import { and, eq, inArray } from 'drizzle-orm'
+import { and, eq, inArray, not } from 'drizzle-orm'
 
 import {
   type FoundTask,
@@ -111,7 +111,7 @@ export function createReservations(db: Db) {
   }
 }
 
-// Tab の無い Terminal Session は Terminate を予約した後の終わりかけなので、Exit の記録を待たずに外す（ADR-0023）。
+// Terminating な Terminal Session は Exit の記録を待たずに外す（ADR-0023）。
 function stillLaunching(
   reader: Pick<Db, 'select'>,
   taskIssueId: number,
@@ -120,11 +120,11 @@ function stillLaunching(
   const live = reader
     .select({ id: terminalSession.id })
     .from(terminalSession)
-    .innerJoin(tab, eq(tab.terminalSessionId, terminalSession.id))
     .where(
       and(
         eq(terminalSession.id, terminalSessionId),
-        inArray(terminalSession.status, ['starting', 'running']),
+        inArray(terminalSession.status, LIVE),
+        not(terminating(reader, terminalSessionId)),
       ),
     )
     .get()
