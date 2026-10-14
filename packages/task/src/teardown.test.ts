@@ -134,6 +134,16 @@ test('a commit whose patch differs from the squash of its pull request only in w
   expect((await inspect()).refusals).toEqual([{ kind: 'unpublished_commits', branch: 'issue-12' }])
 })
 
+test('a commit whose patch differs from the squash of its pull request only in bytes that are not UTF-8 still stops the removal', async () => {
+  const { inspect } = rebasedBench({
+    mainMovedOn: false,
+    a: { 'a.txt': { content: Uint8Array.of(0x80, 0x0a) } },
+    squashOfA: { 'a.txt': { content: Uint8Array.of(0x81, 0x0a) } },
+  })
+
+  expect((await inspect()).refusals).toEqual([{ kind: 'unpublished_commits', branch: 'issue-12' }])
+})
+
 test('without force, a commit whose patch no merged head has, made after the inspection on a rebased branch, keeps the branch', async () => {
   const { checkout, path, inspect } = rebasedBench({ mainMovedOn: true })
   const inspected = await inspect()

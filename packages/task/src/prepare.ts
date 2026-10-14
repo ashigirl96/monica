@@ -30,7 +30,7 @@ export type Ghq = {
 }
 
 export const defaultGhq: Ghq = {
-  root: async () => (await command(['ghq', 'root'], 'ghq root')).trim(),
+  root: () => command(['ghq', 'root'], 'ghq root'),
   async get(repo) {
     await command(['ghq', 'get', repo], 'ghq get')
   },
@@ -243,32 +243,47 @@ function signalGroup(pid: number, signal: NodeJS.Signals | 0): boolean {
   }
 }
 
-export async function git(cwd: string, ...args: string[]): Promise<string> {
-  return (await gitOutput(cwd, args)).trim()
+export function git(cwd: string, ...args: string[]): Promise<string> {
+  return command(['git', '-C', cwd, ...args], gitName(args))
 }
 
-/** stdout を trim せずに返し、`input` があれば stdin に渡す。 */
-export function gitOutput(cwd: string, args: string[], input?: string): Promise<string> {
-  return command(['git', '-C', cwd, ...args], `git ${args.slice(0, 2).join(' ')}`, input)
+/** `from` の stdout を byte のまま `to` の stdin に渡し、`to` の stdout を返す。 */
+export async function gitPiped(cwd: string, from: string[], to: string[]): Promise<string> {
+  const source = spawned(['git', '-C', cwd, ...from], 'ignore')
+  const [output] = await Promise.all([
+    command(['git', '-C', cwd, ...to], gitName(to), source.stdout),
+    succeeded(source, gitName(from)),
+  ])
+  return output
+}
+
+const gitName = (args: string[]) => `git ${args.slice(0, 2).join(' ')}`
+
+async function command(
+  argv: string[],
+  name: string,
+  stdin: 'ignore' | ReadableStream<Uint8Array> = 'ignore',
+): Promise<string> {
+  const child = spawned(argv, stdin)
+  const [stdout] = await Promise.all([new Response(child.stdout).text(), succeeded(child, name)])
+  return stdout.trim()
 }
 
 // Backend が端末から起こされていると、git は認証を /dev/tty で尋ねて準備が止まる。
-async function command(argv: string[], name: string, input?: string): Promise<string> {
-  const child = Bun.spawn(argv, {
+function spawned(argv: string[], stdin: 'ignore' | ReadableStream<Uint8Array>) {
+  return Bun.spawn(argv, {
     env: { ...process.env, GIT_TERMINAL_PROMPT: '0' },
-    stdin: input === undefined ? 'ignore' : Buffer.from(input),
+    stdin,
     stdout: 'pipe',
     stderr: 'pipe',
   })
-  const [stdout, stderr, code] = await Promise.all([
-    new Response(child.stdout).text(),
-    new Response(child.stderr).text(),
-    child.exited,
-  ])
+}
+
+async function succeeded(child: ReturnType<typeof spawned>, name: string) {
+  const [stderr, code] = await Promise.all([new Response(child.stderr).text(), child.exited])
   if (code !== 0) {
     throw new Error(`${name} failed: ${stderr.trim().split('\n').at(-1) || `exit ${code}`}`)
   }
-  return stdout
 }
 
 export async function succeeds(running: Promise<unknown>): Promise<boolean> {

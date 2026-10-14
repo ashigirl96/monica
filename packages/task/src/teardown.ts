@@ -3,7 +3,7 @@ import { dirname } from 'node:path'
 
 import type { Bench } from './bench.ts'
 import type { CloseRefusal } from './contract.ts'
-import { branchOf, checkoutOf, type Ghq, git, gitOutput, succeeds } from './prepare.ts'
+import { branchOf, checkoutOf, type Ghq, git, gitPiped, succeeds } from './prepare.ts'
 import type { IssueRef } from './ref.ts'
 
 export type InspectedWorktree = {
@@ -118,15 +118,12 @@ async function patchIds(
   checkout: string,
   revisions: string[],
 ): Promise<{ patchId: string; commit: string }[]> {
-  const log = await gitOutput(checkout, [
-    'log',
-    '--patch',
-    '--no-color',
-    '--no-ext-diff',
-    '--format=commit %H',
-    ...revisions,
-  ])
-  const ids = await gitOutput(checkout, ['patch-id', '--verbatim'], log)
+  // 文字列を経ると UTF-8 でない byte が置換文字に潰れ、違う patch が同じ patch-id になる。
+  const ids = await gitPiped(
+    checkout,
+    ['log', '--patch', '--no-color', '--no-ext-diff', '--format=commit %H', ...revisions],
+    ['patch-id', '--verbatim'],
+  )
   return ids
     .split('\n')
     .filter((line) => line !== '')
