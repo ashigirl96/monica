@@ -74,6 +74,7 @@ export async function removeWorktree(
 }
 
 // fetch しないので push した commit は merge されていなくても数えず、squash merge で remote から消えた commit も手元にある merged PR の head から辿れれば数えない。
+// remote で rebase してから merge された branch の commit は head から辿れないので、同じ patch が head にあるかで見る。
 async function hasUnpublishedCommits(
   checkout: string,
   branch: string,
@@ -82,14 +83,30 @@ async function hasUnpublishedCommits(
   const commits = await git(
     checkout,
     'rev-list',
-    '--max-count=1',
     '--ignore-missing',
     `refs/heads/${branch}`,
     '--not',
     '--remotes',
     ...mergedHeads,
   )
-  return commits !== ''
+  if (commits === '') return false
+  const landed = await commitsWithPatchIn(checkout, branch, mergedHeads)
+  return commits.split('\n').some((commit) => !landed.has(commit))
+}
+
+async function commitsWithPatchIn(
+  checkout: string,
+  branch: string,
+  mergedHeads: string[],
+): Promise<Set<string>> {
+  const landed = new Set<string>()
+  for (const head of mergedHeads) {
+    if (!(await succeeds(git(checkout, 'cat-file', '-e', `${head}^{commit}`)))) continue
+    for (const line of (await git(checkout, 'cherry', head, `refs/heads/${branch}`)).split('\n')) {
+      if (line.startsWith('- ')) landed.add(line.slice(2))
+    }
+  }
+  return landed
 }
 
 async function checkoutOnDisk(ghq: Ghq, repo: string): Promise<string | null> {

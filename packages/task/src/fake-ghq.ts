@@ -45,6 +45,28 @@ export function commit(repo: string, files: Files, message: string) {
   return git(repo, 'rev-parse', 'HEAD')
 }
 
+const a1: Files = { 'a.txt': { content: 'a\n' } }
+const b1: Files = { 'b.txt': { content: 'b\n' } }
+
+/**
+ * worktree の branch に a1 と、その上に b1 を積む。a1 の PR は `squashOfA` で squash merge され、b1 の PR は remote で main に rebase してから merge された。
+ * rebase した b1 の commit を返す。checkout にはあるが、どの remote の branch からも辿れない。
+ */
+export function stackedThenRebased(
+  worktree: string,
+  checkout: string,
+  { mainMovedOn, squashOfA = a1 }: { mainMovedOn: boolean; squashOfA?: Files },
+) {
+  commit(worktree, a1, 'a1')
+  commit(worktree, b1, 'b1')
+  git(checkout, 'switch', '--quiet', '--detach', 'origin/main')
+  commit(checkout, squashOfA, 'A (#1)')
+  if (mainMovedOn) commit(checkout, { 'other.txt': { content: 'other\n' } }, 'other')
+  const rebasedHead = commit(checkout, b1, 'b1')
+  git(checkout, 'switch', '--quiet', '-')
+  return rebasedHead
+}
+
 type Snapshot = { dirs: string[]; files: { path: string; data: Buffer; mode: number }[] }
 type Template = { origin: Snapshot; refs: string; clone?: { snapshot: Snapshot; url: string } }
 
