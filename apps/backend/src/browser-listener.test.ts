@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 
 import type { contract } from '@monica/note/contract'
-import { createNoteLedger, migrations } from '@monica/note/server'
+import { createNoteLedger, migrations, router as noteRouter } from '@monica/note/server'
 import {
   createUsageLedger,
   featuresOf,
@@ -54,7 +54,8 @@ function listen(port: number | undefined, dist = webDist({ 'index.html': '<p>not
   if (listener) cleanups.push(() => listener.stop())
   const usages = async () =>
     (await createRouterClient(usageRouter, { context: { db, usageLedger } }).list()).usages
-  return { listener, home, usages }
+  const notes = createRouterClient(noteRouter, { context: { db, noteLedger } })
+  return { listener, home, usages, notes }
 }
 
 test('the browser listener answers on both loopbacks to the three names of its port and refuses any other Host', async () => {
@@ -161,6 +162,56 @@ test('a GET for a path of the SPA gets index.html uncached, and a hashed asset i
     expect(notPage.headers.get('content-type') ?? '').not.toStartWith('text/html')
     expect(notPage.ok).toBe(false)
   }
+})
+
+function paragraph(text: string) {
+  return {
+    type: 'doc' as const,
+    content: [
+      {
+        type: 'blockContainer',
+        content: [{ type: 'paragraph', content: [{ type: 'text', text }] }],
+      },
+    ],
+  }
+}
+
+// SPA はどの route にも同じ index.html を返すので、Note の URL を貼った bookmark が Note の名前で出るよう頁に OGP を足す。
+test('the page of a Note carries its name and preview as OGP, so a pasted Note URL reads as that Note', async () => {
+  const dist = webDist({
+    'index.html': '<html><head><title>monica</title></head><body></body></html>',
+  })
+  const port = freePort()
+  const { notes } = listen(port, dist)
+  const write = async (id: string, text: string, title?: string) => {
+    const { updatedAt } = await notes.get({ id })
+    await notes.save({ id, content: paragraph(text), title, expectedUpdatedAt: updatedAt })
+  }
+  const repoNote = await notes.repoNote.create({ repo: 'ashigirl96/monica' })
+  await write(repoNote.id, 'the body <&> "quoted"', 'Plan & "notes"')
+  const essay = await notes.essay.create()
+  await write(essay.id, 'an essay', 'Essay')
+  const removed = await notes.essay.create()
+  await write(removed.id, 'gone', 'Removed')
+  await notes.remove({ id: removed.id })
+  const scratch = await notes.scratch.open({ repo: 'ashigirl96/monica' })
+  await write(scratch.id, 'scratch')
+
+  const cases: [path: string, title: string, description: string | null][] = [
+    [`/repos/ashigirl96/monica/notes/${repoNote.id}`, 'Plan & "notes"', 'the body <&> "quoted"'],
+    [`/notes/${repoNote.id}`, 'Plan & "notes"', 'the body <&> "quoted"'],
+    [`/essays/${essay.id}`, 'Essay', 'an essay'],
+    ['/repos/ashigirl96/monica', 'ashigirl96/monica', 'scratch'],
+    [`/essays/${removed.id}`, 'monica', null],
+    ['/essays/note-999', 'monica', null],
+    ['/daily/2026-10-06', 'monica', null],
+  ]
+  for (const [path, title, description] of cases) {
+    const read = await notes.linkMetadata({ url: `http://127.0.0.1:${port}${path}` })
+    expect([path, read.title, read.description]).toEqual([path, title, description])
+  }
+  // 頁を読むだけで、開くと作られる Daily を作らない。
+  expect(await notes.daily.dates()).toEqual([])
 })
 
 const PNG = Uint8Array.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 0x0d])

@@ -49,7 +49,7 @@ Backend は起動ごとに `crypto.randomUUID()` で 2 つの token を作り、
 - 載せるもの:
   - `/rpc` の `{ note }` の router。context は `{ db, noteLedger, caller: 'notes' }`。workbench・task・job は載せない。`openTab` の `input` は shell に打鍵されるので、token の無い口では任意のコマンドになる。chat も載せない。port を先に握った別の process に Current Page を渡さないため（ADR-0034）。
   - 画像の素の GET（`/api/assets/<file>`、`@monica/note/contract` の `IMAGE_URL_PREFIX`）。prefix の後ろを Note Ledger の `serveImage` に渡し、応答をそのまま返す。oRPC の RPCHandler は File を必ず multipart に包むので、`<img src>` が読む生のバイト列は procedure では返せない（ADR-0019）。
-  - SPA の静的ファイル。`/rpc` と画像以外の GET は、build の出力に在る file ならそれを、無ければ `index.html` を返す。path は file system の path として解かず、起動時に集めた file の一覧から引く。`assets/` の下（Vite が hash を付けた file）は `public, max-age=31536000, immutable`、ほかは `no-cache`。
+  - SPA の静的ファイル。`/rpc` と画像以外の GET は、build の出力に在る file ならそれを、無ければ `index.html` を返す。`index.html` は `NoteLedger.withPageMeta` を通し、path が Note を指せばその OGP を head に足す（`docs/packages/note-ledger.md` の「OGP」）。path は file system の path として解かず、起動時に集めた file の一覧から引く。`assets/` の下（Vite が hash を付けた file）は `public, max-age=31536000, immutable`、ほかは `no-cache`。
 - `maxRequestBodySize` は渡さない（Bun の既定）。note の画像の 20MB は Note Ledger が upload の中身を写す前に見る（`docs/packages/note-ledger.md`）。
 - SPA は compiled binary に `--asset` で同梱した `apps/web/dist` を、entry の隣（`/$bunfs/root/dist`）から読む（`docs/packages/dev-loop.md` の「release build と install」）。`bun run` の Backend には無いので、dev の Backend は SPA の GET に 404 を返し、画面は `apps/web` の Vite が配る。
 
