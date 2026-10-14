@@ -50,7 +50,10 @@ export function listenBrowser(
   app.get(`${IMAGE_URL_PREFIX}*`, (c) =>
     context.noteLedger.serveImage(c.req.path.slice(IMAGE_URL_PREFIX.length)),
   )
-  app.get('*', spa(webDist))
+  app.get(
+    '*',
+    spa(webDist, (path, page) => context.noteLedger.withPageMeta(path, page)),
+  )
 
   // 両方の loopback で bind し、片方だけを他の process が握っている衝突も EADDRINUSE で見つける。
   const servers: Bun.Server<undefined>[] = []
@@ -85,7 +88,10 @@ function fromSameOriginOrExtension(c: Context): boolean {
 }
 
 // 配るのは build の出力に在る file だけなので、path を file system の path として解かない。
-function spa(webDist: string): (c: Context) => Response {
+function spa(
+  webDist: string,
+  withPageMeta: (pathname: string, page: Response) => Response,
+): (c: Context) => Response {
   const files = new Map(
     existsSync(webDist)
       ? [...new Bun.Glob('**/*').scanSync({ cwd: webDist })].map((path) => [
@@ -100,7 +106,7 @@ function spa(webDist: string): (c: Context) => Response {
     if (file) return serve(file, c.req.path.startsWith('/assets/') ? IMMUTABLE : 'no-cache')
     const index = files.get('/index.html')
     if (!index) return c.text('This Backend does not carry the notes screens', 404)
-    return serve(index, 'no-cache')
+    return withPageMeta(c.req.path, serve(index, 'no-cache'))
   }
 }
 

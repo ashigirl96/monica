@@ -169,9 +169,24 @@ Note Mention と Synced Block が引く procedure。画面での扱いは `docs/
 
 このほか、`Content-Type` の大文字小文字を区別しないことと、空か絶対 URL に解けない `href` の icon を飛ばすことも旧 Monica と違う。
 
+### Note の頁の OGP
+
+notes の画面は SPA で、どの route にも同じ `index.html` を返す。そのままでは Note の URL を貼っても、`linkMetadata` は `<title>monica</title>` しか読めない。`NoteLedger.withPageMeta(pathname, page)` は、path が Note を指すとき、ブラウザの口が返す `index.html` の head の先頭に次の meta を足す。
+
+| meta | 値 |
+|---|---|
+| `og:title` | `displayName` |
+| `og:description` | preview（無ければ足さない） |
+| `og:site_name` | `monica` |
+
+- 引く route は `/notes/:id`・`/essays/:id`・`/repos/:owner/:repo/notes/:id`（id の Note）、`/repos/:owner/:repo`（その Repo の Scratch）、`/daily/:date`（その日の Daily）。ほかの path と、無い Note と削除した Note には何も足さない。
+- 画面を開くと作られる Daily と Scratch も、ここでは作らずに在るものだけを読む。頁の GET は副作用を持たないため。
+- `<title>` は変えない。画面が開いた後は `useDocumentTitle` が書き換える。
+- 本文の bookmark と link mention は貼った時点の値を attrs に持つので、この前に貼ったものは貼り直すまで `monica` のまま。
+
 ## createNoteLedger
 
-`createNoteLedger({ db, home, ghq? })` は `start()` / `stop()`・`repoCandidates()`・`cleanImages()`・`serveImage(name)` を持つ。`start()` は何もせず、`stop()` は走っている画像の取り込みと OGP の fetch を打ち切る。`home` は画像の置き場所に使う。`ghq` は `list(signal)` を持ち、省けば `ghq list` を `env: process.env` で spawn する。`signal` で打ち切ると ghq を kill する。task の `Ghq`（`packages/task/src/prepare.ts`）は import しない。`repoCandidates()` は `repo.candidates` の中身で、router の handler が呼ぶ。router の context は `{ db, noteLedger }`。procedure が使う画像の置き場所と打ち切りの signal は、型に出さずに `internals(noteLedger)` で引く（task と job と同じ形）。
+`createNoteLedger({ db, home, ghq? })` は `start()` / `stop()`・`repoCandidates()`・`cleanImages()`・`serveImage(name)`・`withPageMeta(pathname, page)` を持つ。`start()` は何もせず、`stop()` は走っている画像の取り込みと OGP の fetch を打ち切る。`home` は画像の置き場所に使う。`ghq` は `list(signal)` を持ち、省けば `ghq list` を `env: process.env` で spawn する。`signal` で打ち切ると ghq を kill する。task の `Ghq`（`packages/task/src/prepare.ts`）は import しない。`repoCandidates()` は `repo.candidates` の中身で、router の handler が呼ぶ。router の context は `{ db, noteLedger }`。procedure が使う画像の置き場所と打ち切りの signal は、型に出さずに `internals(noteLedger)` で引く（task と job と同じ形）。
 
 `@monica/note/server` の `systemJobs(noteLedger)` が system の Job の並び（`note.image-cleanup`）を出す。note は job を import しないので、task と同じく `createJobLedger` の `systemJobs` と同じ構造の素のオブジェクトを返す。
 
