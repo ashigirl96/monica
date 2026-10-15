@@ -147,6 +147,7 @@ const scenarios: Record<
   'linger-after-answer': (question) => {
     answer(question)
     hold(SAFETY_EXIT_MS)
+    process.on('SIGTERM', () => record({ kind: 'sigterm' }))
   },
   'not-logged-in': () => {
     init()
