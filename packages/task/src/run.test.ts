@@ -1,5 +1,6 @@
 import { afterEach, expect, mock, test } from 'bun:test'
 
+import type { WorkbenchChange } from '@monica/workbench/contract'
 import { eq } from 'drizzle-orm'
 
 import { issue, run } from './schema.ts'
@@ -74,6 +75,27 @@ test('a claude started in the Bench stays a started Run when a layout signal fol
       fixture.workbenchLedger.events.publish('change', { type: 'layout' })
     }
   })
+
+  await fixture.hook(inBench, 's-1', 'SessionStart', { source: 'startup' })
+
+  expect(runsOf(fixture)).toEqual([{ number: 12, agentSessionId: 's-1', origin: 'started' }])
+})
+
+test('a claude started in the Bench becomes a Run even when more than 100 agentSession signals come around its hook in the same turn', async () => {
+  const fixture = setup()
+  const inBench = await fixture.openTab(await fixture.openBench(ref))
+  const signalOthersOn = (count: number) => (change: WorkbenchChange) => {
+    if (change.type !== 'agentSession' || change.sessionId !== 's-1') return
+    for (let i = 0; i < count; i++) {
+      fixture.workbenchLedger.events.publish('change', {
+        type: 'agentSession',
+        sessionId: `other-${count}-${i}`,
+      })
+    }
+  }
+  fixture.workbenchLedger.events.subscribe('change', signalOthersOn(1))
+  fixture.taskLedger.start()
+  fixture.workbenchLedger.events.subscribe('change', signalOthersOn(150))
 
   await fixture.hook(inBench, 's-1', 'SessionStart', { source: 'startup' })
 
