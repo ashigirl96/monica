@@ -302,6 +302,82 @@ fn terminate_ends_the_foreground_job_with_its_shell() {
 }
 
 #[test]
+fn a_write_from_a_connection_that_never_attached_reaches_the_shell() {
+    let daemon = start_daemon("write-unattached");
+    let (writer, _writer_rx) = connect(&daemon);
+    create_zsh_session(&writer, "ts-1").expect("unix spawns should expose a pid");
+
+    writer
+        .notify(RequestOp::Write {
+            session_id: "ts-1".into(),
+            data: b64(b"echo unattached-$((6*7))\r"),
+        })
+        .unwrap();
+
+    let (viewer, viewer_rx) = connect(&daemon);
+    let replay = match viewer
+        .request(RequestOp::Attach {
+            session_id: "ts-1".into(),
+            replay_bytes: None,
+        })
+        .unwrap()
+    {
+        ResponseBody::Attached { replay, .. } => {
+            String::from_utf8_lossy(&from_b64(&replay)).to_string()
+        }
+        other => panic!("unexpected attach response: {other:?}"),
+    };
+    if !replay.contains("unattached-42") {
+        wait_for_output(&viewer_rx, "unattached-42", Duration::from_secs(10));
+    }
+}
+
+#[test]
+fn a_shell_asked_to_start_in_a_missing_directory_starts_in_home() {
+    let daemon = start_daemon("missing-cwd");
+    let user_home = daemon.dir.join("user");
+    std::fs::create_dir_all(&user_home).unwrap();
+    let user_home = std::fs::canonicalize(&user_home).unwrap();
+    let (client, rx) = connect(&daemon);
+    client
+        .request(RequestOp::Create(CreateParams {
+            session_id: "ts-1".to_string(),
+            cwd: daemon
+                .dir
+                .join("removed-worktree")
+                .to_string_lossy()
+                .to_string(),
+            shell: Some("/bin/zsh".to_string()),
+            rows: 24,
+            cols: 80,
+            env: Some(vec![(
+                "HOME".to_string(),
+                user_home.to_string_lossy().to_string(),
+            )]),
+        }))
+        .expect("create should succeed");
+    client
+        .request(RequestOp::Attach {
+            session_id: "ts-1".into(),
+            replay_bytes: None,
+        })
+        .unwrap();
+
+    client
+        .notify(RequestOp::Write {
+            session_id: "ts-1".into(),
+            data: b64(b"print -r -- \"cwd:$(pwd -P):$((1+1))\"\r"),
+        })
+        .unwrap();
+
+    wait_for_output(
+        &rx,
+        &format!("cwd:{}:2", user_home.display()),
+        Duration::from_secs(10),
+    );
+}
+
+#[test]
 fn removing_the_home_ends_the_daemon_and_its_shells() {
     let mut daemon = start_daemon("home-removed");
     let (client, rx) = connect(&daemon);

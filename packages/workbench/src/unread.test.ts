@@ -161,3 +161,41 @@ test('failing to pass the unread Terminal Sessions leaves the hook recorded, wit
   ])
   expect(lines()).toContainEqual(expect.stringContaining('stdout is closed'))
 })
+
+test('unread Terminal Sessions that failed to pass are passed again on the next change', async () => {
+  const calls: string[][] = []
+  const { workbenchLedger, client, settled } = setup({
+    unread: (terminalSessionIds) => {
+      calls.push(terminalSessionIds)
+      if (calls.length === 2) throw new Error('stdout is busy')
+    },
+  })
+  const { runspaceId, tab } = await client.runspace.create(size)
+  await settled(tab.terminalSessionId)
+  stderrLines()
+  await workbenchLedger.start()
+  await client.agentSession.recordHook(waitIn(tab.terminalSessionId, 's-1'))
+
+  await client.tab.open({ runspaceId, ...size })
+
+  expect(calls).toEqual([[], [tab.terminalSessionId], [tab.terminalSessionId]])
+})
+
+test('a notified wait reaches notify before the unread Terminal Sessions that include it', async () => {
+  const order: [string, unknown][] = []
+  const { workbenchLedger, client, settled } = setup({
+    notify: (n) => order.push(['notify', n.terminalSessionId]),
+    unread: (terminalSessionIds) => order.push(['unread', terminalSessionIds]),
+  })
+  const { tab } = await client.runspace.create(size)
+  await settled(tab.terminalSessionId)
+  await workbenchLedger.start()
+
+  await client.agentSession.recordHook(waitIn(tab.terminalSessionId, 's-1'))
+
+  expect(order).toEqual([
+    ['unread', []],
+    ['notify', tab.terminalSessionId],
+    ['unread', [tab.terminalSessionId]],
+  ])
+})
