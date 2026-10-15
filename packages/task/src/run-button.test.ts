@@ -635,6 +635,31 @@ test('an Issue whose labels pick no prompt gets a resume button without a kind o
   })
 })
 
+test('an Issue whose labels pick no prompt gets a running button without a kind while its Task has a live Run', async () => {
+  const fixture = setup()
+  await liveRun(fixture, ['ready-for-human'])
+
+  expect(await fixture.client.runButtons({ refs: [ref] })).toEqual({
+    buttons: [{ ref, button: { run: 'running' }, reason: null }],
+  })
+})
+
+test('a closed Task whose claude is still its live Run gets a reopen button', async () => {
+  const fixture = setup()
+  fixture.github.issue(ref, { title: 'Ship it', labels: ['ready-for-agent'] })
+  fixture.taskLedger.start()
+  mkdirSync(fixture.ghq.checkout('acme/app'), { recursive: true })
+  const { terminalSessionId } = await fixture.client.run({ ref, inPlace: true })
+  await claudeStarted(fixture, terminalSessionId)
+
+  await fixture.client.close({ ref, terminalSessionId })
+
+  expect((await fixture.client.list({})).tasks).toEqual([])
+  expect(await fixture.client.runButtons({ refs: [ref] })).toEqual({
+    buttons: [{ ref, button: { run: 'reopen' }, reason: null }],
+  })
+})
+
 const subIssue = 'acme/app#13'
 
 // spec と子の Task を同じ checkout の in-place の Bench で run し、spec の claude だけを起動させる。

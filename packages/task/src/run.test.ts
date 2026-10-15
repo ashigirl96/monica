@@ -1,5 +1,6 @@
 import { afterEach, expect, mock, test } from 'bun:test'
 
+import type { WorkbenchChange } from '@monica/workbench/contract'
 import { eq } from 'drizzle-orm'
 
 import { issue, run } from './schema.ts'
@@ -64,6 +65,41 @@ test('a Run stays with its Task while its claude moves out of the Bench, until i
   await fixture.hook(outside, 's-1', 'SessionEnd', { reason: 'prompt_input_exit' })
 
   expect(await stateOf(fixture)).toEqual({ state: 'ended' })
+})
+
+test('a claude started in the Bench stays a started Run when a layout signal follows its hook in the same turn', async () => {
+  const fixture = started()
+  const inBench = await fixture.openTab(await fixture.openBench(ref))
+  fixture.workbenchLedger.events.subscribe('change', (change) => {
+    if (change.type === 'agentSession') {
+      fixture.workbenchLedger.events.publish('change', { type: 'layout' })
+    }
+  })
+
+  await fixture.hook(inBench, 's-1', 'SessionStart', { source: 'startup' })
+
+  expect(runsOf(fixture)).toEqual([{ number: 12, agentSessionId: 's-1', origin: 'started' }])
+})
+
+test('a claude started in the Bench becomes a Run even when more than 100 agentSession signals come around its hook in the same turn', async () => {
+  const fixture = setup()
+  const inBench = await fixture.openTab(await fixture.openBench(ref))
+  const signalOthersOn = (count: number) => (change: WorkbenchChange) => {
+    if (change.type !== 'agentSession' || change.sessionId !== 's-1') return
+    for (let i = 0; i < count; i++) {
+      fixture.workbenchLedger.events.publish('change', {
+        type: 'agentSession',
+        sessionId: `other-${count}-${i}`,
+      })
+    }
+  }
+  fixture.workbenchLedger.events.subscribe('change', signalOthersOn(1))
+  fixture.taskLedger.start()
+  fixture.workbenchLedger.events.subscribe('change', signalOthersOn(150))
+
+  await fixture.hook(inBench, 's-1', 'SessionStart', { source: 'startup' })
+
+  expect(runsOf(fixture)).toEqual([{ number: 12, agentSessionId: 's-1', origin: 'started' }])
 })
 
 test('a claude that moves into a Tab of the Bench becomes a Run of the Task then', async () => {
