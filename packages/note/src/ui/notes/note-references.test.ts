@@ -102,6 +102,20 @@ test('a Note Mention that cannot reach the Backend stays unresolved without aski
   expect(await name).toEqual({ displayName: 'On ledgers' })
 })
 
+test('a Note Mention whose answer arrives with a body that cannot be read stays unresolved without asking again', async () => {
+  const { answers, open, paths } = setup()
+  answers.set('/rpc/noteMention/resolve', () =>
+    Promise.resolve(
+      new Response('not json', { status: 200, headers: { 'content-type': 'application/json' } }),
+    ),
+  )
+
+  const name = open().resolveNoteMention('note-3')
+
+  expect(await settledYet(name)).toBe(false)
+  expect(paths()).toEqual(['/rpc/noteMention/resolve'])
+})
+
 test('a Note Mention asks again at once when another request gets through between its failure and its waiting', async () => {
   const { answers, open, reach } = setup()
   let asked = 0
