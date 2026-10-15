@@ -343,6 +343,22 @@ test.each([
   expect(sent).toEqual([{ title: 'src/monica', body: '手空き', terminalSessionId: 'ts-a' }])
 })
 
+test('an ai-title line quoted in the conversation does not hide the Agent Session title', async () => {
+  const sent = await notificationsOn('Stop', {}, (home) =>
+    writeTranscript(home, [
+      aiTitle('今の名前'),
+      JSON.stringify({
+        type: 'user',
+        message: { role: 'user', content: '{"type":"ai-title","aiTitle":"偽"}' },
+      }),
+    ]),
+  )
+
+  expect(sent).toEqual([
+    { title: 'src/monica', body: '手空き · 今の名前', terminalSessionId: 'ts-a' },
+  ])
+})
+
 test('the name the Task gives an Agent Session titles its notification, and the Agent Session title stays in the body', async () => {
   const sent: object[] = []
   const { home, db, client } = setup({
@@ -384,6 +400,45 @@ test('the notification of an Agent Session that moved to another Terminal Sessio
   await record('ts-b', 'Stop')
 
   expect(sent.map((n) => n.terminalSessionId)).toEqual(['ts-a', 'ts-b'])
+})
+
+test('a notification raised by the hook that moves an Agent Session carries the Terminal Session it moved to', async () => {
+  const sent: { terminalSessionId: string }[] = []
+  const { db, client } = setup({ notify: (n) => sent.push(n) })
+  seedTerminalSession(db, 'ts-a', 'running')
+  seedTerminalSession(db, 'ts-b', 'running')
+  await client.agentSession.recordHook({
+    terminalSessionId: 'ts-a',
+    payload: payload('s-1', 'UserPromptSubmit'),
+  })
+
+  await client.agentSession.recordHook({
+    terminalSessionId: 'ts-b',
+    payload: payload('s-1', 'Stop'),
+  })
+
+  expect(sent.map((n) => n.terminalSessionId)).toEqual(['ts-b'])
+})
+
+test('a notification that cannot be posted still leaves the hook recorded and signalled, with one line on stderr', async () => {
+  const { db, workbenchLedger, client } = setup({
+    notify: () => {
+      throw new Error('the notification center is gone')
+    },
+  })
+  seedTerminalSession(db, 'ts-a', 'running')
+  const signals: unknown[] = []
+  onCleanup(workbenchLedger.events.subscribe('change', (change) => signals.push(change)))
+  const lines = stderrLines()
+
+  await client.agentSession.recordHook({
+    terminalSessionId: 'ts-a',
+    payload: payload('s-1', 'Stop'),
+  })
+
+  expect(rowOf(db, 's-1')).toMatchObject({ state: 'waiting', waitReason: 'idle' })
+  expect(signals).toEqual([{ type: 'agentSession', sessionId: 's-1' }])
+  expect(lines()).toEqual([expect.stringContaining('the notification center is gone')])
 })
 
 test('a notification that cannot be named still leaves the hook recorded and signalled, with one line on stderr', async () => {
@@ -482,6 +537,48 @@ test('a second permission asked after the first was seen is unread again', async
   expect(await client.agentSession.list()).toEqual([
     expect.objectContaining({ sessionId: 's-1', unread: true }),
   ])
+})
+
+test('a permission asked again in the same millisecond as the first was seen is unread', async () => {
+  const { db, client } = setup()
+  seedTerminalSession(db, 'ts-a', 'running')
+  onCleanup(() => setSystemTime())
+  setSystemTime(new Date(1_000))
+  const askPermission = () =>
+    client.agentSession.recordHook({
+      terminalSessionId: 'ts-a',
+      payload: payload('s-1', 'PermissionRequest', { tool_name: 'Bash' }),
+    })
+  await askPermission()
+  await seeAsListed(client, 's-1')
+
+  await askPermission()
+
+  expect(await client.agentSession.list()).toEqual([
+    expect.objectContaining({ sessionId: 's-1', unread: true }),
+  ])
+})
+
+test('seeing a notification already seen writes nothing and signals nothing', async () => {
+  const { db, workbenchLedger, client } = setup()
+  seedTerminalSession(db, 'ts-a', 'running')
+  onCleanup(() => setSystemTime())
+  setSystemTime(new Date(1_000))
+  await client.agentSession.recordHook({
+    terminalSessionId: 'ts-a',
+    payload: payload('s-1', 'Stop'),
+  })
+  const [listed] = await client.agentSession.list()
+  const signals: unknown[] = []
+  onCleanup(workbenchLedger.events.subscribe('change', (change) => signals.push(change)))
+
+  setSystemTime(new Date(2_000))
+  await client.agentSession.markSeen({ sessionId: 's-1', notifiedAt: listed!.notifiedAt! })
+  setSystemTime(new Date(3_000))
+  await client.agentSession.markSeen({ sessionId: 's-1', notifiedAt: listed!.notifiedAt! })
+
+  expect(signals).toEqual([{ type: 'agentSession', sessionId: 's-1' }])
+  expect(rowOf(db, 's-1')?.seenAt).toEqual(new Date(2_000))
 })
 
 test('seeing an Agent Session with nothing unread writes nothing and signals nothing', async () => {

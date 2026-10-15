@@ -99,6 +99,43 @@ test.skipIf(!Bun.which('zsh'))(
   },
 )
 
+test.skipIf(!Bun.which('zsh'))(
+  'a login zsh in a Tab finds claude as the wrapper on PATH, not as a shell function',
+  async () => {
+    const home = await startedHome()
+    const user = scratchDir()
+
+    const result = await run(['zsh', '--login', '-i', '-c', 'whence -w claude'], {
+      HOME: user,
+      MONICA_HOME: home,
+      ZDOTDIR: join(home, 'shell/zdotdir'),
+      MONICA_USER_ZDOTDIR: '',
+      PATH: `${join(home, 'bin')}:/usr/bin:/bin`,
+    })
+
+    expect(result.stdout.trimEnd().split('\n').at(-1)).toBe('claude: command')
+  },
+)
+
+test("start writes hook settings that send every hook to the home's monica by its absolute path", async () => {
+  const home = await startedHome()
+
+  const settings = JSON.parse(readFileSync(join(home, 'shell/claude/settings.json'), 'utf8')) as {
+    hooks: Record<string, { hooks: { command: string; timeout: number }[] }[]>
+  }
+
+  const commands = Object.values(settings.hooks).flatMap((groups) =>
+    groups.flatMap((group) => group.hooks),
+  )
+  expect(commands.length).toBeGreaterThan(0)
+  for (const hook of commands) {
+    expect(hook).toMatchObject({
+      command: `'${home}/bin/monica' workbench hook claude`,
+      timeout: 5,
+    })
+  }
+})
+
 const wrapperCleanups: (() => void)[] = []
 afterAll(() => {
   for (const cleanup of wrapperCleanups.splice(0).toReversed()) cleanup()
@@ -188,6 +225,25 @@ test('the claude wrapper reaches the real claude past another wrapper that hands
     `${join(home, 'bin')}:${other}:${real}:/usr/bin:/bin`,
     { MONICA_TERMINAL_SESSION_ID: 'ts-a' },
   )
+
+  expect(result.code).toBe(0)
+  expect(result.stdout.trimEnd().split('\n')).toEqual([
+    '--settings',
+    join(home, 'shell/claude/settings.json'),
+    '--permission-mode=bypassPermissions',
+    '--print',
+    'hi',
+  ])
+})
+
+test('the claude wrapper ignores a trail another process left in the env and still reaches the real claude with the hook settings', async () => {
+  const home = await sharedWrapperHome()
+  const real = realClaude()
+
+  const result = await claudeThroughWrapper(home, `${join(home, 'bin')}:${real}:/usr/bin:/bin`, {
+    ...inTab,
+    MONICA_CLAUDE_TRAIL: `1:${join(real, 'claude')}`,
+  })
 
   expect(result.code).toBe(0)
   expect(result.stdout.trimEnd().split('\n')).toEqual([

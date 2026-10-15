@@ -629,6 +629,26 @@ test('a path in the title moves the cwd until the shell reports its cwd itself',
   expect(await cwd()).toBe('/b')
 })
 
+test('a title that is not a path stays in the webview and signals no layout change', async () => {
+  const { workbenchLedger, client, store } = bench()
+  const { tab } = await client.runspace.create({ cwd: '/a', ...size })
+  await store.set(reloadAtom)
+  const before = (await client.layout.get()).runspaces[0]!.tabs[0]
+  let layoutChanges = 0
+  onCleanup(
+    workbenchLedger.events.subscribe('change', (change) => {
+      if (change.type === 'layout') layoutChanges++
+    }),
+  )
+
+  for (const title of ['vim README.md', 'git status', 'zsh']) {
+    await store.set(updateTabTitleAtom, tab.id, title)
+  }
+
+  expect(layoutChanges).toBe(0)
+  expect((await client.layout.get()).runspaces[0]!.tabs[0]).toEqual(before)
+})
+
 test("a Tab's dot follows its Agent Session each time the Agent Sessions are read again", async () => {
   const { client, store } = bench()
   const { tab } = await client.runspace.create(size)
