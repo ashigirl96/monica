@@ -3,6 +3,7 @@ import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 
 import type { Page, PageSnapshot } from '../contract.ts'
+import { pageText } from './extract.ts'
 import { defaultReaders, snapshotOf } from './snapshot.ts'
 
 const cleanups: (() => void)[] = []
@@ -197,4 +198,15 @@ test('a page that takes more than 30 seconds to turn into text is unparsable, wi
     reason: 'unparsable',
     detail: 'turning the HTML into text took more than 30 seconds',
   })
+})
+
+test('a page that defuddle could fetch a third party for turns into text without any fetch', async () => {
+  const fetched = spyOn(globalThis, 'fetch').mockImplementation((async () =>
+    Response.json({ text: 'Fetched from c2.' })) as unknown as typeof fetch)
+  cleanups.push(() => fetched.mockRestore())
+
+  const text = await pageText(fixture('empty.html'), 'https://wiki.c2.com/?WelcomeVisitors')
+
+  expect(fetched).not.toHaveBeenCalled()
+  expect(text).toBe('')
 })
