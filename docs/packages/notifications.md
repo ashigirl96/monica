@@ -57,7 +57,7 @@ Agent Session がユーザー待ちに入ったときに macOS の通知を出�
 Workbench Ledger は、未読の Agent Session が居る Terminal Session の id の集合（id の昇順の配列）を数え直し、Backend を通して Shell に渡す（未読は `docs/packages/workbench-ledger.md` の「未読」）。Shell はそれで Dock の数を出し（下の「Dock の数」）、release では通知を取り下げる（下の「取り下げ」）。通知のバナーは数秒で消え、窓が隠れている間は webview の JS が止まる（ADR-0013）ので、通知と同じく Backend が数えて Shell が出す。
 
 - 数でなく集合を渡すのは、Dock の数と通知の取り下げを同じ集合から決め、食い違わないようにするため。終了でない Agent Session は 1 つの Terminal Session に 1 つまで（`agent_session` の部分 unique index）なので、集合の大きさは未読の数と同じになる。
-- Workbench Ledger は `start()` で、ptyd への接続を待たずに今の集合を `unread(terminalSessionIds)` に渡す。ptyd が起きない起動でも数を出すため。以降は自分の `changes` を購読して数え直し、前に渡した集合と違うときだけ渡す。数ではなく集合で比べるのは、未読の Agent Session が別の Tab から hook を受けて居場所を移したときのように、数が同じまま集合が変わることがあるため。合図は procedure の output が変わる経路すべてで出る（`docs/packages.md` の contract の規約 5）ので、hook、`markSeen`、shell の終了、reconcile のどれで集合が変わっても拾う。`stop()` で購読をやめる。
+- Workbench Ledger は `start()` で、ptyd への接続を待たずに今の集合を `unread(terminalSessionIds)` に渡す。ptyd が起きない起動でも数を出すため。以降は自分の `changes` を購読して数え直し、前に渡した集合と違うときだけ渡す。数ではなく集合で比べるのは、未読の Agent Session が別の Tab から hook を受けて居場所を移したときのように、数が同じまま集合が変わることがあるため。合図は procedure の output が変わる経路すべてで出る（`CODING_STANDARDS.md` の「domain と package」）ので、hook、`markSeen`、shell の終了、reconcile のどれで集合が変わっても拾う。`stop()` で購読をやめる。
 - 数え直しは合図の後の microtask で行う。合図は他の domain の transaction の中（`removeRunspace` など）からも出るので、commit か rollback の後の行を数えるため。同じ transaction で出た合図は 1 回の数え直しにまとまる。
 - `unread` か数え直しが throw したら、stderr に 1 行出して捨てる。前に渡した集合は変えないので、次の合図で渡し直す。
 - apps/backend が渡す `unread(terminalSessionIds)` は、stdout に `{"type":"unread","terminalSessionIds":[…]}` を 1 行書く。`start()` は endpoint の行より前に呼ぶので、起動時の集合の行は endpoint の行より先に出る。notify の行は `recordHook` の commit の直後に同期で書かれ、数え直しはその後の microtask なので、同じ待ちの notify の行は、それを含む集合の行より先に出る。

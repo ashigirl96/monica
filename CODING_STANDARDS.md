@@ -1,6 +1,6 @@
 # Coding standards
 
-review で差分に当てる規則。どれも判断が要るもので、決定の本文と理由は括弧の中の文書にある。機械で判定できる規則は lint・型・テストに置き、ここには書かない。
+review で差分に当てる規則。どれも判断が要るもので、理由は規則の文か括弧の中にある。括弧は、決定を記録した ADR、規則が守る振る舞いを見るテストの名前、この file の別の規則、規則に当たるコードのどれかを指す。機械で判定できる規則は lint・型・テストに置き、ここには書かない。
 
 ## domain と package
 
@@ -21,9 +21,16 @@ review で差分に当てる規則。どれも判断が要るもので、決定�
 - procedure が transaction の後に送る ptyd への副作用（Create、Terminate）の結果は、procedure が返った時点ではまだ DB に無い。終わらせた shell を終わったものとして他の判定に渡すときは、Backend が Exit を記録するのを一覧か合図で待つ（ADR-0015）。Tab を閉じた Terminal Session は例外で、Tab の無い live な行を Terminating と読めるので、close の ActiveRun guard と Run の起動中の予約は待たずに数えない（ADR-0023、`docs/packages/task-ledger.md` の「close と reopen」）。
 - DB の行と ptyd の両方を進める処理は、workbench の `terminal-session.ts` に置く（ADR-0015）。DB の行と ptyd や fs の両方を進める処理は、commit の前後や ptyd への要求の途中のどこで Backend が止まっても、ptyd との接続が切れても、次の reconcile が正しい状態に戻せる形にする（ADR-0011）。
 - commit の後の副作用（通知など）が失敗しても、commit 済みの変更の合図（`events`）と記録は止めない（`docs/packages/notifications.md`）。
-- procedure の output が変わる経路（reconcile や他の domain の行の変化を含む）は、どれも自分の domain の `events` で合図する（`docs/packages.md` の「contract の規約」の 5）。
+- procedure の output が変わる経路（reconcile や他の domain の行の変化を含む）は、どれも自分の domain の `events` で合図する。合図が来なければ、stream だけを購読して読み直す client は古い output を持ったまま残るため。
 - CLI と webview で動くコードは、cli entry が import する内側のファイルも含めて DB に触らず、procedure を呼ぶ（ADR-0003）。
 - Shell（`apps/desktop/src-tauri`）に置くのは、Tauri プロセスにしか無いもの（窓と webview の event、app の名義、AppKit）に触る処理と、端末の byte だけ。fs と process の spawn で済む処理は Backend の procedure にする（ADR-0001）。
+
+## contract
+
+- 合成した contract の root には、domain の package 名で mount する。path の先頭が package 名になり、CLI の command（`monica task run`）もそれに従う。
+- `.errors()` で宣言するのは、呼び手が分岐する domain の error（close の guard のように `data` に理由の一覧を持つもの）だけにする。ほかは oRPC の標準の code（`NOT_FOUND`、`BAD_REQUEST`）で投げる。
+- 応答の stream（1 回の呼び出しへの応答を流す event iterator）の途中の失敗は、流した event の後に `.errors()` で宣言した error で投げる。handler の中で起きた想定外の error も宣言した error に包む。素の `Error` は client に `INTERNAL_SERVER_ERROR` の「Internal server error」で届き、理由が落ちるため（ADR-0028）。
+- `oc.$meta(...)` と `createSchemaFactory({ coerce: { date: true } })` は、各 package の `contract.ts` の中にだけ書く。oRPC 2.0 で `.meta` が plugin 制になったときに、直す場所を 1 つにするため。`apps/cli/src/forward.ts` の `os.$meta` は、output を持たない procedure を組み直すために contract の meta を引き継ぐ例外。
 
 ## 型
 
@@ -31,7 +38,25 @@ review で差分に当てる規則。どれも判断が要るもので、決定�
 
 ## テスト
 
-- DB は fake にせず、in-memory の SQLite に migration を当てる。外から見える振る舞いは `createRouterClient` を通して確かめる。ptyd と CLI の seam、procedure に出ない行の確かめ方も同じ節にある（`docs/packages.md` の「テスト」）。
+- DB は fake にせず、package ごとに in-memory の SQLite に自分の migration を当てる（task は workbench → task の順）。外から見える振る舞いは `createRouterClient(router, { context })` を通し、他の domain から呼ばれる method と module 内の関数はそのまま呼んで確かめる（ADR-0002）。
+- procedure に出ない行（終わった行など）は、`@monica/<d>/schema` の table を SELECT して確かめてよい。他の domain が読むのと同じ面のため。
+- ptyd は、`@monica/workbench/testing` の fake の ptyd と `tempHome` の home で組む。本物の ptyd は CI の ts job に無く、Exit と Created の競合も決まった順で起こせないため。
+- task と CLI のテストも Workbench Ledger の method を差し替えず、fake の ptyd の home で `createWorkbenchLedger` を組んで本物の protocol に通す（ADR-0009）。Tab と Runspace は Workbench Ledger の method か workbench の router で開き、Agent Session は hook で作り、workbench の table に直に書かない。
+- procedure と Workbench Ledger の method は ptyd を待たずに返る。ptyd に届いた op は fake の `received` か `receivedAtLeast` で待ってから確かめ、Terminal Session が starting を抜けるのは `untilSettled` で待つ。
+- op が届かないことを `receivedAll(…)` が空で確かめるときは、後から送る別の op（Tab を開いた Create など）が届くのを待ってから読む。すぐに読むと、transaction の後に送る op が届く前の空を見て、送ってしまう変異も通すため。
+- await の間の競合は、await の途中で止めて決まった順で起こす。sync は fake の GitHub の `hold()` で、git の ref の更新（`branch -D` など）は checkout の `.git/hooks/reference-transaction` に置いた、file を待つ script で、ptyd の応答は fake の ptyd の `holdNext(op)` で止める（`packages/task/src/close-race.test.ts`）。
+- 止められるのは、procedure が await する所だけ。procedure が待たない副作用（commit の後に workbench が送る Terminate など）を止めても、procedure の中の窓は止まらず、テストは競合を通らないまま通る。
+- system の Job を足すときは、並びを出す domain のテストに 1 本足す。`systemJobs(<d>Ledger)` から名前で取り出した `run` を最小の場面で呼び、Ledger の method に届くことを見る。method の規則のテストは method を直に呼ぶ。`run` が別の method を呼んでも、型も Job Ledger のテストも捕まえないため。
+- 一定の間隔で走る処理は、`setInterval` を `spyOn` で捕まえ、間隔を確かめてから callback を手で呼ぶ。決まった時間の打ち切りは、`setTimeout` を `spyOn` して callback を手で呼ぶ。
+- `jest.useFakeTimers()` は使わない。Bun では `Bun.sleep` と `setTimeout` も止まり、一部の timer だけを偽にできないので、HTTP の応答を待つテストが進まなくなるため。
+- 本番が `Date.now()` の締め切りと短い sleep の loop で待つもの（setup と Job の SIGTERM から SIGKILL までの猶予）は、待ち始めた印を見てから `setSystemTime` で時計を進め、猶予の手前でまだ待っていることも確かめる。最後に `setSystemTime()` で戻す。
+- 子の process の timer は、子を `bun --preload <テスト用の file>` で起こし、preload で差し替える（`apps/cli/src/hook.test.ts` の `AbortSignal.timeout`）。テストの process からは spy できないため。
+- 待たずに進むことは、待てば打ち切りまで返らない場面（Exit を送らない fake の ptyd など）を作って確かめる。操作を、打ち切りより短い `Bun.sleep` と `Promise.race` する。テストの既定の timeout は打ち切りより長いことがあり、待ちを戻す変異も通すため（`packages/workbench/src/ui/store.test.ts`）。
+- 偽の GitHub に request が届くのは、`requests` を poll せず、`received(count)` を await して待つ。固定の sleep でも待たない。
+- 手元の暦日や時刻で切る処理は、テストの中で `process.env.TZ` を UTC 以外（`Asia/Tokyo` など）にして確かめる。`bun test` は UTC で動くので、UTC の日付で切る誤りも通るため。
+- `process.env.TZ` は `finally` で `process.env.TZ = tz ?? 'UTC'` と戻す。`undefined` の代入は文字列の `"undefined"` を入れて直前の時間帯を残し、`delete` は手元の時間帯に落とすので、どちらも UTC に戻らず、同じ process で後に走るテストに漏れるため（`packages/usage/src/usage.test.ts`・`packages/ui/src/local-time.test.ts`）。
+- oRPC の client の procedure を記録するか差し替えるときは、client を `new Proxy` で包み、`get` でその key だけを替えて呼び手に渡す。client は property を読むたびに新しい Proxy を返すので、`spyOn` では差し替えられないため（`packages/task/src/ui/bench-close.test.ts`）。
+- 受けた値を `toMatchObject` に渡した後で読み直さない。Bun の `toMatchObject` は、受けた object の中で matcher（`expect.stringContaining` など）に当たった値を、その matcher に置き換えるため（Bun 1.4.2）。後で読む値は、渡す前に取り出す。
 - 外のサービスの fake（GitHub、ghq、ptyd）は、本物が引数で変える振る舞い（GraphQL の `states` や `includeClosedPrs` など）も再現する。引数を見ない fake では、query から引数を落としてもテストが通る。
 - 打ち切りのテストは、signal に応えない fake（終わらない promise を返す）で確かめる。signal で reject する fake では、打ち切りが相手の終わりを待つ実装でも通る。本物の process は kill されても、子が stdout を握れば出力が読み終わらない（`packages/note/src/repo.ts` の ghq）。
 
@@ -42,4 +67,6 @@ review で差分に当てる規則。どれも判断が要るもので、決定�
 
 ## コメント
 
-- `~/.claude/CLAUDE.md` の「コードコメント」に従う。
+- 既定は comment を書かない。何をしているかは、命名・型・構造・関数の切り出しで伝える（ADR-0039）。
+- comment を足す前に、テストの名前・型・命名・ADR・commit message のどれかで表せないかを確かめる。どれでも表せず、読んだ人が「直して」しまう行にだけ、1 文で書く（ADR-0039）。
+- 経緯・task・呼び出し元・issue 番号は comment に書かず、commit message と PR に書く。
