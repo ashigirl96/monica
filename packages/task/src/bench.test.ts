@@ -429,7 +429,9 @@ test('task.changes signals the Task when run opens its Bench and again when the 
   const benchStates: (string | null)[] = []
   taskLedger.events.subscribe('change', (change) => {
     if (change.type !== 'task' || change.ref !== ref) return
-    benchStates.push(db.select({ setupState: bench.setupState }).from(bench).get()?.setupState ?? null)
+    benchStates.push(
+      db.select({ setupState: bench.setupState }).from(bench).get()?.setupState ?? null,
+    )
   })
   const asked = Promise.withResolvers<void>()
   const answer = Promise.withResolvers<void>()

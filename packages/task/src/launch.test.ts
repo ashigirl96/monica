@@ -224,7 +224,11 @@ test('run --force is still refused while a Run is being started', async () => {
 test('a run whose Tab is moved out of the Bench before its claude starts still refuses the next run', async () => {
   const fixture = await tracked()
   const { terminalSessionId } = await fixture.client.run({ ref, inPlace: true })
-  const outside = await fixture.workbenchClient.runspace.create({ cwd: '/work', rows: 24, cols: 80 })
+  const outside = await fixture.workbenchClient.runspace.create({
+    cwd: '/work',
+    rows: 24,
+    cols: 80,
+  })
 
   await fixture.workbenchClient.tab.move({
     id: fixture.tabIdOf(terminalSessionId),
