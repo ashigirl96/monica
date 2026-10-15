@@ -11,6 +11,7 @@
     "monica/sync-transaction": "error",
     "monica/disable-reason": "error",
     "monica/atom-deferred-get": "error",
+    "monica/tz-restore": "error",
     // jsx: react-jsx では JSX を書く file が React を import しなくてよい。
     "react/react-in-jsx-scope": "off",
     // 指定しないと oxlint は import type だけでできた循環を見逃す。
@@ -43,6 +44,19 @@
       {
         "name": "chrome",
         "message": "chrome を使うのは apps/extension と chat の ui だけ（ADR-0029）"
+      }
+    ],
+    "no-restricted-properties": [
+      "error",
+      {
+        "object": "jest",
+        "property": "useFakeTimers",
+        "message": "useFakeTimers を使わず、setTimeout と setInterval を spyOn で捕まえて callback を手で呼ぶ。Bun の useFakeTimers は偽にする timer を選べず、Bun.sleep と setTimeout も止めるので、それらを待つ処理が進まなくなる"
+      },
+      {
+        "object": "vi",
+        "property": "useFakeTimers",
+        "message": "useFakeTimers を使わず、setTimeout と setInterval を spyOn で捕まえて callback を手で呼ぶ。Bun の useFakeTimers は偽にする timer を選べず、Bun.sleep と setTimeout も止めるので、それらを待つ処理が進まなくなる"
       }
     ]
   },
@@ -914,6 +928,11 @@
       "files": ["**/*.ts", "**/*.tsx"],
       "excludeFiles": ["**/*.test.ts", "**/testing.ts"],
       "rules": { "monica/testing-entry": "error" }
+    },
+    {
+      "files": ["**/*.ts", "**/*.tsx"],
+      "excludeFiles": ["packages/*/src/contract.ts", "apps/cli/src/forward.ts"],
+      "rules": { "monica/contract-only": "error" }
     },
     {
       // bun-types が `expect(…).rejects` の matcher を void を返す型にしているための誤検知。rule に従って await を外すと、test が reject を待たなくなる。
