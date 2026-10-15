@@ -113,8 +113,8 @@ export type BlockEditorCallbacks = {
   uploadImage?: UploadImage
   /** 外部画像 URL をローカル asset 化する（外部 HTML paste の <img> 用）。 */
   importExternalImage?: ImportExternalImage
-  /** 選択範囲の doc JSON を markdown へ投影する。未指定なら markdown コピーは無効（plain text 縮退）。 */
-  renderMarkdown?: RenderMarkdown
+  /** 選択範囲の doc JSON を markdown へ投影する。 */
+  renderMarkdown: RenderMarkdown
   /** plain text paste を markdown として取り込む。未指定なら素のテキスト挿入に縮退。 */
   parseMarkdown?: ParseMarkdown
 }
@@ -136,7 +136,7 @@ export function createBlockEditor(
     importExternalImage,
     renderMarkdown,
     parseMarkdown,
-  }: BlockEditorCallbacks = {},
+  }: BlockEditorCallbacks,
 ): EditorView {
   // synced block の NodeView 群を refresh plugin と共有する（同一ノート内のライブ反映用）
   const syncedRegistry = new Set<SyncedBlockView>()

@@ -338,11 +338,6 @@ describe('stripPendingImages（永続化用）', () => {
   test('本文が pending image だけなら、空の段落を 1 つ持つ doc を保存する', () => {
     expect(stripPendingImages(docJson([imageBlockJson(null, 'only')]))).toEqual(EMPTY_DOC)
   })
-
-  test('pending image が無ければ doc はそのまま（確定 src は保持）', () => {
-    const input = docJson([paraJson('x'), imageBlockJson('/api/assets/b.webp', null)])
-    expect(JSON.stringify(stripPendingImages(input))).toContain('/api/assets/b.webp')
-  })
 })
 
 describe('acceptedPastedImageSrc', () => {

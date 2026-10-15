@@ -5,7 +5,7 @@ import type { Node as PMNode } from 'prosemirror-model'
 import { EditorState, TextSelection } from 'prosemirror-state'
 import type { Command } from 'prosemirror-state'
 
-import { blocksToPlainText } from './clipboard.ts'
+import { toMarkdown } from '../../body/index.ts'
 import { nodes } from './schema.ts'
 import {
   tableDeleteColumn,
@@ -69,9 +69,7 @@ describe('行の挿入', () => {
     const { state, table } = apply(twoByTwo(true), 0, tableInsertRowAbove)
     expect(rowHeaders(table, 0)).toEqual([true, true])
     expect(rowHeaders(table, 1)).toEqual([false, false])
-    expect(blocksToPlainText([state.doc.child(0).child(0)])).toBe(
-      '|  |  |\n| --- | --- |\n| a | b |\n| c | d |',
-    )
+    expect(toMarkdown(state.doc.toJSON())).toBe('|  |  |\n| --- | --- |\n| a | b |\n| c | d |')
   })
 
   test('下に挿入（最終行）: 末尾に追加されカーソルは新行', () => {

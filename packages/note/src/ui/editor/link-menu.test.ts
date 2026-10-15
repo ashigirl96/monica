@@ -4,7 +4,7 @@ import { describe, expect, test } from 'bun:test'
 import type { Node as PMNode } from 'prosemirror-model'
 import { EditorState, Selection, TextSelection } from 'prosemirror-state'
 
-import { EMPTY_DOC } from '../../body/index.ts'
+import { EMPTY_DOC, toMarkdown } from '../../body/index.ts'
 import type { LinkMetadata } from '../../contract.ts'
 import { clipboardPlugin } from './clipboard.ts'
 import { linkMenuPlugin, previewTransaction } from './link-menu.ts'
@@ -214,7 +214,9 @@ function editorState(doc: PMNode, selection?: Selection): EditorState {
 }
 
 function pasteUrl(state: EditorState): EditorState {
-  const pasted = paste(clipboardPlugin(), state, { 'text/plain': URL })
+  const pasted = paste(clipboardPlugin({ renderMarkdown: toMarkdown }), state, {
+    'text/plain': URL,
+  })
   expect(pasted.handled).toBe(true)
   return pasted.state
 }
