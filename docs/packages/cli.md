@@ -20,7 +20,7 @@
   - stdin から 1 通（4 byte の little-endian の長さと UTF-8 の JSON）を読み、中身は見ずに、home（`MONICA_HOME`、無ければ `~/.monica`）の `backend.json` を `src/backend.ts` の `liveEndpoint` で読んで、`{ port, token: <extensionToken> }` を同じ枠で 1 通書いて exit 0 する。全権の token は返さない。`backend.json` が無い、pid が死んでいる、`extensionToken` が無い（この版より前の Backend）ときは `{ error: 'not-running' }` を返す。
   - `sendNativeMessage` は応答を受けてから stdin を閉じるので、EOF を待たずに 1 通だけ読む。Chromium は応答の後、host が 2 秒で抜けなければ SIGKILL する。
   - どの origin でも同じ答えを返す。起こせる Chrome Extension は manifest の `allowed_origins` で browser が絞る。
-  - release の manifest は Shell が、dev の manifest は `bun run extension` が書く（`docs/packages/dev-loop.md`）。
+  - release の manifest は Shell が、dev の manifest は `bun run extension` が書く（`scripts/native-host.ts`）。
 - SKILL.md と CLI を突き合わせる検査テストは apps/cli に置く（ADR-0006。`skill-check.test.ts`）。`createProgram` が組む commander の木を辿って command path と flag 名を引くので、procedure を呼ばず、Backend も要らない。
   - 検査する command は、`bash` か `sh` の fence の中で `monica` から始まる行と、本文のインラインの `monica …`。長い fence の中の fence は例なので見ない。行の `#` から後ろは shell と同じく comment として外す。
   - 親の option（`--format`）と `--help` は、commander と同じく子の後ろでも受ける。

@@ -226,7 +226,7 @@ Essay と Repo Note の削除と ⌥Z の判断は `notes/removals.ts` の `Remo
 - 届かなかったら、1 秒ごとに `daily.dates` を呼んで戻ったかを確かめる。最初の失敗から 1 秒たっても届かなければ上端に「monica に再接続中…」を出し、届いたら消す（`reach.ts`）。Backend の再起動（bun --watch で約 100ms）で帯がちらつかないよう、1 秒待つ。
 - 失敗の後に届いたら（帯を出す前の短い停止も含む）、エラーのまま残った query を取り直す（`Reach.onRecover`）。retry しないので、届かない間に開いた Daily は、取り直さないと focus し直すまでエラーのまま残るため。
 - 届いている間は定期的に呼ばない。そのため、何も操作していない間に Backend が止まっても、次に保存か取り直しが走るまで帯は出ない。
-- dev の Vite の proxy も、Backend に届かないときは接続を切り、release の口と同じ network error を見せる（`docs/packages/dev-loop.md` の「dev loop」）。
+- dev の Vite の proxy も、Backend に届かないときは接続を切り、release の口と同じ network error を見せる（`apps/web/vite.config.ts`）。
 - 閉じると失われる編集がある間だけ、`beforeunload` でタブを閉じる前に確かめる。数えるのは、競合で残った編集、保存に失敗して再試行を待つ編集、送信中の保存の後ろに待つ編集（pagehide の flush はその保存の後ろに並ぶので、ページと一緒に消える）、届かない間の未保存（debounce 中と送信中）。届く Backend への未保存は pagehide の保存が送るので、書いた直後に閉じても確かめない（`SaveQueue` の `wouldLoseOnLeave`）。
 - そのため、書いてから最初の保存が失敗するまでの間に Backend が止まった場合と、keepalive の上限を超える本文を書いた直後に閉じた場合は、確かめずに最後の編集を失う（旧 Monica と同じ）。
 - IndexedDB への退避と Service Worker は使わない（ADR-0017）。

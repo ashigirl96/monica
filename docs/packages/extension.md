@@ -20,7 +20,7 @@
 - globals.css は fluid の token と Tailwind の theme を持ち、`@source` で `packages/chat/src/ui` を走査する。chat の ui の CSS より先に読ませ、Tailwind の layer の順を先に決める。
 - side panel は RPC を呼ぶたびに `chrome.runtime.sendNativeMessage(<host 名>, {})` で Backend の token の口の port と Chrome Extension の token を引き、`http://127.0.0.1:<port>/rpc` を `Authorization: Bearer <Chrome Extension の token>` で呼ぶ（ADR-0034）。引いた値は覚えない。chrome の API に触る部分は chat の ui（`packages/chat/src/ui/native-host.ts`）が持ち、`docs/packages/chat.md` の「Backend の探し方」にある。
 - host 名は `vite.config.ts` の `define` で `__MONICA_NATIVE_HOST__` に焼き込み、型は `src/sidepanel/native-host.d.ts` が宣言する。`vite build` は release の `com.ashigirl96.monica`、`vite`（dev）は `com.ashigirl96.monica_dev`（`scripts/native-host.ts` の `RELEASE_NATIVE_HOST`・`DEV_NATIVE_HOST`）を焼く。dev の host は dev の Brave の `MONICA_HOME` の Backend を返すので、dev の side panel は release の Backend を呼ばない。Vite の dev は `define` を `/@vite/env` で global に置くので、dev で焼いた値は `curl http://localhost:<Chrome Extension の port>/@vite/env` で見られる。
-- host の manifest は、release は release の Shell が、dev は `bun run extension` が書く（`docs/packages/dev-loop.md`）。Brave は user-data-dir に依らず `~/Library/Application Support/Google/Chrome/NativeMessagingHosts/` だけを読むので、同じ実の HOME の Brave はどの profile でも同じ manifest を読む。
+- host の manifest は、release は release の Shell が、dev は `bun run extension` が書く（`scripts/native-host.ts`）。Brave は user-data-dir に依らず `~/Library/Application Support/Google/Chrome/NativeMessagingHosts/` だけを読むので、同じ実の HOME の Brave はどの profile でも同じ manifest を読む。
 - `@fontsource-variable/inter` は globals.css が import するので apps/extension の依存にする。bun の isolated linker では、import する側の package.json に書く必要がある。
 
 ## Run ボタン
@@ -63,7 +63,7 @@ CRXJS は dev も build も `build.outDir` に書く。dir を分けないと、
 
 ## dev の読み込み方
 
-`bun run extension`（`scripts/extension.ts`）が、Vite と Brave をまとめて起こす。手順と flag は `docs/packages/dev-loop.md` の「dev loop」にある。
+`bun run extension`（`scripts/extension.ts`）が、Vite と Brave をまとめて起こす。手順と flag は `scripts/extension.ts` にある。
 
 - Vite は `devInstance` の Chrome Extension の port で `strictPort` で listen する（既定の home は 19781、ほかは 19782〜19881）。空いている別の port には移らない。dev の出力に port が焼き込まれ、別の port で起き直すと Chrome Extension を reload するまで繋がらないため。
 - Brave は home ごとの user-data-dir（`$MONICA_HOME/dev-brave`）で起こし、dev の出力を `--load-extension` で読み込ませる。
@@ -73,10 +73,10 @@ CRXJS は dev も build も `build.outDir` に書く。dir を分けないと、
 
 ## release の読み込み方
 
-`bun run build` が `dist/production` を作り、`bun run install-app` がそれを `/Applications/Monica.app/Contents/Resources/extension` に写す（`docs/packages/dev-loop.md` の「release build と install」）。
+`bun run build` が `dist/production` を作り、`bun run install-app` がそれを `/Applications/Monica.app/Contents/Resources/extension` に写す（`scripts/install-app.ts`）。
 
 - 普段の Brave の `brave://extensions` で開発者モードを on にし、「パッケージ化されていない拡張機能を読み込む」を押す。file の選択で ⌘⇧G を押し、`/Applications/Monica.app/Contents/Resources/extension` を選ぶ。`.app` は Finder では 1 つの file に見え、中に入れないため。読み込むのは一度だけで、ID は release の ID になる。
-- side panel が Backend を見つけるには、release の desktop を一度起動し、Shell に host の manifest を書かせる（`docs/packages/dev-loop.md`）。それまでは host が見つからず、帯「monica の desktop が起動していません」が出る。
+- side panel が Backend を見つけるには、release の desktop を一度起動し、Shell に host の manifest を書かせる（`apps/desktop/src-tauri/src/native_host.rs`）。それまでは host が見つからず、帯「monica の desktop が起動していません」が出る。
 - Brave は unpacked で読み込んだものを自分では読み直さない。`install-app` で `.app` を入れ替えた後は、`brave://extensions` で reload を押す（ADR-0029）。reload を押す前の Brave がどう振る舞うか（古い中身のまま動くか、エラーを出すか）はまだ確かめていない。
 
 ## `chrome` の型と lint
