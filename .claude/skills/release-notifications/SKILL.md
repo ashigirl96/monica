@@ -51,7 +51,7 @@ dock() {
 
 ## Chat の claude と Chrome Extension
 
-`install-app` は `.app` の `Contents/MacOS/claude` に Chat の claude を、`Contents/Resources/extension` に Chrome Extension を写す（`docs/packages/dev-loop.md` の「release build と install」）。本物の claude に訊くのは、入れ替える前と後で 1 問ずつにし、「1 から 5 を並べて」のような短い質問にする。
+`install-app` は `.app` の `Contents/MacOS/claude` に Chat の claude を、`Contents/Resources/extension` に Chrome Extension を写す（`scripts/install-app.ts`）。本物の claude に訊くのは、入れ替える前と後で 1 問ずつにし、「1 から 5 を並べて」のような短い質問にする。
 
 ### 入れ替える前（agent が行う）
 

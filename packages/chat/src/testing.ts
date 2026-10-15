@@ -1,6 +1,8 @@
 import { rmSync, symlinkSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 
+export { testPdf } from './page/test-pdf.ts'
+
 export type FakeScenario =
   | 'answer'
   | 'not-logged-in'

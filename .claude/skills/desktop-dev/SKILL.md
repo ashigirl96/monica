@@ -19,11 +19,15 @@ dev の desktop は `MONICA_HOME` ごとに identifier と vite の port が分�
 
 起動できたのは、log に `MCP Bridge plugin initialized` と `[backend] listening on` が出たとき。待つのは、Bash の `run_in_background` で `until grep -qE '^\[backend\] listening on|^\[desktop exited\]' $SCRATCH/desktop.log; do sleep 0.5; done` を走らせる（前景の `sleep` は harness が止める）。MCP の WebSocket の行も `listening on` を含むので、`[backend]` まで含めて探す。`[desktop exited]` で抜けたら log を読む。
 
+`[desktop exited]` で抜け、log に vite の `Port <port> is already in use` があれば、同じ頃に起こした別の home の desktop と同じ port を選んでいる。手順 3 をやり直すと次の空きを選ぶ。
+
 起動を待つ間（desktop の crate の build）は `bun run check:brief` を流さない。build が CPU を取り、変更と関係の無いテストが 5 秒の timeout で落ちる。
 
 自分の desktop の pid は、`bun run dev:list` の `monica-<名前>` の行の DESKTOP から引く。`pgrep -f target/debug/monica-desktop` はユーザーや別の worktree の desktop にも当たる。
 
 ## 確かめる
+
+起こした後の編集は、起こし直さずに届く。webview は vite の HMR で届き、package の `ui` も source のまま読む。Backend は、packages と apps/backend の編集と `bun run generate` で `bun --watch` が同じ pid のまま起こし直し、webview が繋ぎ直す。端末は切れない。
 
 - **書き込み**は、Terminal Session に直接送る。id は `MONICA_HOME=… bun run monica workbench terminal-session list --format json` の `tabId` から引く。
 

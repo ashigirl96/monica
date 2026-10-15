@@ -64,6 +64,39 @@ function calls(node, name) {
   )
 }
 
+function isStringLiteral(node) {
+  return node?.type === 'Literal' && typeof node.value === 'string'
+}
+
+function isString(node) {
+  return (
+    isStringLiteral(node) ||
+    node?.type === 'TemplateLiteral' ||
+    (node?.type === 'LogicalExpression' &&
+      ['??', '||'].includes(node.operator) &&
+      isStringLiteral(node.right))
+  )
+}
+
+function propertyName(node) {
+  if (node.computed) return isStringLiteral(node.property) ? node.property.value : undefined
+  return node.property.name
+}
+
+function isEnv(node) {
+  return (
+    node?.type === 'MemberExpression' &&
+    !node.computed &&
+    node.property.name === 'env' &&
+    node.object.type === 'Identifier' &&
+    ['process', 'Bun'].includes(node.object.name)
+  )
+}
+
+function isTz(node) {
+  return node?.type === 'MemberExpression' && isEnv(node.object) && propertyName(node) === 'TZ'
+}
+
 const SCHEMA_ENTRY = /^@monica\/([^/]+)\/schema$/
 const TESTING_ENTRY = /^@monica\/[^/]+\/testing$/
 
@@ -203,6 +236,66 @@ export default {
           ImportDeclaration: check,
           ExportNamedDeclaration: check,
           ExportAllDeclaration: check,
+        }
+      },
+    },
+    'tz-restore': {
+      create(context) {
+        const report = (node) =>
+          context.report({
+            node,
+            message:
+              "process.env.TZ には文字列を代入して戻す（tz ?? 'UTC'）。undefined を代入しても delete しても UTC に戻らず、同じ process で後に走るテストに時間帯が漏れる",
+          })
+        return {
+          AssignmentExpression(node) {
+            if (node.operator === '=' && isTz(node.left) && !isString(node.right)) report(node)
+          },
+          UnaryExpression(node) {
+            if (node.operator === 'delete' && isTz(node.argument)) report(node)
+          },
+        }
+      },
+    },
+    'contract-only': {
+      create(context) {
+        const namespaces = new Set()
+        const reportSchemaFactory = (node) =>
+          context.report({
+            node,
+            message:
+              'createSchemaFactory は各 package の contract.ts にだけ書き、table から作る zod schema はそこで作る。日付を受ける coerce の設定を package ごとに 1 か所にするため',
+          })
+        return {
+          ImportDeclaration(node) {
+            if (node.source.value !== 'drizzle-zod') return
+            for (const specifier of node.specifiers) {
+              if (specifier.type === 'ImportNamespaceSpecifier') {
+                namespaces.add(specifier.local.name)
+              } else if (
+                specifier.type === 'ImportSpecifier' &&
+                (specifier.imported.name ?? specifier.imported.value) === 'createSchemaFactory'
+              ) {
+                reportSchemaFactory(specifier)
+              }
+            }
+          },
+          MemberExpression(node) {
+            const name = propertyName(node)
+            if (name === '$meta') {
+              context.report({
+                node,
+                message:
+                  '$meta は各 package の contract.ts にだけ書く。oRPC 2.0 で $meta が無くなるので、直す場所を contract.ts に集める',
+              })
+            } else if (
+              name === 'createSchemaFactory' &&
+              node.object.type === 'Identifier' &&
+              namespaces.has(node.object.name)
+            ) {
+              reportSchemaFactory(node)
+            }
+          },
         }
       },
     },

@@ -75,6 +75,26 @@ test('add registers a Job whose next scheduled time comes from its cron expressi
   })
 })
 
+test('a cron expression is read in the local timezone of the Backend, not in UTC', async () => {
+  const tz = process.env.TZ
+  process.env.TZ = 'Asia/Tokyo'
+  try {
+    const { client } = setup({ at: new Date('2026-10-06T03:00:00Z') })
+    const cwd = tempDir()
+
+    const added = await client.add({
+      name: 'dreaming',
+      schedule: '0 3 * * *',
+      command: 'true',
+      cwd,
+    })
+
+    expect(added).toEqual({ name: 'dreaming', nextAt: new Date('2026-10-06T18:00:00Z') })
+  } finally {
+    process.env.TZ = tz ?? 'UTC'
+  }
+})
+
 test('add refuses a name taken, a name with ., a schedule it cannot read or that never comes, a cwd that is no absolute directory and a timeout over 24h', async () => {
   const { client } = setup()
   const cwd = tempDir()

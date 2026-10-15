@@ -1472,8 +1472,8 @@ test('a kept model that the list does not have falls back to no choice, and so d
 })
 
 test('a kept choice that cannot be read, or a storage that throws, leaves nothing chosen', async () => {
-  const unreadable = new FakeStorage()
-  unreadable.setItem('monica-chat-choice', '{')
+  const garbled = new FakeStorage()
+  garbled.setItem('monica-chat-choice', '{')
   const throwing = {
     getItem(): string | null {
       throw new Error('the storage is not available')
@@ -1483,7 +1483,7 @@ test('a kept choice that cannot be read, or a storage that throws, leaves nothin
     },
   }
 
-  for (const storage of [unreadable, throwing]) {
+  for (const storage of [garbled, throwing]) {
     const { client, store } = openChat(new FakeClient(), storage)
     store.ask('What is this?')
     await settled()

@@ -1,10 +1,15 @@
 import { afterEach, expect, setDefaultTimeout, test } from 'bun:test'
-import { readFileSync, statSync } from 'node:fs'
+import { existsSync, readFileSync, statSync } from 'node:fs'
 import { join } from 'node:path'
 
 import { type contract as chatContract, MAX_ASK_BODY_BYTES } from '@monica/chat/contract'
-import { type FakeScenario, untilFakeClaudesExit, writeFakeClaude } from '@monica/chat/testing'
-import { startFakePtyd, tempHome } from '@monica/workbench/testing'
+import {
+  type FakeScenario,
+  testPdf,
+  untilFakeClaudesExit,
+  writeFakeClaude,
+} from '@monica/chat/testing'
+import { startFakePtyd, tempHome, writeFakeExecutable } from '@monica/workbench/testing'
 import { createORPCClient, ORPCError } from '@orpc/client'
 import { RPCLink } from '@orpc/client/fetch'
 import type { ContractRouterClient } from '@orpc/contract'
@@ -45,13 +50,42 @@ function announcements(stdout: ReadableStream<Uint8Array>) {
 
 type Env = { [key: string]: string | undefined }
 
+type FakePtyd = ReturnType<typeof startFakePtyd>
+
+type SpawnOptions = {
+  beforeSpawn?: (ptyd: FakePtyd) => void
+  sharing?: { home: string; ptyd: FakePtyd }
+}
+
+function stderrOf(stream: ReadableStream<Uint8Array>): Promise<string> {
+  return (async () => {
+    let text = ''
+    const decoder = new TextDecoder()
+    for await (const bytes of stream) {
+      const chunk = decoder.decode(bytes, { stream: true })
+      process.stderr.write(chunk)
+      text += chunk
+    }
+    return text
+  })()
+}
+
 // main.ts は Backend の組み立てそのものなので、Shell と同じく process として起こす。
-async function startBackend(browserPort: number, envOf: (home: string) => Env = () => ({})) {
-  const home = tempHome((cleanup) => cleanups.push(cleanup))
-  const ptyd = startFakePtyd(home)
-  cleanups.push(() => ptyd.stop())
+function spawnBackend(
+  browserPort: number,
+  envOf: (home: string) => Env = () => ({}),
+  { beforeSpawn, sharing }: SpawnOptions = {},
+) {
+  const home = sharing?.home ?? tempHome((cleanup) => cleanups.push(cleanup))
+  let ptyd = sharing?.ptyd
+  if (!ptyd) {
+    const started = startFakePtyd(home)
+    cleanups.push(() => started.stop())
+    ptyd = started
+  }
+  beforeSpawn?.(ptyd)
   const { MONICA_BROWSER_PORT: _, MONICA_CLAUDE_PATH: __, ...inherited } = process.env
-  const backend = Bun.spawn([process.execPath, join(import.meta.dir, 'main.ts')], {
+  const subprocess = Bun.spawn([process.execPath, join(import.meta.dir, 'main.ts')], {
     env: {
       ...inherited,
       MONICA_HOME: home,
@@ -63,23 +97,36 @@ async function startBackend(browserPort: number, envOf: (home: string) => Env = 
     },
     stdin: 'pipe',
     stdout: 'pipe',
-    stderr: 'inherit',
+    stderr: 'pipe',
   })
   // Backend が exit で消す backend.json や、偽の claude と競うと、Bun の rmSync は黙って止まり home を残す。
   // Backend は exit で claude に SIGKILL を送るだけで、居なくなるのを待たない。
   cleanups.push(async () => {
-    backend.kill()
-    await backend.exited
+    subprocess.kill()
+    await subprocess.exited
     await untilFakeClaudesExit(home)
   })
-  const next = announcements(backend.stdout)
+  const stderr = stderrOf(subprocess.stderr)
+  const next = announcements(subprocess.stdout)
   const beforeEndpoint: Announcement[] = []
-  for (;;) {
-    const line = await next()
-    if (line.type === 'endpoint')
-      return { home, port: line.port, token: line.token, beforeEndpoint, next, process: backend }
-    beforeEndpoint.push(line)
+  async function endpoint() {
+    for (;;) {
+      const line = await next()
+      if (line.type === 'endpoint') return line
+      beforeEndpoint.push(line)
+    }
   }
+  return { home, ptyd, subprocess, stderr, next, beforeEndpoint, endpoint }
+}
+
+async function startBackend(
+  browserPort: number,
+  envOf: (home: string) => Env = () => ({}),
+  options: SpawnOptions = {},
+) {
+  const spawned = spawnBackend(browserPort, envOf, options)
+  const announced = await spawned.endpoint()
+  return { ...spawned, port: announced.port, token: announced.token, announced }
 }
 
 type Backend = Awaited<ReturnType<typeof startBackend>>
@@ -249,8 +296,8 @@ test('a Backend that exits while Chat answers leaves no claude behind', async ()
   let read = await answer.next()
   while (!read.done && read.value.type !== 'text') read = await answer.next()
 
-  await backend.process.stdin.end()
-  await backend.process.exited
+  await backend.subprocess.stdin.end()
+  await backend.subprocess.exited
 
   const exited = await Promise.race([
     untilFakeClaudesExit(backend.home).then(() => 'exited'),
@@ -397,4 +444,250 @@ test('usage.list gives every Feature of both listeners as 0 calls, even when the
     failed: 0,
     lastUsed: null,
   })
+})
+
+async function tabPath(backend: Backend) {
+  await viaToken(backend, 'workbench/runspace/create', { rows: 24, cols: 80 })
+  const [create] = await backend.ptyd.receivedAtLeast(1, (op) => op.op === 'create')
+  return create?.op === 'create' ? new Map(create.env ?? []).get('PATH') : undefined
+}
+
+async function stderrAfterExit(backend: { subprocess: Bun.Subprocess; stderr: Promise<string> }) {
+  backend.subprocess.kill()
+  await backend.subprocess.exited
+  return (await backend.stderr).split('\n')
+}
+
+function fakeLoginShell(script: string) {
+  return (home: string) => {
+    const shell = join(home, 'zsh')
+    writeFakeExecutable(shell, script)
+    return { SHELL: shell }
+  }
+}
+
+test('the Backend opens a Tab with the PATH its login shell prints, without handing that shell its stdin', async () => {
+  const backend = await startBackend(
+    freePort(),
+    fakeLoginShell('read -r _\nPATH=/from/login/shell:/usr/bin:/bin /bin/sh -c "$2"'),
+  )
+
+  expect(await tabPath(backend)).toBe(`${backend.home}/bin:/from/login/shell:/usr/bin:/bin`)
+})
+
+test('a login shell that fails leaves the Backend on the PATH it started with, with one line on stderr', async () => {
+  const failing = fakeLoginShell('echo broken >&2; exit 1')
+  const backend = await startBackend(freePort(), (home) => ({
+    ...failing(home),
+    PATH: '/started/with:/usr/bin:/bin',
+  }))
+
+  expect(await tabPath(backend)).toBe(`${backend.home}/bin:/started/with:/usr/bin:/bin`)
+  const lines = await stderrAfterExit(backend)
+  expect(
+    lines.filter((line) => line.includes('[backend] keeping the PATH it started with')),
+  ).toEqual([expect.stringContaining('broken')])
+})
+
+test('the Backend without MONICA_PTYD_PATH exits 1 with one line on stderr and opens no DB', async () => {
+  const home = tempHome((cleanup) => cleanups.push(cleanup))
+  const {
+    MONICA_PTYD_PATH: _,
+    MONICA_BROWSER_PORT: __,
+    MONICA_CLAUDE_PATH: ___,
+    ...inherited
+  } = process.env
+  const backend = Bun.spawn([process.execPath, join(import.meta.dir, 'main.ts')], {
+    env: { ...inherited, MONICA_HOME: home, SHELL: '/bin/sh' },
+    stdout: 'pipe',
+    stderr: 'pipe',
+  })
+
+  expect(await backend.exited).toBe(1)
+  const stderr = await new Response(backend.stderr).text()
+  expect(stderr.split('\n').filter((line) => line.includes('MONICA_PTYD_PATH'))).toHaveLength(1)
+  expect(existsSync(join(home, 'monica.db'))).toBe(false)
+})
+
+type AskInput = Parameters<ReturnType<typeof chatClient>['chat']['ask']>[0]
+
+async function askFails(backend: Backend, input: AskInput): Promise<unknown> {
+  try {
+    for await (const _ of await chatClient(backend).chat.ask(input));
+  } catch (error) {
+    return error
+  }
+  return undefined
+}
+
+test('a MONICA_CLAUDE_PATH that names no file leaves the Workbench answering and ends chat.ask as AGENT_FAILED', async () => {
+  const backend = await startBackend(freePort(), (home) => ({
+    MONICA_CLAUDE_PATH: join(home, 'no-claude'),
+    USER: undefined,
+  }))
+
+  expect((await viaToken(backend, 'workbench/layout/get')).status).toBe(200)
+  const error = await askFails(backend, {
+    question: 'What is 1 + 1?',
+    page: { content: { kind: 'unreadable', reason: 'restricted' } },
+    history: [],
+  })
+  expect(error).toBeInstanceOf(ORPCError)
+  expect(error).toMatchObject({ code: 'AGENT_FAILED' })
+})
+
+test('a second Backend on the same home exits non-zero while the first keeps answering', async () => {
+  const first = await startBackend(freePort())
+
+  const second = spawnBackend(freePort(), () => ({}), { sharing: first })
+  const exitCode = await Promise.race([
+    second.subprocess.exited,
+    second.endpoint().then(
+      () => 'announced',
+      () => second.subprocess.exited,
+    ),
+  ])
+
+  expect(exitCode).toEqual(expect.any(Number))
+  expect(exitCode).not.toBe(0)
+  expect((await viaToken(first, 'job/list')).status).toBe(200)
+})
+
+test('the Backend run from source reads a Japanese PDF and an HTML page into text for claude', async () => {
+  const backend = await startBackend(freePort(), fakeClaude('answer'))
+  const pdf = new File([testPdf([{ font: 'japanese', lines: ['合言葉は桜餅です'] }])], 'a.pdf', {
+    type: 'application/pdf',
+  })
+
+  const snapshotOf = async (content: AskInput['page']['content']) => {
+    const answer = await chatClient(backend).chat.ask({
+      question: 'What does it say?',
+      page: { url: 'https://example.com/page', content },
+      history: [],
+    })
+    const { value } = await answer.next()
+    await answer.return(undefined)
+    return value
+  }
+
+  expect(await snapshotOf({ kind: 'pdf', pdf })).toMatchObject({
+    type: 'snapshot',
+    page: { content: { kind: 'text', text: expect.stringContaining('合言葉は桜餅です') } },
+  })
+  expect(
+    await snapshotOf({
+      kind: 'html',
+      html: '<html><body><p>The password is mochi.</p></body></html>',
+    }),
+  ).toMatchObject({
+    type: 'snapshot',
+    page: { content: { kind: 'text', text: expect.stringContaining('The password is mochi.') } },
+  })
+})
+
+test('the token listener answers the CORS preflight of the release webview and the dev URL, and of no other origin', async () => {
+  const backend = await startBackend(freePort(), () => ({
+    MONICA_DEV_URL: 'http://localhost:1420/',
+  }))
+
+  const allowed = async (origin: string) =>
+    (
+      await fetch(`http://127.0.0.1:${backend.port}/rpc/workbench/layout/get`, {
+        method: 'OPTIONS',
+        headers: { origin, 'access-control-request-method': 'POST' },
+      })
+    ).headers.get('access-control-allow-origin')
+
+  for (const origin of ['tauri://localhost', 'http://tauri.localhost', 'http://localhost:1420'])
+    expect([origin, await allowed(origin)]).toEqual([origin, origin])
+  expect(await allowed('https://evil.example')).toBeNull()
+})
+
+test('the Backend answers /health without a token with the pid that backend.json names', async () => {
+  const backend = await startBackend(freePort())
+
+  const health = await fetch(`http://127.0.0.1:${backend.port}/health`)
+
+  expect(health.status).toBe(200)
+  const { name, pid } = (await health.json()) as { name: string; pid: number }
+  expect({ name, pid }).toEqual({ name: 'monica-backend', pid: backend.subprocess.pid })
+  expect(JSON.parse(readFileSync(join(backend.home, 'backend.json'), 'utf8')).pid).toBe(pid)
+})
+
+test('the Backend announces its endpoint only after monica-ptyd answers the List of its reconcile, and after 3 seconds when it never does', async () => {
+  let release: (() => void) | undefined
+  const held = spawnBackend(freePort(), () => ({}), {
+    beforeSpawn: (ptyd) => {
+      release = ptyd.holdNext('list')
+    },
+  })
+  const announced = held.endpoint().then(() => 'announced')
+
+  expect(await Promise.race([announced, Bun.sleep(1000).then(() => 'silent')])).toBe('silent')
+  release?.()
+  expect(await announced).toBe('announced')
+
+  const startedAt = performance.now()
+  const never = spawnBackend(freePort(), () => ({}), {
+    beforeSpawn: (ptyd) => void ptyd.holdNext('list'),
+  })
+  await never.endpoint()
+  expect(performance.now() - startedAt).toBeGreaterThanOrEqual(3000)
+  const lines = await stderrAfterExit(never)
+  expect(lines.filter((line) => line.includes('not ready after 3s'))).toHaveLength(1)
+})
+
+test('the Backend kills the claude that is still answering when it gets SIGTERM', async () => {
+  const backend = await startBackend(freePort(), fakeClaude('answer'))
+  const answer = await chatClient(backend).chat.ask({
+    question: 'HOLD on, what is 1 + 1?',
+    page: { content: { kind: 'unreadable', reason: 'restricted' } },
+    history: [],
+  })
+  for (;;) {
+    const { done, value } = await answer.next()
+    if (!done && value.type === 'text') break
+  }
+
+  backend.subprocess.kill('SIGTERM')
+
+  expect(
+    await Promise.race([
+      untilFakeClaudesExit(backend.home).then(() => 'gone'),
+      Bun.sleep(2000).then(() => 'still answering'),
+    ]),
+  ).toBe('gone')
+})
+
+test('the Backend removes backend.json and exits 0 on SIGTERM and when its stdin closes', async () => {
+  const terminated = await startBackend(freePort())
+  const orphaned = await startBackend(freePort())
+
+  terminated.subprocess.kill('SIGTERM')
+  void orphaned.subprocess.stdin.end()
+
+  for (const backend of [terminated, orphaned]) {
+    expect(await backend.subprocess.exited).toBe(0)
+    expect(existsSync(join(backend.home, 'backend.json'))).toBe(false)
+  }
+})
+
+test('a token of an earlier Backend gets 401 with WWW-Authenticate on the token listener', async () => {
+  const backend = await startBackend(freePort())
+
+  const response = await viaToken(
+    { port: backend.port, token: crypto.randomUUID() },
+    'chat/ask',
+    INVALID_QUESTION,
+  )
+
+  expect(response.status).toBe(401)
+  expect(response.headers.get('www-authenticate')).toContain('invalid_token')
+})
+
+test('the endpoint line on stdout carries the port and the full token, and not the Chrome Extension token', async () => {
+  const backend = await startBackend(freePort())
+
+  expect(backend.announced).toEqual({ type: 'endpoint', port: backend.port, token: backend.token })
+  expect(endpointFile(backend.home).token).toBe(backend.token)
 })
