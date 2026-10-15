@@ -431,7 +431,7 @@ SDK 0.3.293 と同梱の claude 2.1.293 で、dev の Backend を `env -i`（`HO
   - ThinkingIndicator はその場で日本語にした（「考えています」「ページを読んでいます」「まとめています」）。英語版は残さない。
   - 画面に出る英語の文言は日本語にした（送るボタンの「送る」、止めるボタンの「止める」、textarea の aria-label の「質問」）。
   - Button の asChild の `cloneElement` に ref を渡す所は、oxlint の `react/refs` を理由付きで止めた。
-- 写した元と比べるときは、import の書き換えと oxfmt だけを当てた控えを repo の外に作り、`git diff --no-index` で比べる（`docs/packages/note-ui.md` の「旧 Monica のコードを移すとき」と同じ）。
+- 写した元と比べるときは、import の書き換えと oxfmt だけを当てた控えを repo の外に作り、`git diff --no-index` で比べる。
 
 ### 字と色と CSS
 
@@ -489,7 +489,7 @@ React に依らない `createChatStore(client, storage)` が Chat を持ち、`C
 
 ### テスト
 
-- DOM の環境は入れない（`docs/packages/note-ui.md` の「テスト」と同じ）。
+- DOM の環境は入れない。
 - `current-page.test.ts` は `fake-chrome.ts` の偽の `chrome.tabs` で確かめる。偽物は `globalThis.chrome` に置いてテストの後に外し、`query` の `active`・`windowId`・`currentWindow` を本物と同じく絞る。chrome:// へ移ったときの url も title も無い `onUpdated` も出せる。
 - `read-page.test.ts` は同じ偽物の `chrome.scripting.executeScript` で確かめる。偽物は注入された関数を走らせず、`readings` に置いた結果を返すか、reject するか、返らない。省いた `contentType` は `text/html` になる。渡された injection は `injections` に残る。注入する関数そのもの（shadow root と選択範囲）は DOM が要るので、実機で確かめる。3 秒と 30 秒の打ち切りは `setTimeout` を `spyOn` して callback を手で呼ぶ。PDF の fetch は `fetch` を `spyOn` した偽物で、読まれた chunk の数を数える body を返す。打ち切りと止める操作は、`signal` にも応えずに返らない偽物で確かめる（`CODING_STANDARDS.md` の「テスト」）。`signal` で reject する偽物では、fetch の終わりを待つ実装でも通る。
 - `read-current-page.test.ts` は同じ偽物の `chrome.tabs.captureVisibleTab` と、偽の `createImageBitmap`・`OffscreenCanvas`・`devicePixelRatio` で、撮る時機・大きさと形式・撮れないとき・読めずに撮れたときを確かめる。偽の `captureVisibleTab` は `screenshots` に置いた大きさの偽の PNG を返すか、reject するか、返らない。呼ばれた引数は `captures` に残る。偽の canvas は画像を描かず、書き出した形式と quality と大きさを JSON にした Blob を返す。本物の縮小は bun test に canvas が無いので実機で確かめ、大きさの計算（`shrunkSize`）は `screenshot.test.ts` が純関数として確かめる。撮るのの 3 秒の打ち切りは、`executeScript` の 3 秒の timer と混ざらないよう、`screenshot.test.ts` が `takeScreenshot` を直に呼んで確かめる。

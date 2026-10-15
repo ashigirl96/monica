@@ -19,7 +19,7 @@
 - ブラウザに配る notes の画面は、`bun run web`（`apps/web` の Vite）で起こす。`bun run desktop` は起こさない。Workbench だけを見る dev と agent に Vite を 1 つ余計に持たせないため。
   - `MONICA_HOME` が無ければ `~/.monica-dev`。`devInstance` の Vite の port で `strictPort` で listen し、`/rpc` と `/api/assets` を同じ home の Backend のブラウザの口（`http://127.0.0.1:<ブラウザの口の port>`）へ proxy する。Host を書き換える（`changeOrigin`）ので、ブラウザの口の Host の照合を通る。`Sec-Fetch-Site` はブラウザが Vite に付けた `same-origin` がそのまま届く。
   - その Backend が居なくても、他の口には倒さない。旧 Monica の Vite は dev の Backend が居ないと release の口に倒れ、release の note に書いていた。`MONICA_HOME` が release の home なら、`scripts/desktop.ts` と同じく起こさずに落ちる。
-  - Backend に届かない request には 502 を返さず、接続を切る。release の口では接続が拒まれるので、画面がどちらでも同じ network error を見て再接続の帯を出すため（`docs/packages/note-ui.md` の「再接続の表示と beforeunload」）。
+  - Backend に届かない request には 502 を返さず、接続を切る。release の口では接続が拒まれるので、画面がどちらでも同じ network error を見て再接続の帯を出すため。
   - dev の Backend のブラウザの口は SPA を配らない（`bun run` の Backend には `--asset` の `dist` が無い）。開くのは Vite の URL（既定の home は `http://localhost:19581`）。
 - dev の Chrome Extension は、`bun run extension`（`scripts/extension.ts`）で起こす。Vite と Brave をまとめて起こし、Backend は起こさない（Backend は `bun run desktop` か backend-headless skill で同じ home に起こす）。manifest・ID・出力の dir は `docs/packages/extension.md`。
   1. `MONICA_HOME` が無ければ `~/.monica-dev`。release の home なら、何も起こさずに 1 行出して exit 1 する。Brave が `/Applications/Brave Browser.app/Contents/MacOS/Brave Browser` に無いときも同じ。`MONICA_HOME` は resolve した絶対 path に書き換え、`MONICA_REPO` に repo の root を入れ、その env を Vite と Brave に `Bun.spawn` の `env` で明示して渡す。Bun.spawn の既定の env は起動時の env で、process の中で書き換えた値を含まない。渡さないと、相対 path の home を Vite が自分の cwd（`apps/extension`）から解き、別の dir に出力と port を作った。
