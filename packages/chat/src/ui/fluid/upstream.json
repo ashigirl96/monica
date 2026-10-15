@@ -1,0 +1,24 @@
+{
+  "repository": "https://github.com/mickadesign/fluid-functionalism",
+  "commit": "bf9ece46728035afef54feef6ac67e1f413cc0b0",
+  "files": {
+    "apps/extension/src/sidepanel/globals.css": "app/globals.css",
+    "packages/chat/src/ui/fluid/LICENSE": "LICENSE",
+    "packages/chat/src/ui/fluid/button.tsx": "registry/base/button.tsx",
+    "packages/chat/src/ui/fluid/chat-message.tsx": "registry/default/chat-message.tsx",
+    "packages/chat/src/ui/fluid/hooks/use-touch-primary.tsx": "registry/default/hooks/use-touch-primary.tsx",
+    "packages/chat/src/ui/fluid/input-message.tsx": "registry/default/input-message.tsx",
+    "packages/chat/src/ui/fluid/lib/font-weight.ts": "registry/default/lib/font-weight.ts",
+    "packages/chat/src/ui/fluid/lib/icon-context.tsx": "registry/default/lib/icon-context.tsx",
+    "packages/chat/src/ui/fluid/lib/shape-context.tsx": "registry/default/lib/shape-context.tsx",
+    "packages/chat/src/ui/fluid/lib/size-context.tsx": "registry/default/lib/size-context.tsx",
+    "packages/chat/src/ui/fluid/lib/springs.ts": "registry/default/lib/springs.ts",
+    "packages/chat/src/ui/fluid/lib/surface-classes.ts": "registry/default/lib/surface-classes.ts",
+    "packages/chat/src/ui/fluid/lib/surface-context.tsx": "registry/default/lib/surface-context.tsx",
+    "packages/chat/src/ui/fluid/lib/type-scale.ts": "registry/default/lib/type-scale.ts",
+    "packages/chat/src/ui/fluid/lib/utils.ts": "registry/default/lib/utils.ts",
+    "packages/chat/src/ui/fluid/shimmer.css": "app/globals.css",
+    "packages/chat/src/ui/fluid/thinking-indicator.tsx": "registry/default/thinking-indicator.tsx",
+    "packages/chat/src/ui/fluid/typeset.css": "app/globals.css"
+  }
+}

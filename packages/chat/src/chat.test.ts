@@ -98,7 +98,6 @@ function startChat(
       .split('\n')
       .filter(Boolean)
       .map((line) => JSON.parse(line) as ClaudeRecord)
-  // 偽の claude が居なくなるのを待ってから home を消す（docs/packages/dev-loop.md の「検査と CI」）。
   cleanups.push(async () => {
     // spare の 5 分の時限も消す。
     chatAgent.stop()

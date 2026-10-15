@@ -51,7 +51,7 @@ review で差分に当てる規則。どれも判断が要るもので、理由�
 
 ## 依存
 
-- `@anthropic-ai/claude-agent-sdk` は catalog で `^` を付けずに 1 つの版に固定する。版を変える PR は、`docs/packages/chat.md` の「実機で確かめたこと」の確かめを新しい版と同梱の claude でやり直し、その節を直す。Chat の claude の options の効き目は、確かめた版のものしか分からないため（ADR-0032）。
+- `@anthropic-ai/claude-agent-sdk` は catalog で `^` を付けずに 1 つの版に固定する。版を変える PR は、`docs/research/chat-real-machine-checks.md` の 1 節の確かめを新しい版と同梱の claude でやり直し、その節を直す。Chat の claude の options の効き目は、確かめた版のものしか分からないため（ADR-0032）。
 
 ## テスト
 
