@@ -19,7 +19,7 @@ ask       { question, page: Page, history: { question, answer, page: PageSnapsho
 - `question` は 1 字以上。`page` と `PageSnapshot` の `url` と `title` は省略できるただの文字列で、形を検めない。`chrome://` などの Browser Tab では side panel から見えず、`file://` のページもあるため。
 - `history` は Chat の前の問答を古い順に並べたもの。turn ごとに、その質問の `snapshot` で返した `PageSnapshot` を持つ。Backend は Chat を持たず、送られた履歴をそのまま prompt にする（ADR-0031）。
 - `.errors()` で宣言するのは `CHAT_BUSY`・`NOT_AUTHENTICATED`・`USAGE_LIMIT`・`AGENT_FAILED`。`CHAT_BUSY`（status 429）は、claude を 4 つ持っているときと、本文にしているページが 4 つあるときの `ask` に、iterator を返す前に投げる。本文にする Worker は 1 つ最長 30 秒 CPU と memory を使うため。ほかの 3 つは下の「失敗」にある。
-- `MAX_ASK_BODY_BYTES`（50MB）は、token の口が受ける body の上限。token の口の `Bun.serve` に `maxRequestBodySize` で渡し、超えた body には 413 が返る（`docs/packages/backend.md` の「token の口の 2 つの token」）。side panel は送る前に大きさを見て、超える分を「読めなかった」にするので、413 は side panel からは届かない。
+- `MAX_ASK_BODY_BYTES`（50MB）は、token の口が受ける body の上限。token の口の `Bun.serve` に `maxRequestBodySize` で渡し、超えた body には 413 が返る。side panel は送る前に大きさを見て、超える分を「読めなかった」にするので、413 は side panel からは届かない。
 - PDF の bytes は `page.content` の `pdf`（`z.file()`）に入れる。RPCLink は input のどこにある `Blob` も multipart の別の part で送るので、base64 で膨らませない（note の画像の upload と同じ形）。
 - router は CLI に出さず、token の口に `{ workbench, task, job, chat, usage }` で載せる。Chrome Extension は Native Messaging の host から受け取った Chrome Extension の token で呼び、その token は chat の procedure と task の Run ボタンの 2 つの procedure だけを開く（下の「Backend の探し方」、ADR-0034・0035）。ブラウザの口には載せない。change stream は持たない（ADR-0031）。
 
@@ -32,7 +32,7 @@ ask       { question, page: Page, history: { question, answer, page: PageSnapsho
   - release の Backend は、Shell が env の `MONICA_CLAUDE_PATH` で渡す `.app` の `Contents/MacOS/claude` を渡す。compile した binary は node_modules の claude を解決できないため。`install-app` が同じ lockfile の platform package から写したもの（`scripts/install-app.ts`、ADR-0032）。
   - dev の Backend は env を受けないので省く。
 - `htmlWorker` と `pdfWorker` は HTML と PDF を本文にする Worker の module の URL、`cMaps` は pdf.js の cMap の folder（下の「Page Snapshot」の「本文への変換」と「PDF の本文」）。省けば、Worker は packages/chat の `src/html-worker.ts` と `src/pdf-worker.ts`、`cMaps` は packages/chat から解いた node_modules の `pdfjs-dist/cmaps` になる（`src/page/snapshot.ts` の `defaultReaders`）。`bun test` はどれも省いて動く。
-  - compile した Backend はどれも解けないので、Backend は自分の隣の `html-worker.ts` と `pdf-worker.ts`（build の entrypoint）と、`--asset` で同梱した `cmaps` を渡す（`docs/packages/backend.md` の「起動と終了」）。
+  - compile した Backend はどれも解けないので、Backend は自分の隣の `html-worker.ts` と `pdf-worker.ts`（build の entrypoint）と、`--asset` で同梱した `cmaps` を渡す。
 - `stop()` は同期で、持っている claude すべて（spare を含む）に SIGKILL を送り、spare の時限を消す。Backend の `exit()` は `process.exit(0)` まで await を挟まずに進むため。
 - procedure の handler が使う `prepare`・`models`・`ask` は、型に出さずに `internals(chatAgent)` で引く（`docs/packages.md` の「server entry の形」）。router の context は `{ chatAgent }`。
 - chat は他の domain を import せず、他の domain からも import されない。前者は `.oxlintrc.json` の override が、後者は package.json が守る。table は持たないが、空の journal を持つ（`docs/packages.md` の「ドメイン package の中」）。
@@ -335,7 +335,7 @@ side panel は `ORPCError`（`@orpc/client`）の `code` で分け、`data` は 
 
 side panel は Backend の token の口を、Native Messaging の host から受け取った Chrome Extension の token で呼ぶ（ADR-0034）。
 
-`@monica/chat/ui` と、React と CSS を引かない `@monica/chat/native-host` の entry から出す。Chrome Extension の service worker も Run ボタンの中継で使う（`docs/packages/extension.md` の「Run ボタン」）。
+`@monica/chat/ui` と、React と CSS を引かない `@monica/chat/native-host` の entry から出す。Chrome Extension の service worker も Run ボタンの中継で使う。
 
 - `viaNativeHost(host 名)` は RPCLink の `url` と `headers` を返す。どちらも RPC を呼ぶたびに `chrome.runtime.sendNativeMessage(host 名, {})` で host に問い合わせ、`{ port, token }` から `http://127.0.0.1:<port>/rpc` と `Authorization: Bearer <token>` を作る。引いた値は覚えない。Backend が起き直すと port も token も変わるため。
 - oRPC は 1 回の呼び出しの `url` と `headers` に同じ options の object を渡すので、それを key にした WeakMap で、1 回の呼び出しの問い合わせを 1 回にする。oRPC が別の object を渡すようになっても、問い合わせが 2 回になるだけで、送り先は変わらない。
@@ -415,7 +415,7 @@ SDK 0.3.293 と同梱の claude 2.1.293 で、dev の Backend を `env -i`（`HO
 
 ## ui
 
-`packages/chat/src/ui` は Chrome Extension の side panel の Chat の画面。`@monica/chat/ui` から出すのは root の `ChatApp` と、RPCLink の `url` と `headers` を作る `viaNativeHost` だけで、apps/extension の side panel の main.tsx が host 名を渡した RPCLink を作って `client.chat` を渡す（`docs/packages/extension.md`）。ui は `@monica/ui` に依存しない。
+`packages/chat/src/ui` は Chrome Extension の side panel の Chat の画面。`@monica/chat/ui` から出すのは root の `ChatApp` と、RPCLink の `url` と `headers` を作る `viaNativeHost` だけで、apps/extension の side panel の main.tsx が host 名を渡した RPCLink を作って `client.chat` を渡す。ui は `@monica/ui` に依存しない。
 
 ### fluid-functionalism の写し
 

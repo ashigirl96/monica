@@ -27,7 +27,7 @@ changes                    → { type: "layout" } | { type: "terminalSession", i
                              | { type: "agentSession", sessionId } | { type: "reconciled" }
 ```
 
-- 各 procedure の規則は下の節と、`tab.open` / `tab.respawn` / `terminalSession.list` は #22 の resolution、`recordHook` は `docs/packages/tab-env-and-shim.md`、`repo.*` / `editor.*` は `docs/packages/desktop.md` にある。
+- 各 procedure の規則は下の節と、`tab.open` / `tab.respawn` / `terminalSession.list` は #22 の resolution、`recordHook` は `docs/packages/tab-env-and-shim.md`にある。
 - `recordHook` の CLI は手書きの `monica workbench hook claude`。`agentSession.list` の CLI（`monica workbench agent-session list`）は、画面無しで観測を確かめるためにある。
 - `owned` は他の domain が `createRunspace(tx, { cwd })` で作った Runspace の印（ADR-0012）。規則は「Runspace と Tab」と「pin」の節にある。
 - `terminal_session.shell` は Backend の起動時に 1 回決める。`$SHELL`、無ければ `os.userInfo().shell`、それも無ければ `/bin/zsh`。

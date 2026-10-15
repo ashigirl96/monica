@@ -8,7 +8,7 @@ use crate::locations;
 
 /// `scripts/native-host.ts` の `RELEASE_NATIVE_HOST` と揃える。Chrome Extension が build の時に焼く名前。
 const NAME: &str = "com.ashigirl96.monica";
-/// release の Chrome Extension の ID（`docs/packages/extension.md`）。dev の ID は dev の manifest にだけ書く。
+/// release の Chrome Extension の ID。dev の ID は dev の manifest にだけ書く。
 const RELEASE_ORIGIN: &str = "chrome-extension://dnggfebiponjhdpjgmdfafaghpbkejop/";
 
 pub fn install() {

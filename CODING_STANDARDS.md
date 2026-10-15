@@ -28,12 +28,20 @@ review で差分に当てる規則。どれも判断が要るもので、理由�
 - procedure の output が変わる経路（reconcile や他の domain の行の変化を含む）は、どれも自分の domain の `events` で合図する。合図が来なければ、stream だけを購読して読み直す client は古い output を持ったまま残るため。
 - CLI と webview で動くコードは、cli entry が import する内側のファイルも含めて DB に触らず、procedure を呼ぶ（ADR-0003）。
 - Shell（`apps/desktop/src-tauri`）に置くのは、Tauri プロセスにしか無いもの（窓と webview の event、app の名義、AppKit）に触る処理と、端末の byte だけ。fs と process の spawn で済む処理は Backend の procedure にする（ADR-0001）。
+- Backend で動くコードの `Bun.spawn` には、ふつうは `env: process.env` を渡す。Bench の setup のように、Backend だけの env（`MONICA_*`、Claude Code の env）を子に渡さないときは、workbench の `inheritableEnv()` を渡す。lint の `monica/spawn-env` は `env` の key があるかしか見ないため。
+- Backend の終了（`apps/backend/src/main.ts` の `exit`）は、口と ChatAgent を止めてから `process.exit` まで await を挟まない。await の間に token の口が新しい質問を受けると、止めた後に claude を起こすため。
+- oRPC の client を React の state か jotai の atom に入れるときは、`() => client` の形で渡す（`packages/workbench/src/ui/workbench.tsx` の `setClient`）。client は callable な Proxy なので、そのまま渡すと updater として呼ばれるため。property を読むたびに新しい Proxy が返るので、`client.<domain>` は endpoint ごとに `useMemo` で 1 つにする（`apps/desktop/src/App.tsx`）。
 
 ## contract
 
 - 合成した contract の root には、domain の package 名で mount する。path の先頭が package 名になり、CLI の command（`monica task run`）もそれに従う。
 - `.errors()` で宣言するのは、呼び手が分岐する domain の error（close の guard のように `data` に理由の一覧を持つもの）だけにする。ほかは oRPC の標準の code（`NOT_FOUND`、`BAD_REQUEST`）で投げる。
 - 応答の stream（1 回の呼び出しへの応答を流す event iterator）の途中の失敗は、流した event の後に `.errors()` で宣言した error で投げる。handler の中で起きた想定外の error も宣言した error に包む。素の `Error` は client に `INTERNAL_SERVER_ERROR` の「Internal server error」で届き、理由が落ちるため（ADR-0028）。
+
+## CLI
+
+- 一覧の command は `<noun> list`（1 行に 1 件）、1 件とその子の一覧は `<noun> show <id>` にし、子の複数形（`<noun> runs`）を command にしない。CLI は Skill の語彙なので、同じ形の出力には同じ動詞を使う（ADR-0003）。
+- 手で書く command も、失敗は stderr の 1 行目に `CODE: message` で書き、help と stack を続けない。exit code は 0（成功）・1（それ以外の失敗）・2（Backend 不在）だけを使い、`--format json` の stdout には成功したときの output だけを出す。Skill は stderr の 1 行目と exit code で失敗を読むため（ADR-0003）。
 
 ## 型
 
@@ -73,6 +81,10 @@ review で差分に当てる規則。どれも判断が要るもので、理由�
 - bun test に DOM の環境（happy-dom など）を入れない。
 - GFM に合わせる markdown の読み（表のセルの区切り、backslash の escape）は、同じ入力を `gh api markdown -f mode=gfm -f text='…'` に通し、cmark-gfm の描画と比べて決める。cmark-gfm の文法（`ext_scanners.re`）を読むだけだと、re2c の最長一致を見落として読み違えるため。
 - 相手が body を読みやめられたこと（stream の cancel）を確かめるテストは、cancel が 200ms のうちに届くことを見る。Bun は読みやめたまま捨てた body も GC で 1 秒ほど後に cancel するので、長く待つと cancel を呼ばない実装も通るため。
+- CLI が Backend の error をどう出すかと、接続を拒む Backend への retry は、router を `Bun.serve` に載せて HTTP で確かめる。in-process の client（`createRouterClient`）は handler の生の Error をそのまま投げ、HTTP のように `ORPCError` に包まないため（`apps/cli/src/backend.test.ts`）。
+- process の外からしか見えない約束（argv の振り分け、stdin と stdout の枠、exit code、打ち切り、env の読み方、stdout の行）は、入口の `main.ts` を subprocess で起こして確かめる（`apps/cli/src/hook.test.ts`・`native-host.test.ts`、`apps/backend/src/main.test.ts`）。Backend は Shell と同じく、fake の ptyd の home と、何も書かない stdin の pipe を渡して起こす。
+- 口に procedure が載っているかは、input の検証で断られる不正な input を送って確かめる。載っていれば 400、載っていなければ 404（Chrome Extension の token なら 401）になる。検証は handler の前で断るので、claude や GitHub に届かない。
+- Backend を process で起こして偽の claude（`MONICA_CLAUDE_PATH`）に答えさせるテストは、env から `USER` を落とす。偽の claude を渡し損ねて node_modules の claude が起きても、keychain の login を読めず本物の API を呼ばないため（ADR-0033）。
 
 ## 語
 

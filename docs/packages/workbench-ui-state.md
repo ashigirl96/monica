@@ -1,6 +1,6 @@
 # Workbench の UI 状態と sidebar と status dot
 
-Workbench Ledger に載せない Workbench の画面の状態と、sidebar の Rail、Agent Session の状態と未読の見せ方。どれも `packages/workbench/src/ui` に置く。キーの割り当てと Jump Mode（Ctrl+T の後）は `packages/workbench/src/ui/keys.ts` に閉じる。`Workbench` が window の keydown と、Jump Mode の間の pointerdown（capture）を拾い、入口はキーの事実（key・code・修飾キー・repeat・入力欄の中か）を受ける。Jump Mode の外の binding は 1 つの表にし、xterm に渡さないキーも同じ表から決める（`docs/packages/desktop.md`）。Jump Mode の状態と 2 度目の d の待ちは module の外に書く口を持たず、抜けるのは選ぶ・取り消す・クリック・表示する Tab が替わるときだけ。
+Workbench Ledger に載せない Workbench の画面の状態と、sidebar の Rail、Agent Session の状態と未読の見せ方。どれも `packages/workbench/src/ui` に置く。キーの割り当てと Jump Mode（Ctrl+T の後）は `packages/workbench/src/ui/keys.ts` に閉じる。`Workbench` が window の keydown と、Jump Mode の間の pointerdown（capture）を拾い、入口はキーの事実（key・code・修飾キー・repeat・入力欄の中か）を受ける。Jump Mode の外の binding は 1 つの表にし、xterm に渡さないキーも同じ表から決める。Jump Mode の状態と 2 度目の d の待ちは module の外に書く口を持たず、抜けるのは選ぶ・取り消す・クリック・表示する Tab が替わるときだけ。
 
 ## UI 状態
 
@@ -17,7 +17,7 @@ Workbench Ledger に載せない Workbench の画面の状態と、sidebar の R
 
 左端に Tile（`GLOSSARY.md`）を縦に並べた Rail を置き、選んだ Tile の Runspace を右の一覧に出す。見た目は #191 の canvas の E3。
 
-- Runspace の Repo（`GLOSSARY.md`）は、Bench なら slot `benchLabelOf` が返す Task の Repo、ほかは一番左の Tab の cwd（Tab が無ければ Runspace の cwd）を `repo.of` で引いたもの（`docs/packages/desktop.md`）。active な Tab で決めないのは、Tab を切り替えても行が別の Tile へ移らないようにするため。
+- Runspace の Repo（`GLOSSARY.md`）は、Bench なら slot `benchLabelOf` が返す Task の Repo、ほかは一番左の Tab の cwd（Tab が無ければ Runspace の cwd）を `repo.of` で引いたもの。active な Tab で決めないのは、Tab を切り替えても行が別の Tile へ移らないようにするため。
 - Tile は Repo ごとに 1 つ置き、UI 状態の `tileOrder` にある Tile を先にその順で並べ、無い Tile をその後ろに、Pinned を除いた Runspace の並びで最初に出てきた順に並べる。Tile の順を Workbench Ledger の Runspace の並びから導くだけにしないのは、cd で Repo に入った Runspace を末尾へ送る処理（下）で、並べた順が崩れるため。Tile の key は Repo 名を小文字にしたもので、Task の Repo（GitHub の nameWithOwner）と checkout の path の大小文字が違っても同じ Tile にまとめる。GitHub の Repo 名は大小文字を区別しないため。Repo の外の Tile（「その他」、folder の icon）は区切り線の下の一番下に置き、行が無くても出す。
 - Tile の字は repo 名の頭文字、色は repo 名から 8 色の 1 つを決まって選ぶ。dot の緑・琥珀・赤・灰は使わない。
 - 選んだ Tile の repo 名と owner は、sidebar の上端の WORKBENCH の表示の右に出す。Repo の外の Tile を選んでいるときは何も出さない。

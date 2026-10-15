@@ -12,10 +12,6 @@ monica の repo の形、package の entry、domain 間の呼び出しを決め�
 - `docs/packages/notifications.md`: 通知と Dock の数と取り下げ。通知を出す遷移、title と body、Shell が出す通知、未読の集合、Dock の数、通知センターの通知の置き換えと取り下げに触るとき。
 - `docs/packages/task-ledger.md`: task の contract と Task Ledger。task の procedure、Run、Bench の準備、close、sync、task のテストの fake に触るとき。
 - `docs/packages/chat.md`: chat の contract と `ChatAgent` と ui。Chat の procedure、claude の options と env、spare と同時の数、claude の止め方、偽の claude、side panel の Chat の画面（fluid-functionalism の写し、CSS、Current Page の追い方、markdown）に触るとき。
-- `docs/packages/backend.md`: Backend の組み立て（apps/backend）。起動と終了の順序、PATH、Ledger の配線、ブラウザの口に触るとき。
-- `docs/packages/cli.md`: CLI（apps/cli）。`cli: true` の procedure か SKILL.md を足すとき、argv の振り分け・出力・エラー・補完・CLI のテストに触るとき。
-- `docs/packages/extension.md`: Chrome Extension（apps/extension）。manifest、permission、ID と鍵、mode ごとの出力の dir、dev の読み込み方、`chrome` の型と lint に触るとき。
-- `docs/packages/desktop.md`: desktop（apps/desktop）。webview の枠、キーの扱い、domain の ui の載せ方と Task の slot、Shell（`src-tauri`）に触るとき。
 
 ## 配置
 
@@ -114,7 +110,7 @@ export const router = os.router({ ... });          // context は { db, <d>Ledge
 export function create<D>Ledger(deps: { db: Db; home: string; ... }): <D>Ledger;
 ```
 
-- `<D>Ledger` は、Backend が domain ごとに 1 つ作り、`GLOSSARY.md` の Workbench Ledger・Task Ledger・Job Ledger・Note Ledger を扱う部品。これらは起動時と終了時の処理の `start()` / `stop()` を持つ。GLOSSARY の Usage を扱う `UsageLedger` は、起動時と終了時の処理が無いので持たない。deps と method は domain ごとの文書の「create<D>Ledger」に、作る順と渡すものは `docs/packages/backend.md` にある。
+- `<D>Ledger` は、Backend が domain ごとに 1 つ作り、`GLOSSARY.md` の Workbench Ledger・Task Ledger・Job Ledger・Note Ledger を扱う部品。これらは起動時と終了時の処理の `start()` / `stop()` を持つ。GLOSSARY の Usage を扱う `UsageLedger` は、起動時と終了時の処理が無いので持たない。deps と method は domain ごとの文書の「create<D>Ledger」にある。
 - `WorkbenchLedger` と `TaskLedger` は `events` も持つ。その domain の変更を知らせる in-process の publisher で、job と note は change stream を持たないので無い（ADR-0016・0018）。
 - server entry は、ほかに他の domain と Backend が使う関数と型を出してよい（task の `nameAgentSession`、ptyd と setup が env を絞る workbench の `inheritableEnv()`）。
 - Ledger の型には、他の domain と Backend が呼ぶ method だけを出す。procedure の handler が使う中身（ghq や GitHub への口、Bench の準備の状態など）は、Ledger を key にした WeakMap に置き、`internals(<d>Ledger)` で引く。router の context に渡るのは `db` と Ledger だけなので、外の口も Ledger が持つ。
