@@ -30,7 +30,6 @@ review で差分に当てる規則。どれも判断が要るもので、理由�
 - 合成した contract の root には、domain の package 名で mount する。path の先頭が package 名になり、CLI の command（`monica task run`）もそれに従う。
 - `.errors()` で宣言するのは、呼び手が分岐する domain の error（close の guard のように `data` に理由の一覧を持つもの）だけにする。ほかは oRPC の標準の code（`NOT_FOUND`、`BAD_REQUEST`）で投げる。
 - 応答の stream（1 回の呼び出しへの応答を流す event iterator）の途中の失敗は、流した event の後に `.errors()` で宣言した error で投げる。handler の中で起きた想定外の error も宣言した error に包む。素の `Error` は client に `INTERNAL_SERVER_ERROR` の「Internal server error」で届き、理由が落ちるため（ADR-0028）。
-- `oc.$meta(...)` と `createSchemaFactory({ coerce: { date: true } })` は、各 package の `contract.ts` の中にだけ書く。oRPC 2.0 で `.meta` が plugin 制になったときに、直す場所を 1 つにするため。`apps/cli/src/forward.ts` の `os.$meta` は、output を持たない procedure を組み直すために contract の meta を引き継ぐ例外。
 
 ## 型
 
@@ -51,14 +50,12 @@ review で差分に当てる規則。どれも判断が要るもので、理由�
 - await の間の競合は、await の途中で止めて決まった順で起こす。sync は fake の GitHub の `hold()` で、git の ref の更新（`branch -D` など）は checkout の `.git/hooks/reference-transaction` に置いた、file を待つ script で、ptyd の応答は fake の ptyd の `holdNext(op)` で止める（`packages/task/src/close-race.test.ts`）。
 - 止められるのは、procedure が await する所だけ。procedure が待たない副作用（commit の後に workbench が送る Terminate など）を止めても、procedure の中の窓は止まらず、テストは競合を通らないまま通る。
 - system の Job を足すときは、並びを出す domain のテストに 1 本足す。`systemJobs(<d>Ledger)` から名前で取り出した `run` を最小の場面で呼び、Ledger の method に届くことを見る。method の規則のテストは method を直に呼ぶ。`run` が別の method を呼んでも、型も Job Ledger のテストも捕まえないため。
-- 一定の間隔で走る処理は、`setInterval` を `spyOn` で捕まえ、間隔を確かめてから callback を手で呼ぶ。決まった時間の打ち切りは、`setTimeout` を `spyOn` して callback を手で呼ぶ。
-- `jest.useFakeTimers()` は使わない。Bun では `Bun.sleep` と `setTimeout` も止まり、一部の timer だけを偽にできないので、HTTP の応答を待つテストが進まなくなるため。
+- 一定の間隔で走る処理は、`setInterval` を `spyOn` で捕まえ、間隔を確かめてから callback を手で呼ぶ。決まった時間の打ち切りは、`setTimeout` を `spyOn` してその callback を捕まえ、手で呼ぶ。
 - 本番が `Date.now()` の締め切りと短い sleep の loop で待つもの（setup と Job の SIGTERM から SIGKILL までの猶予）は、待ち始めた印を見てから `setSystemTime` で時計を進め、猶予の手前でまだ待っていることも確かめる。最後に `setSystemTime()` で戻す。
 - 子の process の timer は、子を `bun --preload <テスト用の file>` で起こし、preload で差し替える（`apps/cli/src/hook.test.ts` の `AbortSignal.timeout`）。テストの process からは spy できないため。
 - 待たずに進むことは、待てば打ち切りまで返らない場面（Exit を送らない fake の ptyd など）を作って確かめる。操作を、打ち切りより短い `Bun.sleep` と `Promise.race` する。テストの既定の timeout は打ち切りより長いことがあり、待ちを戻す変異も通すため（`packages/workbench/src/ui/store.test.ts`）。
 - 偽の GitHub に request が届くのは、`requests` を poll せず、`received(count)` を await して待つ。固定の sleep でも待たない。
-- 手元の暦日や時刻で切る処理は、テストの中で `process.env.TZ` を UTC 以外（`Asia/Tokyo` など）にして確かめる。`bun test` は UTC で動くので、UTC の日付で切る誤りも通るため。
-- `process.env.TZ` は `finally` で `process.env.TZ = tz ?? 'UTC'` と戻す。`undefined` の代入は文字列の `"undefined"` を入れて直前の時間帯を残し、`delete` は手元の時間帯に落とすので、どちらも UTC に戻らず、同じ process で後に走るテストに漏れるため（`packages/usage/src/usage.test.ts`・`packages/ui/src/local-time.test.ts`）。
+- 手元の暦日や時刻で切る処理は、テストの中で `process.env.TZ` を UTC 以外（`Asia/Tokyo` など）にして確かめ、`finally` で戻す。`bun test` は `process.env.TZ` を設定せずに UTC で動くので、UTC の日付で切る誤りも通る。
 - oRPC の client の procedure を記録するか差し替えるときは、client を `new Proxy` で包み、`get` でその key だけを替えて呼び手に渡す。client は property を読むたびに新しい Proxy を返すので、`spyOn` では差し替えられないため（`packages/task/src/ui/bench-close.test.ts`）。
 - 受けた値を `toMatchObject` に渡した後で読み直さない。Bun の `toMatchObject` は、受けた object の中で matcher（`expect.stringContaining` など）に当たった値を、その matcher に置き換えるため（Bun 1.4.2）。後で読む値は、渡す前に取り出す。
 - 外のサービスの fake（GitHub、ghq、ptyd）は、本物が引数で変える振る舞い（GraphQL の `states` や `includeClosedPrs` など）も再現する。引数を見ない fake では、query から引数を落としてもテストが通る。
