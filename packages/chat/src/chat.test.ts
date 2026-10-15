@@ -8,7 +8,7 @@ import { createRouterClient } from '@orpc/server'
 import type { AskInput, ChatEvent } from './contract.ts'
 import { testPdf } from './page/test-pdf.ts'
 import { createChatAgent, router } from './server.ts'
-import { type FakeScenario, writeFakeClaude } from './testing.ts'
+import { type FakeScenario, untilFakeClaudesExit, writeFakeClaude } from './testing.ts'
 
 type Block =
   | { type: 'text'; text: string }
@@ -25,6 +25,7 @@ type ClaudeRecord =
   | { pid: number; kind: 'initialize'; request: { [key: string]: unknown } }
   | { pid: number; kind: 'user'; content: Block[] }
   | { pid: number; kind: 'eof' | 'sigterm' }
+  | { pid: number; kind: 'holder'; holder: number }
 
 const cleanups: (() => unknown)[] = []
 afterEach(async () => {
@@ -795,4 +796,119 @@ test('a spare claude that is not logged in ends the answer as NOT_AUTHENTICATED 
 
   expect(answeringPids(records())).toEqual([spare!])
   expect(error).toMatchObject({ code: 'NOT_AUTHENTICATED' })
+})
+
+test('prepare returns before the spare answers its initialize', async () => {
+  const { client } = startChat('slow-initialize')
+
+  const returned = await Promise.race([
+    client.prepare().then(() => 'returned'),
+    Bun.sleep(1000).then(() => 'waiting'),
+  ])
+
+  expect(returned).toBe('returned')
+})
+
+test('a question asked while the spare is still starting goes to that spare without starting a second claude', async () => {
+  const { client, records, claudes } = startChat('slow-initialize')
+  await client.prepare()
+  const [spare] = claudes()
+
+  await answerOf(await client.ask(QUESTION))
+
+  expect(answeringPids(records())).toEqual([spare!])
+  expect(startsOf(records())).toHaveLength(1)
+})
+
+test('a spare that has exited is replaced by another claude for the question', async () => {
+  const { client, records, claudes } = startChat()
+  await client.prepare()
+  const [spare] = claudes()
+  await until(() => (kindsOf(records(), spare!).includes('initialize') ? true : undefined))
+  process.kill(spare!, 'SIGKILL')
+  await gone(spare!)
+
+  const answer = await answerOf(await client.ask(QUESTION))
+
+  expect(answer).toBe('Two is the answer.')
+  const [answering] = answeringPids(records())
+  expect(answering).not.toBe(spare)
+})
+
+test('an ask with another pair while the spare is still starting kills the spare instead of waiting for it', async () => {
+  const { client, records, claudes } = startChat('slow-initialize')
+  await client.prepare()
+  const [spare] = claudes()
+
+  await answerOf(await client.ask({ ...QUESTION, model: 'sonnet', effort: 'high' }))
+
+  await gone(spare!)
+  expect(kindsOf(records(), spare!)).not.toContain('eof')
+})
+
+test('a claude that has answered exits through the end of its stdin', async () => {
+  const { client, records } = startChat()
+
+  await answerOf(await client.ask(QUESTION))
+
+  const [answering] = answeringPids(records())
+  await until(() => (kindsOf(records(), answering!).includes('eof') ? true : undefined))
+  await gone(answering!)
+})
+
+test('a claude that has answered but not yet exited still counts toward the four', async () => {
+  const { client, records } = startChat('linger-after-answer')
+  await holdAnswers(client, records, 3)
+  await answerOf(await client.ask(QUESTION))
+
+  const fifth = client.ask(QUESTION)
+
+  await expect(fifth).rejects.toMatchObject({ code: 'CHAT_BUSY', status: 429 })
+})
+
+test('an ask aborted while its page turns into text ends without starting claude', async () => {
+  const { client, records, claudes } = startChat(undefined, {
+    htmlWorker: new URL('./page/fixtures/silent-worker.ts', import.meta.url),
+  })
+  const requested = workerRequests()
+  const controller = new AbortController()
+  const asking = client.ask(QUESTION, { signal: controller.signal })
+  await requested(1)
+
+  controller.abort()
+
+  await expect(asking).rejects.toBeDefined()
+  expect(claudes()).toEqual([])
+  expect(startsOf(records())).toEqual([])
+})
+
+function startLeavingStderrOpen() {
+  const chat = startChat('exit-leaving-stderr-open')
+  cleanups.push(async () => {
+    for (const record of chat.records()) {
+      if (record.kind === 'holder') process.kill(record.holder, 'SIGKILL')
+    }
+    await untilFakeClaudesExit(chat.home)
+  })
+  return chat
+}
+
+test('a claude that exits while its child still holds stderr ends the answer as AGENT_FAILED within a second', async () => {
+  const { client } = startLeavingStderrOpen()
+  const started = performance.now()
+
+  const { error } = await outcomeOf(client.ask(QUESTION))
+
+  expect(performance.now() - started).toBeLessThan(1000)
+  expect(error).toMatchObject({ code: 'AGENT_FAILED', defined: true })
+  expect(detailOf(error)).toContain('claude: a child still holds stderr')
+})
+
+test('the stderr that reaches the Backend shortly after claude exits is still in the detail of AGENT_FAILED', async () => {
+  const { client } = startLeavingStderrOpen()
+
+  const { error } = await outcomeOf(client.ask(QUESTION))
+
+  expect(error).toMatchObject({ code: 'AGENT_FAILED', defined: true })
+  expect(detailOf(error)).toContain('claude: the child wrote after the exit')
 })

@@ -148,6 +148,24 @@ test('a Browser Tab showing a PDF has its URL fetched with the cookies of the br
   expect(new Uint8Array(await page.content.pdf.arrayBuffer())).toEqual(PDF_BYTES)
 })
 
+test('a Browser Tab shows a PDF by its content type, not by the extension of its URL', async () => {
+  fake = new FakeChrome(1, [
+    { id: 10, windowId: 1, url: 'https://coast.example/tides?format=pdf', title: 'Tides' },
+    { id: 20, windowId: 1, url: 'https://coast.example/tides.pdf', title: 'Tides' },
+  ])
+  fake.install()
+  fake.readings.set(10, { contentType: 'application/pdf' })
+  fake.readings.set(20, { contentType: 'text/html', html: '<body>Tide</body>' })
+  const calls = fakeFetch(() => new Response(PDF_BYTES))
+
+  const byContentType = await read(10)
+  const byExtension = await read(20)
+
+  expect(calls.map(({ url }) => url)).toEqual(['https://coast.example/tides?format=pdf'])
+  expect(byContentType.content).toMatchObject({ kind: 'pdf' })
+  expect(byExtension.content).toEqual({ kind: 'html', html: '<body>Tide</body>' })
+})
+
 test('a PDF whose response is not ok cannot be fetched, with the status as the detail', async () => {
   installPdfTab()
   fakeFetch(() => new Response('gone', { status: 404 }))
@@ -212,6 +230,24 @@ const never = () => new Promise<never>(() => {})
 test('a PDF that does not arrive within 30 seconds cannot be fetched, and its fetch is aborted', async () => {
   installPdfTab()
   const calls = fakeFetch(never)
+  const setTimeoutSpy = spyOn(globalThis, 'setTimeout')
+  cleanups.push(() => setTimeoutSpy.mockRestore())
+
+  const reading = read(10)
+  const limit = await until(() => setTimeoutSpy.mock.calls.find(([, ms]) => ms === 30_000))
+  limit[0]()
+
+  expect((await reading).content).toEqual({
+    kind: 'unreadable',
+    reason: 'fetch-failed',
+    detail: 'no response within 30 seconds',
+  })
+  expect(calls[0]!.init!.signal!.aborted).toBe(true)
+})
+
+test('a PDF whose body does not finish within 30 seconds cannot be fetched, and its fetch is aborted', async () => {
+  installPdfTab()
+  const calls = fakeFetch(() => new Response(new ReadableStream({ start() {} })))
   const setTimeoutSpy = spyOn(globalThis, 'setTimeout')
   cleanups.push(() => setTimeoutSpy.mockRestore())
 

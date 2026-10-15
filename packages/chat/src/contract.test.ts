@@ -5,7 +5,7 @@ import {
   type TraverseContractProcedureCallbackOptions,
 } from '@orpc/server'
 
-import { contract } from './contract.ts'
+import { askErrors, ChatEventSchema, contract } from './contract.ts'
 
 test('every procedure has a description and an output', () => {
   const procedures: TraverseContractProcedureCallbackOptions[] = []
@@ -20,4 +20,13 @@ test('every procedure has a description and an output', () => {
 
   expect(procedures.length).toBeGreaterThan(0)
   expect(missing.map(({ path }) => path.join('.'))).toEqual([])
+})
+
+test('a plan limit of a kind the contract does not know passes as the data of USAGE_LIMIT and as a usage event', () => {
+  const limit = { rateLimitType: 'some_new_limit', resetsAt: 1 }
+
+  expect(askErrors.USAGE_LIMIT.data.safeParse(limit).success).toBe(true)
+  expect(ChatEventSchema.safeParse({ type: 'usage', utilization: 0.9, ...limit }).success).toBe(
+    true,
+  )
 })
