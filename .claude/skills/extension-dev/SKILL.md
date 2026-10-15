@@ -60,7 +60,7 @@ Browser Tab は agent-browser（下の節）で動かし、side panel の見出�
 
 - headed の窓を撮るときは、上の command に `--headed` を足して Brave を起こし（`bun run extension` の headed の Brave には CDP の port が無い）、`MONICA_HOME=<home> bun scripts/extension-panel.ts open` で side panel を開く。窓は desktop-dev skill の「窓の枠」と同じく、Brave の main process の pid の窓の CGWindowID を取って `screencapture -x -o -l<id>` で撮る。main process は `pgrep -f "^/Applications/Brave Browser.app/Contents/MacOS/Brave Browser .*<home>/dev-brave"` で引く。
 
-`Extensions.triggerAction` が使えないときは、Chrome Extension の page を Browser Tab で開き、そこから `chrome.sidePanel.open` を user gesture 付きで呼ぶ。Current Page が Chrome Extension の page に変わるので、Current Page を見る確かめには `open` を使う。dev の ID は `docs/packages/extension.md` にある。
+`Extensions.triggerAction` が使えないときは、Chrome Extension の page を Browser Tab で開き、そこから `chrome.sidePanel.open` を user gesture 付きで呼ぶ。Current Page が Chrome Extension の page に変わるので、Current Page を見る確かめには `open` を使う。dev の ID は `scripts/native-host.ts` の `DEV_EXTENSION_ORIGIN` にある。
 
 ```bash
 MONICA_HOME=${TMPDIR%/}/monica-<名前> bun -e '
@@ -90,6 +90,20 @@ cdp.close();'
 - manifest（`content_scripts` など）を変えると、Vite は dev の出力を書き直すが、Brave は Chrome Extension を読み直さない。service worker の target で `chrome.runtime.reload()` を呼ぶ。
 - dev では `chrome.runtime.reload()` の 1 秒ほど後に、CRXJS が github.com のページを読み込み直す。reload の前の content script（service worker に届かない）は残らないので、その振る舞いは Chrome Extension の無い agent-browser の session で確かめる。`github-page.ts` の `bundledContentScript` と同じく `issues-page.ts` を iife に bundle し、`sendMessage` が `Extension context invalidated.` で reject する偽の `chrome.runtime` と一緒にページで評価する。
 - Backend が `runButtons` や `press` に返す答え（error など）を決めて試すときは、Backend を起こさずに、偽の Backend の `Bun.serve` を起こして `$MONICA_HOME/backend.json` に `{ pid, port, token, extensionToken }` を書く。dev の host は、`pid` が生きていればその `port` と `extensionToken` を返す。偽の Backend の script は `apps/extension/` の下に一時で置く。repo の root からは `@monica/task` を解決できないため。
+
+## ID と鍵と icon を作り直す
+
+ID は manifest の `key`（公開鍵の DER の base64）で決まる（ADR-0029）。秘密鍵は file に書かず、公開鍵と ID だけを取る。
+
+```bash
+KEY=$(openssl genrsa 2048 2>/dev/null | openssl rsa -pubout -outform DER 2>/dev/null | openssl base64 -A)
+printf %s "$KEY" | openssl base64 -d -A | shasum -a 256 | head -c32 | tr 0-9a-f a-p   # ID
+```
+
+- release の鍵は `apps/extension/vite.config.ts` の `RELEASE.key` に、ID は `apps/desktop/src-tauri/src/native_host.rs` の `RELEASE_ORIGIN` とそのテストの `allowed_origins` に書く。release の ID を変えると、普段の Brave に読み込んだ release の Chrome Extension は別物になり、読み込み直しが要る。
+- dev の鍵は `DEV.key` に、ID は `scripts/native-host.ts` の `DEV_EXTENSION_ORIGIN` と、`scripts/native-host.test.ts`・`apps/cli/src/native-host.test.ts` の origin に書く。
+- 古い ID を `git grep -n` して、何も返さなくなるまで直す。
+- icon は `apps/desktop/src-tauri/icons/128x128@2x.png` を `sips -z <size> <size>` で 16・32・48・128 に縮め、`apps/extension/public/icons/<size>.png` に置く。
 
 ## 止める
 
