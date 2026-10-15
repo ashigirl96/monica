@@ -112,6 +112,11 @@ function startDrag(view: EditorView, border: ColumnBorder, event: MouseEvent): v
   setColumnBorder(view, { ...border, dragging: true })
 
   const move = (e: MouseEvent) => {
+    // 窓の外で離した mouseup は window に届かないので、ボタンが離れた move で終える
+    if (e.buttons === 0) {
+      up()
+      return
+    }
     current = moveColumnBorder(
       start,
       border.col,
@@ -123,6 +128,7 @@ function startDrag(view: EditorView, border: ColumnBorder, event: MouseEvent): v
   const up = () => {
     window.removeEventListener('mousemove', move)
     window.removeEventListener('mouseup', up)
+    window.removeEventListener('blur', up)
     const tr = view.state.tr.setMeta(tableResizeKey, { border: null } satisfies ResizeMeta)
     // 掴んだ間に表が動いたか消えたら、描きかけの幅を捨てて doc の幅に戻す
     const now = view.state.doc.nodeAt(border.tablePos)
@@ -135,6 +141,7 @@ function startDrag(view: EditorView, border: ColumnBorder, event: MouseEvent): v
   }
   window.addEventListener('mousemove', move)
   window.addEventListener('mouseup', up)
+  window.addEventListener('blur', up)
 }
 
 function edgeDecorations(state: EditorState, border: ColumnBorder): DecorationSet {
