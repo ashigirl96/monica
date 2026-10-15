@@ -107,7 +107,7 @@ result 行は log に残るので、`session_id` を拾って朝に Tab で `cla
 ## テスト
 
 - in-memory の SQLite に job の migration だけを当てる。job は他の domain の table を持たない。
-- tick は `setInterval` を `spyOn` で捕まえて手で呼び、時刻は `now` に渡した時計で進める。fake timers は使わない（`docs/packages.md` の「テスト」）。
+- tick は `setInterval` を `spyOn` で捕まえて手で呼び、時刻は `now` に渡した時計で進める。fake timers は使わない（`CODING_STANDARDS.md` の「テスト」）。
 - system の Job の `run` は、呼ばれるたびに保留の Promise を返す偽物にし、終わり方（resolve / reject）と終わる時をテストが決める。
 - ユーザーの Job は本物の `/bin/sh` で走らせ、home と cwd は `mkdtemp(tmpdir())` で作る。終わるまでは `show` を読み直して待つ。走り続ける回は、cwd に file ができるまで待つ command で止め、テストが file を置いて終わらせる。timeout は `setTimeout` を `spyOn` して timeout の ms の callback を捕まえ、手で呼ぶ（Bench の setup と同じ）。log の名前と Job Execution の時刻は `now` の時計から来る。
 - 行数は procedure に出ないので、保持の件数と remove が消した行は `job_execution` を SELECT して確かめる。

@@ -13,7 +13,7 @@ ask       { question, page: Page, history: { question, answer, page: PageSnapsho
 - `prepare` は受けた model と effort で spare（下の「spare」）を起こし、その initialize を待たずに返る。同じ組の spare が既にあるか、claude を 4 つ持っていれば何もしない。違う組の spare は捨てて起こし直す。Chrome Extension は Backend の不在の確かめにもこれを呼ぶので、速く返す。
 - `model` は `models` の `value` の文字列、`effort` は `'low' | 'medium' | 'high' | 'xhigh' | 'max'`。どちらも省けて、省いた方は `haiku`・`low`（contract の `DEFAULT_MODEL`・`DEFAULT_EFFORT`）になる。Backend は受けた値を `options.model`・`options.effort` に渡すだけで、一覧に照らして弾かない。model が持たない effort の丸めは claude に任せる。side panel が選んで ask ごとに送り、Backend は選択を持たない（ADR-0031 と同じ形）。
 - `models` は Agent SDK の `Query.supportedModels()` が返す `ModelInfo` のうち、side panel が使う 5 つの field を返す。一覧は account と managed settings で変わるので hard code しない（`docs/research/agent-sdk-model-effort-web-tools.md` の 1 節）。最初の呼び出しで、何も流さない AsyncIterable（`src/prompt.ts` の `promptless`）を prompt にした `query()` を既定の組で起こし、一覧を読んで `close()` する。一覧は initialize の応答から来て推論は走らない。読めた一覧は `ChatAgent` が持ち、2 回目からは claude を起こさない。読むのに失敗したら持たずに `AGENT_FAILED`（`detail` に SDK の error と stderr の末尾）を返し、次の呼び出しで読み直す。読んでいる間の呼び出しは同じ読みを待つ。一覧を読む claude も同時の 4 つに数え、空きが無ければ `CHAT_BUSY` を返す。
-- `ask` は 1 回の質問への応答の stream（`docs/packages.md` の contract の規約 7）。`ChatEvent` は `type` の判別 union で、最初に `{ type: 'snapshot', page: PageSnapshot（screenshot を除く）, omitted: { pages, turns } }` を 1 つ流し、続けて `{ type: 'text', text }`（答えの文字の delta）を流す。client は届いた順に `text` をつなぐ。result を受けたら stream を閉じる。形は下の「Page Snapshot」にある。
+- `ask` は 1 回の質問への応答の stream（ADR-0028）。`ChatEvent` は `type` の判別 union で、最初に `{ type: 'snapshot', page: PageSnapshot（screenshot を除く）, omitted: { pages, turns } }` を 1 つ流し、続けて `{ type: 'text', text }`（答えの文字の delta）を流す。client は届いた順に `text` をつなぐ。result を受けたら stream を閉じる。形は下の「Page Snapshot」にある。
 - claude が WebSearch を呼んだら、`{ type: 'search', query }` を流す（下の「`search`」）。検索の前後の text も同じ `text` で流し、client は 1 つの答えにつなぐ。
 - 答えの間に `{ type: 'retry', attempt }`（API の再試行）と `{ type: 'usage', utilization, rateLimitType, resetsAt? }`（plan の使用量の警告）も流す。下の「失敗」にある。
 - `question` は 1 字以上。`page` と `PageSnapshot` の `url` と `title` は省略できるただの文字列で、形を検めない。`chrome://` などの Browser Tab では side panel から見えず、`file://` のページもあるため。
@@ -264,7 +264,7 @@ code は上から順に当てる。
   - `result` があればその文字列にする。成功の形の `result` は `result`、`SDKResultError` は `errors` を改行でつないだもの。
   - `result` の前に SDK の iterator が投げたら、translate はその message で `EndedEarly` を投げ、`ChatAgent` が claude の stderr の末尾（上の「claude の持ち方」）を足す。claude の場所に何も無い、起きてすぐ落ちた（`Claude Code process exited with code 1`）、答えの途中で落ちた、`initialize_timeout` がこれに当たる。
   - result 無しに iterator が終わったら、translate は `claude exited before it answered` で `EndedEarly` を投げ、`ChatAgent` が stderr の末尾を足す。
-- typed error は、それまで流した `snapshot`・`text`・`retry`・`usage` の後に投げる（`docs/packages.md` の contract の規約 7）。
+- typed error は、それまで流した `snapshot`・`text`・`retry`・`usage` の後に投げる（`CODING_STANDARDS.md` の「contract」）。
 - `chat.ask` の handler（`src/server.ts`）は、`ChatAgent` が投げた `ChatFailure` を宣言した error にし、ほかの想定外の error も `AGENT_FAILED` に包む。iterator を返す前（Page Snapshot の変換や claude の起動）に投げた error も同じに包む。素の `Error` は `INTERNAL_SERVER_ERROR`「Internal server error」になり、理由が消えるため。
 - 自分で SIGKILL した claude の `EndedEarly` は失敗にしない（上の「claude の持ち方」）。stream の abort と Backend の終了では、stream は error を投げずに閉じる。
 - contract に載せないもの: Backend に届かない場合、古い Chrome Extension の token の 401（`UNAUTHORIZED`）、body の上限の 413（`PAYLOAD_TOO_LARGE`）。413 は side panel が送る前に大きさを見て「読めなかった」にするので、side panel からは届かない。
