@@ -52,7 +52,7 @@ impl DailyLog {
         retention_days: u64,
         max_total_bytes: u64,
     ) -> Result<Self> {
-        let (_, file) = prepare_today(dir, stem, today, retention_days, max_total_bytes)?;
+        let file = prepare_today(dir, stem, today, retention_days, max_total_bytes)?;
         Ok(Self {
             dir: dir.to_path_buf(),
             stem: stem.to_string(),
@@ -96,33 +96,17 @@ impl DailyLog {
     }
 }
 
-/// Runs the same migration and retention housekeeping as [`DailyLog::open`], then hands back
-/// today's path and a raw append handle. For a child process' stdio, which needs a descriptor
-/// rather than a writer and therefore cannot roll over while the child holds it: the file is named
-/// for the day the child was spawned, and retention treats it by its mtime rather than that name.
-pub fn open_today(dir: &Path, stem: &str) -> Result<(PathBuf, File)> {
-    prepare_today(
-        dir,
-        stem,
-        Local::now().date_naive(),
-        RETENTION_DAYS,
-        MAX_TOTAL_BYTES,
-    )
-}
-
-/// Returns the path alongside the handle so both come from one date resolution — building the path
-/// separately lets a caller name a different day than the one it opened, across local midnight.
 fn prepare_today(
     dir: &Path,
     stem: &str,
     today: NaiveDate,
     retention_days: u64,
     max_total_bytes: u64,
-) -> Result<(PathBuf, File)> {
+) -> Result<File> {
     std::fs::create_dir_all(dir).with_context(|| format!("failed to create {}", dir.display()))?;
     migrate_legacy(dir, stem, legacy_day(dir, stem, today));
     sweep(dir, stem, today, retention_days, max_total_bytes);
-    Ok((day_path(dir, stem, today), open_day_file(dir, stem, today)?))
+    open_day_file(dir, stem, today)
 }
 
 fn open_day_file(dir: &Path, stem: &str, day: NaiveDate) -> Result<File> {
@@ -586,63 +570,6 @@ mod tests {
             .collect();
         assert_eq!(dated.len(), 1, "expected one dated file, got {dated:?}");
         assert_eq!(std::fs::read_to_string(&dated[0]).unwrap(), "line\n");
-        std::fs::remove_dir_all(&dir).ok();
-    }
-
-    /// Asserts on the shape rather than on a named day so a run crossing midnight cannot flake:
-    /// whichever day the two opens land on, the first file must still hold what was written to it.
-    #[test]
-    fn open_today_hands_back_an_appending_handle_to_the_dated_file() {
-        let dir = temp_dir("open-today");
-        let (path, mut file) = open_today(&dir, STEM).unwrap();
-        assert_eq!(path.parent(), Some(dir.as_path()));
-        assert!(path
-            .file_name()
-            .and_then(|name| name.to_str())
-            .and_then(|name| parse_day(name, STEM))
-            .is_some());
-        file.write_all(b"first\n").unwrap();
-
-        let (second, mut again) = open_today(&dir, STEM).unwrap();
-        again.write_all(b"second\n").unwrap();
-
-        assert!(std::fs::read_to_string(&path).unwrap().contains("first"));
-        assert!(std::fs::read_to_string(&second).unwrap().contains("second"));
-        std::fs::remove_dir_all(&dir).ok();
-    }
-
-    #[test]
-    fn open_today_creates_the_dir() {
-        let dir = temp_dir("open-today-mkdir");
-        let (path, _) = open_today(&dir, STEM).unwrap();
-        assert!(path.exists());
-        std::fs::remove_dir_all(&dir).ok();
-    }
-
-    #[test]
-    fn open_today_folds_the_legacy_file_into_the_rotation() {
-        let dir = temp_dir("open-today-legacy");
-        write(&dir, "hook-claude.log", b"before rotation\n");
-
-        let (path, _) = open_today(&dir, STEM).unwrap();
-
-        assert!(!dir.join("hook-claude.log").exists());
-        assert_eq!(
-            std::fs::read(&path).unwrap(),
-            b"before rotation\n",
-            "the legacy file's content must be the handle's starting point"
-        );
-        std::fs::remove_dir_all(&dir).ok();
-    }
-
-    #[test]
-    fn open_today_runs_retention() {
-        let dir = temp_dir("open-today-sweep");
-        write(&dir, "hook-claude_2020-01-01.log", b"ancient");
-
-        open_today(&dir, STEM).unwrap();
-
-        assert!(!dir.join("hook-claude_2020-01-01.log").exists());
         std::fs::remove_dir_all(&dir).ok();
     }
 
