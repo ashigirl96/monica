@@ -352,6 +352,23 @@ test('an answer cut off at the output limit fails as AGENT_FAILED after the text
   expect(failureOf(error)).toEqual({ code: 'AGENT_FAILED', data: { detail: text } })
 })
 
+test('an assistant error that claude goes on from is no failure when a successful result follows', async () => {
+  const { events, error } = await translated([
+    init(),
+    ...streamText(FAKE_TEXT.slice(0, 2)),
+    assistantText(
+      "API Error: Claude's response exceeded the 60 output token maximum.",
+      'max_output_tokens',
+    ),
+    ...streamText(FAKE_TEXT.slice(2)),
+    assistantText(ANSWER),
+    result(ANSWER),
+  ])
+
+  expect(error).toBeUndefined()
+  expect(events).toEqual(FAKE_TEXT.map((text) => ({ type: 'text', text })))
+})
+
 // API の stream が切れると、CLI は答えを最初からやり直す。
 test('an answer that claude starts over after a cut API stream comes as text, a retry, then the text from the start', async () => {
   const { events, error } = await translated([

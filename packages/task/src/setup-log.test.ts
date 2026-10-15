@@ -47,6 +47,17 @@ test('the setup log of a closed Task goes 14 days after it was last written, and
   expect(existsSync(join(home, 'logs/setup/acme'))).toBe(false)
 })
 
+test('the clean-up removes the old logs before it yields, so no run can write a log in between', async () => {
+  const { client, taskLedger, log } = await benched()
+  await client.close({ ref })
+  lastWritten(log, 15)
+
+  const cleaning = taskLedger.cleanSetupLogs()
+
+  expect(existsSync(log)).toBe(false)
+  await cleaning
+})
+
 test('the log of a Task with a Bench stays however old it is, and so does a log written less than 14 days ago', async () => {
   const { taskLedger, home, log } = await benched()
   lastWritten(log, 15)

@@ -1,7 +1,7 @@
 import { afterEach, expect, test } from 'bun:test'
-import { existsSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { dirname, join } from 'node:path'
 
 import { commit, fakeGhq, type Files, git, stackedThenRebased } from './fake-ghq.ts'
 import { inspectWorktree, removeWorktree } from './teardown.ts'
@@ -82,6 +82,27 @@ test('without force, commits made after the inspection on top of the head of a m
     warnings: ['branch issue-12 got commits on no remote while closing, so it stays'],
   })
   expect(hasBranch(checkout, 'issue-12')).toBe(true)
+})
+
+test('the removal drops only the registration of its own missing worktree, leaving another missing worktree registered', async () => {
+  const { ghq, checkout, path } = worktreeOnIssue12()
+  const another = join(realpathSync(dirname(path)), 'another')
+  git(checkout, 'worktree', 'add', '--quiet', '-b', 'another', another, 'origin/main')
+  rmSync(another, { recursive: true, force: true })
+  rmSync(path, { recursive: true, force: true })
+
+  const inspected = await inspectWorktree(
+    ghq.client,
+    { cwd: path, branch: 'issue-12' },
+    forIssue,
+    [],
+  )
+  await removeWorktree(inspected, { force: false })
+
+  const registered = git(checkout, 'worktree', 'list', '--porcelain')
+  expect(registered).toContain(`worktree ${another}\n`)
+  expect(registered).not.toContain('refs/heads/issue-12')
+  expect(hasBranch(checkout, 'issue-12')).toBe(false)
 })
 
 function rebasedBench(options: Parameters<typeof stackedThenRebased>[2]) {

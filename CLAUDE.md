@@ -1,6 +1,10 @@
 ## 構成
 
-repo の形と規則は `docs/packages.md` から読む。全文を読み、冒頭の「索引」から作業が触る範囲の文書を開く。
+package や entry を足すとき、file の置き場を決めるとき、entry か domain をまたいで import するか書くときは、`docs/packages.md` を読む。
+
+## テスト
+
+テストを書くとき・直すときは `CODING_STANDARDS.md` の「テスト」を読む。
 
 ## Agent skills
 

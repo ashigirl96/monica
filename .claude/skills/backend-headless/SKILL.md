@@ -1,6 +1,6 @@
 ---
 name: backend-headless
-description: "desktop 無しで Backend と monica-ptyd を起こし、CLI と RPC で振る舞いを確かめる。受け入れ条件を手で確かめるとき、Backend の起動・終了・ptyd との再接続を実機で見るとき、Tab で claude を動かして Agent Session を見るとき、Task の Bench（run・close）を確かめるとき、Job が予定の時刻に走るのを確かめるとき、notes の画面をブラウザで確かめるときに使う。"
+description: "desktop 無しで Backend と monica-ptyd を起こし、CLI と RPC で振る舞いを確かめる。受け入れ条件を手で確かめるとき、Backend の起動・終了・ptyd との再接続を実機で見るとき、Tab で claude を動かして Agent Session を見るとき、Task の Bench（run・close）を確かめるとき、Job が予定の時刻に走るのを確かめるとき、zsh の補完を確かめるとき、notes の画面をブラウザで確かめるときに使う。"
 ---
 
 Backend を本物の ptyd に繋いで起こす。Shell の役（親として生き続け、stdin の pipe の書き側を握る）は Bash の background job が演じる。
@@ -115,6 +115,16 @@ Backend を本物の ptyd に繋いで起こす。Shell の役（親として生
 
 - cron 式は分の単位で、tick は 30 秒おきなので、2 分先の式で登録する。`T=$(date -v+2M '+%M %H')` から `"$((10#${T% *})) $((10#${T#* })) * * *"` を作り、`monica job add <name> --schedule … --command … --cwd <絶対 path>` に渡す。予定の分から 30 秒以内に走る。
 - 走ったのは `$MONICA_HOME/logs/jobs/<name>/` ができたとき。待つのは、Bash の `run_in_background` で `until [ -d ${TMPDIR%/}/monica-s2/logs/jobs/<name> ]; do sleep 1; done` を走らせる。結果は `monica job show <name>` の RESULT・EXIT・LOG で見る。
+
+## zsh の補完を確かめる
+
+`monica completions zsh` の script は CI で走らせない。zsh を zpty で起こして TAB を押し、出た候補を読む。
+
+- 起こす zsh の `ZDOTDIR` に置く `.zshrc` に、次の 3 つを書く。
+  - `bindkey -e`。`EDITOR` が vi 系だと、zsh は vi の keymap で起きる。
+  - `stty rows 50 cols 200`。pty の大きさが 0 のままだと、zsh は候補の一覧を出さない。
+  - `autoload -Uz compinit && compinit` と `eval "$(monica completions zsh)"`。
+- Task の ref や Job の名前の候補は Backend に聞く。「起こす」の 4 で張った `$MONICA_HOME/bin/monica` を PATH の先頭に置き、同じ `MONICA_HOME` で zsh を起こす。
 
 ## notes の画面をブラウザで確かめる
 

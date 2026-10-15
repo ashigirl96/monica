@@ -34,3 +34,14 @@ fn place(link: &Path, target: &Path) {
         );
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    #[cfg(debug_assertions)]
+    fn a_debug_shell_links_no_cli_into_the_user_bin() {
+        assert!(locations::user_cli_link().is_none());
+    }
+}

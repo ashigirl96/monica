@@ -6,7 +6,7 @@ import { defineConfig } from 'vite'
 import { devHome, devInstance, extensionDevOutput } from '../../scripts/dev-instance.ts'
 import { DEV_NATIVE_HOST, RELEASE_NATIVE_HOST } from '../../scripts/native-host.ts'
 
-// key は公開鍵の DER の base64 で、ID を固定する（ADR-0029）。ID と鍵の作り方は docs/packages/extension.md にある。
+// key は公開鍵の DER の base64 で、ID を固定する（ADR-0029）。
 const RELEASE = {
   name: 'Monica',
   key: 'MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAuHoAgFcS1qQ4pN2xjNjHf6YprMN+GS1cf1Xa3b/BCHrWAujmObBMXHTL3Wt1FtskqE3YViSYzW1C9VyTy08qptaY8zDWb36bYS6QUy3vr3V9FlNI6FhqQz/dcBdwZHQ5AbdI56sqeB3ddunp9PT8eSpR+7EzqBXnFf30/Xxyn2OGJ0rOCLYnZ4EoBWR7YKNRAzEMl1ezYDwhNOD+4QMUh1o0dceBJe5K3jQNMzvhia4YICblk8QEMl1Uzkw2/pyHxnLJXrPCyqstMAqwREplyL8J52sr8u4UPR2LFvnZLfW3FLWJtoVK05SVr66w31wmLA66H6eCJrkzFVafSoHUFwIDAQAB',

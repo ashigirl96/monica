@@ -1,12 +1,20 @@
 import { afterEach, expect, mock, setSystemTime, spyOn, test } from 'bun:test'
-import { existsSync, lstatSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
+import {
+  chmodSync,
+  existsSync,
+  lstatSync,
+  readFileSync,
+  realpathSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs'
 import { join } from 'node:path'
 
 import { runspace, tab } from '@monica/workbench/schema'
 
 import { commit, git } from './fake-ghq.ts'
 import { bench, issue, task } from './schema.ts'
-import { cleanUp, failure, setup } from './testing.ts'
+import { cleanUp, failure, onCleanup, setup } from './testing.ts'
 
 afterEach(() => {
   mock.restore()
@@ -124,6 +132,34 @@ test('run excludes CLAUDE.local.md when only the branch of the checkout ignores 
   expect(await fixture.client.run({ ref })).toMatchObject({ warnings: [] })
 
   expect(git(cwd, 'status', '--porcelain')).toBe('')
+})
+
+test('run excludes CLAUDE.local.md when only the branch of the worktree ignores it, not that of the checkout', async () => {
+  const { ghq, client } = await tracked(null)
+  ghq.clone('acme/app')
+  const checkout = ghq.checkout('acme/app')
+  git(checkout, 'switch', '--quiet', '-c', 'issue-12')
+  commit(checkout, { '.gitignore': { content: 'CLAUDE.local.md\n' } }, 'ignore')
+  git(checkout, 'switch', '--quiet', 'main')
+
+  expect(await client.run({ ref })).toMatchObject({ warnings: [] })
+
+  expect(git(checkout, 'status', '--porcelain')).not.toContain('CLAUDE.local.md')
+})
+
+test('run warns and still readies the Bench when it cannot make CLAUDE.local.md in the checkout', async () => {
+  const { ghq, client } = await tracked(null)
+  ghq.clone('acme/app')
+  const checkout = ghq.checkout('acme/app')
+  chmodSync(checkout, 0o555)
+  onCleanup(() => chmodSync(checkout, 0o755))
+
+  const output = await client.run({ ref })
+
+  expect(output.warnings).toEqual([
+    expect.stringContaining('could not share CLAUDE.local.md with the checkout'),
+  ])
+  expect(await client.bench.list()).toMatchObject([{ setupState: 'ready' }])
 })
 
 test('run excludes CLAUDE.local.md even when the checkout hides untracked files from git status', async () => {
@@ -333,6 +369,24 @@ test('run after a failure makes the worktree again when it is gone', async () =>
   expect(await client.bench.list()).toMatchObject([{ setupState: 'ready' }])
 })
 
+test('run makes again a worktree that is gone without dropping the registration of another missing worktree', async () => {
+  const { home, ghq, client, cwd } = await tracked(
+    '#!/bin/sh\ntest -e "$(git rev-parse --git-common-dir)/setup-ok"\n',
+  )
+  await failure(client.run({ ref }))
+  const checkout = ghq.checkout('acme/app')
+  const another = join(realpathSync(home), 'elsewhere/app')
+  git(checkout, 'worktree', 'add', '--quiet', '-b', 'elsewhere', another)
+  rmSync(another, { recursive: true, force: true })
+  rmSync(cwd, { recursive: true, force: true })
+  writeFileSync(join(checkout, '.git/setup-ok'), '')
+
+  await client.run({ ref })
+
+  expect(git(checkout, 'worktree', 'list', '--porcelain')).toContain(`worktree ${another}\n`)
+  expect(await client.bench.list()).toMatchObject([{ setupState: 'ready' }])
+})
+
 test("run --in-place opens the Bench on the Repo's checkout, cloning it, and runs no setup", async () => {
   const { home, ghq, client, exit } = await tracked('#!/bin/sh\nexit 1\n')
   const checkout = ghq.checkout('acme/app')
@@ -353,6 +407,50 @@ test("run --in-place opens the Bench on the Repo's checkout, cloning it, and run
   expect(git(checkout, 'status', '--porcelain')).toBe('')
   expect(await client.bench.list()).toMatchObject([{ setupState: 'ready' }])
   expect(await client.run({ ref })).toMatchObject({ cwd: checkout, benchCreated: false })
+})
+
+test('run --in-place fails when ghq clones the renamed repo away from the checkout of the Bench', async () => {
+  const { ghq, github, client } = await tracked(null)
+  const checkout = ghq.checkout('acme/app')
+  spyOn(ghq.client, 'get').mockRejectedValueOnce(new Error('network is down'))
+  await failure(client.run({ ref, inPlace: true }))
+  expect(await client.bench.list()).toMatchObject([{ setupState: 'failed' }])
+  github.renameRepo('acme/app', 'acme/renamed')
+  ghq.origin('acme/renamed')
+
+  const error = await failure(client.run({ ref: 'acme/renamed#12', inPlace: true }))
+
+  expect(error.code).toBe('PRECONDITION_FAILED')
+  expect(error.message).toContain(`did not clone it to ${checkout}`)
+})
+
+test('task.changes signals the Task when run opens its Bench and again when the Bench is prepared', async () => {
+  const { db, ghq, client, taskLedger } = await tracked(null)
+  const benchStates: (string | null)[] = []
+  taskLedger.events.subscribe('change', (change) => {
+    if (change.type !== 'task' || change.ref !== ref) return
+    benchStates.push(
+      db.select({ setupState: bench.setupState }).from(bench).get()?.setupState ?? null,
+    )
+  })
+  const asked = Promise.withResolvers<void>()
+  const answer = Promise.withResolvers<void>()
+  spyOn(ghq.client, 'get').mockImplementation(async (repo) => {
+    asked.resolve()
+    await answer.promise
+    ghq.clone(repo)
+  })
+
+  const running = client.run({ ref, inPlace: true })
+  await asked.promise
+
+  expect(benchStates).toContain('preparing')
+  expect(benchStates).not.toContain('ready')
+
+  answer.resolve()
+  await running
+
+  expect(benchStates).toContain('ready')
 })
 
 test('run --in-place refuses a Bench that is a worktree', async () => {

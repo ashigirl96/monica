@@ -3,7 +3,7 @@ name: release-notifications
 description: "通知センター・バナー・Dock の数・通知のクリックと、`.app` に同梱した Chat の claude と Chrome Extension を、release の Monica で実機で確かめる。.app の中でしか動かないものの受け入れ条件を確かめるときに使う。"
 ---
 
-release の Shell は .app の中でだけ UNUserNotificationCenter を使い、dev は別の経路で通知を出す（`docs/packages/notifications.md`）。そのため、通知センターとバナーとクリックは release でしか確かめられない。release の Monica はユーザーが毎日使っている app なので、入れ替える前に了承を取る。
+release の Shell は .app の中でだけ UNUserNotificationCenter を使い、dev は別の経路で通知を出す（ADR-0022）。そのため、通知センターとバナーとクリックは release でしか確かめられない。release の Monica はユーザーが毎日使っている app なので、入れ替える前に了承を取る。
 
 ## 入れる
 
@@ -51,7 +51,7 @@ dock() {
 
 ## Chat の claude と Chrome Extension
 
-`install-app` は `.app` の `Contents/MacOS/claude` に Chat の claude を、`Contents/Resources/extension` に Chrome Extension を写す（`docs/packages/dev-loop.md` の「release build と install」）。本物の claude に訊くのは、入れ替える前と後で 1 問ずつにし、「1 から 5 を並べて」のような短い質問にする。
+`install-app` は `.app` の `Contents/MacOS/claude` に Chat の claude を、`Contents/Resources/extension` に Chrome Extension を写す（`scripts/install-app.ts`）。本物の claude に訊くのは、入れ替える前と後で 1 問ずつにし、「1 から 5 を並べて」のような短い質問にする。
 
 ### 入れ替える前（agent が行う）
 
@@ -68,7 +68,7 @@ dock() {
    ```
 
 3. 置いた `.app` の Backend を、`backend-headless` skill の「release の build の Backend」の形で起こす。env は `env -i` で絞り、`MONICA_HOME` は使い捨てにし、`MONICA_PTYD_PATH` と `MONICA_CLAUDE_PATH` は `$A/Contents/MacOS` の `monica-ptyd` と `claude` を指す。ブラウザの口の port は渡さなくてよい（Chat は token の口に載る）。`.app` そのものは起こさない。
-4. token の口へ、`backend.json` の Chrome Extension の token で `chat.ask` を 1 回送る（Chrome Extension と同じ呼び方。ADR-0034）。port と Chrome Extension の token は、置いた `.app` の CLI を host として起こして受け取ってもよい（`docs/packages/cli.md` の「Native Messaging の host」）。script を `apps/backend/` の下に置くと `@orpc/client` と `@monica/chat/contract` を解決できるので、終わったら消す。答えている間と答えた後に、Backend の子を `ps -A -o pid=,ppid=,command=` で読む。
+4. token の口へ、`backend.json` の Chrome Extension の token で `chat.ask` を 1 回送る（Chrome Extension と同じ呼び方。ADR-0034）。port と Chrome Extension の token は、置いた `.app` の CLI を host として起こして受け取ってもよい。第 1 引数に `chrome-extension://<release の ID>/` を渡し、stdin に 4 byte の little-endian の長さと JSON の 1 通を書く（ADR-0034）。script を `apps/backend/` の下に置くと `@orpc/client` と `@monica/chat/contract` を解決できるので、終わったら消す。答えている間と答えた後に、Backend の子を `ps -A -o pid=,ppid=,command=` で読む。
 
    ```ts
    const { port, extensionToken } = await Bun.file(`${process.env.MONICA_HOME}/backend.json`).json()
@@ -86,7 +86,7 @@ dock() {
    for await (const event of answer) if (event.type === 'text') process.stdout.write(event.text)
    ```
 
-   答えの text が流れ、答えている間は Backend の子に `$A/Contents/MacOS/claude` が居て、答えた後にその pid が消える。答えた後には次の質問のための spare が別の pid で起きる（`docs/packages/chat.md` の「spare」）。
+   答えの text が流れ、答えている間は Backend の子に `$A/Contents/MacOS/claude` が居て、答えた後にその pid が消える。答えた後には次の質問のための spare が別の pid で起きる。
 5. Backend を `backend-headless` skill の「止めて片付ける」で止め、home と `$SCRATCH/stage` を消す。SIGKILL された spare は `~/.claude/sessions/<pid>.json` を残すので、その pid の file も消す。
 
 ### 入れ替えた後（PR の確認でユーザーが行う）
@@ -98,8 +98,8 @@ dock() {
 
 ### Brave での読み込みと reload（PR の確認でユーザーが行う）
 
-1. 普段の Brave の `brave://extensions` で「パッケージ化されていない拡張機能を読み込む」を押し、⌘⇧G で `/Applications/Monica.app/Contents/Resources/extension` を選ぶ。ID が `docs/packages/extension.md` の release の ID になる。
-2. もう一度 `install-app` を流した後、reload を押す前に Brave が何を出すか（そのまま動くか、エラーか）を見る。reload の後も有効のままで、action で side panel が開く。結果は `docs/packages/extension.md` の「release の読み込み方」に書く。
+1. 普段の Brave の `brave://extensions` で「パッケージ化されていない拡張機能を読み込む」を押し、⌘⇧G で `/Applications/Monica.app/Contents/Resources/extension` を選ぶ。ID が release の ID（`apps/desktop/src-tauri/src/native_host.rs` の `RELEASE_ORIGIN`）になる。
+2. もう一度 `install-app` を流した後、reload を押す前に Brave が何を出すか（そのまま動くか、エラーか）を見る。reload の後も有効のままで、action で side panel が開く。結果は `docs/research/brave-unpacked-reload.md` に書く。
 
 ## 片付ける
 

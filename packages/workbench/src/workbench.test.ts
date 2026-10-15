@@ -214,6 +214,17 @@ test('changes streams a signal naming the Terminal Session that changed', async 
   await changes.return?.()
 })
 
+test('a Terminal Session that starts running signals changes naming it, so the webview attaches to it', async () => {
+  const { workbenchLedger, client, settled } = setup()
+  const signals: WorkbenchChange[] = []
+  onCleanup(workbenchLedger.events.subscribe('change', (change) => signals.push(change)))
+
+  const { tab } = await client.runspace.create({ rows: 24, cols: 80 })
+  expect(await settled(tab.terminalSessionId)).toMatchObject({ status: 'running' })
+
+  expect(signals).toContainEqual({ type: 'terminalSession', id: tab.terminalSessionId })
+})
+
 test('an Exit that arrives while the reconcile waits for List still ends the row', async () => {
   const { ptyd, db, workbenchLedger } = setup()
   seedRowInTab(db, 'ts-a')
