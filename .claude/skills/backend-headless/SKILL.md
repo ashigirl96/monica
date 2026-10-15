@@ -5,6 +5,13 @@ description: "desktop 無しで Backend と monica-ptyd を起こし、CLI と R
 
 Backend を本物の ptyd に繋いで起こす。Shell の役（親として生き続け、stdin の pipe の書き側を握る）は Bash の background job が演じる。
 
+worktree の session では、guard が中身を読み切れない command を断る。下の例は次の形に書き換えて流す。
+
+- `${TMPDIR%/}`: `echo $TMPDIR` で出した値を文字のまま書く。
+- `bun -e '… await import(…) …'`: script を scratchpad の file に書き、`bun <file>` で流す。repo の module は絶対 path で import する。
+- `agent-browser … eval "<式>"`: 式を scratchpad の file に書き、`exec agent-browser --session <名前> eval "$(cat "$1")"` だけの sh の wrapper に、その file を渡す。
+- `;` や `&&` でつないだ command、heredoc: 1 つずつ別の Bash の呼び出しにする。
+
 ## 起こす
 
 1. `cargo build -p monica-ptyd`
