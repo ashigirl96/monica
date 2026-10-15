@@ -3,7 +3,7 @@ name: release-notifications
 description: "通知センター・バナー・Dock の数・通知のクリックと、`.app` に同梱した Chat の claude と Chrome Extension を、release の Monica で実機で確かめる。.app の中でしか動かないものの受け入れ条件を確かめるときに使う。"
 ---
 
-release の Shell は .app の中でだけ UNUserNotificationCenter を使い、dev は別の経路で通知を出す（`docs/packages/notifications.md`）。そのため、通知センターとバナーとクリックは release でしか確かめられない。release の Monica はユーザーが毎日使っている app なので、入れ替える前に了承を取る。
+release の Shell は .app の中でだけ UNUserNotificationCenter を使い、dev は別の経路で通知を出す（ADR-0022）。そのため、通知センターとバナーとクリックは release でしか確かめられない。release の Monica はユーザーが毎日使っている app なので、入れ替える前に了承を取る。
 
 ## 入れる
 

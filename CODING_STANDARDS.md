@@ -12,7 +12,7 @@ review で差分に当てる規則。どれも判断が要るもので、理由�
 - GitHub から引いた Issue で写しの行や Task を引き当てるときは、node ID で照らし（`packages/task/src/copy.ts` の `isLinkedIssue`）、`(repo, number)` は node ID の無い行にだけ使う。判定する経路と run する経路のように、同じ Issue を引く箇所はすべて同じ照らし方にそろえる。repo の改名の後は sync まで行の名前が古く、旧名は別の repo が使い回すため（`docs/packages/task-ledger.md` の写しの同一性）。
 - await を挟む処理は、await の間に同じ Task や行を動かす経路（同じ domain の別の procedure、hook の購読、背景の sync、ユーザーの shell やエディタ）を数え上げ、経路ごとに、予約で断るか、最後の同期区間（transaction）で見直すか、git のような外の確かめに任せるかで閉じる。git や fs のように戻せない操作の後に見つけたものは、断らずに守ったまま処理を終える。断れば、壊した後の中途半端な状態が残るため（`docs/packages/task-ledger.md` の「close と reopen」）。
 - Run と Run Button の判定に当てる Issue Facts は、`run-admission.ts` の `freshestFacts` で取り、写しか押した時に読んだ答えかを呼び手で選ばない。`freshestFacts` は、sync が写しを書き直した、sync が失敗して押す前の写しを使った（`syncOrUseCopy` の `warnings`）、sync しない（resume）の 3 つの経路で、手元で最も新しいほうを返す。どれが新しいかは `synced_at` と時刻の大小でなく sync の成否で決める。in-process の fake は読みと sync を同じミリ秒で返すため（`docs/packages/task-ledger.md` の「Run ボタン」の `press`）。
-- webview の action が procedure を呼んでから読み直すまでの間にも、CLI や別の画面の操作が挟まる。読み直しで分かるのは今の状態だけで、どの操作で変わったかは分からない。そのため、原因で分岐する判定（閉じて空になったか、移して空になったか）は、procedure が transaction の中で決めて output で返す（`docs/packages/workbench-ledger.md` の「Runspace と Tab」の `emptiedRunspaceId`）。
+- webview の action が procedure を呼んでから読み直すまでの間にも、CLI や別の画面の操作が挟まる。読み直しで分かるのは今の状態だけで、どの操作で変わったかは分からない。そのため、原因で分岐する判定（閉じて空になったか、移して空になったか）は、procedure が transaction の中で決めて output で返す（workbench の `tab.close` が返す `emptiedRunspaceId`）。
 - 画面の処理が await の後で画面の状態や保存の台帳を書き換えるときは、await の間に起きうること（画面が別の対象へ移る、同じ対象をユーザーが編集する、別のタブが同じ対象を保存する、取り直しが失敗して古い cache が返る）を数え、完了時に見直してから書き換える。見直しに使うのは、開いている対象、編集の印、取り直しの成否（`packages/note/src/ui/notes/note-sync.ts` の `reloadLatest`）、返った版の中身（`packages/note/src/ui/pages/essays/actions.ts` の `setOpenEssayStatus`）。開いている対象は URL で見る。`navigate` は URL をその場で書き換えるが、prop と、effect で写した ref は描画の後まで前の対象を指すため。見直さずに保存の予約を捨てる・別の対象へ予約する経路は本文の消失なので、diff が持ち込んだものでなくても直す。
 - 対象を消す経路と開き直す経路では、その対象に紐づく手元の状態（保存の予約と基準版、未保存の本文と title、本文と一覧の cache）を数え、経路ごとに捨てるか重ねるかを決める。消す経路では、送信中の保存が後から返す失敗と CONFLICT も数える。残した予約は消した対象へ保存を送り続けるため（`packages/note/src/ui/notes/removals.ts` の `Removals`、`packages/note/src/ui/notes/note-sync.ts` の `noteToOpen`）。
 - 削除のように戻しにくい操作は、開いている対象の種類を確かめてから行う。種類ごとの route は別の種類の id でも開くため（`packages/note/src/ui/notes/removals.ts` の `Removals` の種類）。
@@ -24,8 +24,10 @@ review で差分に当てる規則。どれも判断が要るもので、理由�
 - 画面の effect の中で一度きりの値（module に置いた飛び先など）を取り出すときは、dev の StrictMode が effect を片付けて走らせ直しても、2 度目に同じ値を得られる形にする。取り出すたびに消すと、片付けで壊れる 1 度目にだけ効く（`packages/note/src/ui/notes/block-jump.ts` の `arrivalAt`）。
 - procedure が transaction の後に送る ptyd への副作用（Create、Terminate）の結果は、procedure が返った時点ではまだ DB に無い。終わらせた shell を終わったものとして他の判定に渡すときは、Backend が Exit を記録するのを一覧か合図で待つ（ADR-0015）。Tab を閉じた Terminal Session は例外で、Tab の無い live な行を Terminating と読めるので、close の ActiveRun guard と Run の起動中の予約は待たずに数えない（ADR-0023、`docs/packages/task-ledger.md` の「close と reopen」）。
 - DB の行と ptyd の両方を進める処理は、workbench の `terminal-session.ts` に置く（ADR-0015）。DB の行と ptyd や fs の両方を進める処理は、commit の前後や ptyd への要求の途中のどこで Backend が止まっても、ptyd との接続が切れても、次の reconcile が正しい状態に戻せる形にする（ADR-0011）。
-- commit の後の副作用（通知など）が失敗しても、commit 済みの変更の合図（`events`）と記録は止めない（`docs/packages/notifications.md`）。
+- commit の後の副作用（通知など）が失敗しても、commit 済みの変更の合図（`events`）と記録は止めない。commit は戻らないので、副作用の失敗で合図を飛ばしたり呼び手に失敗を返したりすると、commit 済みの変更が無かったように見えるため。
 - procedure の output が変わる経路（reconcile や他の domain の行の変化を含む）は、どれも自分の domain の `events` で合図する。合図が来なければ、stream だけを購読して読み直す client は古い output を持ったまま残るため。
+- 合図（`events`）は、行を書いた関数が自分で出す。合図のための id や真偽を戻り値で返して、呼び手に出させない。呼び手を 1 つ忘れるだけで、購読側（task の Run の誕生、Dock の数、webview の読み直し）が黙って古いまま残るため。
+- 呼び手の transaction を受け取る関数は、その transaction の中で合図を出す。rollback しても購読側が読み直すだけで害は無い（ADR-0009）。
 - CLI と webview で動くコードは、cli entry が import する内側のファイルも含めて DB に触らず、procedure を呼ぶ（ADR-0003）。
 - Shell（`apps/desktop/src-tauri`）に置くのは、Tauri プロセスにしか無いもの（窓と webview の event、app の名義、AppKit）に触る処理と、端末の byte だけ。fs と process の spawn で済む処理は Backend の procedure にする（ADR-0001）。
 

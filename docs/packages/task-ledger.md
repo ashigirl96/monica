@@ -45,12 +45,12 @@ createTaskLedger(deps: {
 ```
 
 - `home` は Bench の worktree と setup の log を置く場所（「Bench」）。`github` は GraphQL の URL と token の取り方で、省けば `https://api.github.com/graphql` と `gh auth token --hostname github.com` になる。`ghq` は `root()` と `get(repo)` で、省けば `ghq` の command を呼ぶ。テストは偽の GitHub と ghq を渡す（「テスト」）。
-- Workbench Ledger の書き込みは `docs/packages/workbench-ledger.md` の「他の domain が呼ぶ書き込み」の method を通す。
+- Workbench Ledger の書き込みは `docs/packages.md` の「server entry の形」の method を通す。
 - `start()` は preparing のまま残った Bench を失敗にし（「Bench」）、Workbench Ledger の `events` を購読して Run の不変条件を当てる（「Run」）。`stop()` は購読を外し、走っている sync と準備を打ち切り、setup の process group を kill する。
 - `TaskLedger` は `events`・`start()`・`stop()` のほかに `syncInBackground()` と `cleanSetupLogs()` だけを持ち、どちらも task の system の Job が呼ぶ。
   - `syncInBackground()`: open な Task すべての Sync で、失敗した repo があるか throw したら reject する（「sync」）。
   - `cleanSetupLogs()`: setup の log を消し、消せなかった log か directory があれば残りを消してから reject する（「Bench」）。
-- `@monica/task/server` は、ほかに `systemJobs(taskLedger)` と `nameAgentSession(db, agentSessionId)` を出す。`systemJobs` は `syncInBackground()` を呼ぶ `task.sync` と、`cleanSetupLogs()` を呼ぶ `task.setup-log-cleanup` を出す。`nameAgentSession` は Backend が Workbench Ledger に渡し、通知の呼び名になる（`docs/packages/notifications.md` の「title と body」）。
+- `@monica/task/server` は、ほかに `systemJobs(taskLedger)` と `nameAgentSession(db, agentSessionId)` を出す。`systemJobs` は `syncInBackground()` を呼ぶ `task.sync` と、`cleanSetupLogs()` を呼ぶ `task.setup-log-cleanup` を出す。`nameAgentSession` は Backend が Workbench Ledger に渡し、通知の呼び名になる。
 
 ## Run
 
@@ -170,7 +170,7 @@ Chrome Extension が GitHub の Issues の一覧と Issue の画面に差し込�
 - tx で Task を引き直して ref を作り直す。`closed_at` を入れ、`bench` の行を消し、`removeRunspace(tx, runspaceId, { spare })` を呼ぶ。`spare` は呼び手の Terminal Session と、`--force` でなければ tx の中で数え直した ActiveRun の Terminal Session。後者は git を待つ間に live になった Run で、Bench の Tab で起こして hook から Run になったものと、Bench の外の Tab で resume された既存の Run の両方を含む。前者は呼び手と同じく所有を解いた Runspace に残し、どちらも `warnings` に載せる。`removeRunspace` は Runspace の中の Tab しか残す・消すの対象にしないので、Bench の外の Tab の分は `spare` に入っても何も変わらない。guard の後に見つけたものは、壊した後で断らずに守ったまま close を終えるため。output の `spared` は呼び手の Tab が残ったかどうか。commit の後に `{ type: "task", ref }` で知らせて返る。消した Tab の Terminal Session は、close を待たせずに workbench が終わらせる（ADR-0015）。
 - Run の行は残す。close を頼んだ claude は、終わるまで closed な Task の Run のままで、`current` もその Task を返す。
 - CLI は拒否を、1 行目の `CLOSE_REFUSED: <ref> stays open:`、理由を 1 行ずつ、最後の `pass --force to close anyway` で出し、exit 1 にする。Skill は stderr の 1 行目で失敗を読むので、1 行目は `CODE: message` の形を保つ。
-- Workbench で Bench の最後の Tab を閉じると、webview の task の ui が `close({ ref })` を `force` も `terminalSessionId` も無しで呼ぶ（呼び方と toast は `docs/packages/desktop.md` の slot、きっかけは `docs/packages/workbench-ledger.md` の「Runspace と Tab」）。止める条件は CLI の close と同じで、push 済みでレビュー中の PR があっても guard は当たらないので、その Task も閉じる。閉じた Tab の claude は、Tab を閉じると Terminating になり、Exit の記録の前でも ActiveRun にも起動中の予約にも当たらないので、webview は Exit を待たずに close を呼ぶ。git の guard だけが止める（ADR-0023）。close の間に Bench へ開いた shell の Tab は、その claude が Run になっていなければ close が消す（`spare` が守るのは Run の Tab だけ）。guard で止まった Bench は Tab の無いまま残り、Workbench が止めた理由と「New shell in …」と、2 度押しで `force` 付きの close を呼ぶ「Close anyway」を出す。止めた理由を覚えていない Tab の無い Bench（最後の Tab を外へ移した、準備中に空になった、app を再起動した）には、1 度の押下で強制でない close を呼ぶ「Close」を出す（ADR-0036）。準備中の Bench では close を呼ばず、準備が終わっても自分でやり直さない。Bench の close の状態は task の ui の `bench-close.ts` が 1 つの module に持つ（`docs/packages/desktop.md` の slot）。
+- Workbench で Bench の最後の Tab を閉じると、webview の task の ui が `close({ ref })` を `force` も `terminalSessionId` も無しで呼ぶ（呼び方と toast は `docs/packages/desktop.md` の slot）。止める条件は CLI の close と同じで、push 済みでレビュー中の PR があっても guard は当たらないので、その Task も閉じる。閉じた Tab の claude は、Tab を閉じると Terminating になり、Exit の記録の前でも ActiveRun にも起動中の予約にも当たらないので、webview は Exit を待たずに close を呼ぶ。git の guard だけが止める（ADR-0023）。close の間に Bench へ開いた shell の Tab は、その claude が Run になっていなければ close が消す（`spare` が守るのは Run の Tab だけ）。guard で止まった Bench は Tab の無いまま残り、Workbench が止めた理由と「New shell in …」と、2 度押しで `force` 付きの close を呼ぶ「Close anyway」を出す。止めた理由を覚えていない Tab の無い Bench（最後の Tab を外へ移した、準備中に空になった、app を再起動した）には、1 度の押下で強制でない close を呼ぶ「Close」を出す（ADR-0036）。準備中の Bench では close を呼ばず、準備が終わっても自分でやり直さない。Bench の close の状態は task の ui の `bench-close.ts` が 1 つの module に持つ（`docs/packages/desktop.md` の slot）。
 - `reopen` は closed な Task だけを受ける（open は `BAD_REQUEST`）。`run` と同じく `refreshTask` で sync してから、`writeClosedTask` の transaction で `closed_at` を NULL に戻し、`{ type: "task", ref }` で知らせる。Bench は作らないので、表示状態は `not_started`（Issue が closed なら `issue_closed`）。次の `run` か `attach` が Bench を作り直す。`run` は close で消えた branch `issue-<n>` を origin の default branch から作り直し、Bench より前の Run は resume しない（「Run の起動」の節）。
 
 ## sync

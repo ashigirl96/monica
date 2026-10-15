@@ -24,7 +24,7 @@ Bun.spawn は `env` を渡さないと、子に起動時の environ を渡し、
 
 domain は 6 つしかないので、汎用の「domain の登録」機構は作らずに直接並べる。
 
-Backend の stdout は Shell 宛ての JSON 行専用で、log は stderr に出す（ADR-0007）。行の種類は `endpoint`・`notify`・`unread`（`docs/packages/notifications.md` の「Backend と Shell」）。
+Backend の stdout は Shell 宛ての JSON 行専用で、log は stderr に出す（ADR-0007）。行の種類は `endpoint`・`notify`・`unread`。
 
 ## token の口の 2 つの token
 
