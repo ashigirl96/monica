@@ -420,7 +420,7 @@
                   "@monica/usage",
                   "@monica/usage/*"
                 ],
-                "message": "note は他の domain を import しない（docs/packages/note-ledger.md）"
+                "message": "note は他の domain を import しない（docs/packages.md の「依存の向き」）"
               }
             ]
           }
@@ -450,7 +450,7 @@
                   "@monica/usage",
                   "@monica/usage/*"
                 ],
-                "message": "note は他の domain を import しない（docs/packages/note-ledger.md）"
+                "message": "note は他の domain を import しない（docs/packages.md の「依存の向き」）"
               },
               {
                 "group": ["@monica/*/server", "../server", "../server.ts"],
@@ -501,7 +501,7 @@
                   "@monica/usage",
                   "@monica/usage/*"
                 ],
-                "message": "note は他の domain を import しない（docs/packages/note-ledger.md）"
+                "message": "note は他の domain を import しない（docs/packages.md の「依存の向き」）"
               },
               {
                 "group": [

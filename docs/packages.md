@@ -11,9 +11,7 @@ monica の repo の形、package の entry、domain 間の呼び出しを決め�
 - `docs/packages/tab-env-and-shim.md`: Tab の env、shim、claude wrapper、hook の settings と CLI、payload の decoder に触るとき。
 - `docs/packages/notifications.md`: 通知と Dock の数と取り下げ。通知を出す遷移、title と body、Shell が出す通知、未読の集合、Dock の数、通知センターの通知の置き換えと取り下げに触るとき。
 - `docs/packages/task-ledger.md`: task の contract と Task Ledger。task の procedure、Run、Bench の準備、close、sync、task のテストの fake に触るとき。
-- `docs/packages/note-ledger.md`: note の contract と Note Ledger と body。note の procedure、画像、OGP、本文の JSON と markdown の変換に触るとき。
 - `docs/packages/chat.md`: chat の contract と `ChatAgent` と ui。Chat の procedure、claude の options と env、spare と同時の数、claude の止め方、偽の claude、side panel の Chat の画面（fluid-functionalism の写し、CSS、Current Page の追い方、markdown）に触るとき。
-- `docs/packages/note-ui.md`: note の ui。`packages/note/src/ui` か `apps/web` に触るとき、旧 Monica のコードを移すとき。
 - `docs/packages/backend.md`: Backend の組み立て（apps/backend）。起動と終了の順序、PATH、Ledger の配線、ブラウザの口に触るとき。
 - `docs/packages/cli.md`: CLI（apps/cli）。`cli: true` の procedure か SKILL.md を足すとき、argv の振り分け・出力・エラー・補完・CLI のテストに触るとき。
 - `docs/packages/extension.md`: Chrome Extension（apps/extension）。manifest、permission、ID と鍵、mode ごとの出力の dir、dev の読み込み方、`chrome` の型と lint に触るとき。
@@ -87,7 +85,7 @@ entry は層ではなく、import してよい実行環境で切る（ADR-0009�
 | `@monica/<d>/server` | router、`create<D>Ledger()`（chat は `createChatAgent()`）、migrations の re-export | Bun | apps/backend、他 package の server、テスト |
 | `@monica/<d>/ui` | React の component と atom。画面を持たない job と usage には無い | browser | apps/desktop、apps/web（note）、apps/extension（chat）、他 package の ui |
 | `@monica/<d>/cli` | 出力の整形関数、補完の候補を返す関数、手で書く command。CLI に出す procedure の無い note と chat には無い | Bun | apps/cli |
-| `@monica/<d>/body` | Note の本文の JSON を読む関数と、本文と markdown の変換（`docs/packages/note-ledger.md`）。今は note だけが持つ | どこでも | 自分の contract と server と ui |
+| `@monica/<d>/body` | Note の本文の JSON を読む関数と、本文と markdown の変換。今は note だけが持つ | どこでも | 自分の contract と server と ui |
 | `@monica/chat/native-host` | Native Messaging の host に Backend の port と Chrome Extension の token を問い合わせる `viaNativeHost`、`BackendUnreachable`、捕まえた error が Backend Unreachable かを決める `isUnreachable`（`src/ui/native-host.ts`）。chat だけが持つ | browser（Chrome Extension） | `@monica/chat/ui`、apps/extension の service worker。React と CSS を引かずに使えるよう、ui の index と分ける |
 | `@monica/<d>/testing` | 他の package のテストに出す fake。今は workbench と chat が持つ。workbench は `src/fake-ptyd.ts` の fake の ptyd（`startFakePtyd`）、短い home を作る `tempHome`、Terminal Session が starting を抜けるのを待つ `untilSettled`、sh の script を走らせる偽の実行 file を置く `writeFakeExecutable`（`src/fake-executable.ts`）を出す。chat は `src/testing.ts` の、偽の claude を起こす wrapper を書く `writeFakeClaude` と、その失敗の場面の型 `FakeScenario` と、偽の claude が居なくなるのを待つ `untilFakeClaudesExit` を出す | Bun | 他 package のテストと `testing.ts` |
 | `@monica/chat/html-worker`・`@monica/chat/pdf-worker` | HTML と PDF を本文にする Bun の Worker の module（`src/html-worker.ts`・`src/pdf-worker.ts`）。何も export せず、読み込むと `message` の listener を置く。chat だけが持つ | Bun の Worker | apps/backend の Worker の entrypoint（`apps/backend/src/html-worker.ts`・`apps/backend/src/pdf-worker.ts`）だけ。compiled binary の Worker は build の entrypoint に要り、main.ts の隣に置くと main.ts から同じ相対 path で引けるため（`docs/packages/chat.md` の「本文への変換」と「PDF の本文」） |

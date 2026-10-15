@@ -13,7 +13,11 @@ review で差分に当てる規則。どれも判断が要るもので、理由�
 - await を挟む処理は、await の間に同じ Task や行を動かす経路（同じ domain の別の procedure、hook の購読、背景の sync、ユーザーの shell やエディタ）を数え上げ、経路ごとに、予約で断るか、最後の同期区間（transaction）で見直すか、git のような外の確かめに任せるかで閉じる。git や fs のように戻せない操作の後に見つけたものは、断らずに守ったまま処理を終える。断れば、壊した後の中途半端な状態が残るため（`docs/packages/task-ledger.md` の「close と reopen」）。
 - Run と Run Button の判定に当てる Issue Facts は、`run-admission.ts` の `freshestFacts` で取り、写しか押した時に読んだ答えかを呼び手で選ばない。`freshestFacts` は、sync が写しを書き直した、sync が失敗して押す前の写しを使った（`syncOrUseCopy` の `warnings`）、sync しない（resume）の 3 つの経路で、手元で最も新しいほうを返す。どれが新しいかは `synced_at` と時刻の大小でなく sync の成否で決める。in-process の fake は読みと sync を同じミリ秒で返すため（`docs/packages/task-ledger.md` の「Run ボタン」の `press`）。
 - webview の action が procedure を呼んでから読み直すまでの間にも、CLI や別の画面の操作が挟まる。読み直しで分かるのは今の状態だけで、どの操作で変わったかは分からない。そのため、原因で分岐する判定（閉じて空になったか、移して空になったか）は、procedure が transaction の中で決めて output で返す（`docs/packages/workbench-ledger.md` の「Runspace と Tab」の `emptiedRunspaceId`）。
-- 画面の処理が await の後で画面の状態や保存の台帳を書き換えるときは、await の間に起きうること（画面が別の対象へ移る、同じ対象をユーザーが編集する、別のタブが同じ対象を保存する、取り直しが失敗して古い cache が返る）を数え、完了時に見直してから書き換える。見直しに使うのは、開いている対象、編集の印、取り直しの成否（`packages/note/src/ui/notes/note-sync.ts` の `reloadLatest`）、返った版の中身（`packages/note/src/ui/pages/essays/actions.ts` の `setOpenEssayStatus`）。開いている対象は URL で見る。`navigate` は URL をその場で書き換えるが、prop と、effect で写した ref は描画の後まで前の対象を指すため。見直さずに保存の予約を捨てる・別の対象へ予約する経路は本文の消失なので、旧 Monica から移したコードでも直す（`docs/packages/note-ui.md` の「旧 Monica のコードを移すとき」）。
+- 画面の処理が await の後で画面の状態や保存の台帳を書き換えるときは、await の間に起きうること（画面が別の対象へ移る、同じ対象をユーザーが編集する、別のタブが同じ対象を保存する、取り直しが失敗して古い cache が返る）を数え、完了時に見直してから書き換える。見直しに使うのは、開いている対象、編集の印、取り直しの成否（`packages/note/src/ui/notes/note-sync.ts` の `reloadLatest`）、返った版の中身（`packages/note/src/ui/pages/essays/actions.ts` の `setOpenEssayStatus`）。開いている対象は URL で見る。`navigate` は URL をその場で書き換えるが、prop と、effect で写した ref は描画の後まで前の対象を指すため。見直さずに保存の予約を捨てる・別の対象へ予約する経路は本文の消失なので、diff が持ち込んだものでなくても直す。
+- 対象を消す経路と開き直す経路では、その対象に紐づく手元の状態（保存の予約と基準版、未保存の本文と title、本文と一覧の cache）を数え、経路ごとに捨てるか重ねるかを決める。消す経路では、送信中の保存が後から返す失敗と CONFLICT も数える。残した予約は消した対象へ保存を送り続けるため（`packages/note/src/ui/notes/removals.ts` の `Removals`、`packages/note/src/ui/notes/note-sync.ts` の `noteToOpen`）。
+- 削除のように戻しにくい操作は、開いている対象の種類を確かめてから行う。種類ごとの route は別の種類の id でも開くため（`packages/note/src/ui/notes/removals.ts` の `Removals` の種類）。
+- focus で取り直す query は互いに順不同で返る。ある query の答えを別の query の答えで解く処理は、どちらが先に返っても同じ結果になるよう、前の答えを控えて使う（`packages/note/src/ui/pages/essays/editor.tsx` の、外で消された Essay の移り先を一覧の並びから選ぶ処理）。
+- 画面にいる間だけ持つ状態（削除の取り消しの stack など）は、route を描き分けるより上で持ち、URL から導いた画面に結び付ける。中継の route（`/notes/:id`、`/repos`）を経ると、画面の component は一度 unmount されるため（`packages/note/src/ui/routes.ts` の `removalScreenOf`）。
 - props を渡すなどして眠っていた経路を有効にする変更は、有効になる経路を diff の外まで読み、上の規則に照らす。旧 Monica から振る舞いを変えずに移したコードは、移した時には呼ばれていないので、await の後の見直しを経ていないことがある（エディタが破棄された後の完了を `view.isDestroyed` で捨てる `packages/note/src/ui/editor/image-upload.ts`）。
 - 外から来た id（Shell の event、通知のクリック）で webview の layout や一覧を引く処理は、今の値が古い場合を数えて閉じる。窓が隠れている間は webview の JS が止まって読み直せず、Backend の再起動中は読み直しが失敗しても値が前のまま残る。読み直してから引き、読み直せなければ次に読めた値で引く（`packages/workbench/src/ui/notification-click.ts`）。
 - 合図（listener）を購読して待つ処理は、待つと決めてから購読するまでの間に合図が過ぎた場合を、購読した後に回数や版を見直して閉じる。過ぎた合図は来ないので、そのままでは次の合図まで待ち続ける（`packages/note/src/ui/notes/note-references.ts` の `untilReached`）。
@@ -66,6 +70,9 @@ review で差分に当てる規則。どれも判断が要るもので、理由�
 - テストが起こした process（Backend、偽の claude、偽の ptyd）は、居なくなるのを待ってから home を消す。走査の途中で他の process が子を消すと、Bun の `rmSync({ recursive: true, force: true })` は例外を出さずに止まり、home が TMPDIR に残るため。
 - 一時 directory は `finally` で消さず、hook（`afterAll` など）で消す。timeout で打ち切られた test は `finally` を飛ばすため。
 - hook は test file に書く。共有の module は片付けの関数を出し、呼び手の test file に登録させる（`scripts/oxlint/lint-probes.ts` の `cleanUpLintProbes`）。bun test は同じ process の test file どうしで module を使い回し、module の top level で登録した hook は最初に import した file にしか付かないため。
+- bun test に DOM の環境（happy-dom など）を入れない。
+- GFM に合わせる markdown の読み（表のセルの区切り、backslash の escape）は、同じ入力を `gh api markdown -f mode=gfm -f text='…'` に通し、cmark-gfm の描画と比べて決める。cmark-gfm の文法（`ext_scanners.re`）を読むだけだと、re2c の最長一致を見落として読み違えるため。
+- 相手が body を読みやめられたこと（stream の cancel）を確かめるテストは、cancel が 200ms のうちに届くことを見る。Bun は読みやめたまま捨てた body も GC で 1 秒ほど後に cancel するので、長く待つと cancel を呼ばない実装も通るため。
 
 ## 語
 
