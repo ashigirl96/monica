@@ -32,6 +32,6 @@
 
 ## テスト
 
-- remote client を `createRouterClient` に差し替えて回す（ADR-0003。fixture は `apps/cli/src/testing.ts`）。その Task Ledger は失敗する GitHub と ghq を持つ（`docs/packages/task-ledger.md` の「テスト」）。Backend 側のエラーの形と接続拒否の retry だけは、router を `Bun.serve` に載せて確かめる。in-process の client は handler の生の Error を投げ、HTTP のように `ORPCError`（`INTERNAL_SERVER_ERROR`）に包まないため。
+- remote client を `createRouterClient` に差し替えて回す（ADR-0003。fixture は `apps/cli/src/testing.ts`）。その Task Ledger は失敗する GitHub と ghq を持つ。Backend 側のエラーの形と接続拒否の retry だけは、router を `Bun.serve` に載せて確かめる。in-process の client は handler の生の Error を投げ、HTTP のように `ORPCError`（`INTERNAL_SERVER_ERROR`）に包まないため。
 - Native Messaging の host も、`apps/cli/src/main.ts` を第 1 引数 `chrome-extension://<id>/` の subprocess で起こし、一時の home に書いた `backend.json` から返す port と token を、枠付きの stdin と stdout で確かめる（`src/native-host.test.ts`）。stdin は応答を読むまで閉じず、EOF を待つ実装なら止まる。`HOME` を一時の dir にして、`MONICA_HOME` が無いときに `~/.monica` を読むことも見る。
 - hook の CLI（`monica workbench hook claude`）は例外で、`apps/cli/src/main.ts` を subprocess で起こし、router を `Bun.serve` に載せて確かめる。claude から見た約束（stdin の payload、stdout の allow、exit code）と 2 秒の打ち切り、trpc-cli より前の振り分けは、process の外からしか見えないため。

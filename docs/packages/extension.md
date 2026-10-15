@@ -25,7 +25,7 @@
 
 ## Run ボタン
 
-GitHub の Issues の一覧の行と、Issue の画面の header に Run ボタンを差し込み、押されたら Task を run する（ADR-0035）。ボタンと prompt は Backend の task が決める（`docs/packages/task-ledger.md` の「Run ボタン」）。
+GitHub の Issues の一覧の行と、Issue の画面の header に Run ボタンを差し込み、押されたら Task を run する（ADR-0035）。ボタンと prompt は Backend の task が決める。
 
 - manifest の `content_scripts` に `src/issues-page.ts` を `https://github.com/*` で載せる。GitHub は repo の中（Code の tab から Issues の tab へなど）も、`/`・`/<owner>`・`/issues` から repo へも client 側の routing で移り、そこでは content script が注入されないので、`issues*` や repo の画面に絞らず github.com の画面すべてに注入する。script は走査のたびに `location.pathname` が `/<owner>/<repo>/issues`（一覧）か `/<owner>/<repo>/issues/<n>`（Issue の画面）かを見て、どちらでもなければ何もしない。一覧の path と title の link の href は同じ正規表現で読み、当たらない href は飛ばす。
 - Issue の画面では、`[data-testid="issue-header"]` ごとに ref を決める。header の中に文字が `#<n>` の link があればその href から、無ければ path から読む。sub-issue を横のパネルで開くと、GitHub は path を親のままにして（`?issue=<owner>|<repo>|<n>` を足すだけ）パネルにも header を足し、パネルの header は title の横に自分への `#<n>` の link を持つため。path の ref を全 header に配ると、パネルの Run が親を run する。link も container も、いちばん近い `[data-testid="issue-header"]` がその header であるものだけを見て、header が入れ子でも外側の header に内側の要素を拾わせない。ref を決めたら、header の下の `New issue` の container（class に `HeaderMenu-module__buttonContainer` か `buttonContainer__` を含む要素。GitHub は class 名を `<Name>-module__<name>__<hash>` と `<name>__<hash>` の 2 つの形で混ぜて出すため、両方の形に当てる）の先頭にボタンを差し込み、`New issue` を右端に残す。header はこの container を 2 つ持ち、幅で片方を CSS で隠すので、両方に差し込み、どちらを見せるかは GitHub に任せる。ボタンは `New issue` と同じ高さの `btn`（`btn-sm` でない）にし、押下が失敗した理由はボタンの左に出す。押下の後は、両方の container のボタンを返った行で描き直す。ref を置く要素が title の link でなく container であること以外は、一覧の行と同じに振る舞う。
