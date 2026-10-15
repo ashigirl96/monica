@@ -283,6 +283,29 @@ test('a PDF 1MiB under the body limit goes through RPCLink to chat.ask, and byte
   })
 })
 
+test('a Backend that exits while Chat answers leaves no claude behind', async () => {
+  const backend = await startBackend(freePort(), fakeClaude('linger-after-answer'))
+  const ask = (question: string) =>
+    chatClient(backend).chat.ask({
+      question,
+      page: { content: { kind: 'unreadable', reason: 'restricted' } },
+      history: [],
+    })
+  for await (const _ of await ask('What is 1 + 1?'));
+  const answer = await ask('HOLD on, what is 1 + 1?')
+  let read = await answer.next()
+  while (!read.done && read.value.type !== 'text') read = await answer.next()
+
+  await backend.subprocess.stdin.end()
+  await backend.subprocess.exited
+
+  const exited = await Promise.race([
+    untilFakeClaudesExit(backend.home).then(() => 'exited'),
+    Bun.sleep(3000).then(() => 'left behind'),
+  ])
+  expect(exited).toBe('exited')
+})
+
 // 答えの途中の失敗は、流した text の後に、宣言した error の code と data で Chrome Extension に届く。
 test('a failure after some text of the answer reaches an RPCLink client after that text as the declared error with its data', async () => {
   const backend = await startBackend(freePort(), fakeClaude('max-output-tokens'))

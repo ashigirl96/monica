@@ -341,6 +341,26 @@ test('a page the same as an earlier one still sends its own screenshot', () => {
   expect(content[4]).toEqual(image())
 })
 
+test('a page the same as an earlier one still sends its own selection', () => {
+  const history = [turn(1, page('Anemones live there.'))]
+  const same = page('', {
+    content: { kind: 'same', turn: 0 },
+    selection: { text: 'Anemones', truncated: false },
+  })
+
+  const { content } = askContent('And these?', same, history)
+
+  expect(content.slice(3)).toEqual([
+    {
+      type: 'document',
+      source: { type: 'text', media_type: 'text/plain', data: 'Anemones' },
+      title: 'Selection: Tide pools',
+      context: 'URL: https://coast.example/tide-pools',
+    },
+    { type: 'text', text: expect.stringContaining('And these?') },
+  ])
+})
+
 test('a page that could not be read but was taken a screenshot of sends the image with the reason it could not be read', () => {
   const unreadable = page('', {
     content: { kind: 'unreadable', reason: 'timeout' },
