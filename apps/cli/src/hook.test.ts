@@ -1,50 +1,17 @@
 import { afterEach, expect, test } from 'bun:test'
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
-import { tmpdir } from 'node:os'
+import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 
-import { createRouterClient } from '@orpc/server'
-import { RPCHandler } from '@orpc/server/fetch'
+import {
+  cleanUp,
+  monicaHome,
+  onCleanup,
+  openTabOutsideBench,
+  serveBackend,
+  writeEndpoint,
+} from './testing.ts'
 
-import { cleanUp, inMemoryBackend, openTabOutsideBench } from './testing.ts'
-
-const cleanups: (() => void)[] = []
-afterEach(() => {
-  for (const cleanup of cleanups.splice(0).toReversed()) cleanup()
-  cleanUp()
-})
-
-function monicaHome(): string {
-  const home = mkdtempSync(join(tmpdir(), 'monica-'))
-  cleanups.push(() => rmSync(home, { recursive: true, force: true }))
-  return home
-}
-
-function writeEndpoint(home: string, port: number) {
-  writeFileSync(
-    join(home, 'backend.json'),
-    JSON.stringify({ port, pid: process.pid, token: 'token' }),
-  )
-}
-
-function serveBackend(home: string) {
-  const backend = inMemoryBackend()
-  const handler = new RPCHandler(backend.router)
-  const server = Bun.serve({
-    hostname: '127.0.0.1',
-    port: 0,
-    async fetch(request) {
-      const { response } = await handler.handle(request, {
-        prefix: '/rpc',
-        context: backend.context,
-      })
-      return response ?? new Response('not found', { status: 404 })
-    },
-  })
-  cleanups.push(() => server.stop(true))
-  writeEndpoint(home, server.port!)
-  return { ...backend, client: createRouterClient(backend.router, { context: backend.context }) }
-}
+afterEach(cleanUp)
 
 const exitPlanMode = JSON.parse(
   readFileSync(
@@ -152,7 +119,7 @@ test('a Backend that does not answer is given up after 2 seconds and the hook ex
     port: 0,
     fetch: () => new Promise<Response>(() => {}),
   })
-  cleanups.push(() => hung.stop(true))
+  onCleanup(() => hung.stop(true))
   writeEndpoint(home, hung.port!)
 
   const result = await hook(home, prompt, { ...inTab, MONICA_TEST_TIMEOUTS_LOG: timeouts }, [

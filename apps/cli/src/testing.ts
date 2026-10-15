@@ -1,4 +1,6 @@
 import { Database } from 'bun:sqlite'
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
 import {
@@ -32,6 +34,7 @@ import {
 } from '@monica/workbench/server'
 import { startFakePtyd, tempHome, untilSettled } from '@monica/workbench/testing'
 import { createRouterClient, os } from '@orpc/server'
+import { RPCHandler } from '@orpc/server/fetch'
 import { drizzle } from 'drizzle-orm/bun-sqlite'
 import { migrate } from 'drizzle-orm/bun-sqlite/migrator'
 
@@ -45,10 +48,42 @@ const noGhq: Ghq = {
 }
 
 const cleanups: (() => void)[] = []
-const onCleanup = (cleanup: () => void) => cleanups.push(cleanup)
+export const onCleanup = (cleanup: () => void) => cleanups.push(cleanup)
 
 export function cleanUp() {
   for (const cleanup of cleanups.splice(0).toReversed()) cleanup()
+}
+
+export function monicaHome(): string {
+  const home = mkdtempSync(join(tmpdir(), 'monica-'))
+  onCleanup(() => rmSync(home, { recursive: true, force: true }))
+  return home
+}
+
+export function writeEndpoint(home: string, port: number) {
+  writeFileSync(
+    join(home, 'backend.json'),
+    JSON.stringify({ port, pid: process.pid, token: 'token' }),
+  )
+}
+
+export function serveBackend(home: string) {
+  const backend = inMemoryBackend()
+  const handler = new RPCHandler(backend.router)
+  const server = Bun.serve({
+    hostname: '127.0.0.1',
+    port: 0,
+    async fetch(request) {
+      const { response } = await handler.handle(request, {
+        prefix: '/rpc',
+        context: backend.context,
+      })
+      return response ?? new Response('not found', { status: 404 })
+    },
+  })
+  onCleanup(() => server.stop(true))
+  writeEndpoint(home, server.port!)
+  return { ...backend, client: createRouterClient(backend.router, { context: backend.context }) }
 }
 
 export function inMemoryBackend({ home, ghq = noGhq }: { home?: string; ghq?: Ghq } = {}) {

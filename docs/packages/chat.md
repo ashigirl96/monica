@@ -13,7 +13,7 @@ ask       { question, page: Page, history: { question, answer, page: PageSnapsho
 - `prepare` は受けた model と effort で spare（下の「spare」）を起こし、その initialize を待たずに返る。同じ組の spare が既にあるか、claude を 4 つ持っていれば何もしない。違う組の spare は捨てて起こし直す。Chrome Extension は Backend の不在の確かめにもこれを呼ぶので、速く返す。
 - `model` は `models` の `value` の文字列、`effort` は `'low' | 'medium' | 'high' | 'xhigh' | 'max'`。どちらも省けて、省いた方は `haiku`・`low`（contract の `DEFAULT_MODEL`・`DEFAULT_EFFORT`）になる。Backend は受けた値を `options.model`・`options.effort` に渡すだけで、一覧に照らして弾かない。model が持たない effort の丸めは claude に任せる。side panel が選んで ask ごとに送り、Backend は選択を持たない（ADR-0031 と同じ形）。
 - `models` は Agent SDK の `Query.supportedModels()` が返す `ModelInfo` のうち、side panel が使う 5 つの field を返す。一覧は account と managed settings で変わるので hard code しない（`docs/research/agent-sdk-model-effort-web-tools.md` の 1 節）。最初の呼び出しで、何も流さない AsyncIterable（`src/prompt.ts` の `promptless`）を prompt にした `query()` を既定の組で起こし、一覧を読んで `close()` する。一覧は initialize の応答から来て推論は走らない。読めた一覧は `ChatAgent` が持ち、2 回目からは claude を起こさない。読むのに失敗したら持たずに `AGENT_FAILED`（`detail` に SDK の error と stderr の末尾）を返し、次の呼び出しで読み直す。読んでいる間の呼び出しは同じ読みを待つ。一覧を読む claude も同時の 4 つに数え、空きが無ければ `CHAT_BUSY` を返す。
-- `ask` は 1 回の質問への応答の stream（`docs/packages.md` の contract の規約 7）。`ChatEvent` は `type` の判別 union で、最初に `{ type: 'snapshot', page: PageSnapshot（screenshot を除く）, omitted: { pages, turns } }` を 1 つ流し、続けて `{ type: 'text', text }`（答えの文字の delta）を流す。client は届いた順に `text` をつなぐ。result を受けたら stream を閉じる。形は下の「Page Snapshot」にある。
+- `ask` は 1 回の質問への応答の stream（ADR-0028）。`ChatEvent` は `type` の判別 union で、最初に `{ type: 'snapshot', page: PageSnapshot（screenshot を除く）, omitted: { pages, turns } }` を 1 つ流し、続けて `{ type: 'text', text }`（答えの文字の delta）を流す。client は届いた順に `text` をつなぐ。result を受けたら stream を閉じる。形は下の「Page Snapshot」にある。
 - claude が WebSearch を呼んだら、`{ type: 'search', query }` を流す（下の「`search`」）。検索の前後の text も同じ `text` で流し、client は 1 つの答えにつなぐ。
 - 答えの間に `{ type: 'retry', attempt }`（API の再試行）と `{ type: 'usage', utilization, rateLimitType, resetsAt? }`（plan の使用量の警告）も流す。下の「失敗」にある。
 - `question` は 1 字以上。`page` と `PageSnapshot` の `url` と `title` は省略できるただの文字列で、形を検めない。`chrome://` などの Browser Tab では side panel から見えず、`file://` のページもあるため。
@@ -29,13 +29,13 @@ ask       { question, page: Page, history: { question, answer, page: PageSnapsho
 
 - `$MONICA_HOME/chat` を `mkdirSync(…, { recursive: true, mode: 0o700 })` で作り、claude の cwd にする。
 - `claudePath` は claude の場所で、SDK の `pathToClaudeCodeExecutable` に渡す。省けば渡さず、SDK が node_modules の platform package（`@anthropic-ai/claude-agent-sdk-darwin-arm64` など）の claude を使う。
-  - release の Backend は、Shell が env の `MONICA_CLAUDE_PATH` で渡す `.app` の `Contents/MacOS/claude` を渡す。compile した binary は node_modules の claude を解決できないため。`install-app` が同じ lockfile の platform package から写したもの（`docs/packages/dev-loop.md` の「release build と install」、ADR-0032）。
+  - release の Backend は、Shell が env の `MONICA_CLAUDE_PATH` で渡す `.app` の `Contents/MacOS/claude` を渡す。compile した binary は node_modules の claude を解決できないため。`install-app` が同じ lockfile の platform package から写したもの（`scripts/install-app.ts`、ADR-0032）。
   - dev の Backend は env を受けないので省く。
 - `htmlWorker` と `pdfWorker` は HTML と PDF を本文にする Worker の module の URL、`cMaps` は pdf.js の cMap の folder（下の「Page Snapshot」の「本文への変換」と「PDF の本文」）。省けば、Worker は packages/chat の `src/html-worker.ts` と `src/pdf-worker.ts`、`cMaps` は packages/chat から解いた node_modules の `pdfjs-dist/cmaps` になる（`src/page/snapshot.ts` の `defaultReaders`）。`bun test` はどれも省いて動く。
   - compile した Backend はどれも解けないので、Backend は自分の隣の `html-worker.ts` と `pdf-worker.ts`（build の entrypoint）と、`--asset` で同梱した `cmaps` を渡す（`docs/packages/backend.md` の「起動と終了」）。
 - `stop()` は同期で、持っている claude すべて（spare を含む）に SIGKILL を送り、spare の時限を消す。Backend の `exit()` は `process.exit(0)` まで await を挟まずに進むため。
 - procedure の handler が使う `prepare`・`models`・`ask` は、型に出さずに `internals(chatAgent)` で引く（`docs/packages.md` の「server entry の形」）。router の context は `{ chatAgent }`。
-- chat は他の domain を import せず、他の domain からも import されない。前者は `.oxlintrc.json` の override が、後者は package.json が守る。table は持たないが、空の journal を持つ（`docs/packages/migration.md`）。
+- chat は他の domain を import せず、他の domain からも import されない。前者は `.oxlintrc.json` の override が、後者は package.json が守る。table は持たないが、空の journal を持つ（`docs/packages.md` の「ドメイン package の中」）。
 
 ## claude の options と env
 
@@ -264,7 +264,7 @@ code は上から順に当てる。
   - `result` があればその文字列にする。成功の形の `result` は `result`、`SDKResultError` は `errors` を改行でつないだもの。
   - `result` の前に SDK の iterator が投げたら、translate はその message で `EndedEarly` を投げ、`ChatAgent` が claude の stderr の末尾（上の「claude の持ち方」）を足す。claude の場所に何も無い、起きてすぐ落ちた（`Claude Code process exited with code 1`）、答えの途中で落ちた、`initialize_timeout` がこれに当たる。
   - result 無しに iterator が終わったら、translate は `claude exited before it answered` で `EndedEarly` を投げ、`ChatAgent` が stderr の末尾を足す。
-- typed error は、それまで流した `snapshot`・`text`・`retry`・`usage` の後に投げる（`docs/packages.md` の contract の規約 7）。
+- typed error は、それまで流した `snapshot`・`text`・`retry`・`usage` の後に投げる（`CODING_STANDARDS.md` の「contract」）。
 - `chat.ask` の handler（`src/server.ts`）は、`ChatAgent` が投げた `ChatFailure` を宣言した error にし、ほかの想定外の error も `AGENT_FAILED` に包む。iterator を返す前（Page Snapshot の変換や claude の起動）に投げた error も同じに包む。素の `Error` は `INTERNAL_SERVER_ERROR`「Internal server error」になり、理由が消えるため。
 - 自分で SIGKILL した claude の `EndedEarly` は失敗にしない（上の「claude の持ち方」）。stream の abort と Backend の終了では、stream は error を投げずに閉じる。
 - contract に載せないもの: Backend に届かない場合、古い Chrome Extension の token の 401（`UNAUTHORIZED`）、body の上限の 413（`PAYLOAD_TOO_LARGE`）。413 は side panel が送る前に大きさを見て「読めなかった」にするので、side panel からは届かない。
@@ -381,7 +381,7 @@ side panel は Backend の token の口を、Native Messaging の host から受
 - 途中の失敗が RPCLink の client に `ORPCError` の `code` と `data` で届くことは、`apps/backend/src/main.test.ts` が process の Backend の token の口に Chrome Extension の token で繋いで確かめる。
 - 本文への変換は `src/page/snapshot.test.ts` が `src/page/fixtures/` の HTML（`getHTML` が書き出す、document element の中身の形）で、同じページと全体の上限と block の並び（スクリーンショットの `image` の置き場所と 1,500 字の数え方を含む）は `src/page/prompt.test.ts` が `PageSnapshot` を直に組んで確かめる。どちらも claude を起こさない。
 - PDF の本文は `src/page/pdf.test.ts` が、Worker を通して確かめる。PDF は `src/page/test-pdf.ts` の `testPdf(pages)` が bytes を組み、binary の file を repo に置かない。`latin` のページは埋め込まない Helvetica、`japanese` のページは埋め込まない `HeiseiKakuGo-W5` と `UniJIS-UCS2-H` で書き、cMap が無いと日本語が落ちる。`'missing'` のページは無い object を指し、読めば pdf.js が例外を投げるので、残りのページを読まないことをそれで確かめる。ページの大きさは行の長さと数に合わせて広げる。pdf.js はページの外の字を本文に入れないため。
-- claude は `src/fake-claude.ts` の偽の claude に差し替える。テストは拡張子の無い `/bin/sh` の wrapper を一時 directory に置いて `claudePath` に渡す。wrapper は `@monica/chat/testing` の `writeFakeClaude(dir, recordPath, scenario?)` が置き、Backend のテスト（`apps/backend/src/main.test.ts`）も使う。置くのは repo の `src/fake-claude.sh` を指す symlink の `<dir>/claude` と、起こす bun・`fake-claude.ts` の path・記録の file・場面を 1 行ずつ書いた `<dir>/claude.args` で、`fake-claude.sh` は `$0.args` を読んで `exec "<bun>" "<fake-claude.ts>" "<記録の file>" <場面> "$@"` する。macOS は新しく書いた実行 file を初めて exec するたびに検査を挟み（1 回 0.1〜1 秒、system で 1 列に並ぶ）、exec 済みの file を指す symlink では挟まないため（`docs/packages/dev-loop.md` の「検査と CI」）。SDK は path が `.js`・`.mjs`・`.ts`・`.tsx`・`.jsx` で終わると `bun` か `node` を名前で起こすが、claude の env には `PATH` が無い。拡張子の無い path は直に起こす。wrapper の `/bin/sh` は env に `PWD`・`SHLVL`・`_` を足す。
+- claude は `src/fake-claude.ts` の偽の claude に差し替える。テストは拡張子の無い `/bin/sh` の wrapper を一時 directory に置いて `claudePath` に渡す。wrapper は `@monica/chat/testing` の `writeFakeClaude(dir, recordPath, scenario?)` が置き、Backend のテスト（`apps/backend/src/main.test.ts`）も使う。置くのは repo の `src/fake-claude.sh` を指す symlink の `<dir>/claude` と、起こす bun・`fake-claude.ts` の path・記録の file・場面を 1 行ずつ書いた `<dir>/claude.args` で、`fake-claude.sh` は `$0.args` を読んで `exec "<bun>" "<fake-claude.ts>" "<記録の file>" <場面> "$@"` する。macOS は新しく書いた実行 file を初めて exec するたびに検査を挟み（1 回 0.1〜1 秒、system で 1 列に並ぶ）、exec 済みの file を指す symlink では挟まないため（`CODING_STANDARDS.md` の「テスト」）。SDK は path が `.js`・`.mjs`・`.ts`・`.tsx`・`.jsx` で終わると `bun` か `node` を名前で起こすが、claude の env には `PATH` が無い。拡張子の無い path は直に起こす。wrapper の `/bin/sh` は env に `PWD`・`SHLVL`・`_` を足す。
 - 偽の claude は次のように話す。
   - stdin の `control_request` に `control_response`（`subtype: success`）を返す。`initialize` には `response` に `@monica/chat/testing` の `FAKE_MODELS`（effort を持つ `haiku` と持たない Haiku 4.5）を `models` で入れ、ほかは `response: {}`。
   - `user` の message を受けたら、`system`（`init`）、`stream_event`（`content_block_delta` の `text_delta` を 3 つと `thinking_delta` を 1 つ）、`assistant`、`result`（`subtype: success`）を 1 行ずつ書く。
@@ -397,7 +397,7 @@ side panel は Backend の token の口を、Native Messaging の host から受
 - claude の場所に何も無い場面は、`createChatAgent` に一時 directory の無い path を渡して作る。
 - 起こした claude は、テストの process の子のうち生きているもの（`ps` の ppid と stat）で数える。SDK は呼び出しの中で同期に spawn するので、`ask` と `prepare` が返った直後に数えれば、起こしていないことも確かめられる。
 - 5 分の時限は、`setTimeout` を `spyOn` で捕まえ、300000ms の callback を手で呼ぶ。
-- テストは偽の claude が居なくなるのを待ってから home を消す（`docs/packages/dev-loop.md` の「検査と CI」）。`ChatAgent` を自分で作るテストは自分の子を数え、Backend の process を起こすテストは `@monica/chat/testing` の `untilFakeClaudesExit(dir)` で、wrapper を書いた dir を command line に持つ process が居なくなるのを待つ。`stop()` も Backend の終了も SIGKILL を送るだけで、居なくなるのを待たないため。
+- テストは偽の claude が居なくなるのを待ってから home を消す（`CODING_STANDARDS.md` の「テスト」）。`ChatAgent` を自分で作るテストは自分の子を数え、Backend の process を起こすテストは `@monica/chat/testing` の `untilFakeClaudesExit(dir)` で、wrapper を書いた dir を command line に持つ process が居なくなるのを待つ。`stop()` も Backend の終了も SIGKILL を送るだけで、居なくなるのを待たないため。
 
 ## 実機で確かめたこと
 
@@ -431,7 +431,7 @@ SDK 0.3.293 と同梱の claude 2.1.293 で、dev の Backend を `env -i`（`HO
   - ThinkingIndicator はその場で日本語にした（「考えています」「ページを読んでいます」「まとめています」）。英語版は残さない。
   - 画面に出る英語の文言は日本語にした（送るボタンの「送る」、止めるボタンの「止める」、textarea の aria-label の「質問」）。
   - Button の asChild の `cloneElement` に ref を渡す所は、oxlint の `react/refs` を理由付きで止めた。
-- 写した元と比べるときは、import の書き換えと oxfmt だけを当てた控えを repo の外に作り、`git diff --no-index` で比べる（`docs/packages/note-ui.md` の「旧 Monica のコードを移すとき」と同じ）。
+- 写した元と比べるときは、import の書き換えと oxfmt だけを当てた控えを repo の外に作り、`git diff --no-index` で比べる。
 
 ### 字と色と CSS
 
@@ -489,7 +489,7 @@ React に依らない `createChatStore(client, storage)` が Chat を持ち、`C
 
 ### テスト
 
-- DOM の環境は入れない（`docs/packages/note-ui.md` の「テスト」と同じ）。
+- DOM の環境は入れない。
 - `current-page.test.ts` は `fake-chrome.ts` の偽の `chrome.tabs` で確かめる。偽物は `globalThis.chrome` に置いてテストの後に外し、`query` の `active`・`windowId`・`currentWindow` を本物と同じく絞る。chrome:// へ移ったときの url も title も無い `onUpdated` も出せる。
 - `read-page.test.ts` は同じ偽物の `chrome.scripting.executeScript` で確かめる。偽物は注入された関数を走らせず、`readings` に置いた結果を返すか、reject するか、返らない。省いた `contentType` は `text/html` になる。渡された injection は `injections` に残る。注入する関数そのもの（shadow root と選択範囲）は DOM が要るので、実機で確かめる。3 秒と 30 秒の打ち切りは `setTimeout` を `spyOn` して callback を手で呼ぶ。PDF の fetch は `fetch` を `spyOn` した偽物で、読まれた chunk の数を数える body を返す。打ち切りと止める操作は、`signal` にも応えずに返らない偽物で確かめる（`CODING_STANDARDS.md` の「テスト」）。`signal` で reject する偽物では、fetch の終わりを待つ実装でも通る。
 - `read-current-page.test.ts` は同じ偽物の `chrome.tabs.captureVisibleTab` と、偽の `createImageBitmap`・`OffscreenCanvas`・`devicePixelRatio` で、撮る時機・大きさと形式・撮れないとき・読めずに撮れたときを確かめる。偽の `captureVisibleTab` は `screenshots` に置いた大きさの偽の PNG を返すか、reject するか、返らない。呼ばれた引数は `captures` に残る。偽の canvas は画像を描かず、書き出した形式と quality と大きさを JSON にした Blob を返す。本物の縮小は bun test に canvas が無いので実機で確かめ、大きさの計算（`shrunkSize`）は `screenshot.test.ts` が純関数として確かめる。撮るのの 3 秒の打ち切りは、`executeScript` の 3 秒の timer と混ざらないよう、`screenshot.test.ts` が `takeScreenshot` を直に呼んで確かめる。

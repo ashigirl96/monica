@@ -205,6 +205,7 @@ test('the page of a Note carries its name and preview as OGP, so a pasted Note U
     [`/essays/${removed.id}`, 'monica', null],
     ['/essays/note-999', 'monica', null],
     ['/daily/2026-10-06', 'monica', null],
+    ['/repos/ashigirl96/unscratched', 'monica', null],
   ]
   for (const [path, title, description] of cases) {
     const read = await notes.linkMetadata({ url: `http://127.0.0.1:${port}${path}` })
@@ -212,6 +213,7 @@ test('the page of a Note carries its name and preview as OGP, so a pasted Note U
   }
   // 頁を読むだけで、開くと作られる Daily を作らない。
   expect(await notes.daily.dates()).toEqual([])
+  expect(await notes.noteMention.search({ q: 'unscratched' })).toEqual([])
 })
 
 const PNG = Uint8Array.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 0x0d])
@@ -259,6 +261,80 @@ test('a GET for an image whose name is not one the Note Ledger makes is not foun
     expect([path, response.status]).toEqual([path, 404])
     expect([path, await response.text()]).not.toEqual([path, 'the DB'])
   }
+})
+
+test('a GET from another site runs no note procedure', async () => {
+  const port = freePort()
+  const { notes } = listen(port)
+  const data = encodeURIComponent(JSON.stringify({ json: { date: '2026-10-06' } }))
+
+  const response = await fetch(`http://127.0.0.1:${port}/rpc/note/daily/open?data=${data}`, {
+    headers: { host: `monica.localhost:${port}`, 'sec-fetch-site': 'cross-site' },
+  })
+
+  expect(response.status).not.toBe(200)
+  expect(await notes.daily.dates()).toEqual([])
+})
+
+test('the browser listener lets no page of another origin read its answers', async () => {
+  const port = freePort()
+  listen(port)
+  const headers = {
+    host: `monica.localhost:${port}`,
+    origin: 'https://evil.example',
+    'sec-fetch-site': 'cross-site',
+  }
+
+  const page = await fetch(`http://127.0.0.1:${port}/`, { headers })
+  const preflight = await fetch(`http://127.0.0.1:${port}/rpc/note/daily/open`, {
+    method: 'OPTIONS',
+    headers: { ...headers, 'access-control-request-method': 'POST' },
+  })
+
+  expect(page.headers.get('access-control-allow-origin')).toBeNull()
+  expect(preflight.headers.get('access-control-allow-origin')).toBeNull()
+})
+
+test('a GET serves only the files the build output had when the listener started', async () => {
+  const dist = webDist({ 'index.html': '<p>notes</p>' })
+  const port = freePort()
+  listen(port, dist)
+  writeFileSync(join(dist, 'late.txt'), 'late')
+
+  const late = await fetch(`http://127.0.0.1:${port}/late.txt`, {
+    headers: { host: `monica.localhost:${port}` },
+  })
+
+  expect(await late.text()).toBe('<p>notes</p>')
+})
+
+test('an image of 20MB goes through the browser listener to the Note Ledger', async () => {
+  const port = freePort()
+  listen(port)
+  const client: ContractRouterClient<{ note: typeof contract }> = createORPCClient(
+    new RPCLink({
+      url: `http://127.0.0.1:${port}/rpc`,
+      headers: { 'sec-fetch-site': 'same-origin' },
+    }),
+  )
+  const png = new Uint8Array(20 * 1024 * 1024)
+  png.set(PNG)
+
+  const { url } = await client.note.image.upload({ file: new File([png], 'large.png') })
+
+  expect((await fetch(`http://127.0.0.1:${port}${url}`)).status).toBe(200)
+})
+
+test('a browser listener without the built notes screens answers a GET for a page with 404', async () => {
+  const port = freePort()
+  listen(port, join(tmpdir(), `monica-no-web-dist-${crypto.randomUUID()}`))
+
+  const page = await fetch(`http://127.0.0.1:${port}/`, {
+    headers: { host: `monica.localhost:${port}` },
+  })
+
+  expect(page.status).toBe(404)
+  expect(page.headers.get('content-type') ?? '').not.toStartWith('text/html')
 })
 
 // headless で起こした dev の Backend が release の 19380 を取らないよう、env が無ければ既定の port にも倒さない。

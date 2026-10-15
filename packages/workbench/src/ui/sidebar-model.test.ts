@@ -435,6 +435,28 @@ test('a Runspace brought up by a number takes the selected Tile along when its s
   expect(sidebar.selected.key).toBe('acme/lib')
 })
 
+test("making a Tab in another Repo active leaves its Runspace's row under the Tile of its leftmost Tab", async () => {
+  const { client, store } = bench()
+  const app = ghqCheckout('acme/app')
+  const lib = ghqCheckout('acme/lib')
+  const inApp = await client.runspace.create({ cwd: app.checkout, ...size })
+  const inLib = await client.runspace.create({ cwd: lib.checkout, ...size })
+  const libTab = await client.tab.open({
+    runspaceId: inApp.runspaceId,
+    cwd: lib.checkout,
+    ...size,
+  })
+  await store.set(reloadAtom)
+  await untilListed(store, 'acme/lib', [inLib.runspaceId])
+  await untilListed(store, 'acme/app', [inApp.runspaceId])
+
+  store.set(activateTerminalTabAtom, libTab.id)
+
+  const sidebar = store.get(sidebarAtom)
+  expect(idsIn(sidebar, 'acme/app')).toEqual([inApp.runspaceId])
+  expect(idsIn(sidebar, 'acme/lib')).toEqual([inLib.runspaceId])
+})
+
 test('moving a Runspace down past another of its Repo by key keeps the Tiles in their order', async () => {
   const { client, store } = bench()
   const app = ghqCheckout('acme/app')

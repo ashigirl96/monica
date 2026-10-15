@@ -20,6 +20,19 @@ test('spin', () => {
 `,
 )
 writeFileSync(pass, `import { test } from 'bun:test'\ntest('pass', () => {})\n`)
+const leave = join(dir, 'leave.test.ts')
+writeFileSync(
+  leave,
+  `import { test } from 'bun:test'
+import { mkdirSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+test('leave', () => {
+  mkdirSync(join(tmpdir(), 'monica-left'))
+  writeFileSync(join(tmpdir(), 'monica-left', 'backend.json'), '{}')
+})
+`,
+)
 
 const isAlive = (pid: number) => {
   try {
@@ -67,4 +80,12 @@ test('普通に終わる run は進捗の file を TMPDIR の残り物として�
 
   expect(stderr).not.toContain('TMPDIR に残した')
   expect(code).toBe(0)
+})
+
+test('テストが TMPDIR に残した file を名前で出し、テストが通っても失敗する', async () => {
+  const { code, stderr } = await runTestScript([leave])
+
+  expect(stderr).toContain('bun test が TMPDIR に残した: monica-left/')
+  expect(stderr).toContain('backend.json')
+  expect(code).toBe(1)
 })

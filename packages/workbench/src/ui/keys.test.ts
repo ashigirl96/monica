@@ -101,3 +101,30 @@ test('a key added to the binding table is taken from the focused terminal and ac
   ])
   expect(acted).toBe(1)
 })
+
+test('with the terminal focused, ⌘ with one character and ⌥ keys outside the binding table stay out of xterm, ⌘A selects all, and ⌘Enter goes to xterm', () => {
+  const store = createStore()
+  let selectedAll = 0
+  const xterm = buildKeyEventHandler(
+    (e) => keymap.takesFromTerminal(store, e),
+    () => {},
+    () => selectedAll++,
+  )
+
+  const toTerminal = {
+    metaC: xterm(keydown('c', 'KeyC', { meta: true })),
+    metaV: xterm(keydown('v', 'KeyV', { meta: true })),
+    altX: xterm(keydown('≈', 'KeyX', { alt: true })),
+    metaA: xterm(keydown('a', 'KeyA', { meta: true })),
+    metaEnter: xterm(keydown('Enter', 'Enter', { meta: true })),
+  }
+
+  expect(toTerminal).toEqual({
+    metaC: false,
+    metaV: false,
+    altX: false,
+    metaA: false,
+    metaEnter: true,
+  })
+  expect(selectedAll).toBe(1)
+})

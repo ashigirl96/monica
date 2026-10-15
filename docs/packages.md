@@ -1,6 +1,6 @@
 # パッケージ構成
 
-monica の repo の形、package の entry、domain 間の呼び出し、テスト、contract の規約を決める。決定の理由は各規則に添えた ADR（`docs/adr/`）にある。規則を変える変更は、同じ PR でここと `docs/packages/` の文書を今の形に直す。
+monica の repo の形、package の entry、domain 間の呼び出しを決める。決定の理由は各規則に添えた ADR（`docs/adr/`）にある。規則を変える変更は、同じ PR でここと `docs/packages/` の文書を今の形に直す。
 
 ## 索引
 
@@ -11,17 +11,11 @@ monica の repo の形、package の entry、domain 間の呼び出し、テス�
 - `docs/packages/tab-env-and-shim.md`: Tab の env、shim、claude wrapper、hook の settings と CLI、payload の decoder に触るとき。
 - `docs/packages/notifications.md`: 通知と Dock の数と取り下げ。通知を出す遷移、title と body、Shell が出す通知、未読の集合、Dock の数、通知センターの通知の置き換えと取り下げに触るとき。
 - `docs/packages/task-ledger.md`: task の contract と Task Ledger。task の procedure、Run、Bench の準備、close、sync、task のテストの fake に触るとき。
-- `docs/packages/job-ledger.md`: job の contract と Job Ledger。job の procedure、system の Job を足すとき、裏で定期的に走る処理に触るとき。
-- `docs/packages/note-ledger.md`: note の contract と Note Ledger と body。note の procedure、画像、OGP、本文の JSON と markdown の変換に触るとき。
-- `docs/packages/usage.md`: usage の contract と Usage Ledger。Feature の呼び出しを数える場所、Caller の決め方、`usage.list` に触るとき、口や procedure を足すとき。
 - `docs/packages/chat.md`: chat の contract と `ChatAgent` と ui。Chat の procedure、claude の options と env、spare と同時の数、claude の止め方、偽の claude、side panel の Chat の画面（fluid-functionalism の写し、CSS、Current Page の追い方、markdown）に触るとき。
-- `docs/packages/note-ui.md`: note の ui。`packages/note/src/ui` か `apps/web` に触るとき、旧 Monica のコードを移すとき。
 - `docs/packages/backend.md`: Backend の組み立て（apps/backend）。起動と終了の順序、PATH、Ledger の配線、ブラウザの口に触るとき。
 - `docs/packages/cli.md`: CLI（apps/cli）。`cli: true` の procedure か SKILL.md を足すとき、argv の振り分け・出力・エラー・補完・CLI のテストに触るとき。
 - `docs/packages/extension.md`: Chrome Extension（apps/extension）。manifest、permission、ID と鍵、mode ごとの出力の dir、dev の読み込み方、`chrome` の型と lint に触るとき。
 - `docs/packages/desktop.md`: desktop（apps/desktop）。webview の枠、キーの扱い、domain の ui の載せ方と Task の slot、Shell（`src-tauri`）に触るとき。
-- `docs/packages/migration.md`: migration。table を足すか変えるとき、domain の package を足すとき。
-- `docs/packages/dev-loop.md`: dev loop、release、検査、版。dev の起動、scripts、release の build、CI、依存と tsconfig に触るとき、テストが誤りを捕まえるかを変異で確かめるとき。
 
 ## 配置
 
@@ -76,6 +70,8 @@ packages/<d>/
     └── ui/index.ts
 ```
 
+- schema の entry を持たない package（chat）は、`drizzle.config.ts`・`src/schema.ts`・`generate` の script を置かず、`migrations/<d>/meta/_journal.json` に `{"version":"7","dialect":"sqlite","entries":[]}` を手で置く。drizzle-kit は schema の file が無いと exit 1 し、`bun run generate` が落ちるため。
+
 entry より内側のファイル分割は自由。
 
 ## entry
@@ -89,12 +85,12 @@ entry は層ではなく、import してよい実行環境で切る（ADR-0009�
 | `@monica/<d>/server` | router、`create<D>Ledger()`（chat は `createChatAgent()`）、migrations の re-export | Bun | apps/backend、他 package の server、テスト |
 | `@monica/<d>/ui` | React の component と atom。画面を持たない job と usage には無い | browser | apps/desktop、apps/web（note）、apps/extension（chat）、他 package の ui |
 | `@monica/<d>/cli` | 出力の整形関数、補完の候補を返す関数、手で書く command。CLI に出す procedure の無い note と chat には無い | Bun | apps/cli |
-| `@monica/<d>/body` | Note の本文の JSON を読む関数と、本文と markdown の変換（`docs/packages/note-ledger.md`）。今は note だけが持つ | どこでも | 自分の contract と server と ui |
+| `@monica/<d>/body` | Note の本文の JSON を読む関数と、本文と markdown の変換。今は note だけが持つ | どこでも | 自分の contract と server と ui |
 | `@monica/chat/native-host` | Native Messaging の host に Backend の port と Chrome Extension の token を問い合わせる `viaNativeHost`、`BackendUnreachable`、捕まえた error が Backend Unreachable かを決める `isUnreachable`（`src/ui/native-host.ts`）。chat だけが持つ | browser（Chrome Extension） | `@monica/chat/ui`、apps/extension の service worker。React と CSS を引かずに使えるよう、ui の index と分ける |
 | `@monica/<d>/testing` | 他の package のテストに出す fake。今は workbench と chat が持つ。workbench は `src/fake-ptyd.ts` の fake の ptyd（`startFakePtyd`）、短い home を作る `tempHome`、Terminal Session が starting を抜けるのを待つ `untilSettled`、sh の script を走らせる偽の実行 file を置く `writeFakeExecutable`（`src/fake-executable.ts`）を出す。chat は `src/testing.ts` の、偽の claude を起こす wrapper を書く `writeFakeClaude` と、その失敗の場面の型 `FakeScenario` と、偽の claude が居なくなるのを待つ `untilFakeClaudesExit` を出す | Bun | 他 package のテストと `testing.ts` |
 | `@monica/chat/html-worker`・`@monica/chat/pdf-worker` | HTML と PDF を本文にする Bun の Worker の module（`src/html-worker.ts`・`src/pdf-worker.ts`）。何も export せず、読み込むと `message` の listener を置く。chat だけが持つ | Bun の Worker | apps/backend の Worker の entrypoint（`apps/backend/src/html-worker.ts`・`apps/backend/src/pdf-worker.ts`）だけ。compiled binary の Worker は build の entrypoint に要り、main.ts の隣に置くと main.ts から同じ相対 path で引けるため（`docs/packages/chat.md` の「本文への変換」と「PDF の本文」） |
 
-- 依存の向きは task → workbench だけ。workbench は task を import しない（ADR-0005）。job は task も workbench も import しない（ADR-0016）。note は他の domain を import せず、他の domain からも import されない。chat と usage も同じ。usage が数える処理と全 Feature の一覧は、Backend の組み立てが deps で渡す（`docs/packages/usage.md`）。
+- 依存の向きは task → workbench だけ。workbench は task を import しない（ADR-0005）。job は task も workbench も import しない（ADR-0016）。note は他の domain を import せず、他の domain からも import されない。chat と usage も同じ。usage が数える処理と全 Feature の一覧は、Backend の組み立てが deps で渡す。
 - task の schema は workbench の table を FK のために import するが、re-export しない（ADR-0010）。
 - 境界は次のものが守る。
   - package の間の向き: package.json。bun の isolated linker では package.json に書いていない依存を解決できない。
@@ -118,7 +114,7 @@ export const router = os.router({ ... });          // context は { db, <d>Ledge
 export function create<D>Ledger(deps: { db: Db; home: string; ... }): <D>Ledger;
 ```
 
-- `<D>Ledger` は、Backend が domain ごとに 1 つ作り、`GLOSSARY.md` の Workbench Ledger・Task Ledger・Job Ledger・Note Ledger を扱う部品。これらは起動時と終了時の処理の `start()` / `stop()` を持つ。GLOSSARY の Usage を扱う `UsageLedger` は、起動時と終了時の処理が無いので持たない（`docs/packages/usage.md`）。deps と method は domain ごとの文書の「create<D>Ledger」に、作る順と渡すものは `docs/packages/backend.md` にある。
+- `<D>Ledger` は、Backend が domain ごとに 1 つ作り、`GLOSSARY.md` の Workbench Ledger・Task Ledger・Job Ledger・Note Ledger を扱う部品。これらは起動時と終了時の処理の `start()` / `stop()` を持つ。GLOSSARY の Usage を扱う `UsageLedger` は、起動時と終了時の処理が無いので持たない。deps と method は domain ごとの文書の「create<D>Ledger」に、作る順と渡すものは `docs/packages/backend.md` にある。
 - `WorkbenchLedger` と `TaskLedger` は `events` も持つ。その domain の変更を知らせる in-process の publisher で、job と note は change stream を持たないので無い（ADR-0016・0018）。
 - server entry は、ほかに他の domain と Backend が使う関数と型を出してよい（task の `nameAgentSession`、ptyd と setup が env を絞る workbench の `inheritableEnv()`）。
 - Ledger の型には、他の domain と Backend が呼ぶ method だけを出す。procedure の handler が使う中身（ghq や GitHub への口、Bench の準備の状態など）は、Ledger を key にした WeakMap に置き、`internals(<d>Ledger)` で引く。router の context に渡るのは `db` と Ledger だけなので、外の口も Ledger が持つ。
@@ -135,41 +131,6 @@ export function create<D>Ledger(deps: { db: Db; home: string; ... }): <D>Ledger;
 - **event は「変わった」の合図**で、購読側は payload を信じず DB を読み直す。bun:sqlite の transaction は同期なので、tx の中で publish しても購読側が動くのは commit 後の microtask になる。rollback されても読み直すだけで害が無いので、commit 後に publish する仕組みは作らない。
 - workbench の router を in-process client（`createRouterClient`）で呼ぶ形は採らない。oRPC の呼び出しは async で、drizzle の bun:sqlite の transaction に async 関数を渡すと throw しても rollback されないため（ADR-0009）。
 - transaction に async 関数を渡さない。lint の `monica/sync-transaction` が、関数式と、同じ file で定義した async 関数を名前で渡す形を止める。transaction を開いて最後の引数を中で呼ぶ task の `writeOpenTask`・`writeClosedTask`・`openRunTab` も同じく見る（`scripts/oxlint/sync-transaction.test.ts`）。
-
-## テスト
-
-package ごとに in-memory の SQLite に自分の migration を当てる（task は workbench → task の順）。外から見える振る舞いは `createRouterClient(router, { context })` を通して確かめ、他の domain から呼ばれる method と module 内の関数（`openTab` など）はそのまま呼ぶ。DB を fake に差し替えない（ADR-0002）。`bun test` を root で打つと全 package のテストが走る。外の口の fake は domain ごとの文書の「テスト」に、CLI と Backend の組み立ての確かめ方は `docs/packages/cli.md` と `docs/packages/backend.md` にある。
-
-- workbench の ptyd は `packages/workbench/src/fake-ptyd.ts` に差し替える。fake は `$home/ptyd.sock` で NDJSON を話し、List の中身を台本にし、Exit を押し込み、届いた Reap と Terminate を記録する。本物の ptyd は CI の ts job に無く、Exit と Created の競合も決まった順で起こせないため。home は `mkdtemp(tmpdir())` で短くする（socket の path の上限は 104 byte）。fake と home の helper は `@monica/workbench/testing` から他の package にも出す。
-  - op が届かないことを `receivedAll(…)` が空で確かめるときは、後から送る別の op（Tab を開いた Create など）が届くのを待ってから読む。ptyd は 1 本の接続で順に受けるので、後の op が届けば先に送られた op も届いている。すぐに読むと、transaction の後に送る op が届く前の空を見て、送ってしまう変異も通す。
-- task と CLI のテストの Workbench Ledger も、fake の ptyd の home で `createWorkbenchLedger` を組む（`ptydPath` は存在しない path）。Workbench Ledger の method は差し替えず、transaction で `openTab` → commit の後に workbench が送る Create と Write を、本物の protocol で通す。procedure と Workbench Ledger の method は ptyd を待たずに返るので、ptyd に届いた Create・Write・Terminate は fake の `received` か `receivedAtLeast` で待ってから確かめ、Terminal Session が starting を抜けるのは `untilSettled` で待つ。Tab と Runspace は Workbench Ledger の method か workbench の router で開き、Agent Session は hook で作る。workbench の table に直に書かない。
-- await の間の競合は、await の途中で止めて決まった順で起こす。sync の途中は fake GitHub の `hold()`、git の ref の更新（`branch -D` など）の途中は checkout の `.git/hooks/reference-transaction` が file を待つ script、ptyd の応答の途中は fake の ptyd の `holdNext(op)` で止める（`close-race.test.ts`）。
-  - 止められるのは await の途中だけ。procedure が待たない副作用（commit の後に workbench が送る Terminate など）を止めても、procedure の中の窓は止まらない。close は commit から予約を外すまでに await を持たないので、その窓は procedure からは作れない。
-  - 同じ Task の sync は 1 本に合流するので、`hold()` は後から来た run・close・reopen の sync も止める。1 本だけを止めるときは `setTimeout` を spy し、合流した呼び手の打ち切り（`SYNC_BEFORE_COMMAND_TIMEOUT_MS`）を手で起こして写しで進ませる。
-- system の Job を足すときは、並びを出す domain のテストに、`systemJobs(<d>Ledger)` から名前で取り出した `run` を最小の場面で呼ぶテストを 1 本足し、Ledger の method に届くことを見る（`note.image-cleanup`、`task.setup-log-cleanup`）。method の規則のテストは method を直に呼ぶ。`run` が別の method を呼んでも、型も Job Ledger のテストも捕まえないため。
-- 一定の間隔で走る処理は、`setInterval` を `spyOn` で捕まえ、間隔を確かめてから callback を手で呼ぶ。決まった時間の打ち切りは、`setTimeout` を `spyOn` してその callback を捕まえ、手で呼ぶ。Bun の `jest.useFakeTimers()` は `Bun.sleep` と `setTimeout` も止め、一部の timer だけを偽にできないので、HTTP の応答を待つテストが進まなくなる。
-  - 本番が `Date.now()` の締め切りと短い sleep の loop で待つもの（setup と Job の SIGTERM から SIGKILL までの猶予）は、待ち始めた印を見てから `setSystemTime` で時計を進める。猶予の手前まで進めた時点でまだ待っていることも確かめ、値を検出できるようにする。最後に `setSystemTime()` で戻す。
-  - 子の process の timer はテストの process から spy できないので、子を `bun --preload <テスト用の file>` で起こし、preload で差し替える（hook の `AbortSignal.timeout`、`apps/cli/src/hook.test.ts`）。
-  - 待たずに進むことは、待てば打ち切りまで返らない場面（Exit を送らない fake の ptyd など）を作り、操作を打ち切りより短い `Bun.sleep` と `Promise.race` して確かめる。テストの既定の timeout は打ち切りより長いことがあり、待ちを戻す変異も通すため（`packages/workbench/src/ui/store.test.ts`）。
-  - 偽の GitHub に request が届くのは、`requests` を poll せず `received(count)` を await する。固定の sleep でも待たない。
-- 手元の暦日や時刻で切る処理は、テストの中で `process.env.TZ` を UTC 以外（`Asia/Tokyo` など）にして確かめ、`finally` で `process.env.TZ = tz ?? 'UTC'` と戻す。`bun test` は `process.env.TZ` を設定せずに UTC で動くので、UTC の日付で切る誤りも通る。`undefined` の代入と `delete` は手元の時間帯に落ち、同じ process で後に走るテストに漏れる（`packages/usage/src/usage.test.ts`・`packages/ui/src/local-time.test.ts`）。
-- oRPC の client の procedure は `spyOn` で差し替えられない。client は property を読むたびに新しい Proxy を返すため。呼び出しを記録するか差し替えるときは、client を `new Proxy` で包み、`get` でその key だけを替えて、呼び手に渡す（`packages/task/src/ui/bench-close.test.ts`）。
-- 受けた値を `toMatchObject` に渡した後で読み直さない。Bun の `toMatchObject` は、受けた object の中で `expect.stringContaining` などの matcher に当たった値を、その matcher に置き換える（Bun 1.4.2）。後で読む値は、`toMatchObject` より前に取り出す。
-- 終わった行のように procedure に出ない行は、`@monica/<d>/schema` の table を SELECT して確かめてよい。他の domain が読むのと同じ面だから。
-
-## contract の規約
-
-1. 合成した contract の root は package 名で mount する（token の口では `{ workbench, task, job, chat, usage }`、ブラウザの口では `{ note }`）。path の先頭が package 名になり、CLI もそれに従う（`monica task run`、`monica workbench hook claude`）。
-2. 全 procedure に `.meta({ description })` と `.output()` を付ける。description は CLI の help の正本、output は `--format json` の形の正本になる（#17 の JSON の形もここに書く）。
-3. CLI に出すのは `.meta({ cli: true })` を付けた procedure だけ（ADR-0003）。event iterator の procedure は付けても出ない。
-4. 呼び手が分岐する domain エラー（close の guard のように `data` に理由の一覧を持つもの）だけを `.errors()` で宣言する。それ以外は oRPC の標準 code（`NOT_FOUND`、`BAD_REQUEST`）を投げる。
-5. 変更の stream は domain ごとに 1 本（`workbench.changes`、`task.changes`）で、判別 union の event を流す。中身は `events` と同じ合図。合図は、その domain の procedure の output が変わる経路すべてで出す。stream だけを購読して読み直す client が、古い output を持ったまま残らないようにするため。他の domain の行から導く output（task の表示状態は workbench の Agent Session から導く）は、相手の合図を受けて自分の合図を出す。購読する画面の無い job と、focus のたびに取り直す note は stream を持たない（ADR-0016・0018）。
-6. `oc.$meta(...)` と `createSchemaFactory({ coerce: { date: true } })` は各 package の `contract.ts` の中にだけ書く。oRPC 2.0 で `.meta` が plugin 制になったときに直す場所を 1 つにするため（#21）。例外は `apps/cli/src/forward.ts` で、output を持たない procedure を組み直すために contract の meta を `os.$meta` で引き継ぐ（`docs/packages/cli.md`）。
-7. 応答の stream は、1 回の呼び出しへの応答を流す event iterator（`chat.ask`）。答えが終われば閉じ、client は payload をそのまま描く。規約 5 の change stream とは別の種類で、購読し続けない（ADR-0028）。
-   - 途中の失敗は、それまで流した event の後に、`.errors()` で宣言した typed error で投げる。client には先の event の後に `ORPCError` で届き、`code` と `data` も届く。
-   - handler の中で起きた想定外の error も宣言した error に包み、素の `Error` を外へ出さない。素の `Error` は oRPC で `INTERNAL_SERVER_ERROR`「Internal server error」になり、理由が client に届かないため。
-
-contract を走査するテストが、description と output が全 procedure にあること、`cli: true` の procedure に整形関数があることを確かめる。CLI に載る workbench・task・job・usage は `apps/cli/src/contract.test.ts`、note と chat は `packages/note/src/contract.test.ts` と `packages/chat/src/contract.test.ts` が見る。
 
 ## ここで決めていないこと
 

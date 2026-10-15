@@ -2,6 +2,10 @@
 
 repo の形と規則は `docs/packages.md` から読む。全文を読み、冒頭の「索引」から作業が触る範囲の文書を開く。
 
+## テスト
+
+テストを書くとき・直すときは `CODING_STANDARDS.md` の「テスト」を読む。
+
 ## Agent skills
 
 ### Issue tracker
