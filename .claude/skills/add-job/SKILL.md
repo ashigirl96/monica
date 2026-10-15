@@ -3,7 +3,7 @@ name: add-job
 description: ユーザーの Job を登録する。「毎日〜したい」「定期的に〜を走らせたい」のように、予定で繰り返し走る処理を monica に足したいときに使う。
 ---
 
-依頼を Job に落とし、release の Backend に登録して、1 回走らせて確かめる。Job の規則は `docs/packages/job-ledger.md` の「ユーザーの Job」にある。
+依頼を Job に落とし、release の Backend に登録して、1 回走らせて確かめる。add の引数の形は `monica job add --help` に、予定・成否・env の決まりは ADR-0016 にある。
 
 この skill の `monica` は release の CLI を指す。`$MONICA_HOME` が空か `$HOME/.monica` でなければ（dev の Tab）、`env MONICA_HOME="$HOME/.monica" "$HOME/.local/bin/monica"` に置き換える。
 
@@ -21,9 +21,30 @@ description: ユーザーの Job を登録する。「毎日〜したい」「�
 1 行に収まらない command と、副作用のある Job は、PATH の外の `~/.local/share/monica-jobs/<名前>.sh` に script を書き（`#!/bin/sh`・`set -eu`・`chmod +x`）、command はその絶対 path だけにする。
 
 - stdin も TTY も無い。対話を待つ command には非対話の flag を付ける。
-- 成否は exit code だけで決まる。果たせなかった回は 0 以外で終え、原因を最後の行に出す。`claude -p` を呼ぶなら job-ledger.md の「claude を呼ぶ Job の成否」の形にする（`set -u` で exit code を自分で受ける）。
+- 成否は exit code だけで決まる。果たせなかった回は 0 以外で終え、原因を最後の行に出す。`claude -p` を呼ぶなら、下の「claude を呼ぶ script」の形にする（`set -u` で exit code を自分で受ける）。
 - 副作用のある Job は `--dry-run` で対象を出すだけの mode を持ち、本番でも変える前に対象を log に出す。
 - 消す Job は、push していない commit・未 commit の変更・別の session が使っている worktree を持つ対象を残す。
+
+### claude を呼ぶ script
+
+monica は exit code だけを見る。`claude -p` は tool を拒否された回も exit 0 で終わりうるので、script が `--output-format json` の result 行と成果を確かめ、何もできていなければ 0 以外で終わる。
+
+```sh
+#!/bin/sh
+# monica job add dreaming --schedule '0 3 * * *' --command ~/.local/share/monica-jobs/dreaming.sh
+set -u
+result=$(claude -p "$(cat ~/prompts/dreaming.md)" --output-format json)
+status=$?
+echo "$result"
+[ "$status" -eq 0 ] || exit "$status"
+if echo "$result" | jq -e '.is_error or (.permission_denials | length > 0)' > /dev/null; then
+  echo "dreaming: $(echo "$result" | jq -r '.result')" >&2
+  exit 1
+fi
+# 成果（MEMORY.md が変わったかなど）も確かめ、無ければ 0 以外で終わる。
+```
+
+result 行は log に残るので、`session_id` を拾って朝に Tab で `claude --resume` できる。
 
 ## 3. dry-run を走らせる
 

@@ -340,7 +340,7 @@
                   "@monica/chat",
                   "@monica/chat/*"
                 ],
-                "message": "usage は他の domain を import しない（docs/packages/usage.md）"
+                "message": "usage は他の domain を import しない（docs/packages.md の「依存の向き」）"
               }
             ]
           }
@@ -377,7 +377,7 @@
                   "@monica/chat",
                   "@monica/chat/*"
                 ],
-                "message": "usage は他の domain を import しない（docs/packages/usage.md）"
+                "message": "usage は他の domain を import しない（docs/packages.md の「依存の向き」）"
               },
               {
                 "group": [
