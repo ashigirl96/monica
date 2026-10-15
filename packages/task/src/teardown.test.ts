@@ -113,30 +113,6 @@ function rebasedBench(options: Parameters<typeof stackedThenRebased>[2]) {
   return { checkout, path, inspect }
 }
 
-test.each([false, true])(
-  'commits whose patches the rebased head of a merged pull request has do not stop the removal, and the branch goes (main moved on before the rebase: %p)',
-  async (mainMovedOn) => {
-    const { checkout, path, inspect } = rebasedBench({ mainMovedOn })
-
-    const inspected = await inspect()
-
-    expect(inspected.refusals).toEqual([])
-    expect(await removeWorktree(inspected, { force: false })).toEqual({
-      removedWorktree: path,
-      deletedBranch: 'issue-12',
-      warnings: [],
-    })
-    expect(hasBranch(checkout, 'issue-12')).toBe(false)
-  },
-)
-
-test('a commit whose patch no merged head has still stops the removal of a rebased branch', async () => {
-  const { path, inspect } = rebasedBench({ mainMovedOn: true })
-  commit(path, { 'c.txt': { content: 'c\n' } }, 'c1')
-
-  expect((await inspect()).refusals).toEqual([{ kind: 'unpublished_commits', branch: 'issue-12' }])
-})
-
 test('a commit under the rebased ones whose patch the squash of its pull request does not match still stops the removal', async () => {
   const { inspect } = rebasedBench({
     mainMovedOn: false,

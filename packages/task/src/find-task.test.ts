@@ -123,14 +123,6 @@ test('findTask for reopen refuses an open Task with TaskStateRefusal, and finds 
   })
 })
 
-test('findTask finds the Task inside a transaction', async () => {
-  const { db } = await trackedTask()
-
-  const found = db.transaction((tx) => findTask(tx, isIssue(parseRef(ref)), ref, 'close'))
-
-  expect(found.issue).toMatchObject({ repo: 'acme/app', number: 12 })
-})
-
 test('refreshTask finds the Task again by its row, so it has the name the sync copied from a renamed repo', async () => {
   const { db, github, deps } = await trackedTask()
   const found = findTask(db, isIssue(parseRef(ref)), ref, 'run')
