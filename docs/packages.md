@@ -6,8 +6,6 @@ monica の repo の形、package の entry、domain 間の呼び出しを決め�
 
 この文書には、どの作業も読む規則を置く。ほかの規則は `docs/packages/` に分けてあり、作業がその範囲に触るときに読む。
 
-- `docs/packages/task-ledger.md`: task の contract と Task Ledger。task の procedure、Run、Bench の準備、close、sync、task のテストの fake に触るとき。
-
 ## 配置
 
 ```
