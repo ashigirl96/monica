@@ -14,7 +14,13 @@ import {
   type SnapshotEvent,
   type Unreadable,
 } from '../contract.ts'
-import { type ChatClient, type ChatEntry, type ChatStore, createChatStore } from './chat-store.ts'
+import {
+  type ChatClient,
+  type ChatEntry,
+  type ChatStore,
+  type ChoiceStorage,
+  createChatStore,
+} from './chat-store.ts'
 import type { CurrentPage } from './current-page.ts'
 import { BackendUnreachable } from './native-host.ts'
 
@@ -161,7 +167,7 @@ const snapshotAt = (url: string, title: string): PageSnapshot => ({
 
 const SHOT = 'c2NyZWVuc2hvdA=='
 
-function openChat(client = new FakeClient(), storage = new FakeStorage()) {
+function openChat(client = new FakeClient(), storage: ChoiceStorage = new FakeStorage()) {
   let page = pageAt('https://a.example/', 'A')
   let shown: CurrentPage = { url: page.url, title: page.title }
   let shot: Pick<Page, 'screenshot' | 'screenshotFailed'> = { screenshot: SHOT }
@@ -901,6 +907,22 @@ test('a claude that ran out of retries says the Anthropic API was not reached', 
   })
 })
 
+test('a claude that failed mid-answer after a retry of the API says it was cut off', async () => {
+  const { entry } = await failAfter(
+    [{ type: 'retry', attempt: 1 }, text('Tw')],
+    failed('claude exited with code 1'),
+  )
+
+  expect(entry.failure?.line).toBe('答えが途中で切れました')
+})
+
+test('a declared error whose data does not match the contract says claude gave no answer, with its code and message', async () => {
+  const { entry } = await failAfter([], declared('USAGE_LIMIT'))
+
+  expect(entry.failure?.line).toBe('claude が答えを返せませんでした')
+  expect(entry.failure?.detail).toStartWith('USAGE_LIMIT: ')
+})
+
 test('a claude that gave no answer says so and gives what claude said', async () => {
   const { entry } = await failAfter([], failed('Claude Code native binary not found'))
 
@@ -1222,6 +1244,23 @@ test('a question stopped before its Page Snapshot joins the history with only th
   ])
 })
 
+test('a question stopped before its Page Snapshot joins the history with the screenshot sent with it', async () => {
+  const { client, store } = openChat()
+  store.toggleScreenshot()
+  store.ask('What is this?')
+  await settled()
+
+  store.stop()
+  store.ask('Go on')
+  await settled()
+
+  expect(latest(client).input.history[0]!.page).toEqual({
+    url: 'https://a.example/',
+    title: 'A',
+    screenshot: SHOT,
+  })
+})
+
 test('a question stopped before its page is read joins the history with the URL and title that the side panel showed when it was sent', async () => {
   const { client, store, showHeader, holdReading } = openChat()
   showHeader({ url: 'https://b.example/', title: 'B' })
@@ -1436,6 +1475,47 @@ test('a kept model that the list does not have falls back to no choice, and so d
   }
   expect(missing.store.snapshot().picker).toMatchObject({ model: 'haiku', effort: 'low' })
   expect(unlisted.store.snapshot().picker).toBeUndefined()
+})
+
+test('a kept choice that cannot be read, or a storage that throws, leaves nothing chosen', async () => {
+  const garbled = new FakeStorage()
+  garbled.setItem('monica-chat-choice', '{')
+  const throwing = {
+    getItem(): string | null {
+      throw new Error('the storage is not available')
+    },
+    setItem(): void {
+      throw new Error('the storage is not available')
+    },
+  }
+
+  for (const storage of [garbled, throwing]) {
+    const { client, store } = openChat(new FakeClient(), storage)
+    store.ask('What is this?')
+    await settled()
+
+    expect(client.prepares).toEqual([{}])
+    expect(latest(client).input).not.toHaveProperty('model')
+    expect(latest(client).input).not.toHaveProperty('effort')
+    expect(() => store.chooseModel('claude-opus-4-6')).not.toThrow()
+  }
+})
+
+test('a kept model that the list does not have stays in storage for a later side panel whose list has it', async () => {
+  const storage = savedChoice({ model: 'claude-new-1' })
+  const first = openChat(new FakeClient(), storage)
+  await settled()
+  const client = new FakeClient()
+  client.offered = [
+    ...MODELS,
+    { value: 'claude-new-1', displayName: 'New 1', description: 'New 1' },
+  ]
+
+  const later = openChat(client, storage)
+  await settled()
+
+  expect(first.store.snapshot().picker).toMatchObject({ model: 'haiku' })
+  expect(later.store.snapshot().picker).toMatchObject({ model: 'claude-new-1' })
 })
 
 test('a list without haiku makes its first model the choice shown and sent', async () => {

@@ -3,13 +3,15 @@ import { join } from 'node:path'
 
 export { testPdf } from './page/test-pdf.ts'
 
-/** 偽の claude の場面。answer のほかは、research で本物の claude が流した失敗の並びを真似る。 */
 export type FakeScenario =
   | 'answer'
   | 'not-logged-in'
   | 'max-output-tokens'
   | 'exit-at-start'
   | 'exit-mid-answer'
+  | 'slow-initialize'
+  | 'linger-after-answer'
+  | 'exit-leaving-stderr-open'
 
 /** 偽の claude が initialize の応答で返す model の一覧。SDK の ModelInfo の形。 */
 export const FAKE_MODELS = [
