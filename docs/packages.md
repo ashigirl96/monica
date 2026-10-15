@@ -6,10 +6,6 @@ monica の repo の形、package の entry、domain 間の呼び出しを決め�
 
 この文書には、どの作業も読む規則を置く。ほかの規則は `docs/packages/` に分けてあり、作業がその範囲に触るときに読む。
 
-- `docs/packages/workbench-ledger.md`: workbench の contract と Workbench Ledger。workbench の procedure、他の domain から Workbench Ledger の method を呼ぶとき、ptyd に送るもの、reconcile、pin、Agent Session の行と未読に触るとき。
-- `docs/packages/workbench-ui-state.md`: workbench の ui。Workbench の画面の状態、sidebar、status dot、未読の見せ方、通知のクリックに触るとき。
-- `docs/packages/tab-env-and-shim.md`: Tab の env、shim、claude wrapper、hook の settings と CLI、payload の decoder に触るとき。
-- `docs/packages/notifications.md`: 通知と Dock の数と取り下げ。通知を出す遷移、title と body、Shell が出す通知、未読の集合、Dock の数、通知センターの通知の置き換えと取り下げに触るとき。
 - `docs/packages/task-ledger.md`: task の contract と Task Ledger。task の procedure、Run、Bench の準備、close、sync、task のテストの fake に触るとき。
 - `docs/packages/chat.md`: chat の contract と `ChatAgent` と ui。Chat の procedure、claude の options と env、spare と同時の数、claude の止め方、偽の claude、side panel の Chat の画面（fluid-functionalism の写し、CSS、Current Page の追い方、markdown）に触るとき。
 - `docs/packages/backend.md`: Backend の組み立て（apps/backend）。起動と終了の順序、PATH、Ledger の配線、ブラウザの口に触るとき。
@@ -120,7 +116,8 @@ export function create<D>Ledger(deps: { db: Db; home: string; ... }): <D>Ledger;
 - Ledger の型には、他の domain と Backend が呼ぶ method だけを出す。procedure の handler が使う中身（ghq や GitHub への口、Bench の準備の状態など）は、Ledger を key にした WeakMap に置き、`internals(<d>Ledger)` で引く。router の context に渡るのは `db` と Ledger だけなので、外の口も Ledger が持つ。
 - chat は記録を持たないので、Ledger ではなく `ChatAgent`（`createChatAgent()`）を持つ。型には Backend が呼ぶ `stop()` だけを出し、procedure の handler が使う `prepare`・`models`・`ask` は Ledger と同じく `internals(chatAgent)` で引く。router の context は `{ chatAgent }` で、`db` は渡さない。deps と method は `docs/packages/chat.md` にある。
 - system の Job を持つ domain（task と note）は、`@monica/<d>/server` の `systemJobs(<d>Ledger)` で `{ name, every, run }[]` を出し、Backend の組み立てがそれを `createJobLedger` に渡す。名前は `<domain>.<name>`、`run` は失敗なら reject する。domain は timer を持たない。job を import しないので、戻り値は素のオブジェクトにし、job の型を注記しない（#18、ADR-0016）。
-- 他の domain から呼ばれる書き込みは、第 1 引数に transaction（`db` でもよい）を取る**同期**の method にする。呼び手は `db.transaction((tx) => { workbenchLedger.moveTab(tx, …); insertRun(tx, …) })` のように、両 domain の書き込みを 1 つの transaction にまとめる。fs への副作用は transaction に入らないので別の async method にし、呼び手が commit の後に呼ぶ。ptyd への副作用は workbench が transaction の後に自分で送る（ADR-0015）。今これを持つのは `WorkbenchLedger` だけで、method は `docs/packages/workbench-ledger.md` の「他の domain が呼ぶ書き込み」にある。
+- 他の domain から呼ばれる書き込みは、第 1 引数に transaction（`db` でもよい）を取る**同期**の method にする。呼び手は `db.transaction((tx) => { workbenchLedger.moveTab(tx, …); insertRun(tx, …) })` のように、両 domain の書き込みを 1 つの transaction にまとめる。fs への副作用は transaction に入らないので別の async method にし、呼び手が commit の後に呼ぶ。ptyd への副作用は workbench が transaction の後に自分で送る（ADR-0015）。今これを持つのは `WorkbenchLedger` の `createRunspace`・`removeRunspace`・`moveTab`・`openTab` だけ（ADR-0015）。どれも呼び手の transaction の中で `{ type: "layout" }` を 1 つ出す。ptyd への Create・Write・Terminate は commit の後に workbench が送るので、呼び手は reconcile も ptyd も待たない。
+- Terminal Session が Terminating か（live で、どの Tab にも指されていない）は、workbench の server entry の `terminating` が drizzle の query の条件で返す。task の close の ActiveRun と Run の起動中の予約は、transaction の中でもこれで閉じた Tab の claude を数えない（ADR-0023）。
 - 他の domain が呼ばない書き込みは、同じ形（第 1 引数が tx）の module 内の関数として procedure の handler から呼び、Ledger には出さない。合図や通知の口のような Ledger の deps を使う書き込みは、`internals` に置いた module の method にしてよい。そのうち呼び手と transaction を束ねないもの（workbench の hook の適用と `markSeen`）は tx を取らない。他の domain から呼ばれない処理は router の handler の中に書いてよい。
 
 ### domain をまたぐ規則
