@@ -38,6 +38,13 @@ export function getTableCellContext($pos: ResolvedPos): TableCellContext | null 
   return null
 }
 
+/** いちばん長い行のセル数。行の長さは揃っているとは限らない。 */
+export function tableWidth(table: PMNode): number {
+  let max = 0
+  for (let r = 0; r < table.childCount; r++) max = Math.max(max, table.child(r).childCount)
+  return max
+}
+
 export function cellStartPos(
   tablePos: number,
   table: PMNode,

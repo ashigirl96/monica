@@ -33,6 +33,7 @@ import { slashMenuPlugin } from './slash-menu.ts'
 import { SyncedBlockView, syncedBlockRefreshPlugin } from './synced-block.ts'
 import type { OnOpenBlock, ResolveBlock } from './synced-block.ts'
 import { tableMenuPlugin } from './table-menu.ts'
+import { tableResizePlugin } from './table-resize.ts'
 
 export type DocRead = { ok: true; doc: PMNode } | { ok: false; error: string }
 
@@ -166,6 +167,7 @@ export function createBlockEditor(
       codeBlockActivePlugin(),
       blockDecorationsPlugin(),
       blockHighlightPlugin(),
+      tableResizePlugin(),
       // clipboardPlugin より前に置く: 画像ファイルの paste / drop を URL・block paste 経路より
       // 先に横取りする。uploadImage 不在（desktop journal）なら plugin ごと外れて画像 paste は無効。
       ...(uploadImage

@@ -2,8 +2,9 @@ import type { Node as PMNode } from 'prosemirror-model'
 import { TextSelection } from 'prosemirror-state'
 import type { Command, EditorState, Transaction } from 'prosemirror-state'
 
+import { columnWidths, insertColumnWidth, removeColumnWidth } from './column-widths.ts'
 import { nodes } from './schema.ts'
-import { cellStartPos, getTableCellContext } from './table.ts'
+import { cellStartPos, getTableCellContext, tableWidth } from './table.ts'
 import type { TableCellContext } from './table.ts'
 
 // 表の構造編集（行・列の挿入 / 削除）。normalizer は表を見ないので、行幅の矩形性は
@@ -37,12 +38,6 @@ function selectCellIn(tr: Transaction, tablePos: number, rowIndex: number, cellI
   const r = Math.min(rowIndex, table.childCount - 1)
   const c = Math.min(cellIndex, table.child(r).childCount - 1)
   tr.setSelection(TextSelection.create(tr.doc, cellStartPos(tablePos, table, r, c) + 1))
-}
-
-function tableWidth(table: PMNode): number {
-  let max = 0
-  for (let r = 0; r < table.childCount; r++) max = Math.max(max, table.child(r).childCount)
-  return max
 }
 
 /** 最後の行 / 列を消すときは表ごと空 paragraph に置き換える（container と id は残す） */
@@ -112,6 +107,8 @@ export function insertColumnTr(
         : cellStartPos(ctx.tablePos, ctx.tableNode, r, c)
     tr.insert(at, nodes.tableCell.create({ header: neighbor.attrs.header }))
   }
+  const widths = columnWidths(ctx.tableNode)
+  if (widths) tr.setNodeAttribute(ctx.tablePos, 'colWidths', insertColumnWidth(widths, col))
   selectCellIn(tr, ctx.tablePos, ctx.rowIndex, col)
   return tr
 }
@@ -132,6 +129,8 @@ export function deleteColumnTr(state: EditorState, ctx: TableCellContext): Trans
     const at = cellStartPos(ctx.tablePos, ctx.tableNode, r, col)
     tr.delete(at, at + row.child(col).nodeSize)
   }
+  const widths = columnWidths(ctx.tableNode)
+  if (widths) tr.setNodeAttribute(ctx.tablePos, 'colWidths', removeColumnWidth(widths, col))
   selectCellIn(tr, ctx.tablePos, ctx.rowIndex, col)
   return tr
 }

@@ -217,6 +217,8 @@ export const schema = new Schema({
       group: 'blockContent',
       content: 'tableRow+',
       isolating: true,
+      // 各列の幅の比（合計 1）。column-widths.ts が読み書きする。
+      attrs: { colWidths: { default: null } },
       parseDOM: [{ tag: 'table' }],
       // hole は tbody 側に置く: ブラウザが <table> 直下に暗黙の tbody を挿入するため、
       // 挟まないと PM の想定 DOM と実 DOM がズレる（prosemirror-tables と同じ形）。

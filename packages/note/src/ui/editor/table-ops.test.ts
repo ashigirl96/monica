@@ -181,6 +181,31 @@ describe('列の削除', () => {
   })
 })
 
+const sized = (colWidths: number[], doc = twoByTwo()) =>
+  docOf(block('T', nodes.table.create({ colWidths }, tableOf_(doc).content)))
+
+describe('列の幅', () => {
+  test('列を足すと新しい列は平均の幅で入り、ほかの列は比を保って縮む', () => {
+    const { table } = apply(sized([0.2, 0.8]), 0, tableInsertColumnRight)
+    expect(table.attrs.colWidths).toEqual([0.1333, 0.3333, 0.5333])
+  })
+
+  test('列を消すと残りの列が比を保って全幅に広がる', () => {
+    const { table } = apply(sized([0.2, 0.8]), 1, tableDeleteColumn)
+    expect(table.attrs.colWidths).toEqual([1])
+  })
+
+  test('ragged: 最長の行にしか無い列を消すと、その列の幅だけが落ちる', () => {
+    const { table } = apply(sized([0.2, 0.3, 0.5], ragged()), 2, tableDeleteColumn)
+    expect(table.attrs.colWidths).toEqual([0.4, 0.6])
+  })
+
+  test('幅を持たない表は列を足しても幅を持たない', () => {
+    const { table } = apply(twoByTwo(), 0, tableInsertColumnLeft)
+    expect(table.attrs.colWidths).toBeNull()
+  })
+})
+
 describe('表の外', () => {
   test.each([
     ['tableInsertRowAbove', tableInsertRowAbove],

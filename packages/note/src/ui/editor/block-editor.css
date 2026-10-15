@@ -585,6 +585,27 @@
   vertical-align: top;
   text-align: left;
   min-width: 48px;
+  position: relative;
+}
+
+/* 幅を持つ表は colgroup の比をそのまま守る（auto だと中身の長さで比が崩れる） */
+[data-block-content="table"].jb-table-sized {
+  table-layout: fixed;
+}
+
+[data-block-content="table"] .jb-col-resize-edge::after {
+  content: "";
+  position: absolute;
+  top: -1px;
+  bottom: -1px;
+  right: -2px;
+  width: 3px;
+  background: var(--jb-blue);
+  pointer-events: none;
+}
+
+.jb-editor.jb-col-resizing {
+  cursor: col-resize;
 }
 
 [data-block-content="table"] th {
