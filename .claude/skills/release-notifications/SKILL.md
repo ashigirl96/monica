@@ -86,7 +86,7 @@ dock() {
    for await (const event of answer) if (event.type === 'text') process.stdout.write(event.text)
    ```
 
-   答えの text が流れ、答えている間は Backend の子に `$A/Contents/MacOS/claude` が居て、答えた後にその pid が消える。答えた後には次の質問のための spare が別の pid で起きる（`docs/packages/chat.md` の「spare」）。
+   答えの text が流れ、答えている間は Backend の子に `$A/Contents/MacOS/claude` が居て、答えた後にその pid が消える。答えた後には次の質問のための spare が別の pid で起きる。
 5. Backend を `backend-headless` skill の「止めて片付ける」で止め、home と `$SCRATCH/stage` を消す。SIGKILL された spare は `~/.claude/sessions/<pid>.json` を残すので、その pid の file も消す。
 
 ### 入れ替えた後（PR の確認でユーザーが行う）
