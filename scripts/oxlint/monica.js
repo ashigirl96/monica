@@ -194,7 +194,7 @@ export default {
             context.report({
               node,
               message:
-                '他の domain の table に直接書かない。書き込みは相手の domain の method を通す（docs/packages.md の「domain をまたぐ規則」）',
+                '他の domain の table に直接書かない。書き込みは相手の domain の method を通す（ADR-0009）',
             })
           },
         }

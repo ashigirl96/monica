@@ -8,7 +8,7 @@
   - 実装の分かれ道がすべて決まっている。残っていれば grilling で決める。PR の中で戻せる細部は「推奨で決めたこと」に書く。
   - 実装の前提になる API や挙動を、コードか実機で確かめてある。ライブラリの API は doc comment で止めず、使う platform の分岐まで実装を読む（tauri の `set_badge_count` は doc comment では `0` で消えるが、macOS の実装は「0」を出す）。
   - issue が使う語と ADR が main に入っている。
-  - 直す docs は、変える振る舞いの語で `docs/` と `CODING_STANDARDS.md` を `git grep` して挙げてある。`CODING_STANDARDS.md` は review でしか読まれず、古い規則が残っても実装の間に気づかれないため。
+  - 直す docs は、変える振る舞いの語で `CODING_STANDARDS.md`・`docs/packages.md`・`.claude/skills/` を `git grep` して挙げてある。`docs/adr/` と `docs/research/` は記録なので挙げない。`CODING_STANDARDS.md` は review でしか読まれず、古い規則が残っても実装の間に気づかれないため。
   - テストを消す・残す・置き換える対象は、行番号ではなく test の名前で挙げてある。行番号は後の commit でずれ、範囲で指すと関係の無いテストまで入るため。
   - 消すテストだけが通る行は、`bun test --coverage` で消す前と後の Uncovered Line #s を比べて挙げ、残すテストか置き換えるテストのどれが通るかを書いてある。どれも通らない行は、そのまま無テストになることを issue に書く。置き換え先が下の層の module だと、上の層の分岐（server の error の写しなど）を通らなくなるため。入口のテストを module のテストに置き換えるときは、入口が module に渡す選択（断り方など）を見るテストを入口ごとに残す。入口が別の値を渡しても行は通るので、coverage の比較では見つからないため。
 - **issue を読む**: `gh issue view <number> --json body,comments,labels,assignees --jq '...'`。`--comments` は人間向けの整形出力用で `--json` と排他なので、`jq` で絞るときは `--json` の field に `comments` を含める。実装するために読むときは、`gh issue list --state open --search '"#<number>" in:body' --json number,title` で、本文がその issue を挙げる issue（Blocked by に挙げる後続など）も一覧する。範囲の外に出した作業は、すでに別の issue になっていることがある。open な PR がその issue を扱っていないかも `gh pr list --state open --search '"#<number>" in:body' --json number,title` で確かめる。issue を作った後に main に入った commit も `git log --oneline --since=<issue の createdAt> origin/main` で一覧し、issue が今の形として挙げた file や値を変えたものが無いか確かめる。前提を変えた PR がその issue を挙げていなければ、上の検索には出ないため。

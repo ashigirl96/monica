@@ -6,8 +6,8 @@ review で差分に当てる規則。どれも判断が要るもので、理由�
 
 - 1 つの概念は `packages/<domain>` の 1 箇所で定義する。層ごとの写し型、DTO、port と adapter を作らない（ADR-0002）。
 - apps は packages を組み立てるだけで、ロジックを持たない（ADR-0002）。
-- 他の domain の table には、`sql` で書いた文や table を引数で受け取る helper を通しても直接書かない。書き込みは相手の domain の method を通す（`docs/packages.md` の「domain をまたぐ規則」）。
-- 他の domain から呼ばれる書き込みは、第 1 引数に transaction を取る同期の method にする。fs への副作用は別の async method にし、呼び手が commit の後に呼ぶ。ptyd への副作用は workbench が transaction の後に自分で送る（`docs/packages.md` の「server entry の形」、ADR-0015）。
+- 他の domain の table には、`sql` で書いた文や table を引数で受け取る helper を通しても直接書かない。書き込みは相手の domain の method を通す（ADR-0009）。
+- 他の domain から呼ばれる書き込みは、第 1 引数に transaction を取る同期の method にする。fs への副作用は別の async method にし、呼び手が commit の後に呼ぶ。ptyd への副作用は workbench が transaction の後に自分で送る（ADR-0009、ADR-0015）。
 - await を挟んでから transaction に入る処理は、transaction の中で行を id で引き直し、path や名前のような行から作る値はその行から作る。await の間に sync が repo の改名を写したり、別の procedure が同じ行を書いたりするため。
 - GitHub から引いた Issue で写しの行や Task を引き当てるときは、node ID で照らし（`packages/task/src/copy.ts` の `isLinkedIssue`）、`(repo, number)` は node ID の無い行にだけ使う。判定する経路と run する経路のように、同じ Issue を引く箇所はすべて同じ照らし方にそろえる。repo の改名の後は sync まで行の名前が古く、旧名は別の repo が使い回すため。
 - await を挟む処理は、await の間に同じ Task や行を動かす経路（同じ domain の別の procedure、hook の購読、背景の sync、ユーザーの shell やエディタ）を数え上げ、経路ごとに、予約で断るか、最後の同期区間（transaction）で見直すか、git のような外の確かめに任せるかで閉じる。git や fs のように戻せない操作の後に見つけたものは、断らずに守ったまま処理を終える。断れば、壊した後の中途半端な状態が残るため（`packages/task/src/close-race.test.ts` の「a claude that becomes a Run while close removes the worktree keeps its Tab, like the caller's, and close completes」）。
