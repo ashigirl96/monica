@@ -1,6 +1,7 @@
 // テストの claude。Agent SDK と stream-json を話し、受けたものを argv[2] の記録の file に JSON 行で書く。
 // argv[3] の場面（testing.ts の FakeScenario）のとおりに答えるか、失敗する。
 // 質問に HOLD を含むと、最初の text の delta の後に止まり、stdin の EOF と SIGTERM では抜けない。
+import { spawn } from 'node:child_process'
 import { appendFileSync } from 'node:fs'
 import { createInterface } from 'node:readline'
 
@@ -15,6 +16,8 @@ const FAKE_TEXT = ['Two', ' is', ' the answer.']
 const SAFETY_EXIT_MS = 30_000
 // login 無しの claude は result の後も抜けるまでに時間がかかる。ChatAgent がそれを待たないことを見るため。
 const LINGER_MS = 5_000
+const SLOW_INITIALIZE_MS = 2_000
+const CHILD_WRITE_MS = 50
 
 const record = (line: object) =>
   appendFileSync(recordPath, `${JSON.stringify({ pid: process.pid, ...line })}\n`)
@@ -24,6 +27,20 @@ record({ kind: 'start', argv, env: process.env, cwd: process.cwd() })
 
 if (scenario === 'exit-at-start') {
   process.stderr.write('claude: the config is broken\n')
+  process.exit(1)
+}
+
+if (scenario === 'exit-leaving-stderr-open') {
+  const holding = [
+    `setTimeout(() => process.stderr.write('claude: the child wrote after the exit\\n'), ${CHILD_WRITE_MS})`,
+    `setTimeout(() => {}, ${SAFETY_EXIT_MS})`,
+  ].join(';')
+  const holder = spawn(process.execPath, ['-e', holding, recordPath], {
+    stdio: ['ignore', 'ignore', 'inherit'],
+  })
+  holder.unref()
+  record({ kind: 'holder', holder: holder.pid })
+  process.stderr.write('claude: a child still holds stderr\n')
   process.exit(1)
 }
 
@@ -121,8 +138,16 @@ function answer(question: string) {
 }
 
 // research（docs/research/chat-failures.md の §2）で本物の claude が流した並び。
-const scenarios: Record<Exclude<FakeScenario, 'exit-at-start'>, (question: string) => void> = {
+const scenarios: Record<
+  Exclude<FakeScenario, 'exit-at-start' | 'exit-leaving-stderr-open'>,
+  (question: string) => void
+> = {
   answer,
+  'slow-initialize': answer,
+  'linger-after-answer': (question) => {
+    answer(question)
+    hold(SAFETY_EXIT_MS)
+  },
   'not-logged-in': () => {
     init()
     assistant('Not logged in · Please run /login', 'authentication_failed')
@@ -155,19 +180,22 @@ lines.on('line', (line) => {
   if (message.type === 'control_request' && 'request_id' in message) {
     const initialize = message.request.subtype === 'initialize'
     if (initialize) record({ kind: 'initialize', request: message.request })
-    send({
-      type: 'control_response',
-      response: {
-        subtype: 'success',
-        request_id: message.request_id,
-        response: initialize ? { models: FAKE_MODELS } : {},
-      },
-    })
+    const respond = () =>
+      send({
+        type: 'control_response',
+        response: {
+          subtype: 'success',
+          request_id: message.request_id,
+          response: initialize ? { models: FAKE_MODELS } : {},
+        },
+      })
+    if (initialize && scenario === 'slow-initialize') setTimeout(respond, SLOW_INITIALIZE_MS)
+    else respond()
   } else if (message.type === 'user' && 'message' in message) {
     const { content } = message.message
     record({ kind: 'user', content })
     const text = typeof content === 'string' ? content : content.map((b) => b.text ?? '').join('')
-    scenarios[scenario as Exclude<FakeScenario, 'exit-at-start'>](text)
+    scenarios[scenario as keyof typeof scenarios](text)
   }
 })
 lines.on('close', () => {
