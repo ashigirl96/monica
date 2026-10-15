@@ -1,8 +1,13 @@
-import type { Node as PMNode } from 'prosemirror-model'
-
-import { tableWidth } from './table.ts'
+import type { DOMOutputSpec, Node as PMNode } from 'prosemirror-model'
 
 // 列の幅は表の幅に対する比（合計 1）で持ち、表は常に本文の幅に収める。
+
+/** いちばん長い行のセル数。行の長さは揃っているとは限らない。 */
+export function tableWidth(table: PMNode): number {
+  let max = 0
+  for (let r = 0; r < table.childCount; r++) max = Math.max(max, table.child(r).childCount)
+  return max
+}
 
 /** colWidths が今の列数と合うときだけ返す。行・列の編集で合わなくなった幅は使わない。 */
 export function columnWidths(table: PMNode): number[] | null {
@@ -46,4 +51,8 @@ export function removeColumnWidth(widths: number[], col: number): number[] {
 // 本文の JSON を短く保つ。1/10000 の差は画面の 1px に満たない。
 export function round(w: number): number {
   return Math.round(w * 10000) / 10000
+}
+
+export function colgroupSpec(widths: number[] | null): DOMOutputSpec {
+  return ['colgroup', ...(widths ?? []).map((w) => ['col', { style: `width: ${w * 100}%` }])]
 }

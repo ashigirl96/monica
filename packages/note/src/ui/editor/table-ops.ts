@@ -2,9 +2,9 @@ import type { Node as PMNode } from 'prosemirror-model'
 import { TextSelection } from 'prosemirror-state'
 import type { Command, EditorState, Transaction } from 'prosemirror-state'
 
-import { columnWidths, insertColumnWidth, removeColumnWidth } from './column-widths.ts'
+import { columnWidths, insertColumnWidth, removeColumnWidth, tableWidth } from './column-widths.ts'
 import { nodes } from './schema.ts'
-import { cellStartPos, getTableCellContext, tableWidth } from './table.ts'
+import { cellStartPos, getTableCellContext } from './table.ts'
 import type { TableCellContext } from './table.ts'
 
 // 表の構造編集（行・列の挿入 / 削除）。normalizer は表を見ないので、行幅の矩形性は

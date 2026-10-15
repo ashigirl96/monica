@@ -1,12 +1,13 @@
+import { DOMSerializer } from 'prosemirror-model'
 import type { Node as PMNode } from 'prosemirror-model'
 import { Plugin, PluginKey } from 'prosemirror-state'
 import type { EditorState } from 'prosemirror-state'
 import { Decoration, DecorationSet } from 'prosemirror-view'
 import type { EditorView, NodeView, ViewMutationRecord } from 'prosemirror-view'
 
-import { columnWidths, moveColumnBorder, round } from './column-widths.ts'
+import { columnWidths, moveColumnBorder, round, tableWidth } from './column-widths.ts'
 import { nodes } from './schema.ts'
-import { cellStartPos, getTableCellContext, tableWidth } from './table.ts'
+import { cellStartPos, getTableCellContext } from './table.ts'
 
 const MIN_COLUMN_PX = 48
 const EDGE_GRAB_PX = 5
@@ -27,30 +28,32 @@ function applyColumnWidths(table: HTMLTableElement, widths: number[] | null): vo
   })
 }
 
+function widthsKey(node: PMNode): string | null {
+  return columnWidths(node)?.join(',') ?? null
+}
+
 export class TableView implements NodeView {
-  dom: HTMLTableElement
+  dom: HTMLElement
   contentDOM: HTMLElement
-  private widthsKey: string | null = null
+  private widthsKey: string | null
 
   constructor(node: PMNode) {
-    this.dom = document.createElement('table')
-    this.dom.setAttribute('data-block-content', 'table')
-    this.contentDOM = document.createElement('tbody')
-    this.dom.append(document.createElement('colgroup'), this.contentDOM)
-    this.sync(node)
-  }
-
-  private sync(node: PMNode): void {
-    const widths = columnWidths(node)
-    const key = widths ? widths.join(',') : null
-    if (key === this.widthsKey) return
-    this.widthsKey = key
-    applyColumnWidths(this.dom, widths)
+    const spec = nodes.table.spec.toDOM?.(node)
+    if (!spec) throw new Error('table has no toDOM')
+    const { dom, contentDOM } = DOMSerializer.renderSpec(document, spec)
+    if (!(dom instanceof HTMLElement) || !contentDOM) throw new Error('table toDOM has no hole')
+    this.dom = dom
+    this.contentDOM = contentDOM
+    this.widthsKey = widthsKey(node)
   }
 
   update(node: PMNode): boolean {
     if (node.type !== nodes.table) return false
-    this.sync(node)
+    const key = widthsKey(node)
+    if (key !== this.widthsKey && this.dom instanceof HTMLTableElement) {
+      this.widthsKey = key
+      applyColumnWidths(this.dom, columnWidths(node))
+    }
     return true
   }
 
@@ -100,13 +103,19 @@ function measuredWidths(tableDom: HTMLTableElement, table: PMNode): number[] | n
   return sum > 0 ? px.map((w) => round(w / sum)) : null
 }
 
-function startDrag(view: EditorView, border: ColumnBorder, event: MouseEvent): void {
+/** 掴んだ境界のドラッグを始め、途中で打ち切る関数を返す。打ち切りは何も dispatch しない。 */
+function startDrag(
+  view: EditorView,
+  border: ColumnBorder,
+  event: MouseEvent,
+  onEnd: () => void,
+): (() => void) | null {
   const table = view.state.doc.nodeAt(border.tablePos)
   const tableDom = view.nodeDOM(border.tablePos)
-  if (table?.type !== nodes.table || !(tableDom instanceof HTMLTableElement)) return
+  if (table?.type !== nodes.table || !(tableDom instanceof HTMLTableElement)) return null
   const start = columnWidths(table) ?? measuredWidths(tableDom, table)
   const totalPx = tableDom.getBoundingClientRect().width
-  if (!start || totalPx <= 0) return
+  if (!start || totalPx <= 0) return null
   const startX = event.clientX
   let current = start
   setColumnBorder(view, { ...border, dragging: true })
@@ -125,10 +134,14 @@ function startDrag(view: EditorView, border: ColumnBorder, event: MouseEvent): v
     )
     applyColumnWidths(tableDom, current)
   }
-  const up = () => {
+  const stop = () => {
     window.removeEventListener('mousemove', move)
     window.removeEventListener('mouseup', up)
     window.removeEventListener('blur', up)
+    onEnd()
+  }
+  const up = () => {
+    stop()
     const tr = view.state.tr.setMeta(tableResizeKey, { border: null } satisfies ResizeMeta)
     // 掴んだ間に表が動いたか消えたら、描きかけの幅を捨てて doc の幅に戻す
     const now = view.state.doc.nodeAt(border.tablePos)
@@ -142,6 +155,7 @@ function startDrag(view: EditorView, border: ColumnBorder, event: MouseEvent): v
   window.addEventListener('mousemove', move)
   window.addEventListener('mouseup', up)
   window.addEventListener('blur', up)
+  return stop
 }
 
 function edgeDecorations(state: EditorState, border: ColumnBorder): DecorationSet {
@@ -160,8 +174,11 @@ function edgeDecorations(state: EditorState, border: ColumnBorder): DecorationSe
 }
 
 export function tableResizePlugin(): Plugin<ColumnBorder | null> {
+  // view が壊れた後の mouseup で dispatch しないよう、destroy でドラッグを打ち切る
+  let stopDrag: (() => void) | null = null
   return new Plugin<ColumnBorder | null>({
     key: tableResizeKey,
+    view: () => ({ destroy: () => stopDrag?.() }),
     state: {
       init: () => null,
       apply(tr, prev) {
@@ -193,7 +210,9 @@ export function tableResizePlugin(): Plugin<ColumnBorder | null> {
           const border = tableResizeKey.getState(view.state)
           if (!border || border.dragging || event.button !== 0) return false
           event.preventDefault()
-          startDrag(view, border, event)
+          stopDrag = startDrag(view, border, event, () => {
+            stopDrag = null
+          })
           return true
         },
       },
