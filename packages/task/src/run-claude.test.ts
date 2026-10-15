@@ -460,6 +460,21 @@ test('run --force still refuses a Task with a live Run', async () => {
   expect(await benchTabs(fixture)).toHaveLength(1)
 })
 
+test('run refuses a Task with a live Run and an open Blocker with CONFLICT, not BLOCKED', async () => {
+  const fixture = await tracked()
+  fixture.taskLedger.start()
+  const { terminalSessionId } = await fixture.client.run({ ref })
+  await fixture.hook(terminalSessionId, 's-1', 'SessionStart', { source: 'startup' })
+  fixture.github.issue(blocker, { title: 'Upstream fix' })
+  fixture.github.issue(ref, { title: 'Ship it', blockedBy: [blocker] })
+  await fixture.client.sync({})
+
+  const error = await failure(fixture.client.run({ ref }))
+
+  expect(error.code).toBe('CONFLICT')
+  expect(error.message).toStartWith(`${ref} has a live Run (s-1 `)
+})
+
 test('run --force starts a new Run past the open Blockers', async () => {
   const fixture = await tracked({ blockedBy: [blocker] })
 

@@ -209,6 +209,29 @@ test("attach opens the Bench on the checkout of the Repo's new name when the Rep
   expect(fixture.db.select().from(bench).get()).toMatchObject({ cwd: renamed })
 })
 
+test('attach moves the Tab into the Bench a run opened while attach looked up ghq root', async () => {
+  const fixture = await trackedWithoutBench()
+  mkdirSync(fixture.ghq.checkout('acme/app'), { recursive: true })
+  const root = await fixture.ghq.client.root()
+  const asked = Promise.withResolvers<void>()
+  const answer = Promise.withResolvers<string>()
+  spyOn(fixture.ghq.client, 'root').mockImplementationOnce(() => {
+    asked.resolve()
+    return answer.promise
+  })
+  const outside = await fixture.openTabOutsideBench()
+
+  const attaching = fixture.client.attach({ ref, terminalSessionId: outside })
+  await asked.promise
+  await fixture.client.run({ ref, inPlace: true })
+  answer.resolve(root)
+
+  expect(await attaching).toMatchObject({ ref, benchCreated: false })
+  const benches = fixture.db.select().from(bench).all()
+  expect(benches).toHaveLength(1)
+  expect(runspaceOfTab(fixture, outside)).toBe(benches[0]!.runspaceId)
+})
+
 test('attach refuses a Task that has no Bench and whose Repo is not cloned, changing nothing', async () => {
   const fixture = await trackedWithoutBench()
   const outside = await fixture.openTabOutsideBench()

@@ -185,3 +185,55 @@ test('while a Run is being started, close without --force is refused with CONFLI
 
   expect(await client.run({ ref, inPlace: true })).toMatchObject({ ref, benchCreated: true })
 })
+
+test('a Run whose Tab was closed stays live in list and on its button, and holds the next run, until its exit is recorded', async () => {
+  const fixture = await tracked()
+  const { client } = fixture
+  const { terminalSessionId } = await client.run({ ref, inPlace: true })
+  await fixture.hook(terminalSessionId, 's-1', 'SessionStart', { source: 'startup' })
+
+  await fixture.closeTab(terminalSessionId)
+
+  expect((await client.list({})).tasks).toMatchObject([{ ref, displayState: { state: 'waiting' } }])
+  expect(await client.runButtons({ refs: [ref] })).toEqual({
+    buttons: [{ ref, button: { kind: 'tackle', run: 'running' }, reason: null }],
+  })
+  const refused = await failure(client.run({ ref }))
+  expect(refused.code).toBe('CONFLICT')
+  expect(refused.message).toStartWith(`${ref} has a live Run (s-1 `)
+
+  await fixture.exit(terminalSessionId)
+
+  expect(await client.runButtons({ refs: [ref] })).toEqual({
+    buttons: [{ ref, button: { kind: 'tackle', run: 'resume' }, reason: null }],
+  })
+})
+
+test('run --force is still refused while a Run is being started', async () => {
+  const fixture = await tracked()
+  await fixture.client.run({ ref, inPlace: true })
+  const before = tabCount(fixture)
+
+  expect(await failure(fixture.client.run({ ref, force: true }))).toMatchObject({
+    code: 'CONFLICT',
+    message: expect.stringContaining('has a Run being started'),
+  })
+  expect(tabCount(fixture)).toBe(before)
+})
+
+test('a run whose Tab is moved out of the Bench before its claude starts still refuses the next run', async () => {
+  const fixture = await tracked()
+  const { terminalSessionId } = await fixture.client.run({ ref, inPlace: true })
+  const outside = await fixture.workbenchClient.runspace.create({ cwd: '/work', rows: 24, cols: 80 })
+
+  await fixture.workbenchClient.tab.move({
+    id: fixture.tabIdOf(terminalSessionId),
+    runspaceId: outside.runspaceId,
+    index: 0,
+  })
+
+  expect(await failure(fixture.client.run({ ref }))).toMatchObject({
+    code: 'CONFLICT',
+    message: expect.stringContaining('has a Run being started'),
+  })
+})
