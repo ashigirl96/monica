@@ -19,8 +19,6 @@ review で差分に当てる規則。どれも判断が要るもので、理由�
 - focus で取り直す query は互いに順不同で返る。ある query の答えを別の query の答えで解く処理は、どちらが先に返っても同じ結果になるよう、前の答えを控えて使う（`packages/note/src/ui/pages/essays/editor.tsx` の、外で消された Essay の移り先を一覧の並びから選ぶ処理）。
 - 画面にいる間だけ持つ状態（削除の取り消しの stack など）は、route を描き分けるより上で持ち、URL から導いた画面に結び付ける。中継の route（`/notes/:id`、`/repos`）を経ると、画面の component は一度 unmount されるため（`packages/note/src/ui/routes.ts` の `removalScreenOf`）。
 - props を渡すなどして眠っていた経路を有効にする変更は、有効になる経路を diff の外まで読み、上の規則に照らす。旧 Monica から振る舞いを変えずに移したコードは、移した時には呼ばれていないので、await の後の見直しを経ていないことがある（エディタが破棄された後の完了を `view.isDestroyed` で捨てる `packages/note/src/ui/editor/image-upload.ts`）。
-- エディタの node に NodeView を足すときは、schema の `toDOM` と `parseDOM` も NodeView と同じ attr を描き、読み戻す形にする。synced block の写し（`synced-block.ts` の `mirrorSerializer`）と clipboard の `text/html` は NodeView を通らず、`toDOM` と `parseDOM` で描き、読むため（`packages/note/src/ui/editor/schema.ts` の table）。
-- エディタの plugin が `window` や `document` に付けた listener は、plugin view の `destroy` でも外し、壊れた view には dispatch しない。Note を切り替えると、エディタはドラッグなどの操作の途中でも壊れるため（`packages/note/src/ui/editor/table-resize.ts` の `tableResizePlugin`）。
 - 外から来た id（Shell の event、通知のクリック）で webview の layout や一覧を引く処理は、今の値が古い場合を数えて閉じる。窓が隠れている間は webview の JS が止まって読み直せず、Backend の再起動中は読み直しが失敗しても値が前のまま残る。読み直してから引き、読み直せなければ次に読めた値で引く（`packages/workbench/src/ui/notification-click.ts`）。
 - 合図（listener）を購読して待つ処理は、待つと決めてから購読するまでの間に合図が過ぎた場合を、購読した後に回数や版を見直して閉じる。過ぎた合図は来ないので、そのままでは次の合図まで待ち続ける（`packages/note/src/ui/notes/note-references.ts` の `untilReached`）。
 - 画面の effect の中で一度きりの値（module に置いた飛び先など）を取り出すときは、dev の StrictMode が effect を片付けて走らせ直しても、2 度目に同じ値を得られる形にする。取り出すたびに消すと、片付けで壊れる 1 度目にだけ効く（`packages/note/src/ui/notes/block-jump.ts` の `arrivalAt`）。
