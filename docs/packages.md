@@ -11,8 +11,6 @@ monica の repo の形、package の entry、domain 間の呼び出しを決め�
 - `docs/packages/tab-env-and-shim.md`: Tab の env、shim、claude wrapper、hook の settings と CLI、payload の decoder に触るとき。
 - `docs/packages/notifications.md`: 通知と Dock の数と取り下げ。通知を出す遷移、title と body、Shell が出す通知、未読の集合、Dock の数、通知センターの通知の置き換えと取り下げに触るとき。
 - `docs/packages/task-ledger.md`: task の contract と Task Ledger。task の procedure、Run、Bench の準備、close、sync、task のテストの fake に触るとき。
-- `docs/packages/job-ledger.md`: job の contract と Job Ledger。job の procedure、system の Job を足すとき、裏で定期的に走る処理に触るとき。
-- `docs/packages/usage.md`: usage の contract と Usage Ledger。Feature の呼び出しを数える場所、Caller の決め方、`usage.list` に触るとき、口や procedure を足すとき。
 - `docs/packages/chat.md`: chat の contract と `ChatAgent` と ui。Chat の procedure、claude の options と env、spare と同時の数、claude の止め方、偽の claude、side panel の Chat の画面（fluid-functionalism の写し、CSS、Current Page の追い方、markdown）に触るとき。
 - `docs/packages/backend.md`: Backend の組み立て（apps/backend）。起動と終了の順序、PATH、Ledger の配線、ブラウザの口に触るとき。
 - `docs/packages/cli.md`: CLI（apps/cli）。`cli: true` の procedure か SKILL.md を足すとき、argv の振り分け・出力・エラー・補完・CLI のテストに触るとき。
@@ -92,7 +90,7 @@ entry は層ではなく、import してよい実行環境で切る（ADR-0009�
 | `@monica/<d>/testing` | 他の package のテストに出す fake。今は workbench と chat が持つ。workbench は `src/fake-ptyd.ts` の fake の ptyd（`startFakePtyd`）、短い home を作る `tempHome`、Terminal Session が starting を抜けるのを待つ `untilSettled`、sh の script を走らせる偽の実行 file を置く `writeFakeExecutable`（`src/fake-executable.ts`）を出す。chat は `src/testing.ts` の、偽の claude を起こす wrapper を書く `writeFakeClaude` と、その失敗の場面の型 `FakeScenario` と、偽の claude が居なくなるのを待つ `untilFakeClaudesExit` を出す | Bun | 他 package のテストと `testing.ts` |
 | `@monica/chat/html-worker`・`@monica/chat/pdf-worker` | HTML と PDF を本文にする Bun の Worker の module（`src/html-worker.ts`・`src/pdf-worker.ts`）。何も export せず、読み込むと `message` の listener を置く。chat だけが持つ | Bun の Worker | apps/backend の Worker の entrypoint（`apps/backend/src/html-worker.ts`・`apps/backend/src/pdf-worker.ts`）だけ。compiled binary の Worker は build の entrypoint に要り、main.ts の隣に置くと main.ts から同じ相対 path で引けるため（`docs/packages/chat.md` の「本文への変換」と「PDF の本文」） |
 
-- 依存の向きは task → workbench だけ。workbench は task を import しない（ADR-0005）。job は task も workbench も import しない（ADR-0016）。note は他の domain を import せず、他の domain からも import されない。chat と usage も同じ。usage が数える処理と全 Feature の一覧は、Backend の組み立てが deps で渡す（`docs/packages/usage.md`）。
+- 依存の向きは task → workbench だけ。workbench は task を import しない（ADR-0005）。job は task も workbench も import しない（ADR-0016）。note は他の domain を import せず、他の domain からも import されない。chat と usage も同じ。usage が数える処理と全 Feature の一覧は、Backend の組み立てが deps で渡す。
 - task の schema は workbench の table を FK のために import するが、re-export しない（ADR-0010）。
 - 境界は次のものが守る。
   - package の間の向き: package.json。bun の isolated linker では package.json に書いていない依存を解決できない。
@@ -116,7 +114,7 @@ export const router = os.router({ ... });          // context は { db, <d>Ledge
 export function create<D>Ledger(deps: { db: Db; home: string; ... }): <D>Ledger;
 ```
 
-- `<D>Ledger` は、Backend が domain ごとに 1 つ作り、`GLOSSARY.md` の Workbench Ledger・Task Ledger・Job Ledger・Note Ledger を扱う部品。これらは起動時と終了時の処理の `start()` / `stop()` を持つ。GLOSSARY の Usage を扱う `UsageLedger` は、起動時と終了時の処理が無いので持たない（`docs/packages/usage.md`）。deps と method は domain ごとの文書の「create<D>Ledger」に、作る順と渡すものは `docs/packages/backend.md` にある。
+- `<D>Ledger` は、Backend が domain ごとに 1 つ作り、`GLOSSARY.md` の Workbench Ledger・Task Ledger・Job Ledger・Note Ledger を扱う部品。これらは起動時と終了時の処理の `start()` / `stop()` を持つ。GLOSSARY の Usage を扱う `UsageLedger` は、起動時と終了時の処理が無いので持たない。deps と method は domain ごとの文書の「create<D>Ledger」に、作る順と渡すものは `docs/packages/backend.md` にある。
 - `WorkbenchLedger` と `TaskLedger` は `events` も持つ。その domain の変更を知らせる in-process の publisher で、job と note は change stream を持たないので無い（ADR-0016・0018）。
 - server entry は、ほかに他の domain と Backend が使う関数と型を出してよい（task の `nameAgentSession`、ptyd と setup が env を絞る workbench の `inheritableEnv()`）。
 - Ledger の型には、他の domain と Backend が呼ぶ method だけを出す。procedure の handler が使う中身（ghq や GitHub への口、Bench の準備の状態など）は、Ledger を key にした WeakMap に置き、`internals(<d>Ledger)` で引く。router の context に渡るのは `db` と Ledger だけなので、外の口も Ledger が持つ。
