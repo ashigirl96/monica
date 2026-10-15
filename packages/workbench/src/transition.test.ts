@@ -302,3 +302,18 @@ describe.each(notifications)('notifying on %s', (_name, event, bodies) => {
     },
   )
 })
+
+describe.each(notifications)(
+  'notifying in the same millisecond as the row before on %s',
+  (_name, event, bodies) => {
+    test.each(columns.map((column, i) => [column, bodies[i]!] as const))(
+      'from %s',
+      (column, body) => {
+        const prev = column === 'unknown' ? null : rowIn(column, { stateChangedAt: NOW })
+        const next = transition(prev, event, NOW)
+
+        expect(next && notificationFor(prev, event, next)).toBe(body)
+      },
+    )
+  },
+)

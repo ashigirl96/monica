@@ -1,4 +1,4 @@
-import { afterEach, expect, test } from 'bun:test'
+import { afterEach, expect, setSystemTime, test } from 'bun:test'
 
 import { createStore, type Store } from 'jotai'
 
@@ -137,6 +137,47 @@ test('a notification for the Tab shown in the front window is seen at once', asy
   await until(store, agentSessionByTerminalSessionAtom, () =>
     Boolean(seenAtOf(store, tab.terminalSessionId)),
   )
+  expect(store.get(unreadOfTerminalSessionAtom)(tab.terminalSessionId)).toBe(false)
+})
+
+test('a second notification for the shown Tab that comes before the first is marked seen is seen too', async () => {
+  const { client, store, record } = bench({ focused: true })
+  const { tab } = await client.runspace.create(size)
+  await store.set(reloadAtom)
+  onCleanup(() => setSystemTime())
+  const firstCalled = Promise.withResolvers<void>()
+  const release = Promise.withResolvers<void>()
+  let firstMarkSeen: Promise<void> | undefined
+  const agentSessionHoldingFirstMarkSeen = new Proxy(client.agentSession, {
+    get: (target, key) =>
+      key === 'markSeen'
+        ? (input: Parameters<typeof target.markSeen>[0]) => {
+            if (firstMarkSeen) return target.markSeen(input)
+            firstMarkSeen = release.promise.then(() => target.markSeen(input))
+            firstCalled.resolve()
+            return firstMarkSeen
+          }
+        : Reflect.get(target, key),
+  })
+  store.set(
+    workbenchClientAtom,
+    () =>
+      new Proxy(client, {
+        get: (target, key) =>
+          key === 'agentSession' ? agentSessionHoldingFirstMarkSeen : Reflect.get(target, key),
+      }),
+  )
+  setSystemTime(new Date(1_000))
+  await record(tab.terminalSessionId, 'PermissionRequest', { tool_name: 'Bash' })
+  await firstCalled.promise
+  setSystemTime(new Date(2_000))
+  await record(tab.terminalSessionId, 'PermissionRequest', { tool_name: 'Edit' })
+  await store.set(reloadAgentSessionsAtom)
+
+  release.resolve()
+  await firstMarkSeen
+  await store.set(reloadAgentSessionsAtom)
+
   expect(store.get(unreadOfTerminalSessionAtom)(tab.terminalSessionId)).toBe(false)
 })
 
