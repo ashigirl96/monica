@@ -1,7 +1,6 @@
 /// <reference types="bun" />
 import { describe, expect, test } from 'bun:test'
 
-import { blocksToPlainText } from './clipboard.ts'
 import { exitDocEnd, exitDocStart, hasAdjacentTableRow, splitBlock } from './commands.ts'
 import { nodes } from './schema.ts'
 import {
@@ -130,34 +129,6 @@ describe('hasAdjacentTableRow', () => {
     const $pos = doc.resolve(contentPos(doc, 'P', 'end'))
     expect(hasAdjacentTableRow($pos, 1)).toBe(false)
     expect(hasAdjacentTableRow($pos, -1)).toBe(false)
-  })
-})
-
-describe('blocksToPlainText', () => {
-  test('table は GFM のパイプ記法で出す（貼り戻しで表に戻るため）', () => {
-    const doc = twoByTwo()
-    expect(blocksToPlainText([doc.child(0).child(0)])).toBe('| a | b |\n| c | d |')
-  })
-
-  test('header 行があれば delimiter 行を挟む', () => {
-    const doc = docOf(
-      block(
-        'T',
-        tableOf(
-          [
-            ['a', 'b'],
-            ['c', 'd'],
-          ],
-          true,
-        ),
-      ),
-    )
-    expect(blocksToPlainText([doc.child(0).child(0)])).toBe('| a | b |\n| --- | --- |\n| c | d |')
-  })
-
-  test('セル内の `|` と `\\` はエスケープする（列が増えない）', () => {
-    const doc = docOf(block('T', tableOf([['a | b', 'c\\d']])))
-    expect(blocksToPlainText([doc.child(0).child(0)])).toBe('| a \\| b | c\\\\d |')
   })
 })
 

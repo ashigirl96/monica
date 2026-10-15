@@ -4,6 +4,7 @@ import { describe, expect, test } from 'bun:test'
 import { Node as PMNode } from 'prosemirror-model'
 import { EditorState, Selection } from 'prosemirror-state'
 
+import { toMarkdown } from '../../body/index.ts'
 import { BLOCKS_MIME, clipboardPlugin, serializeBlocksPayload } from './clipboard.ts'
 import { pasteMenuKey } from './menu-keys.ts'
 import type { PasteMenuActiveState } from './menu-keys.ts'
@@ -121,9 +122,13 @@ function editorState(doc: PMNode): EditorState {
 
 function pasteBlocks(state: EditorState): EditorState {
   const payload = serializeBlocksPayload([textContainer('x', 'src-1')], 'note-A')
-  const pasted = paste(clipboardPlugin({ syncPasteEnabled: true }), state, {
-    [BLOCKS_MIME]: payload,
-  })
+  const pasted = paste(
+    clipboardPlugin({ renderMarkdown: toMarkdown, syncPasteEnabled: true }),
+    state,
+    {
+      [BLOCKS_MIME]: payload,
+    },
+  )
   expect(pasted.handled).toBe(true)
   return pasted.state
 }

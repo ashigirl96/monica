@@ -33,7 +33,9 @@ import {
 } from './test-fixtures.ts'
 
 function pasteBlocks(state: EditorState, payload: string): EditorState {
-  const pasted = paste(clipboardPlugin(), state, { [BLOCKS_MIME]: payload })
+  const pasted = paste(clipboardPlugin({ renderMarkdown: toMarkdown }), state, {
+    [BLOCKS_MIME]: payload,
+  })
   expect(pasted.handled).toBe(true)
   return pasted.state
 }
@@ -92,7 +94,9 @@ function pasteMarkdown(
   text: string,
   parseMarkdown: ParseMarkdown,
 ): EditorState {
-  const pasted = paste(clipboardPlugin({ parseMarkdown }), state, { 'text/plain': text })
+  const pasted = paste(clipboardPlugin({ renderMarkdown: toMarkdown, parseMarkdown }), state, {
+    'text/plain': text,
+  })
   expect(pasted.handled).toBe(true)
   return pasted.state
 }

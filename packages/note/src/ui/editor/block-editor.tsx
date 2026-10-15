@@ -58,8 +58,8 @@ type BlockEditorProps = {
   uploadImage?: UploadImage
   /** 外部画像 URL をローカル asset 化する（外部 HTML paste の <img> 用） */
   importExternalImage?: ImportExternalImage
-  /** 選択範囲の doc JSON を markdown へ投影する。未指定なら markdown コピーは無効（plain text 縮退） */
-  renderMarkdown?: RenderMarkdown
+  /** 選択範囲の doc JSON を markdown へ投影する */
+  renderMarkdown: RenderMarkdown
   /** plain text paste を markdown として取り込む。未指定なら素のテキスト挿入に縮退 */
   parseMarkdown?: ParseMarkdown
   /** unmount 時に最終 doc の JSON を受け取る（永続化フック） */
@@ -116,7 +116,6 @@ export function BlockEditor({
   const hasResolveNoteMention = resolveNoteMention !== undefined
   const hasResolveBlock = resolveBlock !== undefined
   const hasUploadImage = uploadImage !== undefined
-  const hasRenderMarkdown = renderMarkdown !== undefined
   const hasParseMarkdown = parseMarkdown !== undefined
   // initialDoc 等と同じく mount 時に一度だけ読む（差し替えは想定しない）
   const handleRefAtMount = useRef(handleRef)
@@ -155,9 +154,7 @@ export function BlockEditor({
       importExternalImage: hasUploadImage
         ? (url) => importExternalImageRef.current?.(url) ?? Promise.resolve(null)
         : undefined,
-      renderMarkdown: hasRenderMarkdown
-        ? (docJson) => renderMarkdownRef.current?.(docJson) ?? ''
-        : undefined,
+      renderMarkdown: (docJson) => renderMarkdownRef.current(docJson),
       parseMarkdown: hasParseMarkdown
         ? (markdown) => parseMarkdownRef.current?.(markdown) ?? null
         : undefined,

@@ -31,43 +31,6 @@ export function serializeBlocksPayload(
   return JSON.stringify(payload)
 }
 
-// `@monica/note/body` の toMarkdown と同じ GFM 形にする。この plain text は renderMarkdown を
-// 渡さないときの代わりで、ここだけ表の形が違うと外部へ出したあと貼り戻したときに表に戻らない。
-function tableToGfm(table: PMNode): string {
-  const lines: string[] = []
-  table.forEach((row, _offset, index) => {
-    const cells: string[] = []
-    let header = false
-    row.forEach((cell) => {
-      if (cell.attrs.header) header = true
-      // `\` は import 側の escape を食わないよう二重化し、hardBreak は空白へ潰す
-      const raw = cell.content.textBetween(0, cell.content.size, undefined, ' ')
-      cells.push(raw.replace(/\\/g, '\\\\').replace(/\|/g, '\\|'))
-    })
-    lines.push(`| ${cells.join(' | ')} |`)
-    if (index === 0 && header) lines.push(`| ${cells.map(() => '---').join(' | ')} |`)
-  })
-  return lines.join('\n')
-}
-
-export function blocksToPlainText(containers: readonly PMNode[]): string {
-  const lines: string[] = []
-  const walk = (container: PMNode, depth: number) => {
-    const content = container.child(0)
-    let text: string
-    if (content.type === nodes.divider) text = '---'
-    else if (content.type === nodes.syncedBlock) text = '[synced block]'
-    else if (content.type === nodes.table) text = tableToGfm(content)
-    else text = content.content.textBetween(0, content.content.size, undefined, '\n')
-    lines.push('  '.repeat(depth) + text)
-    if (container.childCount > 1) {
-      container.child(1).forEach((child) => walk(child, depth + 1))
-    }
-  }
-  for (const container of containers) walk(container, 0)
-  return lines.join('\n')
-}
-
 // 外部 HTML/plain text に block ID を出さない
 function stripIds(node: PMNode): PMNode {
   if (node.type === nodes.blockContainer) {
@@ -206,16 +169,14 @@ function handleUrlPaste(view: EditorView, event: ClipboardEvent): boolean {
 function writeBlocksToClipboard(
   event: ClipboardEvent,
   containers: readonly PMNode[],
-  sourceNoteId?: string,
-  // markdown があれば text/plain に載せる（renderMarkdown が無ければインデント plain text）。
-  // BLOCKS_MIME / html は常に共存させ、paste-and-sync 経路を壊さない。
-  markdownPlain?: string,
+  sourceNoteId: string | undefined,
+  markdown: string,
 ): void {
   if (!event.clipboardData) return
   event.preventDefault()
   event.clipboardData.setData(BLOCKS_MIME, serializeBlocksPayload(containers, sourceNoteId))
   event.clipboardData.setData('text/html', blocksToHtml(containers))
-  event.clipboardData.setData('text/plain', markdownPlain ?? blocksToPlainText(containers))
+  event.clipboardData.setData('text/plain', markdown)
 }
 
 /** 選択範囲の doc JSON を markdown へ書き出す。copy の同期 handler から呼ぶので同期で返す。 */
@@ -229,8 +190,8 @@ export type ClipboardOptions = {
   sourceNoteId?: string
   /** paste 時に「Paste and sync」を提示するか（= resolveBlock が提供されているか）。 */
   syncPasteEnabled?: boolean
-  /** 選択範囲を markdown へ投影する。未指定なら markdown コピーは無効（plain text 縮退）。 */
-  renderMarkdown?: RenderMarkdown
+  /** 選択範囲を markdown へ投影し、copy の text/plain に載せる。 */
+  renderMarkdown: RenderMarkdown
   /** plain text paste を markdown として取り込む。未指定なら素のテキスト挿入に縮退。 */
   parseMarkdown?: ParseMarkdown
 }
@@ -340,10 +301,10 @@ function handleMarkdownPaste(
   return true
 }
 
-export function clipboardPlugin(options: ClipboardOptions = {}): Plugin {
+export function clipboardPlugin(options: ClipboardOptions): Plugin {
   const { renderMarkdown } = options
   const markdownOf = (containers: readonly PMNode[]) =>
-    renderMarkdown?.(docJsonFromContainers(containers))
+    renderMarkdown(docJsonFromContainers(containers))
 
   return new Plugin({
     props: {
@@ -353,11 +314,7 @@ export function clipboardPlugin(options: ClipboardOptions = {}): Plugin {
       transformPasted: (slice) => mapSliceNodes(slice, preparePasted),
       // text 選択の text/plain を markdown に差し替える。block 選択は copy ハンドラが
       // preventDefault するのでここは通らない。
-      ...(renderMarkdown
-        ? {
-            clipboardTextSerializer: (slice: Slice) => selectionToMarkdown(slice, renderMarkdown),
-          }
-        : {}),
+      clipboardTextSerializer: (slice: Slice) => selectionToMarkdown(slice, renderMarkdown),
 
       handleDOMEvents: {
         copy(view, event) {
