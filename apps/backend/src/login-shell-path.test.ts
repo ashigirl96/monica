@@ -1,4 +1,4 @@
-import { afterEach, expect, test } from 'bun:test'
+import { afterEach, expect, setDefaultTimeout, test } from 'bun:test'
 import { mkdtempSync, realpathSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -6,6 +6,8 @@ import { join } from 'node:path'
 import { writeFakeExecutable } from '@monica/workbench/testing'
 
 import { loginShellPath } from './login-shell-path.ts'
+
+setDefaultTimeout(20_000)
 
 const dirs: string[] = []
 
@@ -38,5 +40,13 @@ test("fails with the shell's stderr when the login shell fails", () => {
 
   expect(() => loginShellPath({ SHELL: shell, HOME: dir, PATH: '/usr/bin:/bin' })).toThrow(
     `${shell} -ilc exited with 1: zshrc: parse error`,
+  )
+})
+
+test('gives up on a login shell that does not finish within 5 seconds', () => {
+  const { dir, shell } = fakeShell('exec sleep 30')
+
+  expect(() => loginShellPath({ SHELL: shell, HOME: dir, PATH: '/usr/bin:/bin' })).toThrow(
+    `${shell} -ilc took over 5000ms`,
   )
 })

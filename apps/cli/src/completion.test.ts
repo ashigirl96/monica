@@ -1,14 +1,23 @@
-import { afterEach, expect, test } from 'bun:test'
+import { afterEach, expect, spyOn, test } from 'bun:test'
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 
 import type { Command } from 'commander'
 import { kebabCase } from 'trpc-cli'
 
-import type { Client } from './backend.ts'
+import { type Client, connect as connectTo } from './backend.ts'
 import { completers } from './contract.ts'
-import { createProgram } from './program.ts'
+import { createProgram, runCli } from './program.ts'
 import { backendWithTasks, cleanUp, monica } from './testing.ts'
 
-afterEach(cleanUp)
+const cleanups: (() => void)[] = []
+const onCleanup = (cleanup: () => void) => cleanups.push(cleanup)
+
+afterEach(() => {
+  for (const cleanup of cleanups.splice(0).toReversed()) cleanup()
+  cleanUp()
+})
 
 test('__complete lists the subcommands with their descriptions for zsh', async () => {
   const result = await monica(['__complete', '--', 'task', ''], () => null)
@@ -86,6 +95,50 @@ test('__complete lists nothing without a Backend, when it fails, after the last 
   expect(failed).toEqual({ code: 0, stdout: '', stderr: '' })
   expect(afterRef.stdout).toBe('')
   expect(afterForce.stdout).toBe('')
+})
+
+test('__complete lists nothing at once for a Backend that refuses connections, and gives up after 1 second on one that does not answer', async () => {
+  const home = mkdtempSync(join(tmpdir(), 'monica-'))
+  onCleanup(() => rmSync(home, { recursive: true, force: true }))
+  const writeEndpoint = (port: number) =>
+    writeFileSync(
+      join(home, 'backend.json'),
+      JSON.stringify({ port, token: 'token', pid: process.pid }),
+    )
+  const complete = async () => {
+    let stdout = ''
+    await runCli(['__complete', '--', 'task', 'run', ''], {
+      connect: (options) => connectTo(home, options),
+      stdout: (text) => (stdout += text),
+      stderr: () => {},
+    })
+    return stdout
+  }
+  const sleep = Bun.sleep
+  const retries: unknown[] = []
+  const spy = spyOn(Bun, 'sleep').mockImplementation(async (ms) => {
+    if (ms === 200) retries.push(ms)
+    return sleep(ms)
+  })
+  onCleanup(() => spy.mockRestore())
+
+  const refusing = Bun.serve({ hostname: '127.0.0.1', port: 0, fetch: () => new Response() })
+  const refusedPort = refusing.port!
+  void refusing.stop(true)
+  writeEndpoint(refusedPort)
+  expect(await complete()).toBe('')
+  expect(retries).toEqual([])
+
+  const silent = Bun.serve({
+    hostname: '127.0.0.1',
+    port: 0,
+    fetch: () => new Promise<Response>(() => {}),
+  })
+  onCleanup(() => void silent.stop(true))
+  writeEndpoint(silent.port!)
+  const startedAt = performance.now()
+  expect(await complete()).toBe('')
+  expect(performance.now() - startedAt).toBeLessThan(1500)
 })
 
 test('completions zsh prints a script that asks the monica typed for the candidates', async () => {
