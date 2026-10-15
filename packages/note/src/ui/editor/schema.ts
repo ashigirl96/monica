@@ -3,7 +3,7 @@ import type { Node as PMNode, NodeType } from 'prosemirror-model'
 
 import { IMAGE_URL_PREFIX } from '../../contract.ts'
 import { notePath } from '../routes.ts'
-import { colgroupSpec, columnWidths } from './column-widths.ts'
+import { colgroupSpec, columnWidths, parseColumnWidths } from './column-widths.ts'
 
 export function newBlockId(): string {
   return crypto.randomUUID()
@@ -220,7 +220,7 @@ export const schema = new Schema({
       isolating: true,
       // 各列の幅の比（合計 1）。
       attrs: { colWidths: { default: null } },
-      parseDOM: [{ tag: 'table' }],
+      parseDOM: [{ tag: 'table', getAttrs: (dom) => ({ colWidths: parseColumnWidths(dom) }) }],
       // hole は tbody 側に置く: ブラウザが <table> 直下に暗黙の tbody を挿入するため、
       // 挟まないと PM の想定 DOM と実 DOM がズレる（prosemirror-tables と同じ形）。
       toDOM: (node) => {

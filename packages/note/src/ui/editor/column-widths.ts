@@ -53,6 +53,17 @@ export function round(w: number): number {
   return Math.round(w * 10000) / 10000
 }
 
+/** toDOM が描いた colgroup の % の幅を比に読み戻す。% でない幅があれば幅を持たない表にする。 */
+export function parseColumnWidths(table: HTMLElement): number[] | null {
+  const cols = Array.from(table.querySelectorAll(':scope > colgroup > col'))
+  const widths = cols.map((col) =>
+    col instanceof HTMLElement && col.style.width.endsWith('%')
+      ? round(Number.parseFloat(col.style.width) / 100)
+      : Number.NaN,
+  )
+  return widths.length > 0 && widths.every((w) => w > 0) ? widths : null
+}
+
 export function colgroupSpec(widths: number[] | null): DOMOutputSpec {
   return ['colgroup', ...(widths ?? []).map((w) => ['col', { style: `width: ${w * 100}%` }])]
 }
