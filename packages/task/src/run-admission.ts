@@ -70,7 +70,7 @@ class Refused extends Error {
   }
 }
 
-/** CLI の `run` と Run Button の押下が通る 1 つの入口。決める順は `docs/packages/task-ledger.md` の「Run の起動」にある。 */
+/** CLI の `run` と Run Button の押下が通る 1 つの入口。 */
 export function admitRun(
   deps: Deps,
   ref: string,
