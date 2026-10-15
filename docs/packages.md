@@ -20,8 +20,6 @@ monica の repo の形、package の entry、domain 間の呼び出しを決め�
 - `docs/packages/cli.md`: CLI（apps/cli）。`cli: true` の procedure か SKILL.md を足すとき、argv の振り分け・出力・エラー・補完・CLI のテストに触るとき。
 - `docs/packages/extension.md`: Chrome Extension（apps/extension）。manifest、permission、ID と鍵、mode ごとの出力の dir、dev の読み込み方、`chrome` の型と lint に触るとき。
 - `docs/packages/desktop.md`: desktop（apps/desktop）。webview の枠、キーの扱い、domain の ui の載せ方と Task の slot、Shell（`src-tauri`）に触るとき。
-- `docs/packages/migration.md`: migration。table を足すか変えるとき、domain の package を足すとき。
-- `docs/packages/dev-loop.md`: dev loop、release、検査、版。dev の起動、scripts、release の build、CI、依存と tsconfig に触るとき、テストが誤りを捕まえるかを変異で確かめるとき。
 
 ## 配置
 
@@ -75,6 +73,8 @@ packages/<d>/
     ├── cli.ts
     └── ui/index.ts
 ```
+
+- schema の entry を持たない package（chat）は、`drizzle.config.ts`・`src/schema.ts`・`generate` の script を置かず、`migrations/<d>/meta/_journal.json` に `{"version":"7","dialect":"sqlite","entries":[]}` を手で置く。drizzle-kit は schema の file が無いと exit 1 し、`bun run generate` が落ちるため。
 
 entry より内側のファイル分割は自由。
 

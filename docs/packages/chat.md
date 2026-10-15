@@ -29,13 +29,13 @@ ask       { question, page: Page, history: { question, answer, page: PageSnapsho
 
 - `$MONICA_HOME/chat` を `mkdirSync(…, { recursive: true, mode: 0o700 })` で作り、claude の cwd にする。
 - `claudePath` は claude の場所で、SDK の `pathToClaudeCodeExecutable` に渡す。省けば渡さず、SDK が node_modules の platform package（`@anthropic-ai/claude-agent-sdk-darwin-arm64` など）の claude を使う。
-  - release の Backend は、Shell が env の `MONICA_CLAUDE_PATH` で渡す `.app` の `Contents/MacOS/claude` を渡す。compile した binary は node_modules の claude を解決できないため。`install-app` が同じ lockfile の platform package から写したもの（`docs/packages/dev-loop.md` の「release build と install」、ADR-0032）。
+  - release の Backend は、Shell が env の `MONICA_CLAUDE_PATH` で渡す `.app` の `Contents/MacOS/claude` を渡す。compile した binary は node_modules の claude を解決できないため。`install-app` が同じ lockfile の platform package から写したもの（`scripts/install-app.ts`、ADR-0032）。
   - dev の Backend は env を受けないので省く。
 - `htmlWorker` と `pdfWorker` は HTML と PDF を本文にする Worker の module の URL、`cMaps` は pdf.js の cMap の folder（下の「Page Snapshot」の「本文への変換」と「PDF の本文」）。省けば、Worker は packages/chat の `src/html-worker.ts` と `src/pdf-worker.ts`、`cMaps` は packages/chat から解いた node_modules の `pdfjs-dist/cmaps` になる（`src/page/snapshot.ts` の `defaultReaders`）。`bun test` はどれも省いて動く。
   - compile した Backend はどれも解けないので、Backend は自分の隣の `html-worker.ts` と `pdf-worker.ts`（build の entrypoint）と、`--asset` で同梱した `cmaps` を渡す（`docs/packages/backend.md` の「起動と終了」）。
 - `stop()` は同期で、持っている claude すべて（spare を含む）に SIGKILL を送り、spare の時限を消す。Backend の `exit()` は `process.exit(0)` まで await を挟まずに進むため。
 - procedure の handler が使う `prepare`・`models`・`ask` は、型に出さずに `internals(chatAgent)` で引く（`docs/packages.md` の「server entry の形」）。router の context は `{ chatAgent }`。
-- chat は他の domain を import せず、他の domain からも import されない。前者は `.oxlintrc.json` の override が、後者は package.json が守る。table は持たないが、空の journal を持つ（`docs/packages/migration.md`）。
+- chat は他の domain を import せず、他の domain からも import されない。前者は `.oxlintrc.json` の override が、後者は package.json が守る。table は持たないが、空の journal を持つ（`docs/packages.md` の「ドメイン package の中」）。
 
 ## claude の options と env
 
@@ -381,7 +381,7 @@ side panel は Backend の token の口を、Native Messaging の host から受
 - 途中の失敗が RPCLink の client に `ORPCError` の `code` と `data` で届くことは、`apps/backend/src/main.test.ts` が process の Backend の token の口に Chrome Extension の token で繋いで確かめる。
 - 本文への変換は `src/page/snapshot.test.ts` が `src/page/fixtures/` の HTML（`getHTML` が書き出す、document element の中身の形）で、同じページと全体の上限と block の並び（スクリーンショットの `image` の置き場所と 1,500 字の数え方を含む）は `src/page/prompt.test.ts` が `PageSnapshot` を直に組んで確かめる。どちらも claude を起こさない。
 - PDF の本文は `src/page/pdf.test.ts` が、Worker を通して確かめる。PDF は `src/page/test-pdf.ts` の `testPdf(pages)` が bytes を組み、binary の file を repo に置かない。`latin` のページは埋め込まない Helvetica、`japanese` のページは埋め込まない `HeiseiKakuGo-W5` と `UniJIS-UCS2-H` で書き、cMap が無いと日本語が落ちる。`'missing'` のページは無い object を指し、読めば pdf.js が例外を投げるので、残りのページを読まないことをそれで確かめる。ページの大きさは行の長さと数に合わせて広げる。pdf.js はページの外の字を本文に入れないため。
-- claude は `src/fake-claude.ts` の偽の claude に差し替える。テストは拡張子の無い `/bin/sh` の wrapper を一時 directory に置いて `claudePath` に渡す。wrapper は `@monica/chat/testing` の `writeFakeClaude(dir, recordPath, scenario?)` が置き、Backend のテスト（`apps/backend/src/main.test.ts`）も使う。置くのは repo の `src/fake-claude.sh` を指す symlink の `<dir>/claude` と、起こす bun・`fake-claude.ts` の path・記録の file・場面を 1 行ずつ書いた `<dir>/claude.args` で、`fake-claude.sh` は `$0.args` を読んで `exec "<bun>" "<fake-claude.ts>" "<記録の file>" <場面> "$@"` する。macOS は新しく書いた実行 file を初めて exec するたびに検査を挟み（1 回 0.1〜1 秒、system で 1 列に並ぶ）、exec 済みの file を指す symlink では挟まないため（`docs/packages/dev-loop.md` の「検査と CI」）。SDK は path が `.js`・`.mjs`・`.ts`・`.tsx`・`.jsx` で終わると `bun` か `node` を名前で起こすが、claude の env には `PATH` が無い。拡張子の無い path は直に起こす。wrapper の `/bin/sh` は env に `PWD`・`SHLVL`・`_` を足す。
+- claude は `src/fake-claude.ts` の偽の claude に差し替える。テストは拡張子の無い `/bin/sh` の wrapper を一時 directory に置いて `claudePath` に渡す。wrapper は `@monica/chat/testing` の `writeFakeClaude(dir, recordPath, scenario?)` が置き、Backend のテスト（`apps/backend/src/main.test.ts`）も使う。置くのは repo の `src/fake-claude.sh` を指す symlink の `<dir>/claude` と、起こす bun・`fake-claude.ts` の path・記録の file・場面を 1 行ずつ書いた `<dir>/claude.args` で、`fake-claude.sh` は `$0.args` を読んで `exec "<bun>" "<fake-claude.ts>" "<記録の file>" <場面> "$@"` する。macOS は新しく書いた実行 file を初めて exec するたびに検査を挟み（1 回 0.1〜1 秒、system で 1 列に並ぶ）、exec 済みの file を指す symlink では挟まないため（`CODING_STANDARDS.md` の「テスト」）。SDK は path が `.js`・`.mjs`・`.ts`・`.tsx`・`.jsx` で終わると `bun` か `node` を名前で起こすが、claude の env には `PATH` が無い。拡張子の無い path は直に起こす。wrapper の `/bin/sh` は env に `PWD`・`SHLVL`・`_` を足す。
 - 偽の claude は次のように話す。
   - stdin の `control_request` に `control_response`（`subtype: success`）を返す。`initialize` には `response` に `@monica/chat/testing` の `FAKE_MODELS`（effort を持つ `haiku` と持たない Haiku 4.5）を `models` で入れ、ほかは `response: {}`。
   - `user` の message を受けたら、`system`（`init`）、`stream_event`（`content_block_delta` の `text_delta` を 3 つと `thinking_delta` を 1 つ）、`assistant`、`result`（`subtype: success`）を 1 行ずつ書く。
@@ -397,7 +397,7 @@ side panel は Backend の token の口を、Native Messaging の host から受
 - claude の場所に何も無い場面は、`createChatAgent` に一時 directory の無い path を渡して作る。
 - 起こした claude は、テストの process の子のうち生きているもの（`ps` の ppid と stat）で数える。SDK は呼び出しの中で同期に spawn するので、`ask` と `prepare` が返った直後に数えれば、起こしていないことも確かめられる。
 - 5 分の時限は、`setTimeout` を `spyOn` で捕まえ、300000ms の callback を手で呼ぶ。
-- テストは偽の claude が居なくなるのを待ってから home を消す（`docs/packages/dev-loop.md` の「検査と CI」）。`ChatAgent` を自分で作るテストは自分の子を数え、Backend の process を起こすテストは `@monica/chat/testing` の `untilFakeClaudesExit(dir)` で、wrapper を書いた dir を command line に持つ process が居なくなるのを待つ。`stop()` も Backend の終了も SIGKILL を送るだけで、居なくなるのを待たないため。
+- テストは偽の claude が居なくなるのを待ってから home を消す（`CODING_STANDARDS.md` の「テスト」）。`ChatAgent` を自分で作るテストは自分の子を数え、Backend の process を起こすテストは `@monica/chat/testing` の `untilFakeClaudesExit(dir)` で、wrapper を書いた dir を command line に持つ process が居なくなるのを待つ。`stop()` も Backend の終了も SIGKILL を送るだけで、居なくなるのを待たないため。
 
 ## 実機で確かめたこと
 

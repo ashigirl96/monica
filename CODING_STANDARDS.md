@@ -36,6 +36,10 @@ review で差分に当てる規則。どれも判断が要るもので、理由�
 
 - test 以外のコードでは、配列や index signature から読んだ値について、範囲外のときの扱いを決めて分岐で書く。`!` を付けてよいのは、範囲内であることが同じ関数の中の条件から読み取れる箇所だけ。`!` で黙らせると、`noUncheckedIndexedAccess` が範囲外の読み出しを拾えなくなるため。test は `!` でよい。範囲外なら test が落ちるだけなので。
 
+## 依存
+
+- `@anthropic-ai/claude-agent-sdk` は catalog で `^` を付けずに 1 つの版に固定する。版を変える PR は、`docs/packages/chat.md` の「実機で確かめたこと」の確かめを新しい版と同梱の claude でやり直し、その節を直す。Chat の claude の options の効き目は、確かめた版のものしか分からないため（ADR-0032）。
+
 ## テスト
 
 - DB は fake にせず、package ごとに in-memory の SQLite に自分の migration を当てる（task は workbench → task の順）。外から見える振る舞いは `createRouterClient(router, { context })` を通し、他の domain から呼ばれる method と module 内の関数はそのまま呼んで確かめる（ADR-0002）。
@@ -59,6 +63,12 @@ review で差分に当てる規則。どれも判断が要るもので、理由�
 - 受けた値を `toMatchObject` に渡した後で読み直さない。Bun の `toMatchObject` は、受けた object の中で matcher（`expect.stringContaining` など）に当たった値を、その matcher に置き換えるため（Bun 1.4.2）。後で読む値は、渡す前に取り出す。
 - 外のサービスの fake（GitHub、ghq、ptyd）は、本物が引数で変える振る舞い（GraphQL の `states` や `includeClosedPrs` など）も再現する。引数を見ない fake では、query から引数を落としてもテストが通る。
 - 打ち切りのテストは、signal に応えない fake（終わらない promise を返す）で確かめる。signal で reject する fake では、打ち切りが相手の終わりを待つ実装でも通る。本物の process は kill されても、子が stdout を握れば出力が読み終わらない（`packages/note/src/repo.ts` の ghq）。
+- テストが exec する偽の実行 file は、repo に置いた 1 つの file を指す symlink にする。sh の script を走らせる偽物（偽の `gh`、偽の login shell）は `@monica/workbench/testing` の `writeFakeExecutable`、偽の claude は `@monica/chat/testing` の `writeFakeClaude` で置く。macOS は新しく書いた実行 file を初めて exec するたびに system で 1 列に並ぶ検査（1 回 0.1〜1 秒）を挟み、並列の worker どうしが待ち合って 5 秒の timeout を落とすため。
+- 本番のコードが書いて exec する file（Tab の claude の wrapper、checkout の `setup.sh`、git hook）を直に exec するのは、その振る舞いを見るテストだけにする。setup を見ないテストの Repo には `setup.sh` を置かず、準備中の Bench が要るだけのテストは ghq の取得を pending の Promise にして止める。同じ wrapper を何度も exec するテストどうしは、home を 1 つにして使い回す（`packages/workbench/src/tab-env.test.ts`）。
+- 遅いテストの timeout を、test ごとの第 3 引数で引き上げない。1 本ごとに process を起こす file は、file の先頭の `setDefaultTimeout` で引き上げる（`apps/backend/src/main.test.ts`）。
+- テストが起こした process（Backend、偽の claude、偽の ptyd）は、居なくなるのを待ってから home を消す。走査の途中で他の process が子を消すと、Bun の `rmSync({ recursive: true, force: true })` は例外を出さずに止まり、home が TMPDIR に残るため。
+- 一時 directory は `finally` で消さず、hook（`afterAll` など）で消す。timeout で打ち切られた test は `finally` を飛ばすため。
+- hook は test file に書く。共有の module は片付けの関数を出し、呼び手の test file に登録させる（`scripts/oxlint/lint-probes.ts` の `cleanUpLintProbes`）。bun test は同じ process の test file どうしで module を使い回し、module の top level で登録した hook は最初に import した file にしか付かないため。
 
 ## 語
 
