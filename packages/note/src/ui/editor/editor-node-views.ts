@@ -14,6 +14,7 @@ import {
 import type { NoteMentionOptions } from './node-views.ts'
 import { SyncedBlockView } from './synced-block.ts'
 import type { SyncedBlockOptions } from './synced-block.ts'
+import { TableView } from './table-resize.ts'
 
 export type EditorNodeViewOptions = NoteMentionOptions & SyncedBlockOptions
 
@@ -26,6 +27,7 @@ export function editorNodeViews(
     todo: (node, view, getPos) => new TodoView(node, view, getPos),
     toggle: (node, view, getPos) => new ToggleView(node, view, getPos),
     codeBlock: (node, view, getPos) => new CodeBlockView(node, view, getPos),
+    table: (node) => new TableView(node),
     divider: () => new DividerView(),
     linkMention: (node) => new LinkMentionView(node),
     noteMention: (node) => new NoteMentionView(node, opts),
