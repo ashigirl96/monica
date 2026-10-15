@@ -435,11 +435,10 @@ test('task.changes signals the Task when run opens its Bench and again when the 
   })
   const asked = Promise.withResolvers<void>()
   const answer = Promise.withResolvers<void>()
-  const clone = ghq.client.get
   spyOn(ghq.client, 'get').mockImplementation(async (repo) => {
     asked.resolve()
     await answer.promise
-    return clone(repo)
+    ghq.clone(repo)
   })
 
   const running = client.run({ ref, inPlace: true })
