@@ -14,7 +14,13 @@ import {
   type SnapshotEvent,
   type Unreadable,
 } from '../contract.ts'
-import { type ChatClient, type ChatEntry, type ChatStore, createChatStore } from './chat-store.ts'
+import {
+  type ChatClient,
+  type ChatEntry,
+  type ChatStore,
+  type ChoiceStorage,
+  createChatStore,
+} from './chat-store.ts'
 import type { CurrentPage } from './current-page.ts'
 import { BackendUnreachable } from './native-host.ts'
 
@@ -161,7 +167,7 @@ const snapshotAt = (url: string, title: string): PageSnapshot => ({
 
 const SHOT = 'c2NyZWVuc2hvdA=='
 
-function openChat(client = new FakeClient(), storage = new FakeStorage()) {
+function openChat(client = new FakeClient(), storage: ChoiceStorage = new FakeStorage()) {
   let page = pageAt('https://a.example/', 'A')
   let shown: CurrentPage = { url: page.url, title: page.title }
   let shot: Pick<Page, 'screenshot' | 'screenshotFailed'> = { screenshot: SHOT }
