@@ -8,6 +8,7 @@
 
 - `failed`: 0 以外で終わった。ERROR は `exit <code>: <LOG の最後の行>` か `killed by <signal>` になる。LOG を読み、最初に失敗した行を探す。
 - `timed_out`: `--timeout` を超え、process group ごと kill された。LOG は途中で切れている。最後に出た行の次で止まっている。
+- claude の Job が `succeeded` なのに成果が無い: LOG の result 行を読む。`permission_denials` があれば拒否された tool を `--allowedTools` に足し、`is_error` なら `result` に理由がある。
 - `interrupted`: 途中で Backend が止まった。Job の問題ではないので、`run` で走らせ直す。
 - 行が無い・LAST が古い: 予定の時刻に Backend が居なかったか、`paused` のまま。`monica job list` の STATE と NEXT を見る。
 
@@ -21,7 +22,6 @@ cd <CWD> && zsh -lc '<COMMAND>' < /dev/null 2>&1 | tail -20; echo "exit ${pipest
 
 - 手元では通る: Tab の env にしか無いもの（`MONICA_*`・Tab の claude wrapper・`.envrc`）に頼っている。script の中で path か env を明示する。
 - 止まって返らない: 対話を待っている。非対話の flag を付ける。
-- `claude -p` の result 行に `permission_denials` がある: 拒否された tool を `--allowedTools` に足す。
 
 ## 3. 直す
 
