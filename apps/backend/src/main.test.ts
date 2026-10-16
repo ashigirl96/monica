@@ -1,5 +1,5 @@
 import { afterEach, expect, setDefaultTimeout, test } from 'bun:test'
-import { existsSync, readFileSync, statSync } from 'node:fs'
+import { existsSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 
 import { type contract as chatContract, MAX_ASK_BODY_BYTES } from '@monica/chat/contract'
@@ -55,26 +55,41 @@ type FakePtyd = ReturnType<typeof startFakePtyd>
 type SpawnOptions = {
   beforeSpawn?: (ptyd: FakePtyd) => void
   sharing?: { home: string; ptyd: FakePtyd }
+  preload?: string
 }
 
-function stderrOf(stream: ReadableStream<Uint8Array>): Promise<string> {
-  return (async () => {
-    let text = ''
+function stderrOf(stream: ReadableStream<Uint8Array>) {
+  let text = ''
+  const waiters = new Set<() => void>()
+  const all = (async () => {
     const decoder = new TextDecoder()
     for await (const bytes of stream) {
       const chunk = decoder.decode(bytes, { stream: true })
       process.stderr.write(chunk)
       text += chunk
+      for (const wake of waiters) wake()
     }
     return text
   })()
+  async function until(predicate: (lines: string[]) => boolean): Promise<string[]> {
+    for (;;) {
+      const lines = text.split('\n')
+      if (predicate(lines)) return lines
+      const chunk = new Promise<void>((resolve) => waiters.add(resolve))
+      if ((await Promise.race([chunk.then(() => 'chunk'), all])) !== 'chunk') {
+        throw new Error('the Backend exited')
+      }
+      waiters.clear()
+    }
+  }
+  return { all, until }
 }
 
 // main.ts は Backend の組み立てそのものなので、Shell と同じく process として起こす。
 function spawnBackend(
   browserPort: number,
   envOf: (home: string) => Env = () => ({}),
-  { beforeSpawn, sharing }: SpawnOptions = {},
+  { beforeSpawn, sharing, preload }: SpawnOptions = {},
 ) {
   const home = sharing?.home ?? tempHome((cleanup) => cleanups.push(cleanup))
   let ptyd = sharing?.ptyd
@@ -85,7 +100,8 @@ function spawnBackend(
   }
   beforeSpawn?.(ptyd)
   const { MONICA_BROWSER_PORT: _, MONICA_CLAUDE_PATH: __, ...inherited } = process.env
-  const subprocess = Bun.spawn([process.execPath, join(import.meta.dir, 'main.ts')], {
+  const preloads = preload ? ['--preload', preload] : []
+  const subprocess = Bun.spawn([process.execPath, ...preloads, join(import.meta.dir, 'main.ts')], {
     env: {
       ...inherited,
       MONICA_HOME: home,
@@ -106,7 +122,7 @@ function spawnBackend(
     await subprocess.exited
     await untilFakeClaudesExit(home)
   })
-  const stderr = stderrOf(subprocess.stderr)
+  const { all: stderr, until: untilStderr } = stderrOf(subprocess.stderr)
   const next = announcements(subprocess.stdout)
   const beforeEndpoint: Announcement[] = []
   async function endpoint() {
@@ -116,7 +132,7 @@ function spawnBackend(
       beforeEndpoint.push(line)
     }
   }
-  return { home, ptyd, subprocess, stderr, next, beforeEndpoint, endpoint }
+  return { home, ptyd, subprocess, stderr, untilStderr, next, beforeEndpoint, endpoint }
 }
 
 async function startBackend(
@@ -446,9 +462,12 @@ test('usage.list gives every Feature of both listeners as 0 calls, even when the
   })
 })
 
+const isCreate = (op: { op: string }) => op.op === 'create'
+
 async function tabPath(backend: Backend) {
+  const before = backend.ptyd.receivedAll(isCreate).length
   await viaToken(backend, 'workbench/runspace/create', { rows: 24, cols: 80 })
-  const [create] = await backend.ptyd.receivedAtLeast(1, (op) => op.op === 'create')
+  const create = (await backend.ptyd.receivedAtLeast(before + 1, isCreate))[before]
   return create?.op === 'create' ? new Map(create.env ?? []).get('PATH') : undefined
 }
 
@@ -475,18 +494,64 @@ test('the Backend opens a Tab with the PATH its login shell prints, without hand
   expect(await tabPath(backend)).toBe(`${backend.home}/bin:/from/login/shell:/usr/bin:/bin`)
 })
 
-test('a login shell that fails leaves the Backend on the PATH it started with, with one line on stderr', async () => {
-  const failing = fakeLoginShell('echo broken >&2; exit 1')
-  const backend = await startBackend(freePort(), (home) => ({
-    ...failing(home),
-    PATH: '/started/with:/usr/bin:/bin',
-  }))
+function brokenLoginShell(home: string) {
+  writeFileSync(join(home, 'broken'), '')
+  return fakeLoginShell(
+    'if [ -e "$(dirname "$0")/broken" ]; then echo still broken >&2; exit 1; fi\nPATH=/from/login/shell:/usr/bin:/bin /bin/sh -c "$2"',
+  )(home)
+}
+
+const rereadSoon = join(import.meta.dir, 'reread-soon.preload.ts')
+
+const isRetryFailure = (line: string) =>
+  line.includes("could not read the login shell's PATH") && line.includes('still broken')
+
+test('a Backend whose login shell fails at start opens Tabs on the PATH it started with, and on the login shell PATH after a later read every 30 seconds succeeds', async () => {
+  const backend = await startBackend(
+    freePort(),
+    (home) => ({
+      ...brokenLoginShell(home),
+      PATH: '/started/with:/usr/bin:/bin',
+      MONICA_TEST_TIMEOUTS_LOG: join(home, 'timeouts'),
+    }),
+    { preload: rereadSoon },
+  )
+  await backend.untilStderr((lines) => lines.some(isRetryFailure))
 
   expect(await tabPath(backend)).toBe(`${backend.home}/bin:/started/with:/usr/bin:/bin`)
+
+  rmSync(join(backend.home, 'broken'))
+  await backend.untilStderr((lines) =>
+    lines.some((line) => /\[backend\] read the login shell's PATH on retry \d+$/.test(line)),
+  )
+  const timeouts = () => readFileSync(join(backend.home, 'timeouts'), 'utf8').trim().split('\n')
+  const scheduled = timeouts()
+  // 縮めた間隔の数回分を待ち、読めた後に読み直しを張り直していないことを見る。
+  await Bun.sleep(300)
+
+  expect(await tabPath(backend)).toBe(`${backend.home}/bin:/from/login/shell:/usr/bin:/bin`)
   const lines = await stderrAfterExit(backend)
   expect(
     lines.filter((line) => line.includes('[backend] keeping the PATH it started with')),
-  ).toEqual([expect.stringContaining('broken')])
+  ).toEqual([expect.stringContaining('still broken')])
+  expect(timeouts()).toEqual(scheduled)
+  expect(new Set(scheduled)).toEqual(new Set(['30000']))
+})
+
+test('a Backend whose login shell keeps failing keeps answering, with one line and the reason for each failed read', async () => {
+  const backend = await startBackend(
+    freePort(),
+    (home) => ({ ...brokenLoginShell(home), MONICA_TEST_TIMEOUTS_LOG: join(home, 'timeouts') }),
+    { preload: rereadSoon },
+  )
+  const lines = await backend.untilStderr((sofar) => sofar.filter(isRetryFailure).length >= 3)
+
+  expect(lines.filter(isRetryFailure).slice(0, 3)).toEqual([
+    expect.stringContaining('retry 1 '),
+    expect.stringContaining('retry 2 '),
+    expect.stringContaining('retry 3 '),
+  ])
+  expect((await fetch(`http://127.0.0.1:${backend.port}/health`)).ok).toBe(true)
 })
 
 test('the Backend without MONICA_PTYD_PATH exits 1 with one line on stderr and opens no DB', async () => {

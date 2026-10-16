@@ -2129,6 +2129,7 @@ dependencies = [
  "anyhow",
  "block2 0.6.2",
  "libc",
+ "monica-logfile",
  "monica-terminal-client",
  "monica-terminal-protocol",
  "objc2 0.6.4",
