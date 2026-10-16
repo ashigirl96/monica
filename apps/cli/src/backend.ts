@@ -69,5 +69,5 @@ function isAlive(pid: number): boolean {
 }
 
 function isRefused(error: unknown): boolean {
-  return (error as { code?: unknown } | null)?.code === 'ConnectionRefused'
+  return (error as { code?: unknown } | null)?.code === 'ECONNREFUSED'
 }
