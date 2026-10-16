@@ -24,4 +24,4 @@ spec または ticket でユーザーが記述した作業を実装する。tick
 
 最後に、`gh pr checks --watch --required` で CI が通ったのを確かめてから、merge してよいかをユーザーに尋ね、了承を得たら merge する。`--required` を付けないと、必須でない CodeQL の完了まで待つため。
 
-merge したら、`git fetch origin main` と `git switch --detach origin/main` で merge 後の main に移り、`install-app` skill で release の Monica を入れ直す。merge の了承が入れ替えの了承を兼ねる。PR の branch のまま build すると、先に main に入った他の PR の変更が抜けるため。整形だけの PR を merge したら、main に入った commit の SHA を `.git-blame-ignore-revs` に足す PR を続けて出す。squash merge なので、branch の commit の SHA は main に残らないため。
+merge したら、`git fetch origin main` をして merge 後の main に移る。本体の checkout では `git switch main` と `git merge --ff-only origin/main` で `main` の branch に戻し、worktree では `git switch --detach origin/main` にする（`main` は本体の checkout が握っていて、worktree では switch できない）。移ったら`install-app` skill で release の Monica を入れ直す。merge の了承が入れ替えの了承を兼ねる。PR の branch のまま build すると、先に main に入った他の PR の変更が抜けるため。整形だけの PR を merge したら、main に入った commit の SHA を `.git-blame-ignore-revs` に足す PR を続けて出す。squash merge なので、branch の commit の SHA は main に残らないため。

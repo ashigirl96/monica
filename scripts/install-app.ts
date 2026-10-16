@@ -22,7 +22,8 @@ function fail(message: string): never {
 }
 
 async function running(): Promise<boolean> {
-  return (await $`pgrep -f ${`^${desktop}`}`.nothrow().quiet()).exitCode === 0
+  // Monica の Tab から流すと desktop は pgrep の祖先になり、-a が無いと外される。
+  return (await $`pgrep -a -f ${`^${desktop}`}`.nothrow().quiet()).exitCode === 0
 }
 
 type Backend = { port: number; token: string; pid: number }
