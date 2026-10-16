@@ -54,14 +54,23 @@ import { loginShellPath, rereadLoginShellPath } from './login-shell-path.ts'
 const announce = (line: object) => console.log(JSON.stringify(line))
 
 let stopRereading = () => {}
+// detached の login shell には Backend の死が届かないので、読んでいる間の SIGTERM で止めてから抜ける。
+const reading = new AbortController()
+const exitWhileReading = () => {
+  reading.abort()
+  process.exit(0)
+}
+process.on('SIGTERM', exitWhileReading)
 try {
-  process.env.PATH = await loginShellPath()
+  process.env.PATH = await loginShellPath(process.env, reading.signal)
 } catch (error) {
   console.error(`[backend] keeping the PATH it started with: ${(error as Error).message}`)
   // Job・gh・setup・Tab はどれも spawn のときに process.env を読むので、差し替えた後に起こすものから新しい PATH で起きる。
   stopRereading = rereadLoginShellPath((path) => {
     process.env.PATH = path
   })
+} finally {
+  process.off('SIGTERM', exitWhileReading)
 }
 
 const ptydPath = process.env.MONICA_PTYD_PATH

@@ -572,6 +572,24 @@ test('a Backend stopped while it rereads the login shell PATH kills that shell a
   for (const pid of pids) expect(await untilGone(pid)).toBe(true)
 })
 
+test('a Backend stopped while it first reads the login shell PATH kills that shell and the children holding its output', async () => {
+  const backend = spawnBackend(
+    freePort(),
+    fakeLoginShell(
+      'd=$(dirname "$0"); echo $$ > "$d/shell.pid"; sleep 9 & echo $! > "$d/child.pid"; wait',
+    ),
+  )
+  while (!existsSync(join(backend.home, 'child.pid'))) await Bun.sleep(20)
+  const pids = ['shell.pid', 'child.pid'].map((name) =>
+    Number(readFileSync(join(backend.home, name), 'utf8')),
+  )
+
+  backend.subprocess.kill('SIGTERM')
+  await backend.subprocess.exited
+
+  for (const pid of pids) expect(await untilGone(pid)).toBe(true)
+})
+
 test('the Backend without MONICA_PTYD_PATH exits 1 with one line on stderr and opens no DB', async () => {
   const home = tempHome((cleanup) => cleanups.push(cleanup))
   const {
