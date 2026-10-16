@@ -13,6 +13,7 @@ export async function loginShellPath(
 ): Promise<string> {
   const shell = env.SHELL || userInfo().shell || '/bin/zsh'
   const timeout = AbortSignal.timeout(TIMEOUT_MS)
+  const aborted = signal ? AbortSignal.any([timeout, signal]) : timeout
   const child = Bun.spawn(
     [shell, '-ilc', `printf '%s' '${DELIMITER}'; printf '%s' "$PATH"; printf '%s' '${DELIMITER}'`],
     {
@@ -23,15 +24,21 @@ export async function loginShellPath(
       stdin: 'ignore',
       stdout: 'pipe',
       stderr: 'pipe',
-      signal: signal ? AbortSignal.any([timeout, signal]) : timeout,
+      signal: aborted,
     },
   )
-  const [exitCode, stdout, stderr] = await Promise.all([
-    child.exited,
-    new Response(child.stdout).text(),
-    new Response(child.stderr).text(),
+  // rc が背景に起こした子は shell を kill しても stdout を握り続けるので、出力の EOF は打ち切りと競わせる。
+  const finished = await Promise.race([
+    Promise.all([
+      child.exited,
+      new Response(child.stdout).text(),
+      new Response(child.stderr).text(),
+    ]),
+    untilAborted(aborted),
   ])
   if (timeout.aborted) throw new Error(`${shell} -ilc took over ${TIMEOUT_MS}ms`)
+  if (!finished) throw new Error(`${shell} -ilc was stopped`)
+  const [exitCode, stdout, stderr] = finished
   if (exitCode !== 0) {
     throw new Error(
       `${shell} -ilc exited with ${exitCode}: ${stderr.trim().replaceAll(/\s*\n\s*/g, ' ')}`,
@@ -40,6 +47,13 @@ export async function loginShellPath(
   const path = stdout.split(DELIMITER)[1]
   if (!path) throw new Error(`${shell} -ilc printed no PATH`)
   return path
+}
+
+function untilAborted(signal: AbortSignal): Promise<undefined> {
+  if (signal.aborted) return Promise.resolve(undefined)
+  return new Promise((resolve) =>
+    signal.addEventListener('abort', () => resolve(undefined), { once: true }),
+  )
 }
 
 export function rereadLoginShellPath(apply: (path: string) => void, env: Env = process.env) {

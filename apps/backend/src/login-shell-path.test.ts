@@ -43,10 +43,12 @@ test("fails with the shell's stderr when the login shell fails", async () => {
   )
 })
 
-test('gives up on a login shell that does not finish within 5 seconds', async () => {
-  const { dir, shell } = fakeShell('exec sleep 30')
+test('gives up on a login shell that does not finish within 5 seconds, even while a child it started holds its output', async () => {
+  const { dir, shell } = fakeShell('sleep 9 & wait')
+  const startedAt = performance.now()
 
   await expect(loginShellPath({ SHELL: shell, HOME: dir, PATH: '/usr/bin:/bin' })).rejects.toThrow(
     `${shell} -ilc took over 5000ms`,
   )
+  expect(performance.now() - startedAt).toBeLessThan(7000)
 })
