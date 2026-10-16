@@ -31,6 +31,7 @@ review で差分に当てる規則。どれも判断が要るもので、理由�
 - CLI と webview で動くコードは、cli entry が import する内側のファイルも含めて DB に触らず、procedure を呼ぶ（ADR-0003）。
 - Shell（`apps/desktop/src-tauri`）に置くのは、Tauri プロセスにしか無いもの（窓と webview の event、app の名義、AppKit）に触る処理と、端末の byte だけ。fs と process の spawn で済む処理は Backend の procedure にする（ADR-0001）。
 - Backend で動くコードの `Bun.spawn` には、ふつうは `env: process.env` を渡す。Bench の setup のように、Backend だけの env（`MONICA_*`、Claude Code の env）を子に渡さないときは、workbench の `inheritableEnv()` を渡す。lint の `monica/spawn-env` は `env` の key があるかしか見ないため。
+- Backend が起こして待つ子 process は、打ち切ったとき・Backend が SIGTERM で止まったとき（`exit` を登録する前の起動の途中も含む）のどちらでも、子孫ごと居なくなるようにする（`apps/backend/src/login-shell-path.ts` の `detached` と group の kill）。子孫は出力を握って待ちを終わらせず、`detached` の子には Backend の死が届かないため。
 - Backend の終了（`apps/backend/src/main.ts` の `exit`）は、口と ChatAgent を止めてから `process.exit` まで await を挟まない。await の間に token の口が新しい質問を受けると、止めた後に claude を起こすため。
 - oRPC の client を React の state か jotai の atom に入れるときは、`() => client` の形で渡す（`packages/workbench/src/ui/workbench.tsx` の `setClient`）。client は callable な Proxy なので、そのまま渡すと updater として呼ばれるため。property を読むたびに新しい Proxy が返るので、`client.<domain>` は endpoint ごとに `useMemo` で 1 つにする（`apps/desktop/src/App.tsx`）。
 

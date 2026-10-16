@@ -13,3 +13,17 @@ export function freePort(): number {
     }
   }
 }
+
+/** kill した process は reap されるまで残るので、居なくなるのを 2 秒まで待つ。 */
+export async function untilGone(pid: number) {
+  const deadline = Date.now() + 2000
+  for (;;) {
+    try {
+      process.kill(pid, 0)
+    } catch {
+      return true
+    }
+    if (Date.now() >= deadline) return false
+    await Bun.sleep(20)
+  }
+}

@@ -4,8 +4,9 @@ use std::path::{Path, PathBuf};
 use std::process::{ChildStdin, ChildStdout, Command, Stdio};
 use std::sync::{Arc, Mutex, MutexGuard};
 use std::thread;
-use std::time::Instant;
+use std::time::{Instant, SystemTime, UNIX_EPOCH};
 
+use monica_logfile::DailyLog;
 use serde::Serialize;
 use shared_child::unix::SharedChildExt;
 use shared_child::SharedChild;
@@ -18,6 +19,7 @@ use crate::{locations, notification, orphan, STOP_GRACE};
 
 pub struct Supervisor {
     home: PathBuf,
+    log: Option<Arc<DailyLog>>,
     state: Mutex<State>,
 }
 
@@ -46,8 +48,13 @@ struct Running {
 
 impl Supervisor {
     pub fn new(home: PathBuf) -> Self {
+        let log = DailyLog::open(&home.join("logs"), "backend")
+            .inspect_err(|error| eprintln!("[shell] failed to open the Backend log: {error:#}"))
+            .ok()
+            .map(Arc::new);
         Self {
             home,
+            log,
             state: Mutex::new(State {
                 running: None,
                 endpoint: None,
@@ -143,12 +150,15 @@ impl Supervisor {
         let child = Arc::new(SharedChild::spawn(&mut command(&self.home))?);
         let stdin = child.take_stdin().expect("stdin is piped");
         let stdout = child.take_stdout().expect("stdout is piped");
+        let stderr = child.take_stderr().expect("stderr is piped");
         state.running = Some(Running {
             child: child.clone(),
             _stdin: stdin,
             notifications: UnreadNotifications::default(),
         });
         relay(app.clone(), stdout, child.clone());
+        let log = self.log.clone();
+        thread::spawn(move || write_lines(BufReader::new(stderr), log.as_deref()));
         Ok(Some(child))
     }
 
@@ -205,6 +215,31 @@ fn relay(app: AppHandle, stdout: ChildStdout, child: Arc<SharedChild>) {
     });
 }
 
+/// 行は desktop の stderr にも出し、端末から起こした dev の desktop で今どおり見えるようにする。
+fn write_lines(mut from: impl BufRead, log: Option<&DailyLog>) {
+    let mut bytes = Vec::new();
+    // UTF-8 でない行で読むのをやめると pipe が詰まり、Backend の stderr への書き込みが止まる。
+    while from
+        .read_until(b'\n', &mut bytes)
+        .is_ok_and(|read| read > 0)
+    {
+        let line = String::from_utf8_lossy(&bytes);
+        let line = line.trim_end_matches('\n');
+        eprintln!("{line}");
+        if let Some(log) = log {
+            let at = SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap_or_default();
+            log.append(&format!(
+                "[{}.{:03}] {line}",
+                at.as_secs(),
+                at.subsec_millis()
+            ));
+        }
+        bytes.clear();
+    }
+}
+
 fn show_badge(app: &AppHandle, count: Option<i64>) {
     let Some(window) = app.get_webview_window("main") else {
         return;
@@ -221,7 +256,7 @@ fn command(home: &Path) -> Command {
         .env("MONICA_PTYD_PATH", locations::ptyd())
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
-        .stderr(Stdio::inherit())
+        .stderr(Stdio::piped())
         // 端末の Ctrl-C を Backend が直接受けて backend.json を残したまま死なないよう、Shell の死は stdin の EOF で知らせる。
         .process_group(0);
     if let Some(port) = locations::browser_port() {
@@ -231,4 +266,50 @@ fn command(home: &Path) -> Command {
         command.env("MONICA_CLAUDE_PATH", claude);
     }
     command
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::io::Cursor;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    #[test]
+    fn writes_each_backend_stderr_line_to_the_daily_backend_log_after_the_time() {
+        let dir = std::env::temp_dir().join(format!("monica-backend-log-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let log = DailyLog::open(&dir, "backend").unwrap();
+        let before = SystemTime::now().duration_since(UNIX_EPOCH).unwrap();
+
+        write_lines(
+            Cursor::new(b"[backend] one\n[backend] \xff two\n".to_vec()),
+            Some(&log),
+        );
+
+        let after = SystemTime::now().duration_since(UNIX_EPOCH).unwrap();
+        let files: Vec<_> = std::fs::read_dir(&dir)
+            .unwrap()
+            .map(|entry| entry.unwrap().file_name().into_string().unwrap())
+            .collect();
+        assert_eq!(files.len(), 1);
+        assert!(files[0].starts_with("backend_") && files[0].ends_with(".log"));
+        let text = std::fs::read_to_string(dir.join(&files[0])).unwrap();
+        let lines: Vec<(f64, &str)> = text
+            .lines()
+            .map(|line| {
+                let (at, rest) = line.strip_prefix('[').unwrap().split_once("] ").unwrap();
+                let (secs, millis) = at.split_once('.').unwrap();
+                assert_eq!(millis.len(), 3);
+                (format!("{secs}.{millis}").parse().unwrap(), rest)
+            })
+            .collect();
+        assert_eq!(
+            lines.iter().map(|(_, rest)| *rest).collect::<Vec<_>>(),
+            ["[backend] one", "[backend] \u{fffd} two"],
+        );
+        for (at, _) in lines {
+            assert!(at >= before.as_millis() as f64 / 1000.0 && at <= after.as_secs_f64() + 0.001);
+        }
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
 }

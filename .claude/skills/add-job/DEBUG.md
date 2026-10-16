@@ -7,6 +7,7 @@
 `monica job show <名前>` の最新の行の RESULT を読む。
 
 - `failed`: 0 以外で終わった。ERROR は `exit <code>: <LOG の最後の行>` か `killed by <signal>` になる。LOG を読み、最初に失敗した行を探す。
+  - `exit 127` で `command not found` なら、Backend の PATH を疑う。Backend は起動時に login shell の PATH を読めないと、launchd の最小の PATH で始め、30 秒ごとに読み直す。`~/.monica/logs/backend_<日付>.log` の `[backend] keeping the PATH it started with`・`could not read the login shell's PATH`・`read the login shell's PATH on retry` の行で、Job が走った時刻に読み直せていたかと、読めなかった理由を見る。読めた後なら `monica job run <名前>` で走らせ直す。
 - `timed_out`: `--timeout` を超え、process group ごと kill された。LOG は途中で切れている。最後に出た行の次で止まっている。
 - claude の Job が `succeeded` なのに成果が無い: LOG の result 行を読む。`permission_denials` があれば拒否された tool を `--allowedTools` に足し、`is_error` なら `result` に理由がある。
 - `interrupted`: 途中で Backend が止まった。Job の問題ではないので、`run` で走らせ直す。
