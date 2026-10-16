@@ -24,20 +24,38 @@ export async function loginShellPath(
       stdin: 'ignore',
       stdout: 'pipe',
       stderr: 'pipe',
-      signal: aborted,
+      // 打ち切った shell は、rc が起こした子ごと group で kill する。読み直しのたびに残ると溜まり続けるため。
+      detached: true,
     },
   )
-  // rc が背景に起こした子は shell を kill しても stdout を握り続けるので、出力の EOF は打ち切りと競わせる。
-  const finished = await Promise.race([
-    Promise.all([
-      child.exited,
-      new Response(child.stdout).text(),
-      new Response(child.stderr).text(),
-    ]),
-    untilAborted(aborted),
-  ])
-  if (timeout.aborted) throw new Error(`${shell} -ilc took over ${TIMEOUT_MS}ms`)
-  if (!finished) throw new Error(`${shell} -ilc was stopped`)
+  // Backend の exit は止めた直後に process.exit するので、kill は abort の中で同期に送る。
+  const { promise: killed, resolve: settleKilled } = Promise.withResolvers<undefined>()
+  const kill = () => {
+    killGroup(child.pid)
+    settleKilled(undefined)
+  }
+  if (aborted.aborted) kill()
+  else aborted.addEventListener('abort', kill, { once: true })
+  let finished
+  try {
+    // setsid した子孫は group の kill を逃れて出力を握り続けるので、EOF は kill と競わせる。
+    finished = await Promise.race([
+      Promise.all([
+        child.exited,
+        new Response(child.stdout).text(),
+        new Response(child.stderr).text(),
+      ]),
+      killed,
+    ])
+  } finally {
+    // 終わった shell の pgid は別の process が使い回すので、後から来る timeout で kill しない。
+    aborted.removeEventListener('abort', kill)
+  }
+  if (!finished) {
+    throw new Error(
+      timeout.aborted ? `${shell} -ilc took over ${TIMEOUT_MS}ms` : `${shell} -ilc was stopped`,
+    )
+  }
   const [exitCode, stdout, stderr] = finished
   if (exitCode !== 0) {
     throw new Error(
@@ -49,11 +67,12 @@ export async function loginShellPath(
   return path
 }
 
-function untilAborted(signal: AbortSignal): Promise<undefined> {
-  if (signal.aborted) return Promise.resolve(undefined)
-  return new Promise((resolve) =>
-    signal.addEventListener('abort', () => resolve(undefined), { once: true }),
-  )
+function killGroup(pid: number) {
+  try {
+    process.kill(-pid, 'SIGKILL')
+  } catch {
+    // group はもう居ない。
+  }
 }
 
 export function rereadLoginShellPath(apply: (path: string) => void, env: Env = process.env) {

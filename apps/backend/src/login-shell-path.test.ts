@@ -1,11 +1,12 @@
 import { afterEach, expect, setDefaultTimeout, test } from 'bun:test'
-import { mkdtempSync, realpathSync, rmSync } from 'node:fs'
+import { mkdtempSync, readFileSync, realpathSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
 import { writeFakeExecutable } from '@monica/workbench/testing'
 
 import { loginShellPath } from './login-shell-path.ts'
+import { untilGone } from './testing.ts'
 
 setDefaultTimeout(20_000)
 
@@ -43,12 +44,17 @@ test("fails with the shell's stderr when the login shell fails", async () => {
   )
 })
 
-test('gives up on a login shell that does not finish within 5 seconds, even while a child it started holds its output', async () => {
-  const { dir, shell } = fakeShell('sleep 9 & wait')
+test('gives up on a login shell that does not finish within 5 seconds and kills it with the children holding its output', async () => {
+  const { dir, shell } = fakeShell(
+    'trap "" TERM; d=$(dirname "$0"); echo $$ > "$d/shell"; sleep 9 & echo $! > "$d/child"; wait; wait',
+  )
   const startedAt = performance.now()
 
   await expect(loginShellPath({ SHELL: shell, HOME: dir, PATH: '/usr/bin:/bin' })).rejects.toThrow(
     `${shell} -ilc took over 5000ms`,
   )
   expect(performance.now() - startedAt).toBeLessThan(7000)
+  for (const name of ['shell', 'child']) {
+    expect(await untilGone(Number(readFileSync(join(dir, name), 'utf8')))).toBe(true)
+  }
 })

@@ -14,7 +14,7 @@ import { createORPCClient, ORPCError } from '@orpc/client'
 import { RPCLink } from '@orpc/client/fetch'
 import type { ContractRouterClient } from '@orpc/contract'
 
-import { freePort } from './testing.ts'
+import { freePort, untilGone } from './testing.ts'
 
 // 負荷の下では `bun main.ts` の起動が既定の 5 秒を越えることがある。
 setDefaultTimeout(20_000)
@@ -109,6 +109,7 @@ function spawnBackend(
       MONICA_BROWSER_PORT: String(browserPort),
       // login shell の rc を読む時間を短くする。
       SHELL: '/bin/sh',
+      ...(preload && { MONICA_TEST_TIMEOUTS_LOG: join(home, 'timeouts') }),
       ...envOf(home),
     },
     stdin: 'pipe',
@@ -512,7 +513,6 @@ test('a Backend whose login shell fails at start opens Tabs on the PATH it start
     (home) => ({
       ...brokenLoginShell(home),
       PATH: '/started/with:/usr/bin:/bin',
-      MONICA_TEST_TIMEOUTS_LOG: join(home, 'timeouts'),
     }),
     { preload: rereadSoon },
   )
@@ -539,11 +539,7 @@ test('a Backend whose login shell fails at start opens Tabs on the PATH it start
 })
 
 test('a Backend whose login shell keeps failing keeps answering, with one line and the reason for each failed read', async () => {
-  const backend = await startBackend(
-    freePort(),
-    (home) => ({ ...brokenLoginShell(home), MONICA_TEST_TIMEOUTS_LOG: join(home, 'timeouts') }),
-    { preload: rereadSoon },
-  )
+  const backend = await startBackend(freePort(), brokenLoginShell, { preload: rereadSoon })
   const lines = await backend.untilStderr((sofar) => sofar.filter(isRetryFailure).length >= 3)
 
   expect(lines.filter(isRetryFailure).slice(0, 3)).toEqual([
@@ -552,6 +548,28 @@ test('a Backend whose login shell keeps failing keeps answering, with one line a
     expect.stringContaining('retry 3 '),
   ])
   expect((await fetch(`http://127.0.0.1:${backend.port}/health`)).ok).toBe(true)
+})
+
+test('a Backend stopped while it rereads the login shell PATH kills that shell and the children holding its output', async () => {
+  const backend = await startBackend(
+    freePort(),
+    (home) => {
+      writeFileSync(join(home, 'broken'), '')
+      return fakeLoginShell(
+        'd=$(dirname "$0"); if [ -e "$d/broken" ]; then rm "$d/broken"; exit 1; fi; echo $$ > "$d/shell.pid"; sleep 9 & echo $! > "$d/child.pid"; wait',
+      )(home)
+    },
+    { preload: rereadSoon },
+  )
+  while (!existsSync(join(backend.home, 'child.pid'))) await Bun.sleep(20)
+  const pids = ['shell.pid', 'child.pid'].map((name) =>
+    Number(readFileSync(join(backend.home, name), 'utf8')),
+  )
+
+  backend.subprocess.kill('SIGTERM')
+  await backend.subprocess.exited
+
+  for (const pid of pids) expect(await untilGone(pid)).toBe(true)
 })
 
 test('the Backend without MONICA_PTYD_PATH exits 1 with one line on stderr and opens no DB', async () => {
