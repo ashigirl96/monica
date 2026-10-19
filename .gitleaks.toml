@@ -5,3 +5,10 @@ useDefault = true
 [[allowlists]]
 description = "RSA public keys in SubjectPublicKeyInfo DER base64"
 regexes = ['''^MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEA''']
+
+# patches/ の addon-webgl は minify した xterm の行を丸ごと載せ、その中の `TwoKeyMap=void` が generic-api-key に誤って当たる。
+[[allowlists]]
+description = "xterm's minified TwoKeyMap export in patches"
+paths = ['''^patches/@xterm%2Faddon-webgl@''']
+regexes = ['''TwoKeyMap=void$''']
+condition = "AND"
