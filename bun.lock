@@ -258,6 +258,9 @@
       },
     },
   },
+  "patchedDependencies": {
+    "@xterm/addon-webgl@0.20.0-beta.300": "patches/@xterm%2Faddon-webgl@0.20.0-beta.300.patch",
+  },
   "catalog": {
     "@anthropic-ai/claude-agent-sdk": "0.3.293",
     "@base-ui/react": "^1.4.1",
