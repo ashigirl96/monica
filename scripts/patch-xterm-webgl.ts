@@ -1,7 +1,6 @@
 import { readFileSync, writeFileSync } from 'node:fs'
 
-// addon-webgl は minify した lib しか配らないので、版を上げたら `bun patch @xterm/addon-webgl` の後にこれを流し、
-// 合わなくなった置き換えを新しい変数名に直してから `bun patch --commit node_modules/@xterm/addon-webgl` する。
+// addon-webgl は minify した lib しか配らないので、版を上げたら置き換えを新しい変数名に直し、`bun patch` の中で流し直す。
 const dir = process.argv[2] ?? 'node_modules/@xterm/addon-webgl/lib'
 
 const helpers = `

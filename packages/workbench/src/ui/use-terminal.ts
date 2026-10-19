@@ -179,8 +179,7 @@ export function useTerminal(
       fontFamily: "'JetBrains Mono Variable', monospace",
       fontSize: store.get(terminalFontSizeAtom),
       lineHeight: 1.0,
-      // ①のような East Asian Ambiguous の文字は 1 cell に置かれるが、fallback の和文 font が全角で描くので、縮めて隣と重ねない。
-      // 縮め方は patches/ の addon-webgl で ghostty に揃え、縦横比を保ち、次の cell が空なら 2 cell の枠に置く。
+      // ①のような East Asian Ambiguous の文字は 1 cell に置かれるが、fallback の和文 font が全角で描くので、縮めて隣と重ねない（縮め方は patches/ の addon-webgl）。
       rescaleOverlappingGlyphs: true,
       cursorBlink: true,
       cursorStyle: 'bar',
