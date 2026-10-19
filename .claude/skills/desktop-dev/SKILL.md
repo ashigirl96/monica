@@ -29,6 +29,8 @@ dev の desktop は `MONICA_HOME` ごとに identifier と vite の port が分�
 
 起こした後の編集は、起こし直さずに届く。webview は vite の HMR で届き、package の `ui` も source のまま読む。Backend は、packages と apps/backend の編集と `bun run generate` で `bun --watch` が同じ pid のまま起こし直し、webview が繋ぎ直す。端末は切れない。
 
+`node_modules` の中身（`bun patch` や依存の入れ直し）を変えたときだけは、`node_modules/.vite` を消して desktop を起こし直す。vite は依存を起動時に束ねて `.vite/deps` から配り、HMR でも reload でも読み直さない。webview に届いたかは、`performance.getEntriesByType('resource')` の `.vite/deps/<依存>.js` を `fetch` して中身を見る。
+
 - **書き込み**は、Terminal Session に直接送る。id は `MONICA_HOME=… bun run monica workbench terminal-session list --format json` の `tabId` から引く。
 
   ```js
@@ -109,7 +111,7 @@ dev の desktop は `MONICA_HOME` ごとに identifier と vite の port が分�
 - **starting の Tab**（Create の応答を待つ Terminal Session）は、`bun run dev:list` の PTYD の pid に `kill -STOP` を送ってから Tab を開いて作り、`kill -CONT` で進める。Backend の接続は切れないので、行は starting のまま留まる。Shell の command は webview から横取りできない（`__TAURI_INTERNALS__.invoke` は書き換えられない property）ので、attach したかは画面の文字で見る。
 - **一瞬だけ出る表示**（Exit で閉じる Tab の overlay など）は、webview の中で `requestAnimationFrame` ごとに DOM を見て、変わった時刻だけを配列に残す。操作も同じ script の中で起こし、frame の時刻とずれないようにする。
 - **長い script**: `webview_execute_js` は約 5 秒で timeout し、`timeout` を大きく渡しても延びない。async の処理は裏で走り続ける。数秒を超えるものは await せずに走らせ、結果は `window.__…` に貯めて、後の呼び出しで読む。timeout した後に同じ script を走らせると、2 本が重なる。
-- **窓の枠**: `webview_screenshot` には信号機も vibrancy も写らない。自分の desktop の pid が持つ窓の CGWindowID を取って `screencapture` で撮る。
+- **窓の枠と端末の字形**: `webview_screenshot` には信号機も vibrancy も、WebGL で描く端末の文字も写らない。自分の desktop の pid が持つ窓の CGWindowID を取って `screencapture` で撮る。背面の窓は描き直されず古い絵が写るので、撮る前に `manage_window` の `focus` で前に出す。
 
   ```bash
   cat > $SCRATCH/winid.swift <<'EOF'
