@@ -17,6 +17,8 @@ const test = Bun.spawn(
     'test',
     '--pass-with-no-tests',
     '--parallel=8',
+    // mods/ の test は claude-code/testing を import し、`claude plugin test` でしか走らない。
+    '--path-ignore-patterns=mods/**',
     `--timings=${timings}`,
     `--preload=${join(import.meta.dir, 'test-progress.ts')}`,
     ...process.argv.slice(2),

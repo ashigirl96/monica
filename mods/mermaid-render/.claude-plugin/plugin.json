@@ -1,0 +1,6 @@
+{
+  "name": "mermaid-render",
+  "version": "0.1.0",
+  "description": "Draws ```mermaid blocks in replies as box-drawing diagrams in the terminal",
+  "types": "./types/index.d.ts"
+}

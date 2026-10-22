@@ -6,5 +6,7 @@ apps/desktop/src-tauri/gen/
 .claude/settings.local.json
 CLAUDE.local.md
 .DS_Store
+# Claude Code が mod を読み込むときに書く。型は mod の .claude-plugin/types/ に置かれ、その中の .gitignore が自分で外す。
+mods/*/tsconfig.json
 
 .claude/worktrees/

@@ -13,10 +13,14 @@ monica/
 ├── scripts/
 ├── apps/               @monica/<dir>。backend・cli（bin は monica）・desktop（src/ が webview、src-tauri/ が Shell）・extension・web
 ├── packages/           @monica/<dir>。domain の workbench・task・job・note・chat・usage と、domain を持たない ui
+├── mods/               @monica/mod-<dir>。Claude Code の mod（hooks module を持つ plugin）が 1 folder に 1 つ
 └── crates/             Rust の crate。crate 名は monica-<dir>
 ```
 
 - apps は packages を組み立てるだけでロジックを持たない（ADR-0002）。apps どうしは互いを import しない。
+- mods は、user の `~/.claude/settings.json` の `env` の `CLAUDE_CODE_PLUGIN_DIRS` に main の checkout の `mods/<dir>` を書き、全 session に読み込ませる。hook がどの session にも掛かるので、hook を持たない plugin `monica`（ADR-0006）とは分ける。
+- mods は apps と packages を import せず、apps と packages からも import されない。mod が子 process で動かす script の依存は、mod の `package.json` に catalog で書く。
+- mod の test は `claude-code/testing` を import するので、`bun run check` の `bun test` からは外し、`claude plugin test mods/<dir>` で走らせる。
 - `packages/ui` には、domain の語を持たない部品と、CLI の整形が使う `@monica/ui/table`・`@monica/ui/local-time` を置く。cli entry は apps/cli だけが import するので、domain の cli entry どうしでは共有できないため。domain の UI は各 domain の `ui` entry に置く。
 
 ### ドメイン package の中

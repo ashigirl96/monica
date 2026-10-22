@@ -27,6 +27,7 @@
     "packages/*/src",
     "packages/*/migrations",
     "packages/*/drizzle.config.ts",
+    "mods/*/render",
     "scripts"
   ]
 }

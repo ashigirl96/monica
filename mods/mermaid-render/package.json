@@ -1,0 +1,8 @@
+{
+  "name": "@monica/mod-mermaid-render",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "beautiful-mermaid": "catalog:"
+  }
+}
