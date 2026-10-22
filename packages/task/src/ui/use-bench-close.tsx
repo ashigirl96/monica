@@ -57,6 +57,8 @@ function EmptyBench({ deps, bench }: { deps: BenchCloseDeps; bench: BenchItem })
       )}
       <button
         type="button"
+        // WebKit は mouse で button に focus を移さず、押す前の focus を外すので、2 度目の press の前に blur で取り消されないよう止める。
+        onMouseDown={(event) => event.preventDefault()}
         onClick={(event) => {
           // WebKit は押した button に focus を移さないので、blur で取り消せるよう自分で移す。
           event.currentTarget.focus()
