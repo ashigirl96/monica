@@ -19,6 +19,33 @@ export const LayoutSchema = z.object({
 
 export const AgentSessionSchema = createSelectSchema(agentSession)
 
+export const ProcessInfoSchema = z.object({
+  pid: z.number().int(),
+  ppid: z.number().int(),
+  pgid: z.number().int(),
+  state: z.string().describe("ps's STAT, such as Ss or SN"),
+  command: z.string(),
+  terminalSessionProcess: z
+    .boolean()
+    .describe('in the session of the shell, so the end of the Terminal Session stops it'),
+})
+
+export const ShownTabSchema = z.object({
+  tab: TabSchema,
+  terminalSession: createSelectSchema(terminalSession),
+  processes: z
+    .array(ProcessInfoSchema)
+    .nullable()
+    .describe(
+      "the Terminal Session Processes and the shell's descendants that left its session, or null when monica-ptyd could not list them",
+    ),
+})
+
+export const ShownRunspaceSchema = z.object({
+  runspace: createSelectSchema(runspace),
+  tabs: z.array(ShownTabSchema).describe('in the order of the Tabs of the Runspace'),
+})
+
 export const ListedAgentSessionSchema = AgentSessionSchema.extend({
   unread: z.boolean().describe('a notified wait no one has seen in its Tab yet'),
 })
@@ -45,9 +72,23 @@ export type TerminalSession = z.infer<typeof TerminalSessionSchema>
 export type Tab = z.infer<typeof TabSchema>
 export type Layout = z.infer<typeof LayoutSchema>
 export type AgentSession = z.infer<typeof AgentSessionSchema>
+export type ShownTab = z.infer<typeof ShownTabSchema>
+export type ShownRunspace = z.infer<typeof ShownRunspaceSchema>
 export type ListedAgentSession = z.infer<typeof ListedAgentSessionSchema>
 export type WorkbenchChange = z.infer<typeof WorkbenchChangeSchema>
 export type RepoPlace = z.infer<typeof RepoPlaceSchema>
+
+// id を省くと、CLI が env から埋める terminalSessionId の Tab を指す。
+const callerOr = (what: string) => ({
+  id: z
+    .string()
+    .meta({
+      positional: true,
+      description: `the id of the ${what}; the one this runs in if left out`,
+    })
+    .optional(),
+  terminalSessionId: z.string().optional(),
+})
 
 const size = { rows: z.number().int().positive(), cols: z.number().int().positive() }
 const index = z.number().int().nonnegative()
@@ -71,9 +112,14 @@ export const contract = {
     remove: meta
       .meta({
         description: 'Remove a Runspace with its Tabs and terminate their Terminal Sessions',
+        cli: true,
       })
-      .input(z.object({ id: z.string() }))
-      .output(z.void()),
+      .input(z.object(callerOr('Runspace')))
+      .output(z.object({ runspaceId: z.string() })),
+    show: meta
+      .meta({ description: 'Show a Runspace with each of its Tabs as tab show does', cli: true })
+      .input(z.object(callerOr('Runspace')))
+      .output(ShownRunspaceSchema),
     move: meta
       .meta({ description: 'Move a Runspace to a position in the sidebar' })
       .input(z.object({ id: z.string(), index }))
@@ -98,16 +144,21 @@ export const contract = {
       .input(z.object({ id: z.string(), ...size }))
       .output(TabSchema),
     close: meta
-      .meta({ description: 'Close a Tab and terminate its Terminal Session' })
-      .input(z.object({ id: z.string() }))
+      .meta({ description: 'Close a Tab and terminate its Terminal Session', cli: true })
+      .input(z.object(callerOr('Tab')))
       .output(
         z.object({
+          tabId: z.string(),
           emptiedRunspaceId: z
             .string()
             .nullable()
             .describe('the owned Runspace this close left with no Tabs, or null'),
         }),
       ),
+    show: meta
+      .meta({ description: 'Show a Tab with its Terminal Session and processes', cli: true })
+      .input(z.object(callerOr('Tab')))
+      .output(ShownTabSchema),
     move: meta
       .meta({ description: 'Move a Tab to a position in a Runspace' })
       .input(z.object({ id: z.string(), runspaceId: z.string(), index }))

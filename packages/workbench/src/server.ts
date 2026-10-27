@@ -4,11 +4,13 @@ import { implement } from '@orpc/server'
 import { eq, getTableColumns, inArray, isNotNull, or } from 'drizzle-orm'
 
 import { listAgentSessions } from './agent-session.ts'
+import { idOrCaller } from './caller.ts'
 import { contract } from './contract.ts'
 import { openInEditor, resolveEditorPaths } from './editor.ts'
 import { asTab, readLayout } from './layout.ts'
 import { repoOf } from './repo.ts'
 import { tab, terminalSession } from './schema.ts'
+import { showRunspace, showTab } from './tab-show.ts'
 import { LIVE } from './terminal-session-status.ts'
 import { agentSessionsOf, layoutWritesOf, type WorkbenchContext } from './workbench.ts'
 
@@ -47,8 +49,16 @@ export const router = os.router({
       )
       return { runspaceId: opened.runspaceId, tab: asTab(opened) }
     }),
-    remove: os.runspace.remove.handler(({ context: { db, workbenchLedger }, input }) => {
-      db.transaction((tx) => layoutWritesOf(workbenchLedger).removeRunspace(tx, input.id))
+    remove: os.runspace.remove.handler(({ context: { db, workbenchLedger }, input }) =>
+      db.transaction((tx) => {
+        const runspaceId = idOrCaller(tx, input, 'Runspace')
+        layoutWritesOf(workbenchLedger).removeRunspace(tx, runspaceId)
+        return { runspaceId }
+      }),
+    ),
+    show: os.runspace.show.handler(({ context: { db, workbenchLedger }, input }) => {
+      const runspaceId = db.transaction((tx) => idOrCaller(tx, input, 'Runspace'))
+      return showRunspace(db, workbenchLedger, runspaceId)
     }),
     move: os.runspace.move.handler(({ context: { db, workbenchLedger }, input }) => {
       db.transaction((tx) => layoutWritesOf(workbenchLedger).moveRunspace(tx, input))
@@ -75,8 +85,15 @@ export const router = os.router({
       )
     }),
     close: os.tab.close.handler(({ context: { db, workbenchLedger }, input }) =>
-      db.transaction((tx) => layoutWritesOf(workbenchLedger).closeTab(tx, input.id)),
+      db.transaction((tx) => {
+        const tabId = idOrCaller(tx, input, 'Tab')
+        return { tabId, ...layoutWritesOf(workbenchLedger).closeTab(tx, tabId) }
+      }),
     ),
+    show: os.tab.show.handler(({ context: { db, workbenchLedger }, input }) => {
+      const tabId = db.transaction((tx) => idOrCaller(tx, input, 'Tab'))
+      return showTab(db, workbenchLedger, tabId)
+    }),
     move: os.tab.move.handler(({ context: { db, workbenchLedger }, input }) => {
       db.transaction((tx) => layoutWritesOf(workbenchLedger).moveTab(tx, input))
     }),

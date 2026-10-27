@@ -6,20 +6,47 @@ use anyhow::{bail, Context};
 use portable_pty::{native_pty_system, CommandBuilder};
 
 use crate::session::PtySession;
+use monica_terminal_protocol::ProcessInfo;
+
+use crate::session_processes::{end_terminal_session_processes, session_processes};
 use crate::types::{PtySize, SpawnRequest};
 
 const READ_BUF_SIZE: usize = 16384;
 const BATCH_QUEUE_CAP: usize = 32;
 const EXIT_DRAIN_TIMEOUT: std::time::Duration = std::time::Duration::from_millis(500);
 
+/// A session's shell, kept from its spawn until the cleanup after its exit is over.
+#[derive(Clone, Copy)]
+struct Shell {
+    pid: libc::pid_t,
+    running: bool,
+}
+
+type Shells = Arc<Mutex<HashMap<String, Shell>>>;
+
 pub struct PtyManager {
     sessions: Arc<Mutex<HashMap<String, PtySession>>>,
+    shells: Shells,
 }
 
 impl PtyManager {
     pub fn new() -> Self {
         Self {
             sessions: Arc::new(Mutex::new(HashMap::new())),
+            shells: Arc::new(Mutex::new(HashMap::new())),
+        }
+    }
+
+    pub fn processes(&self, id: &str) -> anyhow::Result<Vec<ProcessInfo>> {
+        let shell = self
+            .shells
+            .lock()
+            .map_err(|e| anyhow::anyhow!("{e}"))?
+            .get(id)
+            .copied();
+        match shell {
+            Some(Shell { pid, running }) => session_processes(pid, running),
+            None => Ok(Vec::new()),
         }
     }
 
@@ -96,6 +123,19 @@ impl PtyManager {
         let id_for_reader = req.id.clone();
         let id_for_exit = req.id.clone();
         let sessions_for_exit = Arc::clone(&self.sessions);
+        let shells_for_exit = Arc::clone(&self.shells);
+        // Before the wait thread starts, so a shell that exits at once still leaves its entry.
+        if let Some(shell) = pid {
+            if let Ok(mut shells) = self.shells.lock() {
+                shells.insert(
+                    req.id.clone(),
+                    Shell {
+                        pid: shell as libc::pid_t,
+                        running: true,
+                    },
+                );
+            }
+        }
 
         let (tx, rx) = mpsc::sync_channel::<Vec<u8>>(BATCH_QUEUE_CAP);
 
@@ -129,6 +169,14 @@ impl PtyManager {
             .name(format!("pty-wait-{}", &id_for_exit))
             .spawn(move || {
                 let exit_code = wait_for_child(child);
+                if let Some(shell) = shells_for_exit
+                    .lock()
+                    .ok()
+                    .as_mut()
+                    .and_then(|shells| shells.get_mut(&id_for_exit))
+                {
+                    shell.running = false;
+                }
                 // The final output burst may still be in the reader→emitter pipeline when
                 // wait() returns; report the exit only once it has drained so the sink
                 // (e.g. a transcript) doesn't lose the process's last words. Bounded, not
@@ -142,7 +190,19 @@ impl PtyManager {
                         sessions.remove(&id_for_exit);
                     }
                 }
-                exit_sink(id_for_exit, exit_code);
+                exit_sink(id_for_exit.clone(), exit_code);
+                if let Some(shell) = pid {
+                    end_terminal_session_processes(shell as libc::pid_t);
+                }
+                if let Ok(mut shells) = shells_for_exit.lock() {
+                    // A reaped id may already name a newer session with its own shell.
+                    if shells
+                        .get(&id_for_exit)
+                        .is_some_and(|shell| pid == Some(shell.pid as u32))
+                    {
+                        shells.remove(&id_for_exit);
+                    }
+                }
             });
         if let Err(e) = wait_handle {
             cleanup(&mut *killer);

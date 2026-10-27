@@ -16,6 +16,15 @@ export type SessionInfo = {
   cols: number
 }
 
+export type ProcessInfo = {
+  pid: number
+  ppid: number
+  pgid: number
+  state: string
+  command: string
+  terminal_session_process: boolean
+}
+
 export type RequestOp =
   | { op: 'hello'; version: number }
   | {
@@ -31,6 +40,7 @@ export type RequestOp =
   | { op: 'terminate'; session_id: string }
   | { op: 'list' }
   | { op: 'reap'; session_id: string }
+  | { op: 'processes'; session_id: string }
   | { op: 'shutdown' }
 
 export type ResponseBody =
@@ -38,6 +48,7 @@ export type ResponseBody =
   | { body: 'hello'; version: number }
   | { body: 'created'; pid: number | null }
   | { body: 'sessions'; sessions: SessionInfo[] }
+  | { body: 'processes'; processes: ProcessInfo[] }
 
 export type ServerMessage =
   | ({ type: 'ok'; id: number } & ResponseBody)
@@ -50,13 +61,15 @@ export type PtydHandlers = {
   onClose: () => void
 }
 
-// 接続が切れた要求は ptyd が受け取ったかが分からないので、断られたのと分けて返す。
+// 接続が切れたか応答の無い要求は ptyd が受け取ったかが分からないので、断られたのと分けて返す。
 export type Outcome<T> =
   | { kind: 'done'; value: T }
   | { kind: 'refused'; error: string }
   | { kind: 'unknown' }
 
-class Disconnected extends Error {}
+class Unanswered extends Error {}
+
+const PROCESSES_TIMEOUT_MS = 2000
 
 export class PtydClient {
   private socket: Socket
@@ -129,6 +142,19 @@ export class PtydClient {
     return this.outcome({ op: 'terminate', session_id: sessionId }, () => {})
   }
 
+  // この op を持たない古い ptyd は応答しないので、待ちを区切る。
+  processes(sessionId: string): Promise<Outcome<ProcessInfo[]>> {
+    return this.outcome(
+      { op: 'processes', session_id: sessionId },
+      (body) => {
+        if (body.body !== 'processes')
+          throw new Error(`unexpected processes response: ${body.body}`)
+        return body.processes
+      },
+      PROCESSES_TIMEOUT_MS,
+    )
+  }
+
   reap(sessionId: string) {
     this.notify({ op: 'reap', session_id: sessionId })
   }
@@ -137,20 +163,30 @@ export class PtydClient {
     this.notify({ op: 'shutdown' })
   }
 
-  private async outcome<T>(op: RequestOp, read: (body: ResponseBody) => T): Promise<Outcome<T>> {
+  private async outcome<T>(
+    op: RequestOp,
+    read: (body: ResponseBody) => T,
+    timeoutMs?: number,
+  ): Promise<Outcome<T>> {
     try {
-      return { kind: 'done', value: read(await this.request(op)) }
+      return { kind: 'done', value: read(await this.request(op, timeoutMs)) }
     } catch (error) {
-      if (error instanceof Disconnected) return { kind: 'unknown' }
+      if (error instanceof Unanswered) return { kind: 'unknown' }
       return { kind: 'refused', error: error instanceof Error ? error.message : String(error) }
     }
   }
 
-  private request(op: RequestOp): Promise<ResponseBody> {
-    if (this.closed) return Promise.reject(new Disconnected('monica-ptyd connection closed'))
+  private request(op: RequestOp, timeoutMs?: number): Promise<ResponseBody> {
+    if (this.closed) return Promise.reject(new Unanswered('monica-ptyd connection closed'))
     const id = this.nextId++
     return new Promise((resolve, reject) => {
       this.pending.set(id, { resolve, reject })
+      if (timeoutMs !== undefined) {
+        setTimeout(() => {
+          this.pending.delete(id)
+          reject(new Unanswered(`monica-ptyd did not answer ${op.op} in ${timeoutMs}ms`))
+        }, timeoutMs)
+      }
       // op に紛れた id が要求の id を上書きすると応答が待ち手に届かないので、id を最後に置く。
       this.send({ ...op, id })
     })
@@ -224,7 +260,7 @@ export class PtydClient {
   private shutdown(reason: string) {
     if (this.closed) return
     this.closed = true
-    const error = new Disconnected(reason)
+    const error = new Unanswered(reason)
     for (const waiter of this.pending.values()) waiter.reject(error)
     this.pending.clear()
     this.handlers.onClose()

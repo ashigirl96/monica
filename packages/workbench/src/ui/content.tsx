@@ -4,7 +4,7 @@ import { type ReactNode, useCallback, useRef } from 'react'
 import { baseName } from '../paths.ts'
 import { layoutAtom } from './backend-copy.ts'
 import { useImageDrop } from './image-drop.ts'
-import { jumpModeActiveAtom, pendingCloseTabIdAtom } from './keys.ts'
+import { jumpModeActiveAtom, pendingCloseTabIdAtom, pendingRemoveRunspaceIdAtom } from './keys.ts'
 import { activeRunspaceAtom, activeTerminalTabAtom } from './navigation.ts'
 import {
   closeTerminalTabAtom,
@@ -106,10 +106,12 @@ function EmptyRunspaceOverlay({
   )
 }
 
-// 2 度目の d を待つ間は d 以外のキーが取り消しになり、一覧のキーは効かないので出さない。
+// 2 度目の d・D を待つ間はそのキー以外が取り消しになり、一覧のキーは効かないので出さない。
 function JumpOverlay() {
   const active = useAtomValue(jumpModeActiveAtom)
-  const closing = useAtomValue(pendingCloseTabIdAtom) !== null
+  const pendingTab = useAtomValue(pendingCloseTabIdAtom)
+  const pendingRunspace = useAtomValue(pendingRemoveRunspaceIdAtom)
+  const closing = pendingTab !== null || pendingRunspace !== null
   if (!active) return null
 
   return (
@@ -123,6 +125,8 @@ function JumpOverlay() {
           <span className="font-bold text-amber-300">c</span> new tab
           <span className="mx-2 text-foreground/30">·</span>
           <span className="font-bold text-amber-300">d</span> close tab
+          <span className="mx-2 text-foreground/30">·</span>
+          <span className="font-bold text-amber-300">D</span> remove runspace
           <span className="mx-2 text-foreground/30">·</span>
           esc
         </div>

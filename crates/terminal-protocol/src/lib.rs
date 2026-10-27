@@ -134,6 +134,10 @@ pub enum RequestOp {
     Reap {
         session_id: String,
     },
+    /// The processes of a session; empty once its shell has exited and the cleanup is over.
+    Processes {
+        session_id: String,
+    },
     Shutdown,
 }
 
@@ -189,6 +193,23 @@ pub enum ResponseBody {
     Sessions {
         sessions: Vec<SessionInfo>,
     },
+    Processes {
+        processes: Vec<ProcessInfo>,
+    },
+}
+
+/// A Terminal Session Process (ADR-0040), or a descendant of the live shell that left its
+/// session, such as a command claude's Bash tool runs in the background.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ProcessInfo {
+    pub pid: u32,
+    pub ppid: u32,
+    pub pgid: u32,
+    /// `ps`'s STAT, such as `Ss` or `SN`.
+    pub state: String,
+    pub command: String,
+    /// True when the end of the Terminal Session stops it.
+    pub terminal_session_process: bool,
 }
 
 /// One session as the daemon sees it: live (`running: true`) or an exited tombstone

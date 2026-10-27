@@ -108,6 +108,9 @@ fn dispatch(table: &Arc<SessionTable>, conn_id: u64, request: Request) -> Option
             table.reap(&session_id);
             Ok(ResponseBody::Empty)
         }
+        RequestOp::Processes { session_id } => table
+            .processes(&session_id)
+            .map(|processes| ResponseBody::Processes { processes }),
         RequestOp::Shutdown => Ok(ResponseBody::Empty),
     };
 

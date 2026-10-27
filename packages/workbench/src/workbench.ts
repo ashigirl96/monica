@@ -6,7 +6,7 @@ import { type AgentSessions, createAgentSessions, type NotificationDeps } from '
 import type { WorkbenchChange } from './contract.ts'
 import type { Db, Tx } from './db.ts'
 import { createLayoutWrites, type LayoutWrites } from './layout.ts'
-import { openDaemon, type PtydClient } from './ptyd.ts'
+import { openDaemon, type ProcessInfo, type PtydClient } from './ptyd.ts'
 import { writeTabFiles } from './tab-env.ts'
 import { createTerminalSessions, type Size } from './terminal-session.ts'
 import { followUnread, type Unread } from './unread.ts'
@@ -31,6 +31,8 @@ export type WorkbenchLedger = {
 type Internals = {
   layoutWrites: LayoutWrites
   agentSessions: AgentSessions
+  /** null のとき、ptyd に届かず一覧を取れなかった。 */
+  processes: (terminalSessionId: string) => Promise<ProcessInfo[] | null>
 }
 
 // WorkbenchLedger の型は他の domain が呼ぶものだけに保ち、ptyd の接続などの中身は WorkbenchLedger を key にここへ置く。
@@ -48,6 +50,10 @@ export function layoutWritesOf(workbenchLedger: WorkbenchLedger): LayoutWrites {
 
 export function agentSessionsOf(workbenchLedger: WorkbenchLedger): AgentSessions {
   return internals(workbenchLedger).agentSessions
+}
+
+export function processesOf(workbenchLedger: WorkbenchLedger): Internals['processes'] {
+  return internals(workbenchLedger).processes
 }
 
 export function createWorkbenchLedger(
@@ -170,6 +176,11 @@ export function createWorkbenchLedger(
     moveTab: (tx, tabId, runspaceId) => layoutWrites.moveTab(tx, { id: tabId, runspaceId }),
     removeRunspace: (tx, id, options) => layoutWrites.removeOwnedRunspace(tx, id, options),
   }
-  internalsOf.set(workbenchLedger, { layoutWrites, agentSessions })
+  // 繋ぎ直しを待たない。ptyd が居ないと ready() は解決しないため。
+  async function processes(terminalSessionId: string) {
+    const outcome = await client?.processes(terminalSessionId)
+    return outcome?.kind === 'done' ? outcome.value : null
+  }
+  internalsOf.set(workbenchLedger, { layoutWrites, agentSessions, processes })
   return workbenchLedger
 }

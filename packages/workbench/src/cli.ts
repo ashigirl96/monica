@@ -1,7 +1,13 @@
 import { table } from '@monica/ui/table'
 import type { ContractRouterClient } from '@orpc/contract'
 
-import type { AgentSession, contract, TerminalSession } from './contract.ts'
+import type {
+  AgentSession,
+  contract,
+  ShownRunspace,
+  ShownTab,
+  TerminalSession,
+} from './contract.ts'
 
 type Connect = (options: {
   retry: boolean
@@ -52,6 +58,20 @@ function approvePlan(toolInput: unknown) {
 }
 
 export const formatters = {
+  runspace: {
+    remove({ runspaceId }: { runspaceId: string }): string {
+      return `removed Runspace ${runspaceId} with its Tabs`
+    },
+    show({ runspace, tabs }: ShownRunspace): string {
+      return [`Runspace ${runspace.id} at ${runspace.cwd}`, ...tabs.map(shownTab)].join('\n\n')
+    },
+  },
+  tab: {
+    close({ tabId }: { tabId: string }): string {
+      return `closed Tab ${tabId}`
+    },
+    show: shownTab,
+  },
   terminalSession: {
     list(sessions: TerminalSession[]): string {
       if (sessions.length === 0) return 'No live Terminal Sessions'
@@ -70,6 +90,24 @@ export const formatters = {
       ])
     },
   },
+}
+
+export function shownTab({ tab, terminalSession, processes }: ShownTab): string {
+  const shell = terminalSession.pid
+  const head = `Tab ${tab.id} on Terminal Session ${terminalSession.id}: ${terminalSession.status}, shell pid ${shell ?? '-'}`
+  if (processes === null) return `${head}\ncould not list the processes from monica-ptyd`
+  if (processes.length === 0) return `${head}\nNo processes`
+  return `${head}\n${table([
+    ['PID', 'PPID', 'PGID', 'STAT', 'MARK', 'COMMAND'],
+    ...processes.map((p) => [
+      String(p.pid),
+      String(p.ppid),
+      String(p.pgid),
+      p.state,
+      p.pid === shell ? 'shell' : p.terminalSessionProcess ? '' : 'stays',
+      p.command,
+    ]),
+  ])}`
 }
 
 function stateOf(session: AgentSession): string {

@@ -4,7 +4,13 @@ import { join } from 'node:path'
 
 import type { Socket } from 'bun'
 
-import { PROTOCOL_VERSION, type RequestOp, type ServerMessage, type SessionInfo } from './ptyd.ts'
+import {
+  type ProcessInfo,
+  PROTOCOL_VERSION,
+  type RequestOp,
+  type ServerMessage,
+  type SessionInfo,
+} from './ptyd.ts'
 
 export { writeFakeExecutable } from './fake-executable.ts'
 
@@ -63,6 +69,7 @@ export function startFakePtyd(home: string) {
 
   const fake = {
     sessions,
+    processes: new Map<string, ProcessInfo[]>(),
     beforeList: (): ServerMessage[] => [],
     dropNextList: false,
     dropNextTerminate: false,
@@ -191,6 +198,10 @@ export function startFakePtyd(home: string) {
           return socket.end()
         }
         return send(socket, { type: 'ok', id, body: 'created', pid })
+      }
+      case 'processes': {
+        const processes = fake.processes.get(op.session_id) ?? []
+        return send(socket, { type: 'ok', id, body: 'processes', processes })
       }
       default:
         return send(socket, { type: 'ok', id, body: 'empty' })
