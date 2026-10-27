@@ -46,7 +46,7 @@ Run を起こすために claude の Tab を開いてから、その Tab の Age
 _Avoid_: launch（単独で使わない）, 起動中の Run（まだ Run ではない）
 
 **Bench**:
-Task が 1 つ所有する Runspace。最初に開いた時か、Bench の無い Task に Attach した時に作られ、cwd（worktree か Repo の checkout か）はその後変えない。Workbench で最後の Tab を閉じると Task を close する。close の guard で止まったときと、Tab を外へ移したときは、Tab が無くても残る。guard で止まった Bench は、Workbench で止めた理由と、2 度押して強制で close する「Close anyway」を出す。止めた理由の無い Tab の無い Bench は、1 度押して強制でない close をやり直す「Close」を出す。Task を close すると壊れ（close を呼んだ Tab と、強制でない close の間にその Task の Run になった Tab だけは普通の Runspace に残る）、reopen すると作り直す。Workbench（画面）とは別物。
+Task が 1 つ所有する Runspace。最初に開いた時か、Bench の無い Task に Attach した時に作られ、cwd（worktree か Repo の checkout か）はその後変えない。Workbench で最後の Tab を閉じるか、Jump Mode で Tab ごと消すと Task を close する。close の guard で止まったときと、Tab を外へ移したときは、Tab が無くても残る。guard で止まった Bench は、Workbench で止めた理由と、2 度押して強制で close する「Close anyway」を出す。止めた理由の無い Tab の無い Bench は、1 度押して強制でない close をやり直す「Close」を出す。Task を close すると壊れ（close を呼んだ Tab と、強制でない close の間にその Task の Run になった Tab だけは普通の Runspace に残る）、reopen すると作り直す。Workbench（画面）とは別物。
 _Avoid_: task runspace, bench runspace
 
 **Attach**:
@@ -83,7 +83,7 @@ Workbench Ledger のうち、Runspace の並び、各 Runspace の Tab の並び
 _Avoid_: 配置, 並び（単独で使わない）, arrangement
 
 **Jump Mode**:
-Workbench で、sidebar に見えている Runspace と、active な Runspace の Tab に番号を出し、番号で選ぶ間の状態。この間は Tab を閉じる・新しく開く・並べ替えることと、active な Runspace を Tab ごと消すこともできる。Bench と、pin された Tab のある Runspace は消さない。選ぶか、表示する Tab が替わるか、Workbench をクリックするか、取り消すと抜ける。live な Agent Session がいる Tab を閉じるときと、そうした Tab を含む Runspace を消すときは、同じ操作をもう一度求める。
+Workbench で、sidebar に見えている Runspace と、active な Runspace の Tab に番号を出し、番号で選ぶ間の状態。この間は Tab を閉じる・新しく開く・並べ替えることと、active な Runspace を Tab ごと消すこともできる。Bench を消すときは、Tab をすべて閉じてから強制でない Task の close を呼ぶ。pin された Tab のある Runspace は消さない。閉じる・消す操作は、live な Agent Session がいても 1 度で行う。選ぶか、表示する Tab が替わるか、Workbench をクリックするか、取り消すと抜ける。
 _Avoid_: jump hint モード, ジャンプ, hint mode
 
 **Terminal Session**:
