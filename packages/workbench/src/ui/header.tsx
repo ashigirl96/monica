@@ -7,7 +7,7 @@ import { AgentDotMark } from './agent-dot-mark.tsx'
 import { UNREAD_LABEL_STYLE } from './agent-dot.ts'
 import { agentDotOfTerminalSessionAtom, unreadOfTerminalSessionAtom } from './backend-copy.ts'
 import { JumpHint } from './jump-hint.tsx'
-import { jumpHintTargetsAtom, pendingCloseTabIdAtom, pendingRemoveRunspaceIdAtom } from './keys.ts'
+import { jumpHintTargetsAtom } from './keys.ts'
 import { activateTerminalTabAtom, activeRunspaceAtom, activeTerminalTabAtom } from './navigation.ts'
 import { pointerPress } from './press.ts'
 import { createTerminalTabAtom, deadTabsAtom, tabMenuAtom, tabTitlesAtom } from './store.ts'
@@ -29,8 +29,6 @@ export function WorkbenchHeader() {
   const activateTab = useSetAtom(activateTerminalTabAtom)
   const createTab = useSetAtom(createTerminalTabAtom)
   const jumpHints = useAtomValue(jumpHintTargetsAtom)
-  const pendingCloseTabId = useAtomValue(pendingCloseTabIdAtom)
-  const pendingRemoveRunspaceId = useAtomValue(pendingRemoveRunspaceIdAtom)
   const activeTabRef = useRef<HTMLButtonElement>(null)
 
   useEffect(() => {
@@ -83,17 +81,7 @@ export function WorkbenchHeader() {
               unread={unread}
               className="mr-1.5"
             />
-            {tab.id === pendingCloseTabId ? (
-              <span className="flex-1 truncate font-semibold text-destructive">
-                d again to close tab
-              </span>
-            ) : runspace.id === pendingRemoveRunspaceId ? (
-              <span className="flex-1 truncate font-semibold text-destructive">
-                D again to remove runspace
-              </span>
-            ) : (
-              <span className={cn('flex-1 truncate', unread && UNREAD_LABEL_STYLE)}>{label}</span>
-            )}
+            <span className={cn('flex-1 truncate', unread && UNREAD_LABEL_STYLE)}>{label}</span>
             {terminalDot && (
               <span
                 title={status}

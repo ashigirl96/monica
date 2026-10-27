@@ -337,14 +337,14 @@ export const removeRunspaceAtom = action(async (get, set, runspace: Runspace) =>
   await set(reloadAtom)
 })
 
-// webview の一覧は合図の後に読み直すまで古く、起動の直後は空なので、閉じる前に Backend に聞く。
-export async function hasLiveAgentSession(
-  get: Getter,
-  terminalSessionIds: string[],
-): Promise<boolean> {
-  const listed = await clientOf(get).agentSession.list()
-  return listed.some((a) => terminalSessionIds.includes(a.terminalSessionId))
-}
+// Bench は Task の close の guard を通さずに消せないので、Tab を閉じて空の Bench を slot に渡す（ADR-0041）。
+export const closeBenchAtom = action(async (get, set, bench: Runspace) => {
+  if (bench.tabs.length === 0) {
+    get(lastTabClosedAtom)?.(bench.id)
+    return
+  }
+  for (const tab of bench.tabs) await closeTab(get, set, { runspace: bench, tab })
+})
 
 // 接続中の Tab は Exit で閉じるので、閉じ終わるまでの間も終わった印を出さない。
 const closingTabIdsAtom = atom<ReadonlySet<string>>(new Set<string>())

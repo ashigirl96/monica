@@ -4,7 +4,7 @@ import { type ReactNode, useCallback, useRef } from 'react'
 import { baseName } from '../paths.ts'
 import { layoutAtom } from './backend-copy.ts'
 import { useImageDrop } from './image-drop.ts'
-import { jumpModeActiveAtom, pendingCloseTabIdAtom, pendingRemoveRunspaceIdAtom } from './keys.ts'
+import { jumpModeActiveAtom } from './keys.ts'
 import { activeRunspaceAtom, activeTerminalTabAtom } from './navigation.ts'
 import {
   closeTerminalTabAtom,
@@ -106,31 +106,25 @@ function EmptyRunspaceOverlay({
   )
 }
 
-// 2 度目の d・D を待つ間はそのキー以外が取り消しになり、一覧のキーは効かないので出さない。
 function JumpOverlay() {
   const active = useAtomValue(jumpModeActiveAtom)
-  const pendingTab = useAtomValue(pendingCloseTabIdAtom)
-  const pendingRunspace = useAtomValue(pendingRemoveRunspaceIdAtom)
-  const closing = pendingTab !== null || pendingRunspace !== null
   if (!active) return null
 
   return (
     <div className="absolute inset-0 z-20 flex animate-in items-end justify-center bg-black/40 pb-6 duration-150 fade-in">
-      {!closing && (
-        <div className="rounded-full border border-white/10 bg-black/70 px-4 py-1.5 font-mono text-[11px] text-foreground/70 shadow-lg">
-          <span className="font-bold text-amber-300">⌃1 ⌃2 …</span> runspace
-          <span className="mx-2 text-foreground/30">·</span>
-          <span className="font-bold text-amber-300">1 2 …</span> tab
-          <span className="mx-2 text-foreground/30">·</span>
-          <span className="font-bold text-amber-300">c</span> new tab
-          <span className="mx-2 text-foreground/30">·</span>
-          <span className="font-bold text-amber-300">d</span> close tab
-          <span className="mx-2 text-foreground/30">·</span>
-          <span className="font-bold text-amber-300">D</span> remove runspace
-          <span className="mx-2 text-foreground/30">·</span>
-          esc
-        </div>
-      )}
+      <div className="rounded-full border border-white/10 bg-black/70 px-4 py-1.5 font-mono text-[11px] text-foreground/70 shadow-lg">
+        <span className="font-bold text-amber-300">⌃1 ⌃2 …</span> runspace
+        <span className="mx-2 text-foreground/30">·</span>
+        <span className="font-bold text-amber-300">1 2 …</span> tab
+        <span className="mx-2 text-foreground/30">·</span>
+        <span className="font-bold text-amber-300">c</span> new tab
+        <span className="mx-2 text-foreground/30">·</span>
+        <span className="font-bold text-amber-300">d</span> close tab
+        <span className="mx-2 text-foreground/30">·</span>
+        <span className="font-bold text-amber-300">D</span> remove runspace
+        <span className="mx-2 text-foreground/30">·</span>
+        esc
+      </div>
     </div>
   )
 }
