@@ -58,6 +58,7 @@ dev の desktop は `MONICA_HOME` ごとに identifier と vite の port が分�
 
 - **Tab の env**は、上の「書き込み」で `env > $MONICA_HOME/tab-env.txt` を Tab に送り、その file を読む。macOS の `ps eww` は Tab の shell の env を出さない。
 - **Tab の切り替え**は、`[data-tab-id]` の button に `pointerdown` と `pointerup` を `dispatchEvent` する。Tab は pointerdown で切り替わるが、tauri-mcp の click は pointerdown を出さない。
+- **Tab を開く・閉じる**: 開くのは、CLI に出ていないので `button[title^="New tab"]` の `click()`。webview の Close Tab は、前面の Tab の textarea に上の「書き込み」の手順で Ctrl+T（`keyCode` 84）と `d`（68）の keydown を送る Jump Mode の d。CLI の経路は `monica workbench tab close <id>`。
 - **窓の前面と背面**（未読のように窓の focus で変わる振る舞い）は、`osascript -e 'tell application "Finder" to activate'` で別の app を前に出して背面にし、tauri-mcp の `manage_window` の `focus` で前面に戻す。最小化（`manage_window` の `minimize`）では webview の JS が止まりうるので、focus の event が届いて背面と扱えたのかを見分けられない。
   - 最小化した窓は `focus` だけでは戻らず、`document.visibilityState` が `hidden` のまま残る。`osascript -e 'tell application "System Events" to set frontmost of (first process whose unix id is <DESKTOP の pid>) to true'` で前に出してから `focus` する。前面に来たかは webview の `document.hasFocus()` で確かめる。
 - **Dock の数**（icon の badge）は webview の外なので screenshot に写らない。`lsappinfo info -only StatusLabel "$(lsappinfo find pid=<DESKTOP の pid>)"` で読む。数があれば `{ "label"="3" }`、無ければ `[ NULL ]` か `kCFNULL` になる。Backend の落ちと respawn のように一瞬で変わるものは、50ms おきに読んで変わった時刻だけを残す。Rust の file を直すと dev の desktop が Shell を build し直して pid が変わるので、読む前に `bun run dev:list` で引き直す。
