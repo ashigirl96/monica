@@ -88,7 +88,7 @@ test('without force, commits made in the trash before the registration is droppe
   const once = join(dirname(path), 'committed')
   writeFakeExecutable(
     hook,
-    `[ -e '${once}' ] && exit 1\ntouch '${once}'\ngit update-ref refs/heads/issue-12 "$(git commit-tree 'HEAD^{tree}' -p HEAD -m late)"\nexit 1`,
+    `[ -e '${once}' ] && exit 1\ntouch '${once}'\ngit update-ref refs/heads/issue-12 "$(git -c user.name=monica -c user.email=monica@example.com commit-tree 'HEAD^{tree}' -p HEAD -m late)"\nexit 1`,
   )
   git(checkout, 'config', 'core.fsmonitor', hook)
 
