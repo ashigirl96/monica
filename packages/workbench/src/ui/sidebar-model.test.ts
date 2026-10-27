@@ -542,7 +542,7 @@ test('jump hints number the Pinned rows and the rows shown under the selected Ti
   store.set(toggleSectionAtom, 'acme/app:bench')
 
   const ctrlT = { key: 't', code: 'KeyT', meta: false, ctrl: true, alt: false, shift: false }
-  keymap.press(store, { ...ctrlT, repeat: false, editable: false })
+  keymap.press(store, { ...ctrlT, editable: false })
 
   expect(store.get(jumpHintTargetsAtom).byRunspaceId).toEqual({
     [pinned.runspaceId]: '1',

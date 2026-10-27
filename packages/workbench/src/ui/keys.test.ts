@@ -24,7 +24,6 @@ function keydown(key: string, code: string, mods: Modifiers = {}): KeyboardEvent
     ctrlKey: mods.ctrl ?? false,
     altKey: mods.alt ?? false,
     shiftKey: mods.shift ?? false,
-    repeat: false,
     preventDefault: () => {},
   } as KeyboardEvent
 }

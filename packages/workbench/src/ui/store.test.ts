@@ -56,13 +56,7 @@ const {
   workbenchClientAtom,
 } = await import('./store.ts')
 const { terminalSessionStatusAtom } = await import('./terminal-sessions.ts')
-const {
-  jumpModeActiveAtom,
-  keymap,
-  leaveJumpModeOnSwitch,
-  pendingCloseTabIdAtom,
-  pendingRemoveRunspaceIdAtom,
-} = await import('./keys.ts')
+const { jumpModeActiveAtom, keymap, leaveJumpModeOnSwitch } = await import('./keys.ts')
 const { getTabConnection, openTabConnection } = await import('./terminal-connections.ts')
 
 const size = { rows: 24, cols: 80 }
@@ -106,8 +100,8 @@ function pinnedAndListed(store: Store) {
   }
 }
 
-function press(store: Store, key: string, { ctrl = false, repeat = false } = {}) {
-  const facts = { key, code: '', meta: false, ctrl, alt: false, shift: false, repeat }
+function press(store: Store, key: string, { ctrl = false } = {}) {
+  const facts = { key, code: '', meta: false, ctrl, alt: false, shift: false }
   return keymap.press(store, { ...facts, editable: true }).done
 }
 
@@ -192,127 +186,19 @@ test('d in jump mode closes the active Tab and ends its Terminal Session', async
   expect(store.get(jumpModeActiveAtom)).toBe(false)
 })
 
-test('d in jump mode on a Tab with a live Agent Session asks for d again, and closes it on the second d', async () => {
+test('d in jump mode closes a Tab with a live Agent Session at once', async () => {
   const backend = bench()
-  const { client, store } = backend
+  const { ptyd, client, store } = backend
   const { runspaceId, tab: a } = await client.runspace.create(size)
   const claude = await client.tab.open({ runspaceId, ...size })
   await runAgentIn(backend, claude.terminalSessionId)
   store.set(activateTerminalTabAtom, claude.id)
   await enterJumpMode(store)
-
-  await press(store, 'd')
-
-  expect((await client.layout.get()).runspaces[0]!.tabs.map((t) => t.id)).toEqual([a.id, claude.id])
-  expect(store.get(pendingCloseTabIdAtom)).toBe(claude.id)
-  expect(store.get(jumpModeActiveAtom)).toBe(true)
 
   await press(store, 'd')
 
   expect((await client.layout.get()).runspaces[0]!.tabs.map((t) => t.id)).toEqual([a.id])
-  expect(store.get(pendingCloseTabIdAtom)).toBeNull()
-})
-
-test('leaving jump mode forgets the first d, so the next d asks again', async () => {
-  const backend = bench()
-  const { client, store } = backend
-  const { tab } = await client.runspace.create(size)
-  await runAgentIn(backend, tab.terminalSessionId)
-  await enterJumpMode(store)
-  await press(store, 'd')
-
-  await press(store, 'Escape')
-  await enterJumpMode(store)
-  await press(store, 'd')
-
-  expect((await client.layout.get()).runspaces[0]!.tabs.map((t) => t.id)).toEqual([tab.id])
-  expect(store.get(pendingCloseTabIdAtom)).toBe(tab.id)
-})
-
-test('while a Tab waits for the second d, any other key leaves jump mode doing nothing else', async () => {
-  const backend = bench()
-  const { client, store } = backend
-  const { tab } = await client.runspace.create(size)
-  await runAgentIn(backend, tab.terminalSessionId)
-
-  const left: boolean[] = []
-  for (const key of ['c', '1', 'Escape']) {
-    await enterJumpMode(store)
-    await press(store, 'd')
-    await press(store, 'Shift')
-    expect(store.get(pendingCloseTabIdAtom)).toBe(tab.id)
-    await press(store, key)
-    left.push(store.get(jumpModeActiveAtom))
-  }
-
-  expect(left).toEqual([false, false, false])
-  expect((await client.layout.get()).runspaces[0]!.tabs.map((t) => t.id)).toEqual([tab.id])
-})
-
-test('a d held down repeats without counting as the second d', async () => {
-  const backend = bench()
-  const { client, store } = backend
-  const { tab } = await client.runspace.create(size)
-  await runAgentIn(backend, tab.terminalSessionId)
-  await enterJumpMode(store)
-  await press(store, 'd')
-
-  await press(store, 'd', { repeat: true })
-
-  expect((await client.layout.get()).runspaces[0]!.tabs.map((t) => t.id)).toEqual([tab.id])
-  expect(store.get(pendingCloseTabIdAtom)).toBe(tab.id)
-})
-
-test('d in jump mode asks for d again on a Tab whose Agent Session the webview has not read yet', async () => {
-  const { client, store } = bench()
-  const { runspaceId, tab: a } = await client.runspace.create(size)
-  const claude = await client.tab.open({ runspaceId, ...size })
-  await store.set(reloadAtom)
-  await client.agentSession.recordHook({
-    terminalSessionId: claude.terminalSessionId,
-    payload: { session_id: 's-1', cwd: '/work', hook_event_name: 'SessionStart' },
-  })
-  store.set(activateTerminalTabAtom, claude.id)
-  await enterJumpMode(store)
-
-  await press(store, 'd')
-
-  expect((await client.layout.get()).runspaces[0]!.tabs.map((t) => t.id)).toEqual([a.id, claude.id])
-  expect(store.get(pendingCloseTabIdAtom)).toBe(claude.id)
-})
-
-test('a d whose check for an Agent Session is still on its way closes nothing once jump mode is left', async () => {
-  const { client, store } = bench()
-  const { runspaceId, tab: a } = await client.runspace.create(size)
-  const b = await client.tab.open({ runspaceId, ...size })
-  await store.set(reloadAtom)
-  store.set(activateTerminalTabAtom, b.id)
-  await enterJumpMode(store)
-
-  const pressed = press(store, 'd')
-  void press(store, 'Escape')
-  await pressed
-
-  expect((await client.layout.get()).runspaces[0]!.tabs.map((t) => t.id)).toEqual([a.id, b.id])
-})
-
-test('a second d after the Tab it asked about has closed on its own leaves jump mode without closing the Tab in front now', async () => {
-  const backend = bench()
-  const { ptyd, client, store, settled } = backend
-  const { runspaceId, tab: next } = await client.runspace.create(size)
-  const claude = await client.tab.open({ runspaceId, ...size })
-  await settled(claude.terminalSessionId)
-  await runAgentIn(backend, claude.terminalSessionId)
-  store.set(activateTerminalTabAtom, claude.id)
-  await enterJumpMode(store)
-  await press(store, 'd')
-  ptyd.exit(claude.terminalSessionId, 0)
-  await store.set(tabExitedAtom, claude.id, claude.terminalSessionId, 0)
-  expect(store.get(activeTerminalTabAtom)?.id).toBe(next.id)
-
-  await press(store, 'd')
-
-  expect((await client.layout.get()).runspaces[0]!.tabs.map((t) => t.id)).toEqual([next.id])
+  await ptyd.received((op) => op.op === 'terminate' && op.session_id === claude.terminalSessionId)
   expect(store.get(jumpModeActiveAtom)).toBe(false)
 })
 
@@ -329,6 +215,16 @@ test('jump mode is left once the Tab shown changes, and stays while the layout r
 
   expect(store.get(activeTerminalTabAtom)?.id).not.toBe(tab.id)
   expect([afterReload, store.get(jumpModeActiveAtom)]).toEqual([true, false])
+})
+
+test('Ctrl+T in jump mode leaves jump mode', async () => {
+  const { store } = bench()
+  await store.set(reloadAtom)
+  await enterJumpMode(store)
+
+  await press(store, 't', { ctrl: true })
+
+  expect(store.get(jumpModeActiveAtom)).toBe(false)
 })
 
 test('d in jump mode on a pinned Tab leaves jump mode and the Tab', async () => {
@@ -362,9 +258,9 @@ test('D in jump mode removes the active Runspace with its Tabs and ends their Te
   expect(store.get(jumpModeActiveAtom)).toBe(false)
 })
 
-test('D in jump mode on a Runspace with a live Agent Session in one of its Tabs asks for D again, and removes it on the second D', async () => {
+test('D in jump mode removes a Runspace with a live Agent Session in one of its Tabs at once', async () => {
   const backend = bench()
-  const { client, store } = backend
+  const { ptyd, client, store } = backend
   const kept = await client.runspace.create(size)
   const { runspaceId } = await client.runspace.create(size)
   const claude = await client.tab.open({ runspaceId, ...size })
@@ -374,57 +270,88 @@ test('D in jump mode on a Runspace with a live Agent Session in one of its Tabs 
 
   await press(store, 'D')
 
-  expect((await client.layout.get()).runspaces.map((r) => r.id)).toEqual([
-    kept.runspaceId,
-    runspaceId,
-  ])
-  expect(store.get(pendingRemoveRunspaceIdAtom)).toBe(runspaceId)
-  expect(store.get(jumpModeActiveAtom)).toBe(true)
-
-  await press(store, 'D')
-
   expect((await client.layout.get()).runspaces.map((r) => r.id)).toEqual([kept.runspaceId])
-  expect(store.get(pendingRemoveRunspaceIdAtom)).toBeNull()
+  await ptyd.received((op) => op.op === 'terminate' && op.session_id === claude.terminalSessionId)
+  expect(store.get(jumpModeActiveAtom)).toBe(false)
 })
 
-test('while a Runspace waits for the second D, any other key leaves jump mode removing nothing', async () => {
+test('D in jump mode on a Bench closes all its Tabs, ends their Terminal Sessions, and hands the Bench to the slot once', async () => {
   const backend = bench()
-  const { client, store } = backend
-  const { runspaceId, tab } = await client.runspace.create(size)
-  await runAgentIn(backend, tab.terminalSessionId)
-
-  const left: boolean[] = []
-  for (const key of ['c', 'd', '1', 'Escape']) {
-    await enterJumpMode(store)
-    await press(store, 'D')
-    expect(store.get(pendingRemoveRunspaceIdAtom)).toBe(runspaceId)
-    await press(store, key)
-    left.push(store.get(jumpModeActiveAtom))
-  }
-
-  expect(left).toEqual([false, false, false, false])
-  expect((await client.layout.get()).runspaces[0]!.tabs.map((t) => t.id)).toEqual([tab.id])
-})
-
-test('a D held down repeats without counting as the second D', async () => {
-  const backend = bench()
-  const { client, store } = backend
-  const { runspaceId, tab } = await client.runspace.create(size)
-  await runAgentIn(backend, tab.terminalSessionId)
+  const { ptyd, client, store } = backend
+  const runspaceId = ownedRunspace(backend)
+  const a = await client.tab.open({ runspaceId, ...size })
+  const claude = await client.tab.open({ runspaceId, ...size })
+  await runAgentIn(backend, claude.terminalSessionId)
+  store.set(activateRunspaceAtom, runspaceId)
+  const calls = lastTabClosedCalls(store)
   await enterJumpMode(store)
+
   await press(store, 'D')
 
-  await press(store, 'D', { repeat: true })
+  expect(calls).toEqual([runspaceId])
+  expect((await client.layout.get()).runspaces).toMatchObject([
+    { id: runspaceId, owned: true, tabs: [] },
+  ])
+  await ptyd.received((op) => op.op === 'terminate' && op.session_id === a.terminalSessionId)
+  await ptyd.received((op) => op.op === 'terminate' && op.session_id === claude.terminalSessionId)
+  expect(store.get(jumpModeActiveAtom)).toBe(false)
+})
 
-  expect((await client.layout.get()).runspaces.map((r) => r.id)).toEqual([runspaceId])
-  expect(store.get(pendingRemoveRunspaceIdAtom)).toBe(runspaceId)
+test('D in jump mode on a Bench with no Tabs hands the Bench to the slot', async () => {
+  const backend = bench()
+  const { store } = backend
+  const runspaceId = ownedRunspace(backend)
+  await store.set(reloadAtom)
+  store.set(activateRunspaceAtom, runspaceId)
+  const calls = lastTabClosedCalls(store)
+  await enterJumpMode(store)
+
+  await press(store, 'D')
+
+  expect(calls).toEqual([runspaceId])
+  expect(store.get(jumpModeActiveAtom)).toBe(false)
+})
+
+test('D in jump mode on a Bench stops at a Tab whose close does not reach the Backend and hands nothing to the slot', async () => {
+  const backend = bench()
+  const { client, store } = backend
+  const runspaceId = ownedRunspace(backend)
+  await client.tab.open({ runspaceId, ...size })
+  const stuck = await client.tab.open({ runspaceId, ...size })
+  const c = await client.tab.open({ runspaceId, ...size })
+  await store.set(reloadAtom)
+  store.set(activateRunspaceAtom, runspaceId)
+  const calls = lastTabClosedCalls(store)
+  const tabStuckOnClose = new Proxy(client.tab, {
+    get: (target, key) =>
+      key === 'close'
+        ? (input: { id: string }) =>
+            input.id === stuck.id ? Promise.reject(new Error('fetch failed')) : target.close(input)
+        : Reflect.get(target, key),
+  })
+  store.set(
+    workbenchClientAtom,
+    () =>
+      new Proxy(client, {
+        get: (target, key) => (key === 'tab' ? tabStuckOnClose : Reflect.get(target, key)),
+      }),
+  )
+  await enterJumpMode(store)
+
+  await press(store, 'D')
+
+  expect(calls).toEqual([])
+  expect((await client.layout.get()).runspaces[0]!.tabs.map((t) => t.id)).toEqual([stuck.id, c.id])
+  expect(toasts).toEqual(['fetch failed'])
 })
 
 test.each([
   [
-    'a Bench',
+    'a Bench with a pinned Tab',
     async (backend: Backend) => {
       const runspaceId = ownedRunspace(backend)
+      const tab = await backend.client.tab.open({ runspaceId, ...size })
+      await backend.client.tab.pin({ id: tab.id })
       await backend.client.tab.open({ runspaceId, ...size })
       return runspaceId
     },
