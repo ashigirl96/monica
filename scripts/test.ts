@@ -24,7 +24,16 @@ const test = Bun.spawn(
     ...process.argv.slice(2),
   ],
   {
-    env: { ...process.env, TMPDIR: dir, MONICA_TEST_PROGRESS: progress },
+    // CI の git には利用者の設定が無く、identity も推測できずに commit が落ちるので、手元でも同じ失敗を出す。
+    env: {
+      ...process.env,
+      TMPDIR: dir,
+      MONICA_TEST_PROGRESS: progress,
+      GIT_CONFIG_GLOBAL: '/dev/null',
+      GIT_CONFIG_COUNT: '1',
+      GIT_CONFIG_KEY_0: 'user.useConfigOnly',
+      GIT_CONFIG_VALUE_0: 'true',
+    },
     stdout: 'inherit',
     stderr: 'inherit',
   },
