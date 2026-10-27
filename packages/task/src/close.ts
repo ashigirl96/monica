@@ -15,6 +15,7 @@ import { activeRunsBesides } from './run.ts'
 import { bench, issue, pullRequest, task, taskPullRequest } from './schema.ts'
 import type { SyncDeps } from './sync.ts'
 import { inspectWorktree, removeWorktree } from './teardown.ts'
+import { trashOf } from './trash.ts'
 
 export async function closeTask(
   deps: SyncDeps & BenchDeps,
@@ -67,7 +68,9 @@ async function closeReserved(
     }
   }
   const removed = worktree
-    ? await stopOnGitFailure(ref, () => removeWorktree(worktree, { force }))
+    ? await stopOnGitFailure(ref, () =>
+        removeWorktree(worktree, { force, trash: trashOf(deps.home) }),
+      )
     : { removedWorktree: null, deletedBranch: null, warnings: [] }
   const closed = deps.db.transaction((tx) => {
     const now = findTask(tx, eq(issue.id, found.issue.id), ref, 'close')

@@ -11,10 +11,12 @@ import {
   startedAndEnded,
   tabsOf,
   terminatedAfterClose,
+  trashed,
   tracked,
   until,
   withWorktreeBench,
 } from './close-fixture.ts'
+import { git } from './fake-ghq.ts'
 import { SYNC_BEFORE_COMMAND_TIMEOUT_MS } from './sync.ts'
 import { cleanUp, failure } from './testing.ts'
 
@@ -182,10 +184,14 @@ test('close returns before ptyd answers the Terminate of the Bench, and the Task
 
   await fixture.client.close({ ref })
   const output = await fixture.client.reopen({ ref })
+  await fixture.client.run({ ref })
   finish()
 
   expect(output).toMatchObject({ ref })
   expect(await terminatedAfterClose(fixture, 1)).toEqual([fixture.claudeTab])
+  expect(trashed(fixture)).toEqual([{ tree: true, mark: false }])
+  expect(benchOf(fixture)).toMatchObject({ cwd: fixture.cwd, branch: 'issue-12' })
+  expect(git(fixture.cwd, 'branch', '--show-current')).toBe('issue-12')
 })
 
 // 止めた sync に後から来た同じ Task の sync は、合流して自分の timeout まで待つ。その timeout を手で起こし、写しで進ませる。

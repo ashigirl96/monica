@@ -18,6 +18,7 @@ test('job list prints the system Jobs with their schedules', async () => {
       'NAME                    SCHEDULE   STATE   LAST  NEXT  CWD',
       'task.sync               every 5m   active  -     -     -',
       'task.setup-log-cleanup  every 24h  active  -     -     -',
+      'task.worktree-sweep     every 10m  active  -     -     -',
       'note.image-cleanup      every 24h  active  -     -     -',
       '',
     ].join('\n'),

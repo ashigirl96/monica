@@ -12,6 +12,7 @@ import { createReservations } from './reservation.ts'
 import { applyRunInvariant, createRunLaunches, type RunOrigin, taskOfRun } from './run.ts'
 import { sweepSetupLogs } from './setup-log.ts'
 import { SYNC_TIMEOUT_MS, type SyncDeps, syncOpenTasks } from './sync.ts'
+import { restoreTrashedWorktrees, sweepTrashedWorktrees, trashOf } from './trash.ts'
 
 export type TaskLedger = {
   events: EventPublisher<{ change: TaskChange }>
@@ -21,6 +22,8 @@ export type TaskLedger = {
   syncInBackground(): Promise<void>
   /** 消せなかった setup の log か directory があれば、残りを消してから reject する。 */
   cleanSetupLogs(): Promise<void>
+  /** close が捨て場へ移した worktree を消す。消せなかったものがあれば、残りを消してから reject する。 */
+  sweepTrashedWorktrees(): Promise<void>
 }
 
 export function systemJobs(taskLedger: TaskLedger) {
@@ -31,12 +34,17 @@ export function systemJobs(taskLedger: TaskLedger) {
       every: 24 * 60 * 60_000,
       run: () => taskLedger.cleanSetupLogs(),
     },
+    {
+      name: 'task.worktree-sweep',
+      every: 10 * 60_000,
+      run: () => taskLedger.sweepTrashedWorktrees(),
+    },
   ]
 }
 
 type Internals = SyncDeps & BenchDeps & { backgroundSyncError: () => BackgroundSyncError | null }
 
-// TaskLedger の型は events / start / stop / syncInBackground / cleanSetupLogs だけに保ち、GitHub への接続などの中身は TaskLedger を key にここへ置く。
+// TaskLedger の型は他の domain と Backend が呼ぶものだけに保ち、GitHub への接続などの中身は TaskLedger を key にここへ置く。
 const internalsOf = new WeakMap<TaskLedger, Internals>()
 
 export function internals(taskLedger: TaskLedger): Internals {
@@ -118,6 +126,8 @@ export function createTaskLedger(deps: {
     events,
     start() {
       failInterruptedPreparations(db)
+      // start の時点では close の予約が無いので、印のある捨て場は途中の close ではなく落ちた Backend の跡になる。
+      restoreTrashedWorktrees(trashOf(home))
       // async iterator の購読は溜まった合図を 100 件で捨てるので、listener で受ける。
       // Workbench Ledger は transaction の中でも publish するので、読み直しは commit 後の microtask に回す。
       unsubscribe = workbenchLedger.events.subscribe('change', (change) => {
@@ -140,6 +150,7 @@ export function createTaskLedger(deps: {
     async cleanSetupLogs() {
       sweepSetupLogs({ db, home })
     },
+    sweepTrashedWorktrees: () => sweepTrashedWorktrees(trashOf(home)),
   }
   internalsOf.set(taskLedger, {
     ...syncDeps,

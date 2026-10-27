@@ -1,10 +1,11 @@
 import { existsSync } from 'node:fs'
-import { dirname } from 'node:path'
+import { dirname, join } from 'node:path'
 
 import type { Bench } from './bench.ts'
 import type { CloseRefusal } from './contract.ts'
 import { branchOf, checkoutOf, type Ghq, git, gitPiped, succeeds } from './prepare.ts'
 import type { IssueRef } from './ref.ts'
+import { moveAside, putBack, treeOf, unmark } from './trash.ts'
 
 export type InspectedWorktree = {
   path: string
@@ -47,14 +48,28 @@ export async function inspectWorktree(
   return { path, branch, checkout, present, branchExists, mergedHeads, refusals }
 }
 
-/** force でなければ、調べた後に worktree に書かれた変更は git が断り、積まれた commit の branch は残す。 */
+/**
+ * worktree を捨て場へ移して登録を外す。
+ * force でなければ、調べた後に worktree に書かれた変更は捨て場で取り直す検査が断り、積まれた commit の branch は残す。
+ */
 export async function removeWorktree(
   { path, branch, checkout, present, branchExists, mergedHeads }: InspectedWorktree,
-  { force }: { force: boolean },
+  { force, trash }: { force: boolean; trash: string },
 ) {
   if (!checkout) return { removedWorktree: null, deletedBranch: null, warnings: [] }
   if (present) {
-    await git(checkout, 'worktree', 'remove', ...(force ? ['--force'] : []), path)
+    if (existsSync(join(await git(path, 'rev-parse', '--absolute-git-dir'), 'locked'))) {
+      throw new Error(`the worktree ${path} is locked`)
+    }
+    const trashed = moveAside(path, trash, { mark: !force })
+    if (!trashed) {
+      // 別の disk への rename などで移せなければ、遅くても git に消させる。
+      await git(checkout, 'worktree', 'remove', ...(force ? ['--force'] : []), path)
+    } else {
+      if (!force) await recheckInTrash(trashed, path)
+      // path が無いので、強制でなくても登録だけを外してファイルには触れない。
+      await git(checkout, 'worktree', 'remove', path)
+    }
   } else {
     // 登録が残るとその branch を消せないので、関係の無い登録まで外す prune ではなく、この path の登録だけを外す。
     await succeeds(git(checkout, 'worktree', 'remove', '--force', path))
@@ -71,6 +86,22 @@ export async function removeWorktree(
   }
   await git(checkout, 'branch', '-D', branch)
   return { removedWorktree, deletedBranch: branch, warnings: [] }
+}
+
+// rename は変更を見ないので、git の remove と同じく status を取り直し、変更があれば元の path へ戻して断る。
+async function recheckInTrash(trashed: string, path: string) {
+  let status: string
+  try {
+    status = await git(treeOf(trashed), 'status', '--porcelain', '--untracked-files=normal')
+  } catch (error) {
+    putBack(trashed, path)
+    throw error
+  }
+  if (status !== '') {
+    putBack(trashed, path)
+    throw new Error(`the worktree ${path} got changes after it was inspected`)
+  }
+  unmark(trashed)
 }
 
 // fetch しないので push した commit は merge されていなくても数えず、squash merge で remote から消えた commit も手元にある merged PR の head から辿れれば数えない。
