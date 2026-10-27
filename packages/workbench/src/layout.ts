@@ -1,12 +1,13 @@
 import { homedir } from 'node:os'
 
 import { ORPCError } from '@orpc/server'
-import { and, eq, notInArray } from 'drizzle-orm'
+import { and, eq, inArray, notInArray } from 'drizzle-orm'
 
 import type { Layout, Tab, WorkbenchChange } from './contract.ts'
 import type { Db, Tx } from './db.ts'
+import { shouldRespawn } from './pin.ts'
 import { runspace, tab, terminalSession } from './schema.ts'
-import { isLive } from './terminal-session-status.ts'
+import { isLive, LIVE } from './terminal-session-status.ts'
 import type { Size, TerminalSessions } from './terminal-session.ts'
 
 export function readLayout(db: Db): Layout {
@@ -85,6 +86,19 @@ export function createLayoutWrites(deps: {
     restack(tx, tab, keptIds)
   }
 
+  function removeTab(
+    tx: Tx,
+    closed: typeof tab.$inferSelect,
+  ): { emptiedRunspaceId: string | null } {
+    tx.delete(tab).where(eq(tab.id, closed.id)).run()
+    terminalSessions.terminateRemoved([
+      { tabId: closed.id, terminalSessionId: closed.terminalSessionId },
+    ])
+    if (!afterTabLeft(tx, closed.runspaceId)) return { emptiedRunspaceId: null }
+    publish({ type: 'runspaceEmptied', runspaceId: closed.runspaceId })
+    return { emptiedRunspaceId: closed.runspaceId }
+  }
+
   return {
     openRunspace(tx: Tx, input: { cwd: string; index?: number; size?: Size }) {
       const opened = insertTab(tx, {
@@ -130,13 +144,32 @@ export function createLayoutWrites(deps: {
     closeTab(tx: Tx, id: string): { emptiedRunspaceId: string | null } {
       const closed = tabOf(tx, id)
       if (closed.pinned) throw new ORPCError('CONFLICT', { message: `Tab ${id} is pinned` })
-      tx.delete(tab).where(eq(tab.id, id)).run()
-      terminalSessions.terminateRemoved([
-        { tabId: id, terminalSessionId: closed.terminalSessionId },
-      ])
-      const emptied = afterTabLeft(tx, closed.runspaceId)
+      const removed = removeTab(tx, closed)
       signalLayout()
-      return { emptiedRunspaceId: emptied ? closed.runspaceId : null }
+      return removed
+    },
+    // id を省くと終わった Terminal Session を表示する Tab をすべて見る。Exit の記録と後始末の間で Backend が止まった分も拾うため。
+    settleEndedTabs(tx: Tx, endedIds?: string[]) {
+      const rows = tx
+        .select()
+        .from(tab)
+        .innerJoin(terminalSession, eq(tab.terminalSessionId, terminalSession.id))
+        .where(
+          endedIds
+            ? inArray(terminalSession.id, endedIds)
+            : notInArray(terminalSession.status, [...LIVE]),
+        )
+        .all()
+      let closedAny = false
+      for (const { tab: shown, terminal_session: ended } of rows) {
+        if (shouldRespawn(ended, shown)) terminalSessions.rebind(tx, shown)
+        // lost と failed の Tab は、New shell か Close tab を選ばせるので残す。
+        else if (!shown.pinned && ended.status === 'exited') {
+          removeTab(tx, shown)
+          closedAny = true
+        }
+      }
+      if (closedAny) signalLayout()
     },
     moveTab(tx: Tx, input: { id: string; runspaceId: string; index?: number }) {
       relocateTab(tx, input)

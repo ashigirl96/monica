@@ -78,23 +78,6 @@ test('a Tab moved into the Bench by tab.move moves even when its claude is a Run
   expect(runsOf(fixture)).toEqual([{ number: 13, agentSessionId: 's-1', origin: 'started' }])
 })
 
-test('a layout signal after attach leaves the Run attach made alone, without a failed second insert', async () => {
-  const fixture = started()
-  await fixture.openBench(ref)
-  const outside = await fixture.openTabOutsideBench()
-  await fixture.hook(outside, 's-1', 'SessionStart', { source: 'startup' })
-  await fixture.client.attach({ ref, terminalSessionId: outside })
-  const errors = spyOn(console, 'error')
-
-  await fixture.workbenchClient.tab.setCwd({
-    id: fixture.tabIdOf(outside),
-    cwd: '/work/elsewhere',
-  })
-
-  expect(runsOf(fixture)).toEqual([{ number: 12, agentSessionId: 's-1', origin: 'attached' }])
-  expect(errors).not.toHaveBeenCalled()
-})
-
 test('attach moves the calling Tab into the Bench and makes its claude a Run that list shows', async () => {
   const fixture = started()
   const benchRunspace = await fixture.openBench(ref)

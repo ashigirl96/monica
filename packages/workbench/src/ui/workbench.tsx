@@ -11,11 +11,9 @@ import { ResizeHandle } from './resize-handle.tsx'
 import { TileHeading, WorkbenchSidebar } from './sidebar.tsx'
 import {
   appendRunspacesJoiningTile,
+  followWorkbenchChanges,
   type LastTabClosed,
   lastTabClosedAtom,
-  reloadAgentSessionsAtom,
-  reloadAtom,
-  warnFailed,
   type WorkbenchClient,
   workbenchClientAtom,
 } from './store.ts'
@@ -31,32 +29,17 @@ const WorkbenchContent = lazy(() => import('./content.tsx'))
 // Backend が立ち直ると endpoint ごと替わり、前の購読は届かなくなるので、client ごとに張り直す。
 function useWorkbenchChanges(client: WorkbenchClient | null) {
   const setClient = useSetAtom(workbenchClientAtom)
-  const reload = useSetAtom(reloadAtom)
-  const reloadAgentSessions = useSetAtom(reloadAgentSessionsAtom)
+  const store = useStore()
 
   useEffect(() => {
     setClient(() => client)
     if (!client) return
     const controller = new AbortController()
-    const reloadLogged = () => reload().catch((e: unknown) => warnFailed('layout reload', e))
-    const reloadAgentSessionsLogged = () =>
-      reloadAgentSessions().catch((e: unknown) => warnFailed('agent session reload', e))
-    void (async () => {
-      try {
-        // 先に購読してから読むので、読んだ後の変更を取りこぼさない。
-        const changes = await client.changes(undefined, { signal: controller.signal })
-        void reloadLogged()
-        void reloadAgentSessionsLogged()
-        for await (const change of changes) {
-          if (change.type !== 'agentSession') void reloadLogged()
-          void reloadAgentSessionsLogged()
-        }
-      } catch (error) {
-        if (!controller.signal.aborted) console.error('workbench.changes ended', error)
-      }
-    })()
+    followWorkbenchChanges(store, client, controller.signal).catch((error: unknown) => {
+      if (!controller.signal.aborted) console.error('workbench.changes ended', error)
+    })
     return () => controller.abort()
-  }, [client, setClient, reload, reloadAgentSessions])
+  }, [client, setClient, store])
 }
 
 // workbench は task を import しないので、Task に関わる表示と出来事は slot で受け渡す（ADR-0005）。

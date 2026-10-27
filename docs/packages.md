@@ -72,7 +72,7 @@ export function create<D>Ledger(deps: { db: Db; home: string; ... }): <D>Ledger;
 - 記録を持たない chat は、Ledger の代わりに `ChatAgent` を持ち、router の context に `db` を渡さない。
 - system の Job を持つ domain は、`systemJobs(<d>Ledger)` で `{ name, every, run }[]` を出し、Backend の組み立てが Job Ledger に渡す。domain は timer を持たず、job を import しない（ADR-0016）。
 - 他の domain から呼ばれる書き込みは、第 1 引数に transaction（`db` でもよい）を取る**同期**の method にする。呼び手は `db.transaction((tx) => { workbenchLedger.moveTab(tx, …); insertRun(tx, …) })` のように、両 domain の書き込みを 1 つの transaction にまとめる。fs への副作用は transaction に入らないので別の async method にし、呼び手が commit の後に呼ぶ。ptyd への副作用は workbench が transaction の後に自分で送る（ADR-0009・0015）。workbench の書き込みは、呼び手の transaction の中で `{ type: "layout" }` を 1 つ出す。ptyd への Create・Write・Terminate は commit の後に workbench が送るので、呼び手は reconcile も ptyd も待たない（ADR-0015）。
-  - Terminal Session が Terminating か（live で、どの Tab にも指されていない）は、workbench の server entry の `terminating` が query の条件で返す。task の close の ActiveRun と Run の起動中の予約は、transaction の中でもこれで閉じた Tab の claude を数えない（ADR-0023）。
+  - Terminal Session が Terminating か（live で、どの Tab にも指されていない）は、workbench の server entry の `terminating` が query の条件で返す。task の close が止める Active Run と Run の起動は、transaction の中でもこれで閉じた Tab の claude を数えない（ADR-0023）。
 - 他の domain が呼ばない書き込みは、module 内の関数として handler から呼び、Ledger には出さない。
 
 ## domain の package を足すとき

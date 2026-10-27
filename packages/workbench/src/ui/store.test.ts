@@ -28,7 +28,7 @@ await mock.module('@monica/ui', () => ({
 }))
 
 const { createStore } = await import('jotai')
-const { cleanUp, onCleanup, setup } = await import('../testing.ts')
+const { cleanUp, onCleanup, restartPtyd, setup } = await import('../testing.ts')
 const { agentDotOfTerminalSessionAtom } = await import('./backend-copy.ts')
 const {
   activateRunspaceAtom,
@@ -43,6 +43,7 @@ const {
   createRunspaceAtom,
   createTerminalTabAtom,
   deadTabsAtom,
+  followWorkbenchChanges,
   lastTabClosedAtom,
   moveActiveRunspaceAtom,
   reloadAgentSessionsAtom,
@@ -109,10 +110,21 @@ function enterJumpMode(store: Store) {
   return press(store, 't', { ctrl: true })
 }
 
-function lastTabClosedCalls(store: Store): string[] {
+// slot には Backend の runspaceEmptied の合図で渡るので、desktop と同じく合図を追わせる。
+async function lastTabClosedCalls({ client, store }: Backend): Promise<string[]> {
   const calls: string[] = []
   store.set(lastTabClosedAtom, () => (runspaceId: string) => void calls.push(runspaceId))
+  const following = new AbortController()
+  void followWorkbenchChanges(store, client, following.signal).catch(() => {})
+  onCleanup(() => following.abort())
+  // 購読が張られる前の close の合図は届かない。
+  await delivered()
   return calls
+}
+
+// 合図は publish から iterator を経て microtask で届くので、1 つ macrotask を回してから読む。
+function delivered() {
+  return Bun.sleep(0)
 }
 
 test('an empty layout gets one Runspace, even when two reloads race', async () => {
@@ -283,10 +295,11 @@ test('D in jump mode on a Bench closes all its Tabs, ends their Terminal Session
   const claude = await client.tab.open({ runspaceId, ...size })
   await runAgentIn(backend, claude.terminalSessionId)
   store.set(activateRunspaceAtom, runspaceId)
-  const calls = lastTabClosedCalls(store)
+  const calls = await lastTabClosedCalls(backend)
   await enterJumpMode(store)
 
   await press(store, 'D')
+  await delivered()
 
   expect(calls).toEqual([runspaceId])
   expect((await client.layout.get()).runspaces).toMatchObject([
@@ -303,7 +316,7 @@ test('D in jump mode on a Bench with no Tabs hands the Bench to the slot', async
   const runspaceId = ownedRunspace(backend)
   await store.set(reloadAtom)
   store.set(activateRunspaceAtom, runspaceId)
-  const calls = lastTabClosedCalls(store)
+  const calls = await lastTabClosedCalls(backend)
   await enterJumpMode(store)
 
   await press(store, 'D')
@@ -321,7 +334,7 @@ test('D in jump mode on a Bench stops at a Tab whose close does not reach the Ba
   const c = await client.tab.open({ runspaceId, ...size })
   await store.set(reloadAtom)
   store.set(activateRunspaceAtom, runspaceId)
-  const calls = lastTabClosedCalls(store)
+  const calls = await lastTabClosedCalls(backend)
   const tabStuckOnClose = new Proxy(client.tab, {
     get: (target, key) =>
       key === 'close'
@@ -339,6 +352,7 @@ test('D in jump mode on a Bench stops at a Tab whose close does not reach the Ba
   await enterJumpMode(store)
 
   await press(store, 'D')
+  await delivered()
 
   expect(calls).toEqual([])
   expect((await client.layout.get()).runspaces[0]!.tabs.map((t) => t.id)).toEqual([stuck.id, c.id])
@@ -392,14 +406,13 @@ test('closing the last Tab of the last Runspace leaves a fresh Runspace', async 
   expect(runspaces.map((r) => r.id)).toEqual([expect.not.stringMatching(before.id)])
 })
 
-// Exit は ptyd から Shell と Backend の両方に届く。
 test.each([
   ['closed', ({ store }: Backend, tab: Tab) => store.set(closeTerminalTabAtom, tab.id)],
   [
     'exited',
-    ({ ptyd, store }: Backend, tab: Tab) => {
+    async ({ ptyd }: Backend, tab: Tab) => {
       ptyd.exit(tab.terminalSessionId, 0)
-      return store.set(tabExitedAtom, tab.id, tab.terminalSessionId, 0)
+      await ptyd.received((op) => op.op === 'reap' && op.session_id === tab.terminalSessionId)
     },
   ],
 ])(
@@ -411,13 +424,14 @@ test.each([
     const tab = await client.tab.open({ runspaceId, ...size })
     await settled(tab.terminalSessionId)
     await store.set(reloadAtom)
-    const calls = lastTabClosedCalls(store)
+    const calls = await lastTabClosedCalls(backend)
 
     // fake の ptyd は Terminate を受けても Exit を送らないので、Exit を待てば打ち切るまで返らない。
     const closed = await Promise.race([
       close(backend, tab).then(() => true),
       Bun.sleep(1000).then(() => false),
     ])
+    await delivered()
 
     expect(closed).toBe(true)
     expect(calls).toEqual([runspaceId])
@@ -436,12 +450,13 @@ test('a Tab closed while others stay, the last Tab moved out, and the last Tab o
   const other = await client.runspace.create(size)
   const lone = await client.runspace.create(size)
   await store.set(reloadAtom)
-  const calls = lastTabClosedCalls(store)
+  const calls = await lastTabClosedCalls(backend)
 
   await store.set(closeTerminalTabAtom, a.id)
   await client.tab.move({ id: b.id, runspaceId: other.runspaceId, index: 1 })
   await store.set(reloadAtom)
   await store.set(closeTerminalTabAtom, lone.tab.id)
+  await delivered()
 
   expect(calls).toEqual([])
   expect((await client.layout.get()).runspaces).toMatchObject([
@@ -458,7 +473,7 @@ test('the last Tab moved out of an owned Runspace while a Tab closed there reloa
   const moved = await client.tab.open({ runspaceId: owned, ...size })
   const other = await client.runspace.create(size)
   await store.set(reloadAtom)
-  const calls = lastTabClosedCalls(store)
+  const calls = await lastTabClosedCalls(backend)
   // tab.close が返ってから読み直すまでの間に、CLI の Attach が残りの Tab を外へ移す。
   const tabMovingAfterClose = new Proxy(client.tab, {
     get: (target, key) =>
@@ -479,6 +494,7 @@ test('the last Tab moved out of an owned Runspace while a Tab closed there reloa
   )
 
   await store.set(closeTerminalTabAtom, closed.id)
+  await delivered()
 
   expect(calls).toEqual([])
   expect((await client.layout.get()).runspaces).toMatchObject([{ id: owned, tabs: [] }, {}])
@@ -554,32 +570,18 @@ test('a Runspace moves by key only within its sidebar group', async () => {
   expect(sidebar()).toEqual([p!, b!, a!])
 })
 
-test('a Tab whose shell exits while it is connected closes without ever showing the exit', async () => {
-  const { client, store } = bench()
-  const { runspaceId, tab: a } = await client.runspace.create(size)
-  const b = await client.tab.open({ runspaceId, ...size })
-  await store.set(reloadAtom)
-
-  // Shell が Exit を受けた時点では、Backend はまだ exit を記録していない。
-  const closing = store.set(tabExitedAtom, b.id, b.terminalSessionId, 0)
-  expect(store.get(terminalSessionStatusAtom)[b.terminalSessionId]?.status).toBe('exited')
-  expect(store.get(deadTabsAtom)).toEqual({})
-  await closing
-
-  expect((await client.layout.get()).runspaces[0]!.tabs.map((t) => t.id)).toEqual([a.id])
-  expect(store.get(terminalSessionStatusAtom)[b.terminalSessionId]?.status).toBe('exited')
-})
-
-test('a pinned Tab whose shell exits while it is connected stays open, without an error, for the Backend to respawn', async () => {
+test('an Exit releases the connection of its Tab without an overlay, and reads as ended before the Backend records it', async () => {
   const { client, store } = bench()
   const { tab } = await client.runspace.create(size)
-  await client.tab.pin({ id: tab.id })
   await store.set(reloadAtom)
+  openTabConnection(tab.id)
 
-  await store.set(tabExitedAtom, tab.id, tab.terminalSessionId, 0)
+  store.set(tabExitedAtom, tab.id, tab.terminalSessionId)
 
-  expect((await client.layout.get()).runspaces[0]!.tabs.map((t) => t.id)).toEqual([tab.id])
-  expect(toasts).toEqual([])
+  expect(getTabConnection(tab.id)).toBeUndefined()
+  expect(store.get(deadTabsAtom)).toEqual({})
+  await store.set(reloadAtom)
+  expect(store.get(terminalSessionStatusAtom)[tab.terminalSessionId]?.status).toBe('exited')
 })
 
 test('an Exit that arrives after the Tab was bound to a new shell leaves the new shell alone', async () => {
@@ -593,7 +595,7 @@ test('an Exit that arrives after the Tab was bound to a new shell leaves the new
   await settled(respawned.terminalSessionId)
   await store.set(reloadAtom)
 
-  await store.set(tabExitedAtom, tab.id, tab.terminalSessionId, 0)
+  store.set(tabExitedAtom, tab.id, tab.terminalSessionId)
 
   expect(store.get(deadTabsAtom)).toEqual({})
   expect(store.get(terminalSessionStatusAtom)[respawned.terminalSessionId]?.status).toBe('running')
@@ -612,19 +614,21 @@ test('a Close Tab that does not reach the Backend leaves the Tab connected to it
   expect(toasts).toEqual(['Backend is unavailable'])
 })
 
-test('New shell binds a Tab whose shell exited to a new running Terminal Session', async () => {
-  const { ptyd, client, store, settled } = bench()
+test('New shell binds a Tab whose shell ptyd lost to a new running Terminal Session', async () => {
+  const { home, ptyd, workbenchLedger, client, store, settled } = bench()
   const { tab } = await client.runspace.create(size)
   await settled(tab.terminalSessionId)
-  ptyd.exit(tab.terminalSessionId, 1)
-  await ptyd.received((op) => op.op === 'reap' && op.session_id === tab.terminalSessionId)
+  const { promise: reconciled, resolve } = Promise.withResolvers<void>()
+  onCleanup(
+    workbenchLedger.events.subscribe('change', (change) => {
+      if (change.type === 'reconciled') resolve()
+    }),
+  )
+  await restartPtyd(home, ptyd)
+  await reconciled
   await store.set(reloadAtom)
-  expect(store.get(terminalSessionStatusAtom)[tab.terminalSessionId]).toEqual({
-    status: 'exited',
-    exitCode: 1,
-  })
 
-  expect(store.get(deadTabsAtom)[tab.id]).toEqual({ status: 'exited', exitCode: 1 })
+  expect(store.get(deadTabsAtom)[tab.id]).toEqual({ status: 'lost', exitCode: null })
 
   await store.set(startNewShellForTabAtom, tab.id)
 
