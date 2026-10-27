@@ -203,6 +203,8 @@ test('tab.respawn binds the Tab to a new Terminal Session started in its last kn
   const { ptyd, client, settled } = setup()
   const { runspaceId, tab } = await client.runspace.create({ cwd: '/work', ...size })
   await client.tab.setCwd({ id: tab.id, cwd: '/work/sub' })
+  // 起動してすぐ終わった pin された Tab は、張り直されずに終わったまま残る。
+  await client.tab.pin({ id: tab.id })
   await settled(tab.terminalSessionId)
   ptyd.exit(tab.terminalSessionId, 0)
   await ptyd.received((op) => op.op === 'reap' && op.session_id === tab.terminalSessionId)
@@ -251,8 +253,10 @@ test('tab.respawn refuses a Tab whose Terminal Session is still live', async () 
 
 test('a write that makes several layout changes still signals the layout once', async () => {
   const { ptyd, workbenchLedger, client, settled } = setup()
-  const { runspaceId, tab } = await client.runspace.create(size)
+  const { runspaceId } = await client.runspace.create(size)
   const split = await client.tab.open({ runspaceId, ...size })
+  const { tab } = await client.runspace.create(size)
+  await client.tab.pin({ id: tab.id })
   await settled(tab.terminalSessionId)
   ptyd.exit(tab.terminalSessionId, 0)
   await ptyd.received((op) => op.op === 'reap' && op.session_id === tab.terminalSessionId)
@@ -304,9 +308,11 @@ test('every write to the layout streams a layout signal on changes', async () =>
   await write('runspace.move', () => client.runspace.move({ id: runspaceId, index: 0 }))
   await write('tab.pin', () => client.tab.pin({ id: moved.id }))
   await write('tab.unpin', () => client.tab.unpin({ id: moved.id }))
+  await client.tab.pin({ id: tab.id })
   ptyd.exit(tab.terminalSessionId, 0)
   await ptyd.received((op) => op.op === 'reap' && op.session_id === tab.terminalSessionId)
   await write('tab.respawn', () => client.tab.respawn({ id: tab.id, ...size }))
+  await client.tab.unpin({ id: tab.id })
   await write('runspace.remove', () => client.runspace.remove({ id: runspaceId }))
   subscription.abort()
   await consumed

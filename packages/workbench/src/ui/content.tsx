@@ -161,10 +161,7 @@ function TerminalPane({
     (nextCwd: string) => void updateCwd(tabId, nextCwd),
     [tabId, updateCwd],
   )
-  const onExit = useCallback(
-    (sessionId: string, exitCode: number | null) => void tabExited(tabId, sessionId, exitCode),
-    [tabId, tabExited],
-  )
+  const onExit = useCallback((sessionId: string) => tabExited(tabId, sessionId), [tabId, tabExited])
 
   useTerminal(containerRef, {
     tabId,
