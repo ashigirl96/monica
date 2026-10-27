@@ -328,13 +328,24 @@ export const closeTerminalTabAtom = action(async (get, set, tabId?: string) => {
   if (found) await closeTab(get, set, found)
 })
 
+// Terminal Session の終了は Backend が runspace.remove の transaction の後に予約する（ADR-0023）。
+export const removeRunspaceAtom = action(async (get, set, runspace: Runspace) => {
+  try {
+    await clientOf(get).runspace.remove({ id: runspace.id })
+  } catch (e) {
+    if (!isGone(e)) throw e
+  }
+  for (const tab of runspace.tabs) releaseTabConnection(tab.id)
+  await set(reloadAtom)
+})
+
 // webview の一覧は合図の後に読み直すまで古く、起動の直後は空なので、閉じる前に Backend に聞く。
 export async function hasLiveAgentSession(
   get: Getter,
-  terminalSessionId: string,
+  terminalSessionIds: string[],
 ): Promise<boolean> {
   const listed = await clientOf(get).agentSession.list()
-  return listed.some((a) => a.terminalSessionId === terminalSessionId)
+  return listed.some((a) => terminalSessionIds.includes(a.terminalSessionId))
 }
 
 // 接続中の Tab は Exit で閉じるので、閉じ終わるまでの間も終わった印を出さない。
