@@ -301,6 +301,185 @@ fn terminate_ends_the_foreground_job_with_its_shell() {
     wait_until(Duration::from_secs(5), || !process_alive(job));
 }
 
+/// SIGKILLs every pid on drop, so a failing test leaves no `sleep 600` behind.
+struct Strays(Vec<u32>);
+
+impl Drop for Strays {
+    fn drop(&mut self) {
+        for &pid in &self.0 {
+            // SAFETY: kill(2) takes plain values.
+            unsafe { libc::kill(pid as libc::pid_t, libc::SIGKILL) };
+        }
+    }
+}
+
+fn create_attached_zsh(client: &PtydClient, session_id: &str) {
+    create_zsh_session(client, session_id).expect("unix spawns should expose a pid");
+    client
+        .request(RequestOp::Attach {
+            session_id: session_id.into(),
+            replay_bytes: None,
+        })
+        .unwrap();
+}
+
+fn type_and_read_pid(
+    client: &PtydClient,
+    rx: &mpsc::Receiver<ClientEvent>,
+    session_id: &str,
+    line: &str,
+    prefix: &str,
+) -> u32 {
+    client
+        .notify(RequestOp::Write {
+            session_id: session_id.into(),
+            data: b64(format!("{line}\r").as_bytes()),
+        })
+        .unwrap();
+    wait_for_number_after(rx, prefix)
+}
+
+/// A `&` job, a nohup child, a nohup child that ignores SIGTERM, then a foreground job.
+fn start_session_children(
+    client: &PtydClient,
+    rx: &mpsc::Receiver<ClientEvent>,
+    session_id: &str,
+) -> [u32; 4] {
+    let background = type_and_read_pid(
+        client,
+        rx,
+        session_id,
+        "sleep 600 & echo bg-pid-$!",
+        "bg-pid-",
+    );
+    let nohup = type_and_read_pid(
+        client,
+        rx,
+        session_id,
+        "nohup sleep 600 >/dev/null 2>&1 & echo nohup-pid-$!",
+        "nohup-pid-",
+    );
+    let stubborn = type_and_read_pid(
+        client,
+        rx,
+        session_id,
+        "nohup sh -c 'trap \"\" TERM; exec sleep 600' >/dev/null 2>&1 & echo stubborn-pid-$!",
+        "stubborn-pid-",
+    );
+    let foreground = type_and_read_pid(
+        client,
+        rx,
+        session_id,
+        "sh -c 'echo fg-pid-$$; exec sleep 600'",
+        "fg-pid-",
+    );
+    [foreground, background, nohup, stubborn]
+}
+
+fn wait_for_exit(rx: &mpsc::Receiver<ClientEvent>, session_id: &str) {
+    let end = Instant::now() + Duration::from_secs(10);
+    while Instant::now() < end {
+        match rx.recv_timeout(Duration::from_millis(200)) {
+            Ok(ClientEvent::Exit { session_id: id, .. }) if id == session_id => return,
+            Ok(_) | Err(mpsc::RecvTimeoutError::Timeout) => {}
+            Err(e) => panic!("event channel closed: {e}"),
+        }
+    }
+    panic!("{session_id} never exited");
+}
+
+#[test]
+fn terminate_ends_what_is_left_in_the_shells_session_and_spares_the_rest() {
+    let daemon = start_daemon("terminate-session");
+    let (client, rx) = connect(&daemon);
+    let mut strays = Strays(Vec::new());
+
+    create_attached_zsh(&client, "ts-2");
+    let other_session = type_and_read_pid(
+        &client,
+        &rx,
+        "ts-2",
+        "nohup sleep 600 >/dev/null 2>&1 & echo other-pid-$!",
+        "other-pid-",
+    );
+    strays.0.push(other_session);
+    let mut outside = Command::new("sleep").arg("600").spawn().unwrap();
+    strays.0.push(outside.id());
+
+    create_attached_zsh(&client, "ts-1");
+    let escaped = type_and_read_pid(
+        &client,
+        &rx,
+        "ts-1",
+        "perl -MPOSIX -e 'exit if fork; POSIX::setsid(); print \"setsid-pid-$$\\n\"; \
+         open STDIN, \"</dev/null\"; open STDOUT, \">/dev/null\"; open STDERR, \">/dev/null\"; \
+         exec \"sleep\", \"600\"'",
+        "setsid-pid-",
+    );
+    strays.0.push(escaped);
+    let children = start_session_children(&client, &rx, "ts-1");
+    strays.0.extend(children);
+
+    client
+        .request(RequestOp::Terminate {
+            session_id: "ts-1".into(),
+        })
+        .unwrap();
+    wait_for_exit(&rx, "ts-1");
+
+    // A claude got SIGHUP with its shell and still needs time to send SessionEnd.
+    std::thread::sleep(Duration::from_secs(1));
+    let [_, _, nohup, _] = children;
+    assert!(
+        process_alive(nohup),
+        "SIGTERM must wait 2 seconds after the shell ends"
+    );
+
+    wait_until(Duration::from_secs(10), || {
+        children.iter().all(|&pid| !process_alive(pid))
+    });
+    for (pid, what) in [
+        (escaped, "the setsid child"),
+        (other_session, "the other Terminal Session's child"),
+        (outside.id(), "the process outside any Terminal Session"),
+    ] {
+        assert!(process_alive(pid), "{what} should survive");
+    }
+    let _ = outside.kill();
+    let _ = outside.wait();
+}
+
+#[test]
+fn a_shell_that_exits_on_its_own_takes_what_is_left_in_its_session() {
+    let daemon = start_daemon("exit-session");
+    let (client, rx) = connect(&daemon);
+    create_attached_zsh(&client, "ts-1");
+    let children = start_session_children(&client, &rx, "ts-1");
+    let _strays = Strays(children.to_vec());
+
+    // Suspend the foreground job, then exit twice: zsh refuses the first exit while jobs remain.
+    client
+        .notify(RequestOp::Write {
+            session_id: "ts-1".into(),
+            data: b64(b"\x1a"),
+        })
+        .unwrap();
+    for _ in 0..2 {
+        client
+            .notify(RequestOp::Write {
+                session_id: "ts-1".into(),
+                data: b64(b"exit\r"),
+            })
+            .unwrap();
+        std::thread::sleep(Duration::from_millis(300));
+    }
+    wait_for_exit(&rx, "ts-1");
+
+    wait_until(Duration::from_secs(10), || {
+        children.iter().all(|&pid| !process_alive(pid))
+    });
+}
+
 #[test]
 fn a_write_from_a_connection_that_never_attached_reaches_the_shell() {
     let daemon = start_daemon("write-unattached");

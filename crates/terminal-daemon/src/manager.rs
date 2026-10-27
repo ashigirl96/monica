@@ -6,6 +6,7 @@ use anyhow::{bail, Context};
 use portable_pty::{native_pty_system, CommandBuilder};
 
 use crate::session::PtySession;
+use crate::session_processes::end_terminal_session_processes;
 use crate::types::{PtySize, SpawnRequest};
 
 const READ_BUF_SIZE: usize = 16384;
@@ -143,6 +144,9 @@ impl PtyManager {
                     }
                 }
                 exit_sink(id_for_exit, exit_code);
+                if let Some(shell) = pid {
+                    end_terminal_session_processes(shell as libc::pid_t);
+                }
             });
         if let Err(e) = wait_handle {
             cleanup(&mut *killer);
