@@ -87,8 +87,8 @@ Tab を閉じた後、終わるのを待っている Terminal Session。Tab が�
 _Avoid_: 終わりかけ, detached（廃止した Detached と紛れる）, orphan（まだ Run でない Agent Session と紛れる）, ending（Agent Session の終了と紛れる）
 
 **Terminal Session Process**:
-1 つの Terminal Session に属する process。shell の子孫と、env の `MONICA_TERMINAL_SESSION_ID` にその Terminal Session の id を持つ同じ user の process を合わせたもの。nohup や setsid で shell から抜けた process も含む。Terminal Session が終わると、残ったものは ptyd が止める。
-_Avoid_: Tab の process（process を持つのは Terminal Session）, 子 process（shell の子孫だけに聞こえ、setsid で抜けたものが落ちる）
+1 つの Terminal Session に属する process。session id がその Terminal Session の shell の pid と同じもので、shell から起こした job と、nohup で起こした process が入る。setsid で自分の session を作った process は、shell の子孫でも入らない。Terminal Session が終わると、残ったものは ptyd が止める。
+_Avoid_: Tab の process（process を持つのは Terminal Session）, 子 process（shell の子孫のうち、setsid で抜けたものは入らない）
 
 **Terminal Session Transcript**:
 ptyd が Terminal Session の出力をそのまま書き残したもの。直近の分だけを持ち、再 attach ではその末尾を replay する。Terminal Session が終わると消える。
