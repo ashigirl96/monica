@@ -49,6 +49,18 @@ export type ListedAgentSession = z.infer<typeof ListedAgentSessionSchema>
 export type WorkbenchChange = z.infer<typeof WorkbenchChangeSchema>
 export type RepoPlace = z.infer<typeof RepoPlaceSchema>
 
+// id を省くと、CLI が env から埋める terminalSessionId の Tab を指す。
+const callerOr = (what: string) => ({
+  id: z
+    .string()
+    .meta({
+      positional: true,
+      description: `the id of the ${what}; the one this runs in if left out`,
+    })
+    .optional(),
+  terminalSessionId: z.string().optional(),
+})
+
 const size = { rows: z.number().int().positive(), cols: z.number().int().positive() }
 const index = z.number().int().nonnegative()
 
@@ -71,9 +83,10 @@ export const contract = {
     remove: meta
       .meta({
         description: 'Remove a Runspace with its Tabs and terminate their Terminal Sessions',
+        cli: true,
       })
-      .input(z.object({ id: z.string() }))
-      .output(z.void()),
+      .input(z.object(callerOr('Runspace')))
+      .output(z.object({ runspaceId: z.string() })),
     move: meta
       .meta({ description: 'Move a Runspace to a position in the sidebar' })
       .input(z.object({ id: z.string(), index }))
@@ -98,10 +111,11 @@ export const contract = {
       .input(z.object({ id: z.string(), ...size }))
       .output(TabSchema),
     close: meta
-      .meta({ description: 'Close a Tab and terminate its Terminal Session' })
-      .input(z.object({ id: z.string() }))
+      .meta({ description: 'Close a Tab and terminate its Terminal Session', cli: true })
+      .input(z.object(callerOr('Tab')))
       .output(
         z.object({
+          tabId: z.string(),
           emptiedRunspaceId: z
             .string()
             .nullable()

@@ -4,6 +4,7 @@ import { implement } from '@orpc/server'
 import { eq, getTableColumns, inArray, isNotNull, or } from 'drizzle-orm'
 
 import { listAgentSessions } from './agent-session.ts'
+import { callerTab } from './caller.ts'
 import { contract } from './contract.ts'
 import { openInEditor, resolveEditorPaths } from './editor.ts'
 import { asTab, readLayout } from './layout.ts'
@@ -47,9 +48,13 @@ export const router = os.router({
       )
       return { runspaceId: opened.runspaceId, tab: asTab(opened) }
     }),
-    remove: os.runspace.remove.handler(({ context: { db, workbenchLedger }, input }) => {
-      db.transaction((tx) => layoutWritesOf(workbenchLedger).removeRunspace(tx, input.id))
-    }),
+    remove: os.runspace.remove.handler(({ context: { db, workbenchLedger }, input }) =>
+      db.transaction((tx) => {
+        const runspaceId = input.id ?? callerTab(tx, input.terminalSessionId).runspaceId
+        layoutWritesOf(workbenchLedger).removeRunspace(tx, runspaceId)
+        return { runspaceId }
+      }),
+    ),
     move: os.runspace.move.handler(({ context: { db, workbenchLedger }, input }) => {
       db.transaction((tx) => layoutWritesOf(workbenchLedger).moveRunspace(tx, input))
     }),
@@ -75,7 +80,10 @@ export const router = os.router({
       )
     }),
     close: os.tab.close.handler(({ context: { db, workbenchLedger }, input }) =>
-      db.transaction((tx) => layoutWritesOf(workbenchLedger).closeTab(tx, input.id)),
+      db.transaction((tx) => {
+        const tabId = input.id ?? callerTab(tx, input.terminalSessionId).id
+        return { tabId, ...layoutWritesOf(workbenchLedger).closeTab(tx, tabId) }
+      }),
     ),
     move: os.tab.move.handler(({ context: { db, workbenchLedger }, input }) => {
       db.transaction((tx) => layoutWritesOf(workbenchLedger).moveTab(tx, input))

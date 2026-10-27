@@ -1,0 +1,158 @@
+import { afterEach, expect, test } from 'bun:test'
+
+import { createRouterClient } from '@orpc/server'
+
+import { cleanUp, inMemoryBackend, monica } from './testing.ts'
+
+afterEach(cleanUp)
+
+function backend() {
+  const { router, context, ptyd } = inMemoryBackend()
+  const client = createRouterClient(router, { context })
+  return { client, context, ptyd, connect: () => client }
+}
+
+async function runspaceWithTwoTabs(client: ReturnType<typeof backend>['client']) {
+  const { runspaceId, tab: first } = await client.workbench.runspace.create({
+    cwd: '/work',
+    rows: 24,
+    cols: 80,
+  })
+  const second = await client.workbench.tab.open({ runspaceId, rows: 24, cols: 80 })
+  return { runspaceId, first, second }
+}
+
+test('tab close closes the Tab it names and terminates its Terminal Session', async () => {
+  const { client, ptyd, connect } = backend()
+  const { first, second } = await runspaceWithTwoTabs(client)
+
+  const result = await monica(['workbench', 'tab', 'close', first.id], connect)
+
+  expect(result).toEqual({ code: 0, stdout: `closed Tab ${first.id}\n`, stderr: '' })
+  await ptyd.received((op) => op.op === 'terminate' && op.session_id === first.terminalSessionId)
+  const { runspaces } = await client.workbench.layout.get()
+  expect(runspaces.flatMap((r) => r.tabs.map((t) => t.id))).toEqual([second.id])
+})
+
+test('runspace remove removes the Runspace it names with its Tabs', async () => {
+  const { client, ptyd, connect } = backend()
+  const { runspaceId, first, second } = await runspaceWithTwoTabs(client)
+
+  const result = await monica(['workbench', 'runspace', 'remove', runspaceId], connect)
+
+  expect(result).toEqual({
+    code: 0,
+    stdout: `removed Runspace ${runspaceId} with its Tabs\n`,
+    stderr: '',
+  })
+  await ptyd.receivedAtLeast(
+    2,
+    (op) =>
+      op.op === 'terminate' &&
+      [first.terminalSessionId, second.terminalSessionId].includes(op.session_id),
+  )
+  expect((await client.workbench.layout.get()).runspaces.map((r) => r.id)).not.toContain(runspaceId)
+})
+
+test('tab close and runspace remove without an id act on the Tab of MONICA_TERMINAL_SESSION_ID and its Runspace', async () => {
+  const { client, connect } = backend()
+  const { runspaceId, first, second } = await runspaceWithTwoTabs(client)
+  const other = await runspaceWithTwoTabs(client)
+
+  const closed = await monica(['workbench', 'tab', 'close'], connect, {
+    terminalSessionId: first.terminalSessionId,
+  })
+  const removed = await monica(['workbench', 'runspace', 'remove'], connect, {
+    terminalSessionId: second.terminalSessionId,
+  })
+
+  expect(closed).toEqual({ code: 0, stdout: `closed Tab ${first.id}\n`, stderr: '' })
+  expect(removed).toEqual({
+    code: 0,
+    stdout: `removed Runspace ${runspaceId} with its Tabs\n`,
+    stderr: '',
+  })
+  expect((await client.workbench.layout.get()).runspaces.map((r) => r.id)).toEqual([
+    other.runspaceId,
+  ])
+})
+
+test('tab close and runspace remove without an id outside a Tab refuse with BAD_REQUEST and exit 1', async () => {
+  const { connect } = backend()
+
+  const closed = await monica(['workbench', 'tab', 'close'], connect)
+  const removed = await monica(['workbench', 'runspace', 'remove'], connect, {
+    terminalSessionId: 'ts-in-no-tab',
+  })
+
+  expect(closed).toEqual({
+    code: 1,
+    stdout: '',
+    stderr: 'BAD_REQUEST: not in a Tab of the Workbench: give an id, or run this in a Tab\n',
+  })
+  expect(removed).toEqual({
+    code: 1,
+    stdout: '',
+    stderr:
+      'BAD_REQUEST: not in a Tab of the Workbench: Terminal Session ts-in-no-tab is in no Tab\n',
+  })
+})
+
+test('tab close and runspace remove refuse an id nothing has with NOT_FOUND and exit 1', async () => {
+  const { connect } = backend()
+
+  const closed = await monica(['workbench', 'tab', 'close', 'tab-x'], connect)
+  const removed = await monica(['workbench', 'runspace', 'remove', 'rs-x'], connect)
+
+  expect(closed).toEqual({ code: 1, stdout: '', stderr: 'NOT_FOUND: no Tab tab-x\n' })
+  expect(removed).toEqual({ code: 1, stdout: '', stderr: 'NOT_FOUND: no Runspace rs-x\n' })
+})
+
+test('a pinned Tab and its Runspace refuse to go with CONFLICT and exit 1', async () => {
+  const { client, connect } = backend()
+  const { runspaceId, tab } = await client.workbench.runspace.create({ rows: 24, cols: 80 })
+  await client.workbench.tab.pin({ id: tab.id })
+
+  const closed = await monica(['workbench', 'tab', 'close', tab.id], connect)
+  const removed = await monica(['workbench', 'runspace', 'remove', runspaceId], connect)
+
+  expect(closed).toEqual({ code: 1, stdout: '', stderr: `CONFLICT: Tab ${tab.id} is pinned\n` })
+  expect(removed).toEqual({
+    code: 1,
+    stdout: '',
+    stderr: `CONFLICT: Runspace ${runspaceId} holds a pinned Tab\n`,
+  })
+})
+
+test('runspace remove refuses a Bench with CONFLICT and exit 1', async () => {
+  const { client, context, connect } = backend()
+  const { db, workbenchLedger } = context
+  const benchId = db.transaction((tx) => {
+    const id = workbenchLedger.createRunspace(tx, { cwd: '/work' })
+    workbenchLedger.openTab(tx, { runspaceId: id })
+    return id
+  })
+
+  const removed = await monica(['workbench', 'runspace', 'remove', benchId], connect)
+
+  expect(removed).toEqual({
+    code: 1,
+    stdout: '',
+    stderr: `CONFLICT: Runspace ${benchId} is owned by another domain\n`,
+  })
+  expect((await client.workbench.layout.get()).runspaces.map((r) => r.id)).toContain(benchId)
+})
+
+test('tab close and runspace remove --format json print the procedure output as it is', async () => {
+  const { client, connect } = backend()
+  const { runspaceId, first } = await runspaceWithTwoTabs(client)
+
+  const closed = await monica(['workbench', 'tab', 'close', first.id, '--format', 'json'], connect)
+  const removed = await monica(
+    ['workbench', 'runspace', 'remove', runspaceId, '--format', 'json'],
+    connect,
+  )
+
+  expect(JSON.parse(closed.stdout)).toEqual({ tabId: first.id, emptiedRunspaceId: null })
+  expect(JSON.parse(removed.stdout)).toEqual({ runspaceId })
+})

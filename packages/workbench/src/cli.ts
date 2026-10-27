@@ -52,6 +52,16 @@ function approvePlan(toolInput: unknown) {
 }
 
 export const formatters = {
+  runspace: {
+    remove({ runspaceId }: { runspaceId: string }): string {
+      return `removed Runspace ${runspaceId} with its Tabs`
+    },
+  },
+  tab: {
+    close({ tabId }: { tabId: string }): string {
+      return `closed Tab ${tabId}`
+    },
+  },
   terminalSession: {
     list(sessions: TerminalSession[]): string {
       if (sessions.length === 0) return 'No live Terminal Sessions'
