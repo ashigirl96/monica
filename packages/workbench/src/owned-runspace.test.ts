@@ -51,17 +51,53 @@ test('an owned Runspace stays when its last Tab closes, and tab.close names it a
 })
 
 test('tab.close names no Runspace when Tabs stay there, or when the Runspace is not owned and goes away', async () => {
-  const { client, owned } = setupWithOwned()
+  const { workbenchLedger, client, owned } = setupWithOwned()
   const a = await client.tab.open({ runspaceId: owned, ...size })
   await client.tab.open({ runspaceId: owned, ...size })
   const lone = await client.runspace.create(size)
+  const changes: WorkbenchChange[] = []
+  workbenchLedger.events.subscribe('change', (change) => changes.push(change))
 
   expect(await client.tab.close({ id: a.id })).toEqual({ tabId: a.id, emptiedRunspaceId: null })
   expect(await client.tab.close({ id: lone.tab.id })).toEqual({
     tabId: lone.tab.id,
     emptiedRunspaceId: null,
   })
+  expect(changes.filter((change) => change.type === 'runspaceEmptied')).toEqual([])
 })
+
+test.each([
+  [
+    'its shell exits',
+    async ({ ptyd, settled }: ReturnType<typeof setup>, tab: { terminalSessionId: string }) => {
+      await settled(tab.terminalSessionId)
+      ptyd.exit(tab.terminalSessionId, 0)
+      await ptyd.received((op) => op.op === 'reap' && op.session_id === tab.terminalSessionId)
+    },
+  ],
+  [
+    'tab.close closes it, as the CLI does',
+    async ({ client }: ReturnType<typeof setup>, tab: { id: string }) => {
+      await client.tab.close({ id: tab.id })
+    },
+  ],
+])(
+  'when the last Tab of an owned Runspace goes because %s, the Runspace stays with no Tabs and is streamed once as emptied',
+  async (_, close) => {
+    const booted = setupWithOwned()
+    const { workbenchLedger, client, owned } = booted
+    const tab = await client.tab.open({ runspaceId: owned, ...size })
+    const changes: WorkbenchChange[] = []
+    workbenchLedger.events.subscribe('change', (change) => changes.push(change))
+
+    await close(booted, tab)
+
+    expect(changes.filter((change) => change.type === 'runspaceEmptied')).toEqual([
+      { type: 'runspaceEmptied', runspaceId: owned },
+    ])
+    expect((await client.layout.get()).runspaces).toMatchObject([{ id: owned, tabs: [] }])
+  },
+)
 
 test('an owned Runspace stays when its last Tab moves out', async () => {
   const { client, owned } = setupWithOwned()

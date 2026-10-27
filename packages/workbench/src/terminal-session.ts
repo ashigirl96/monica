@@ -3,7 +3,6 @@ import { and, eq, inArray } from 'drizzle-orm'
 import type { AgentSessions } from './agent-session.ts'
 import type { WorkbenchChange } from './contract.ts'
 import type { Db, Tx } from './db.ts'
-import { shouldRespawn } from './pin.ts'
 import type { PtydClient, SessionInfo } from './ptyd.ts'
 import { tab, terminalSession } from './schema.ts'
 import { tabEnv } from './tab-env.ts'
@@ -166,26 +165,6 @@ export function createTerminalSessions(deps: {
     })
     publish({ type: 'terminalSession', id })
     ptyd?.reap(id)
-    respawnPinnedTabs([id])
-  }
-
-  // id を省くと pin された Tab をすべて見る。Exit の記録と張り直しの間で Backend が止まった分も拾うため。
-  function respawnPinnedTabs(endedIds?: string[]) {
-    try {
-      db.transaction((tx) => {
-        const rows = tx
-          .select()
-          .from(terminalSession)
-          .leftJoin(tab, eq(tab.terminalSessionId, terminalSession.id))
-          .where(endedIds ? inArray(terminalSession.id, endedIds) : eq(tab.pinned, true))
-          .all()
-        for (const row of rows) {
-          if (row.tab && shouldRespawn(row.terminal_session, row.tab)) rebind(tx, row.tab)
-        }
-      })
-    } catch (error) {
-      console.error(`[workbench] respawning pinned Tabs failed: ${error}`)
-    }
   }
 
   function reconcile(
@@ -252,7 +231,6 @@ export function createTerminalSessions(deps: {
     rebind,
     terminateRemoved,
     recordExit,
-    respawnPinnedTabs,
     reconcile,
   }
 }

@@ -44,8 +44,8 @@ function seedRow(db: Db, id: string, status: Status) {
 }
 
 // reconcile は Tab の無い live な行を終わらせるので、残す行は Tab に表示させておく。
-function seedRowInTab(db: Db, id: string) {
-  seedRow(db, id, 'running')
+function seedRowInTab(db: Db, id: string, status: Status = 'running') {
+  seedRow(db, id, status)
   const runspaceId = `rs-${id}`
   db.insert(runspace).values({ id: runspaceId, cwd: '/tmp/somewhere', sortOrder: 0 }).run()
   db.insert(tabTable)
@@ -140,6 +140,39 @@ test('an Exit from ptyd turns the row exited with the code and reaps the tombsto
   expect(rowOf(db, 'ts-a')).toMatchObject({ status: 'exited', exitCode: 130 })
 })
 
+test('an unpinned Tab no one has attached to closes when its shell exits', async () => {
+  const { ptyd, client, settled } = setup()
+  const { runspaceId, tab: kept } = await client.runspace.create({
+    cwd: '/work',
+    rows: 24,
+    cols: 80,
+  })
+  const exited = await client.tab.open({ runspaceId, rows: 24, cols: 80 })
+  await settled(exited.terminalSessionId)
+
+  ptyd.exit(exited.terminalSessionId, 0)
+  await ptyd.received((op) => op.op === 'reap' && op.session_id === exited.terminalSessionId)
+
+  expect((await client.layout.get()).runspaces).toMatchObject([{ id: runspaceId, tabs: [kept] }])
+})
+
+test('the reconcile closes an unpinned Tab whose shell exited while the Backend was stopped, and keeps one whose shell ptyd lost or that never started', async () => {
+  const { ptyd, db, workbenchLedger, client } = setup()
+  seedRowInTab(db, 'ts-died')
+  seedRowInTab(db, 'ts-gone')
+  seedRowInTab(db, 'ts-failed', 'failed')
+  ptyd.sessions.push(heldByPtyd('ts-died', { running: false, pid: null, exit_code: 0 }))
+
+  await workbenchLedger.start()
+
+  expect(rowOf(db, 'ts-gone')?.status).toBe('lost')
+  expect(
+    (await client.layout.get()).runspaces
+      .flatMap((r) => r.tabs.map((t) => t.terminalSessionId))
+      .toSorted(),
+  ).toEqual(['ts-failed', 'ts-gone'])
+})
+
 test('a new Terminal Session runs in ptyd under a ts-<uuidv7> id with the shell fixed at startup', async () => {
   const shell = process.env.SHELL
   onCleanup(() => {
@@ -165,13 +198,14 @@ test('a new Terminal Session runs in ptyd under a ts-<uuidv7> id with the shell 
 })
 
 test('a shell that dies before ptyd answers Created stays exited', async () => {
-  const { ptyd, client, settled } = setup()
+  const { ptyd, db, client } = setup()
   ptyd.beforeCreated = (op) => [{ type: 'exit', session_id: op.session_id, exit_code: 127 }]
 
   const { tab } = await client.runspace.create({ cwd: '/work', rows: 24, cols: 80 })
   await ptyd.received((op) => op.op === 'reap')
 
-  expect(await settled(tab.terminalSessionId)).toMatchObject({ status: 'exited', exitCode: 127 })
+  expect(rowOf(db, tab.terminalSessionId)).toMatchObject({ status: 'exited', exitCode: 127 })
+  expect((await client.layout.get()).runspaces).toEqual([])
 })
 
 function nextChange(

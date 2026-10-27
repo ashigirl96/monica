@@ -27,7 +27,6 @@ import {
   applyTerminalSessionListAtom,
   isDeadStatus,
   markEndedAtom,
-  setTerminalSessionStatusAtom,
   type TerminalSessionStatusEntry,
   terminalSessionStatusAtom,
 } from './terminal-sessions.ts'
@@ -116,6 +115,26 @@ export const reloadAtom = serialReload(load)
 export const reloadAgentSessionsAtom = serialReload(async (get, set) => {
   set(agentSessionsAtom, await clientOf(get).agentSession.list())
 })
+
+export async function followWorkbenchChanges(
+  store: Store,
+  client: WorkbenchClient,
+  signal: AbortSignal,
+): Promise<void> {
+  const reload = () => store.set(reloadAtom).catch((e: unknown) => warnFailed('layout reload', e))
+  const reloadAgentSessions = () =>
+    store.set(reloadAgentSessionsAtom).catch((e: unknown) => warnFailed('agent session reload', e))
+  // 先に購読してから読むので、読んだ後の変更を取りこぼさない。
+  const changes = await client.changes(undefined, { signal })
+  void reload()
+  void reloadAgentSessions()
+  for await (const change of changes) {
+    // 読み直して Tab の無い Bench を出す前に渡し、slot が close の間の中身を決められるようにする。
+    if (change.type === 'runspaceEmptied') store.get(lastTabClosedAtom)?.(change.runspaceId)
+    if (change.type !== 'agentSession') void reload()
+    void reloadAgentSessions()
+  }
+}
 
 export const copyActiveAgentSessionIdAtom = atom(null, (get): boolean => {
   const tab = get(activeTerminalTabAtom)
@@ -304,20 +323,12 @@ function isGone(e: unknown): boolean {
 
 // Terminal Session の終了は Backend が tab.close の transaction の後に予約するので、webview からは頼まない（ADR-0023）。
 async function closeTab(get: Getter, set: Setter, { tab }: TabInRunspace) {
-  // 空になったかは close の transaction で決まる。読み直した layout では、間に Tab を外へ移した分と区別できない。
-  let emptiedRunspaceId: string | null = null
   try {
-    emptiedRunspaceId = (await clientOf(get).tab.close({ id: tab.id })).emptiedRunspaceId
+    await clientOf(get).tab.close({ id: tab.id })
   } catch (e) {
     if (!isGone(e)) throw e
   }
   releaseTabConnection(tab.id)
-  if (!emptiedRunspaceId) {
-    await set(reloadAtom)
-    return
-  }
-  // 読み直して Tab の無い Bench を出す前に渡し、slot が close の間の中身を決められるようにする。
-  get(lastTabClosedAtom)?.(emptiedRunspaceId)
   await set(reloadAtom)
 }
 
@@ -346,38 +357,23 @@ export const closeBenchAtom = action(async (get, set, bench: Runspace) => {
   for (const tab of bench.tabs) await closeTab(get, set, { runspace: bench, tab })
 })
 
-// 接続中の Tab は Exit で閉じるので、閉じ終わるまでの間も終わった印を出さない。
-const closingTabIdsAtom = atom<ReadonlySet<string>>(new Set<string>())
-
 export const deadTabsAtom = atom((get) => {
   const statuses = get(terminalSessionStatusAtom)
-  const closing = get(closingTabIdsAtom)
   const dead: Record<string, TerminalSessionStatusEntry> = {}
   for (const tab of get(layoutAtom)?.runspaces.flatMap((r) => r.tabs) ?? []) {
     const entry = statuses[tab.terminalSessionId]
-    if (entry && isDeadStatus(entry.status) && !closing.has(tab.id)) dead[tab.id] = entry
+    if (entry && isDeadStatus(entry.status)) dead[tab.id] = entry
   }
   return dead
 })
 
-export const tabExitedAtom = action(
-  async (get, set, tabId: string, terminalSessionId: string, exitCode: number | null) => {
-    const found = findTab(get, tabId)
-    // Backend の張り直しが先に届いた Tab は、もう新しい shell を指している。
-    if (found?.tab.terminalSessionId !== terminalSessionId) return
-    releaseTabConnection(tabId)
-    set(markEndedAtom, terminalSessionId)
-    set(setTerminalSessionStatusAtom, terminalSessionId, { status: 'exited', exitCode })
-    // pin された Tab は Backend が張り直す。
-    if (found.tab.pinned) return
-    set(closingTabIdsAtom, (prev) => new Set(prev).add(tabId))
-    try {
-      await closeTab(get, set, found)
-    } finally {
-      set(closingTabIdsAtom, (prev) => new Set([...prev].filter((id) => id !== tabId)))
-    }
-  },
-)
+// 閉じるか張り直すかは Backend が決め（ADR-0011）、閉じる Tab に overlay を出さないよう終わった印も付けない。
+export const tabExitedAtom = atom(null, (get, set, tabId: string, terminalSessionId: string) => {
+  // Backend の張り直しが先に届いた Tab は、もう新しい shell を指している。
+  if (findTab(get, tabId)?.tab.terminalSessionId !== terminalSessionId) return
+  releaseTabConnection(tabId)
+  set(markEndedAtom, terminalSessionId)
+})
 
 export const toggleTabPinAtom = action(async (get, set, tabId?: string) => {
   const found = tabId ? findTab(get, tabId) : frontTab(get)

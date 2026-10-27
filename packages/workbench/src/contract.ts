@@ -56,6 +56,8 @@ export const WorkbenchChangeSchema = z.discriminatedUnion('type', [
   z.object({ type: z.literal('terminalSession'), id: z.string() }),
   z.object({ type: z.literal('agentSession'), sessionId: z.string() }),
   z.object({ type: z.literal('reconciled') }),
+  // 空になったかは閉じた transaction でしか決まらず、読み直しでは分からないので id を載せる。
+  z.object({ type: z.literal('runspaceEmptied'), runspaceId: z.string() }),
 ])
 
 export const RepoPlaceSchema = z.object({

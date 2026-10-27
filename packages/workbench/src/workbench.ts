@@ -84,12 +84,22 @@ export function createWorkbenchLedger(
   })
   const layoutWrites = createLayoutWrites({ publish, terminalSessions })
 
+  // Exit の記録と別の transaction にするので、Tab の後始末が失敗しても終わった記録は残る。
+  function settleEndedTabs(endedIds?: string[]) {
+    try {
+      db.transaction((tx) => layoutWrites.settleEndedTabs(tx, endedIds))
+    } catch (error) {
+      console.error(`[workbench] settling Tabs whose shell ended failed: ${error}`)
+    }
+  }
+
   function onExit(id: string, exitCode: number | null) {
     if (exitsDuringReconcile) {
       exitsDuringReconcile.push([id, exitCode])
       return
     }
     terminalSessions.recordExit(client, id, exitCode)
+    settleEndedTabs([id])
   }
 
   // 繋ぎ直すのは reconcile まで済んだ接続が切れたときだけ。hello や List の途中で切れたら、
@@ -122,7 +132,7 @@ export function createWorkbenchLedger(
       exitsDuringReconcile = null
       for (const [id, exitCode] of exits) onExit(id, exitCode)
       publish({ type: 'reconciled' })
-      terminalSessions.respawnPinnedTabs()
+      settleEndedTabs()
       console.error(
         `[workbench] connected to monica-ptyd; reaped ${reaped}, terminated ${terminated}`,
       )
