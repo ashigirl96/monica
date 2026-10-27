@@ -71,7 +71,7 @@ Workbench の sidebar の左端の列（Rail）に並ぶ、Repo 1 つか Repo �
 _Avoid_: Rail（Tile を並べた列の語）, 札
 
 **Tab**:
-Runspace 内の 1 枚の端末画面で、1 つの Terminal Session を表示する。Tab を閉じる（Close Tab）とその Terminal Session も終了し、shell が終わると Tab も閉じる（pin された Tab を除く）。
+Runspace 内の 1 枚の端末画面で、1 つの Terminal Session を表示する。Tab を閉じる（Close Tab）とその Terminal Session も終了し、shell が自分で終わると Tab も閉じる（pin された Tab を除く）。desktop が閉じている間や表示していない間に終わった shell も同じ。shell が起動できなかったときと、ptyd を失って Terminal Session が消えたときは閉じず、新しい shell を張り直すか閉じるかを私が選ぶ。
 _Avoid_: close（単独では Task の close と紛れる）, Terminate, detach
 
 **Pin**:
