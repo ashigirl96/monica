@@ -2,6 +2,7 @@
 //! MONICA_HOME, drive it through PtydClient, and assert sessions survive client
 //! reconnects. PTY-backed, so like run::tests these can be environment-sensitive.
 
+use std::collections::HashMap;
 use std::path::PathBuf;
 use std::process::{Child, Command};
 use std::sync::mpsc;
@@ -9,7 +10,9 @@ use std::time::{Duration, Instant};
 
 use base64::Engine;
 use monica_terminal_client::{ClientEvent, PtydClient};
-use monica_terminal_protocol::{CreateParams, RequestOp, ResponseBody, PROTOCOL_VERSION};
+use monica_terminal_protocol::{
+    CreateParams, ProcessInfo, RequestOp, ResponseBody, PROTOCOL_VERSION,
+};
 
 struct DaemonGuard {
     child: Child,
@@ -313,14 +316,15 @@ impl Drop for Strays {
     }
 }
 
-fn create_attached_zsh(client: &PtydClient, session_id: &str) {
-    create_zsh_session(client, session_id).expect("unix spawns should expose a pid");
+fn create_attached_zsh(client: &PtydClient, session_id: &str) -> u32 {
+    let shell = create_zsh_session(client, session_id).expect("unix spawns should expose a pid");
     client
         .request(RequestOp::Attach {
             session_id: session_id.into(),
             replay_bytes: None,
         })
         .unwrap();
+    shell
 }
 
 fn type_and_read_pid(
@@ -478,6 +482,83 @@ fn a_shell_that_exits_on_its_own_takes_what_is_left_in_its_session() {
     wait_until(Duration::from_secs(10), || {
         children.iter().all(|&pid| !process_alive(pid))
     });
+}
+
+fn processes(client: &PtydClient, session_id: &str) -> Vec<ProcessInfo> {
+    match client
+        .request(RequestOp::Processes {
+            session_id: session_id.into(),
+        })
+        .unwrap()
+    {
+        ResponseBody::Processes { processes } => processes,
+        other => panic!("unexpected processes response: {other:?}"),
+    }
+}
+
+/// pid → whether it ends with its Terminal Session.
+fn marks(processes: &[ProcessInfo]) -> HashMap<u32, bool> {
+    processes
+        .iter()
+        .map(|p| (p.pid, p.terminal_session_process))
+        .collect()
+}
+
+#[test]
+fn processes_lists_the_shells_session_and_the_descendants_that_left_it() {
+    let daemon = start_daemon("processes");
+    let (client, rx) = connect(&daemon);
+    let shell = create_attached_zsh(&client, "ts-1");
+    let nohup = type_and_read_pid(
+        &client,
+        &rx,
+        "ts-1",
+        "nohup sleep 600 >/dev/null 2>&1 & echo nohup-pid-$!",
+        "nohup-pid-",
+    );
+    // The parent stays as the shell's job, the way claude's Bash tool keeps a background command.
+    let escaped = type_and_read_pid(
+        &client,
+        &rx,
+        "ts-1",
+        "perl -MPOSIX -e 'if (my $p = fork) { print \"setsid-pid-$p\\n\"; waitpid $p, 0; exit } \
+         POSIX::setsid(); open STDIN, \"</dev/null\"; open STDOUT, \">/dev/null\"; \
+         open STDERR, \">/dev/null\"; exec \"sleep\", \"600\"' &",
+        "setsid-pid-",
+    );
+    let _strays = Strays(vec![nohup, escaped]);
+
+    let mut before = HashMap::new();
+    wait_until(Duration::from_secs(5), || {
+        before = marks(&processes(&client, "ts-1"));
+        before.get(&escaped) == Some(&false)
+    });
+    assert_eq!(before.get(&shell), Some(&true), "the shell: {before:?}");
+    assert_eq!(
+        before.get(&nohup),
+        Some(&true),
+        "the nohup child: {before:?}"
+    );
+
+    client
+        .request(RequestOp::Terminate {
+            session_id: "ts-1".into(),
+        })
+        .unwrap();
+    wait_for_exit(&rx, "ts-1");
+    let waiting = marks(&processes(&client, "ts-1"));
+    assert_eq!(
+        waiting.get(&nohup),
+        Some(&true),
+        "the nohup child waits for the cleanup: {waiting:?}"
+    );
+
+    wait_until(Duration::from_secs(10), || !process_alive(nohup));
+    let after = processes(&client, "ts-1");
+    assert!(
+        after.iter().all(|p| !p.terminal_session_process),
+        "after the cleanup: {after:?}"
+    );
 }
 
 #[test]

@@ -10,6 +10,7 @@ import { openInEditor, resolveEditorPaths } from './editor.ts'
 import { asTab, readLayout } from './layout.ts'
 import { repoOf } from './repo.ts'
 import { tab, terminalSession } from './schema.ts'
+import { showTab } from './tab-show.ts'
 import { LIVE } from './terminal-session-status.ts'
 import { agentSessionsOf, layoutWritesOf, type WorkbenchContext } from './workbench.ts'
 
@@ -85,6 +86,10 @@ export const router = os.router({
         return { tabId, ...layoutWritesOf(workbenchLedger).closeTab(tx, tabId) }
       }),
     ),
+    show: os.tab.show.handler(({ context: { db, workbenchLedger }, input }) => {
+      const tabId = input.id ?? db.transaction((tx) => callerTab(tx, input.terminalSessionId).id)
+      return showTab(db, workbenchLedger, tabId)
+    }),
     move: os.tab.move.handler(({ context: { db, workbenchLedger }, input }) => {
       db.transaction((tx) => layoutWritesOf(workbenchLedger).moveTab(tx, input))
     }),

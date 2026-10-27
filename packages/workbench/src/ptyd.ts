@@ -16,6 +16,15 @@ export type SessionInfo = {
   cols: number
 }
 
+export type ProcessInfo = {
+  pid: number
+  ppid: number
+  pgid: number
+  state: string
+  command: string
+  terminal_session_process: boolean
+}
+
 export type RequestOp =
   | { op: 'hello'; version: number }
   | {
@@ -31,6 +40,7 @@ export type RequestOp =
   | { op: 'terminate'; session_id: string }
   | { op: 'list' }
   | { op: 'reap'; session_id: string }
+  | { op: 'processes'; session_id: string }
   | { op: 'shutdown' }
 
 export type ResponseBody =
@@ -38,6 +48,7 @@ export type ResponseBody =
   | { body: 'hello'; version: number }
   | { body: 'created'; pid: number | null }
   | { body: 'sessions'; sessions: SessionInfo[] }
+  | { body: 'processes'; processes: ProcessInfo[] }
 
 export type ServerMessage =
   | ({ type: 'ok'; id: number } & ResponseBody)
@@ -57,6 +68,8 @@ export type Outcome<T> =
   | { kind: 'unknown' }
 
 class Disconnected extends Error {}
+
+const PROCESSES_TIMEOUT_MS = 2000
 
 export class PtydClient {
   private socket: Socket
@@ -127,6 +140,18 @@ export class PtydClient {
 
   terminate(sessionId: string): Promise<Outcome<void>> {
     return this.outcome({ op: 'terminate', session_id: sessionId }, () => {})
+  }
+
+  // この op を持たない古い ptyd は応答しないので、待ちを区切る。
+  processes(sessionId: string): Promise<Outcome<ProcessInfo[]>> {
+    const answered = this.outcome({ op: 'processes', session_id: sessionId }, (body) => {
+      if (body.body !== 'processes') throw new Error(`unexpected processes response: ${body.body}`)
+      return body.processes
+    })
+    const timedOut = Bun.sleep(PROCESSES_TIMEOUT_MS).then((): Outcome<never> => ({
+      kind: 'unknown',
+    }))
+    return Promise.race([answered, timedOut])
   }
 
   reap(sessionId: string) {

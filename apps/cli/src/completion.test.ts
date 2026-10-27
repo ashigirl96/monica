@@ -59,7 +59,7 @@ test('__complete lists the choices after an option that takes a value, and skips
   expect(after.stdout).toBe(
     'terminal-session:Available subcommands: list\n' +
       'runspace:Available subcommands: remove\n' +
-      'tab:Available subcommands: close\n' +
+      'tab:Available subcommands: close, show\n' +
       'agent-session:Available subcommands: list\n' +
       'help:display help for command\n',
   )

@@ -19,6 +19,28 @@ export const LayoutSchema = z.object({
 
 export const AgentSessionSchema = createSelectSchema(agentSession)
 
+export const SessionProcessSchema = z.object({
+  pid: z.number().int(),
+  ppid: z.number().int(),
+  pgid: z.number().int(),
+  state: z.string().describe("ps's STAT, such as Ss or SN"),
+  command: z.string(),
+  terminalSessionProcess: z
+    .boolean()
+    .describe('in the session of the shell, so the end of the Terminal Session stops it'),
+})
+
+export const ShownTabSchema = z.object({
+  tab: TabSchema,
+  terminalSession: createSelectSchema(terminalSession),
+  processes: z
+    .array(SessionProcessSchema)
+    .nullable()
+    .describe(
+      "the Terminal Session Processes and the shell's descendants that left its session, or null when monica-ptyd could not list them",
+    ),
+})
+
 export const ListedAgentSessionSchema = AgentSessionSchema.extend({
   unread: z.boolean().describe('a notified wait no one has seen in its Tab yet'),
 })
@@ -45,6 +67,7 @@ export type TerminalSession = z.infer<typeof TerminalSessionSchema>
 export type Tab = z.infer<typeof TabSchema>
 export type Layout = z.infer<typeof LayoutSchema>
 export type AgentSession = z.infer<typeof AgentSessionSchema>
+export type ShownTab = z.infer<typeof ShownTabSchema>
 export type ListedAgentSession = z.infer<typeof ListedAgentSessionSchema>
 export type WorkbenchChange = z.infer<typeof WorkbenchChangeSchema>
 export type RepoPlace = z.infer<typeof RepoPlaceSchema>
@@ -122,6 +145,10 @@ export const contract = {
             .describe('the owned Runspace this close left with no Tabs, or null'),
         }),
       ),
+    show: meta
+      .meta({ description: 'Show a Tab with its Terminal Session and processes', cli: true })
+      .input(z.object(callerOr('Tab')))
+      .output(ShownTabSchema),
     move: meta
       .meta({ description: 'Move a Tab to a position in a Runspace' })
       .input(z.object({ id: z.string(), runspaceId: z.string(), index }))

@@ -1,7 +1,7 @@
 import { table } from '@monica/ui/table'
 import type { ContractRouterClient } from '@orpc/contract'
 
-import type { AgentSession, contract, TerminalSession } from './contract.ts'
+import type { AgentSession, contract, ShownTab, TerminalSession } from './contract.ts'
 
 type Connect = (options: {
   retry: boolean
@@ -61,6 +61,7 @@ export const formatters = {
     close({ tabId }: { tabId: string }): string {
       return `closed Tab ${tabId}`
     },
+    show: shownTab,
   },
   terminalSession: {
     list(sessions: TerminalSession[]): string {
@@ -80,6 +81,25 @@ export const formatters = {
       ])
     },
   },
+}
+
+/** Tab 1 つ分の show を、見出しの 1 行と process の表にする。 */
+export function shownTab({ tab, terminalSession, processes }: ShownTab): string {
+  const shell = terminalSession.pid
+  const head = `Tab ${tab.id} on Terminal Session ${terminalSession.id}: ${terminalSession.status}, shell pid ${shell ?? '-'}`
+  if (processes === null) return `${head}\ncould not list the processes from monica-ptyd`
+  if (processes.length === 0) return `${head}\nNo processes`
+  return `${head}\n${table([
+    ['PID', 'PPID', 'PGID', 'STAT', 'MARK', 'COMMAND'],
+    ...processes.map((p) => [
+      String(p.pid),
+      String(p.ppid),
+      String(p.pgid),
+      p.state,
+      p.pid === shell ? 'shell' : p.terminalSessionProcess ? '' : 'stays',
+      p.command,
+    ]),
+  ])}`
 }
 
 function stateOf(session: AgentSession): string {

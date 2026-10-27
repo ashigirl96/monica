@@ -16,7 +16,7 @@ use crate::manager::PtyManager;
 use crate::terminal_modes::TerminalModes;
 use crate::transcript::{self, Transcript};
 use crate::types::{PtySize, SpawnRequest};
-use monica_terminal_protocol::{CreateParams, ServerMessage, SessionInfo};
+use monica_terminal_protocol::{CreateParams, ProcessInfo, ServerMessage, SessionInfo};
 
 const DEFAULT_REPLAY_BYTES: u32 = 256 * 1024;
 /// Larger than a PTY read, so a backlog drains in fewer frames.
@@ -577,6 +577,10 @@ impl SessionTable {
             .collect();
         sessions.sort_by(|a, b| a.session_id.cmp(&b.session_id));
         sessions
+    }
+
+    pub fn processes(&self, session_id: &str) -> Result<Vec<ProcessInfo>> {
+        self.manager.processes(session_id)
     }
 
     pub fn reap(&self, session_id: &str) {
