@@ -20,7 +20,6 @@ import {
   activeTerminalTabAtom,
   applyLayoutAtom,
   selectedTileAtom,
-  tabClosedAtom,
 } from './navigation.ts'
 import { buildSidebar, isPathTitle, sectionPeersOf, type Sidebar } from './sidebar-model.ts'
 import { getTabTerminal, releaseTabConnection } from './terminal-connections.ts'
@@ -304,7 +303,7 @@ function isGone(e: unknown): boolean {
 }
 
 // Terminal Session の終了は Backend が tab.close の transaction の後に予約するので、webview からは頼まない（ADR-0023）。
-async function closeTab(get: Getter, set: Setter, { runspace, tab }: TabInRunspace) {
+async function closeTab(get: Getter, set: Setter, { tab }: TabInRunspace) {
   // 空になったかは close の transaction で決まる。読み直した layout では、間に Tab を外へ移した分と区別できない。
   let emptiedRunspaceId: string | null = null
   try {
@@ -313,7 +312,6 @@ async function closeTab(get: Getter, set: Setter, { runspace, tab }: TabInRunspa
     if (!isGone(e)) throw e
   }
   releaseTabConnection(tab.id)
-  set(tabClosedAtom, runspace, tab.id)
   if (!emptiedRunspaceId) {
     await set(reloadAtom)
     return
