@@ -146,7 +146,7 @@ test('runspace remove refuses a Bench with CONFLICT and exit 1', async () => {
 
 async function tabWithProcesses() {
   const { client, ptyd, connect } = backend()
-  const { first } = await runspaceWithTwoTabs(client)
+  const { runspaceId, first, second } = await runspaceWithTwoTabs(client)
   const shown = await untilSettled(
     () => client.workbench.terminalSession.list(),
     first.terminalSessionId,
@@ -186,7 +186,7 @@ async function tabWithProcesses() {
     '2002  2001  2002  Ss    stays  python3 -m http.server 18104',
     '',
   ].join('\n')
-  return { client, ptyd, connect, first, shell, stdout }
+  return { client, ptyd, connect, runspaceId, first, second, shell, stdout }
 }
 
 test('tab show prints the Terminal Session, its shell pid, and its processes marking the shell and what stays', async () => {
@@ -276,6 +276,89 @@ test('tab show --format json prints the procedure output as it is', async () => 
       terminalSessionProcess: false,
     },
   ])
+})
+
+async function secondShell(
+  client: ReturnType<typeof backend>['client'],
+  terminalSessionId: string,
+) {
+  return (await untilSettled(() => client.workbench.terminalSession.list(), terminalSessionId))!
+    .pid!
+}
+
+test('runspace show prints the Runspace and each Tab like tab show, in the order of its Tabs', async () => {
+  const { client, connect, runspaceId, second, stdout } = await tabWithProcesses()
+  const otherShell = await secondShell(client, second.terminalSessionId)
+
+  const result = await monica(['workbench', 'runspace', 'show', runspaceId], connect)
+
+  expect(result).toEqual({
+    code: 0,
+    stdout:
+      `Runspace ${runspaceId} at /work\n\n${stdout}\n` +
+      `Tab ${second.id} on Terminal Session ${second.terminalSessionId}: running, shell pid ${otherShell}\n` +
+      'No processes\n',
+    stderr: '',
+  })
+})
+
+test('runspace show without an id shows the Runspace of MONICA_TERMINAL_SESSION_ID, and refuses outside a Tab with BAD_REQUEST', async () => {
+  const { client, connect, runspaceId, second } = await tabWithProcesses()
+  await runspaceWithTwoTabs(client)
+
+  const shown = await monica(['workbench', 'runspace', 'show', '--format', 'json'], connect, {
+    terminalSessionId: second.terminalSessionId,
+  })
+  const outside = await monica(['workbench', 'runspace', 'show'], connect)
+
+  expect(JSON.parse(shown.stdout).runspace.id).toBe(runspaceId)
+  expect(outside).toEqual({
+    code: 1,
+    stdout: '',
+    stderr: 'BAD_REQUEST: not in a Tab of the Workbench: give an id, or run this in a Tab\n',
+  })
+})
+
+test('runspace show refuses an id no Runspace has with NOT_FOUND and exit 1', async () => {
+  const { connect } = backend()
+
+  const result = await monica(['workbench', 'runspace', 'show', 'rs-x'], connect)
+
+  expect(result).toEqual({ code: 1, stdout: '', stderr: 'NOT_FOUND: no Runspace rs-x\n' })
+})
+
+test('runspace show says, for each Tab, it could not list the processes when monica-ptyd is out of reach', async () => {
+  const { client, ptyd, connect, runspaceId, first, second, shell } = await tabWithProcesses()
+  const otherShell = await secondShell(client, second.terminalSessionId)
+  ptyd.stop()
+
+  const result = await monica(['workbench', 'runspace', 'show', runspaceId], connect)
+
+  expect(result).toEqual({
+    code: 0,
+    stdout:
+      `Runspace ${runspaceId} at /work\n\n` +
+      `Tab ${first.id} on Terminal Session ${first.terminalSessionId}: running, shell pid ${shell}\n` +
+      'could not list the processes from monica-ptyd\n\n' +
+      `Tab ${second.id} on Terminal Session ${second.terminalSessionId}: running, shell pid ${otherShell}\n` +
+      'could not list the processes from monica-ptyd\n',
+    stderr: '',
+  })
+})
+
+test('runspace show --format json prints the procedure output as it is', async () => {
+  const { connect, runspaceId, first, second } = await tabWithProcesses()
+
+  const result = await monica(
+    ['workbench', 'runspace', 'show', runspaceId, '--format', 'json'],
+    connect,
+  )
+
+  const shown = JSON.parse(result.stdout)
+  expect(shown.runspace).toMatchObject({ id: runspaceId, cwd: '/work' })
+  expect(shown.tabs.map((t: { tab: { id: string } }) => t.tab.id)).toEqual([first.id, second.id])
+  expect(shown.tabs[0].processes.map((p: { pid: number }) => p.pid)).toContain(2002)
+  expect(shown.tabs[1].processes).toEqual([])
 })
 
 test('tab close and runspace remove --format json print the procedure output as it is', async () => {

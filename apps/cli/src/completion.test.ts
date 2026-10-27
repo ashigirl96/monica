@@ -58,7 +58,7 @@ test('__complete lists the choices after an option that takes a value, and skips
   expect(joined.stdout).toBe('--format=text\n--format=json\n')
   expect(after.stdout).toBe(
     'terminal-session:Available subcommands: list\n' +
-      'runspace:Available subcommands: remove\n' +
+      'runspace:Available subcommands: remove, show\n' +
       'tab:Available subcommands: close, show\n' +
       'agent-session:Available subcommands: list\n' +
       'help:display help for command\n',

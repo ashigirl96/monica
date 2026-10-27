@@ -1,7 +1,13 @@
 import { table } from '@monica/ui/table'
 import type { ContractRouterClient } from '@orpc/contract'
 
-import type { AgentSession, contract, ShownTab, TerminalSession } from './contract.ts'
+import type {
+  AgentSession,
+  contract,
+  ShownRunspace,
+  ShownTab,
+  TerminalSession,
+} from './contract.ts'
 
 type Connect = (options: {
   retry: boolean
@@ -55,6 +61,9 @@ export const formatters = {
   runspace: {
     remove({ runspaceId }: { runspaceId: string }): string {
       return `removed Runspace ${runspaceId} with its Tabs`
+    },
+    show({ runspace, tabs }: ShownRunspace): string {
+      return [`Runspace ${runspace.id} at ${runspace.cwd}`, ...tabs.map(shownTab)].join('\n\n')
     },
   },
   tab: {

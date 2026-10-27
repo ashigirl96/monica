@@ -41,6 +41,11 @@ export const ShownTabSchema = z.object({
     ),
 })
 
+export const ShownRunspaceSchema = z.object({
+  runspace: createSelectSchema(runspace),
+  tabs: z.array(ShownTabSchema).describe('in the order of the Tabs of the Runspace'),
+})
+
 export const ListedAgentSessionSchema = AgentSessionSchema.extend({
   unread: z.boolean().describe('a notified wait no one has seen in its Tab yet'),
 })
@@ -68,6 +73,7 @@ export type Tab = z.infer<typeof TabSchema>
 export type Layout = z.infer<typeof LayoutSchema>
 export type AgentSession = z.infer<typeof AgentSessionSchema>
 export type ShownTab = z.infer<typeof ShownTabSchema>
+export type ShownRunspace = z.infer<typeof ShownRunspaceSchema>
 export type ListedAgentSession = z.infer<typeof ListedAgentSessionSchema>
 export type WorkbenchChange = z.infer<typeof WorkbenchChangeSchema>
 export type RepoPlace = z.infer<typeof RepoPlaceSchema>
@@ -110,6 +116,10 @@ export const contract = {
       })
       .input(z.object(callerOr('Runspace')))
       .output(z.object({ runspaceId: z.string() })),
+    show: meta
+      .meta({ description: 'Show a Runspace with each of its Tabs as tab show does', cli: true })
+      .input(z.object(callerOr('Runspace')))
+      .output(ShownRunspaceSchema),
     move: meta
       .meta({ description: 'Move a Runspace to a position in the sidebar' })
       .input(z.object({ id: z.string(), index }))

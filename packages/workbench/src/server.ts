@@ -10,7 +10,7 @@ import { openInEditor, resolveEditorPaths } from './editor.ts'
 import { asTab, readLayout } from './layout.ts'
 import { repoOf } from './repo.ts'
 import { tab, terminalSession } from './schema.ts'
-import { showTab } from './tab-show.ts'
+import { showRunspace, showTab } from './tab-show.ts'
 import { LIVE } from './terminal-session-status.ts'
 import { agentSessionsOf, layoutWritesOf, type WorkbenchContext } from './workbench.ts'
 
@@ -56,6 +56,11 @@ export const router = os.router({
         return { runspaceId }
       }),
     ),
+    show: os.runspace.show.handler(({ context: { db, workbenchLedger }, input }) => {
+      const runspaceId =
+        input.id ?? db.transaction((tx) => callerTab(tx, input.terminalSessionId).runspaceId)
+      return showRunspace(db, workbenchLedger, runspaceId)
+    }),
     move: os.runspace.move.handler(({ context: { db, workbenchLedger }, input }) => {
       db.transaction((tx) => layoutWritesOf(workbenchLedger).moveRunspace(tx, input))
     }),
