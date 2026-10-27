@@ -5,7 +5,7 @@ import type { ListItem } from './contract.ts'
 import { openBlockersOf } from './copy.ts'
 import { displayState } from './display-state.ts'
 import { formatRef } from './ref.ts'
-import { runAgentSessionsByTask } from './run.ts'
+import { liveRunsByTask } from './run.ts'
 import { bench, issue, task } from './schema.ts'
 
 export function listTasks(db: Db, { closed }: { closed: boolean }): ListItem[] {
@@ -21,7 +21,7 @@ export function listTasks(db: Db, { closed }: { closed: boolean }): ListItem[] {
     db,
     rows.map((row) => row.issue.id),
   )
-  const runsOf = runAgentSessionsByTask(
+  const runsOf = liveRunsByTask(
     db,
     rows.map((row) => row.issue.id),
   )

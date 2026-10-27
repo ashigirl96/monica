@@ -1,7 +1,6 @@
-import { agentSession, terminalSession } from '@monica/workbench/schema'
-import { type Db, LIVE, terminating, type Tx } from '@monica/workbench/server'
+import type { Db, Tx } from '@monica/workbench/server'
 import { ORPCError } from '@orpc/server'
-import { and, eq, inArray, not } from 'drizzle-orm'
+import { eq } from 'drizzle-orm'
 
 import {
   type FoundTask,
@@ -11,20 +10,17 @@ import {
   TaskStateRefusal,
 } from './open-task.ts'
 import { formatRef } from './ref.ts'
-import { issue, run } from './schema.ts'
+import type { RunLaunches } from './run.ts'
+import { issue } from './schema.ts'
 
 export type Prepared = { warnings: string[] } | { error: string }
 
 export type Reservations = ReturnType<typeof createReservations>
 
-// claude は shell に打鍵して起こすので、SessionStart の前に claude だけが抜けると Terminal Session は生き続け、終わりが届かない。
-export const LAUNCH_TIMEOUT_MS = 60_000
-
-// 予約の寿命は request 1 本か Run の起動の間で終わるので、DB ではなく Backend の memory に置く。
-export function createReservations(db: Db) {
+// 予約は Backend が止まれば要らなくなるので、DB ではなく Backend の memory に置く。
+export function createReservations(db: Db, launches: RunLaunches) {
   const closing = new Set<number>()
   const preparations = new Map<number, Promise<Prepared>>()
-  const launches = new Map<number, { terminalSessionId: string; since: number }>()
 
   function writeTask<T>(
     taskIssueId: number,
@@ -38,20 +34,6 @@ export function createReservations(db: Db) {
       if (closing.has(taskIssueId)) throw beingClosed(formatRef(found.issue))
       return write(tx, refuseState(found))
     })
-  }
-
-  // 外す合図を待たずに読むたびに確かめるので、Tab を閉じた直後や Exit を記録した直後の close は合図より先に来ても断られない。
-  function launchingRun(reader: Pick<Db, 'select'>, taskIssueId: number): boolean {
-    const launch = launches.get(taskIssueId)
-    if (!launch) return false
-    if (
-      Date.now() - launch.since < LAUNCH_TIMEOUT_MS &&
-      stillLaunching(reader, taskIssueId, launch.terminalSessionId)
-    ) {
-      return true
-    }
-    launches.delete(taskIssueId)
-    return false
   }
 
   return {
@@ -68,11 +50,10 @@ export function createReservations(db: Db) {
       open: (tx: Tx, found: FoundTask) => T,
     ): T {
       const opened = writeTask(taskIssueId, asked, refuseClosed, open)
-      // Tab は Runspace 間で移るが、Terminal Session は変わらない。
-      launches.set(taskIssueId, { terminalSessionId: opened.terminalSessionId, since: Date.now() })
+      launches.begin(taskIssueId, opened.terminalSessionId)
       return opened
     },
-    launchingRun,
+    hasRunLaunch: launches.hasRunLaunch,
     // 準備は worktree と Bench の行を書き続けるので、走っている間は --force でも close させない。
     async whileClosing<T>(
       taskIssueId: number,
@@ -86,7 +67,7 @@ export function createReservations(db: Db) {
           message: `the Bench of ${ref} is being prepared; close it once the setup ends, or times out after 600s`,
         })
       }
-      if (!force && launchingRun(db, taskIssueId)) {
+      if (!force && launches.hasRunLaunch(db, taskIssueId)) {
         throw new ORPCError('CONFLICT', {
           message: `${ref} has a Run being started; close it once its claude starts, or pass --force to close anyway`,
         })
@@ -94,7 +75,7 @@ export function createReservations(db: Db) {
       closing.add(taskIssueId)
       try {
         const closed = await close()
-        launches.delete(taskIssueId)
+        launches.end(taskIssueId)
         return closed
       } finally {
         closing.delete(taskIssueId)
@@ -109,35 +90,6 @@ export function createReservations(db: Db) {
       return started
     },
   }
-}
-
-// Terminating な Terminal Session は Exit の記録を待たずに外す（ADR-0023）。
-function stillLaunching(
-  reader: Pick<Db, 'select'>,
-  taskIssueId: number,
-  terminalSessionId: string,
-): boolean {
-  const live = reader
-    .select({ id: terminalSession.id })
-    .from(terminalSession)
-    .where(
-      and(
-        eq(terminalSession.id, terminalSessionId),
-        inArray(terminalSession.status, LIVE),
-        not(terminating(reader, terminalSessionId)),
-      ),
-    )
-    .get()
-  if (!live) return false
-  const started = reader
-    .select({ id: run.id })
-    .from(run)
-    .innerJoin(agentSession, eq(agentSession.sessionId, run.agentSessionId))
-    .where(
-      and(eq(run.taskIssueId, taskIssueId), eq(agentSession.terminalSessionId, terminalSessionId)),
-    )
-    .get()
-  return started === undefined
 }
 
 function beingClosed(ref: string) {

@@ -27,7 +27,7 @@ export async function withWorktreeBench(files: Files = {}) {
   return { ...fixture, claudeTab: terminalSessionId, runspaceId: benchOf(fixture)!.runspaceId }
 }
 
-// run が起こした claude が Run にならないうちは、起動中の予約が強制でない close と次の run を断る。
+// run が起こした claude が Run にならないうちは、Run の起動が強制でない close と次の run を断る。
 export async function startedAndEnded(
   { hook }: Pick<Fixture, 'hook'>,
   terminalSessionId: string,

@@ -10,7 +10,7 @@ import { callerTerminalSession } from './current.ts'
 import { findOrTrack } from './find-task.ts'
 import { checkoutUnder, type Ghq, messageOf } from './prepare.ts'
 import { formatRef, type IssueRef, parseRef } from './ref.ts'
-import { insertRuns, liveAgentSession } from './run.ts'
+import { applyRunInvariant, liveAgentSession } from './run.ts'
 import { issue, run } from './schema.ts'
 import type { SyncDeps } from './sync.ts'
 
@@ -79,18 +79,14 @@ export async function attachTab(
         }
       }
       workbenchLedger.moveTab(tx, callerTab.id, target.runspaceId)
-      const orphan = agent && !agent.runTask ? agent : null
-      if (orphan) {
-        insertRuns(tx, 'attached', [
-          { taskIssueId: found.issue.id, agentSessionId: orphan.sessionId },
-        ])
-      }
+      const runCreated =
+        agent !== undefined && applyRunInvariant(tx, 'attached', agent.sessionId).length > 0
       return {
         ref,
         title,
         tracked,
         benchCreated: !found.bench,
-        runCreated: orphan !== null,
+        runCreated,
         agentSessionId,
         moved: true,
       }
