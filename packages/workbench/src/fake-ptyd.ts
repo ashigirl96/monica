@@ -69,7 +69,6 @@ export function startFakePtyd(home: string) {
 
   const fake = {
     sessions,
-    // Terminal Session の id ごとの、Processes の応答。
     processes: new Map<string, ProcessInfo[]>(),
     beforeList: (): ServerMessage[] => [],
     dropNextList: false,

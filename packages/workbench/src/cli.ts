@@ -92,7 +92,6 @@ export const formatters = {
   },
 }
 
-/** Tab 1 つ分の show を、見出しの 1 行と process の表にする。 */
 export function shownTab({ tab, terminalSession, processes }: ShownTab): string {
   const shell = terminalSession.pid
   const head = `Tab ${tab.id} on Terminal Session ${terminalSession.id}: ${terminalSession.status}, shell pid ${shell ?? '-'}`

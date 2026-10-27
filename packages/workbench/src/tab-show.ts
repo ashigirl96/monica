@@ -7,7 +7,6 @@ import { asTab } from './layout.ts'
 import { runspace, tab, terminalSession } from './schema.ts'
 import { processesOf, type WorkbenchLedger } from './workbench.ts'
 
-/** Tab 1 つ分の show の中身。 */
 export async function showTab(
   db: Db,
   workbenchLedger: WorkbenchLedger,
@@ -32,7 +31,6 @@ export async function showTab(
   }
 }
 
-/** Runspace と、その Tab ごとの show の中身を Tab の並び順に。 */
 export async function showRunspace(
   db: Db,
   workbenchLedger: WorkbenchLedger,

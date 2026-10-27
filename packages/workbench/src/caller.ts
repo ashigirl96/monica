@@ -4,8 +4,7 @@ import { eq } from 'drizzle-orm'
 import type { Tx } from './db.ts'
 import { tab } from './schema.ts'
 
-/** id を省いた CLI の呼び出しが指す、呼んだ Terminal Session の Tab。 */
-export function callerTab(tx: Tx, terminalSessionId: string | undefined) {
+function callerTab(tx: Tx, terminalSessionId: string | undefined) {
   if (!terminalSessionId) {
     throw new ORPCError('BAD_REQUEST', {
       message: 'not in a Tab of the Workbench: give an id, or run this in a Tab',
@@ -22,4 +21,14 @@ export function callerTab(tx: Tx, terminalSessionId: string | undefined) {
     })
   }
   return found
+}
+
+export function idOrCaller(
+  tx: Tx,
+  input: { id?: string; terminalSessionId?: string },
+  of: 'Tab' | 'Runspace',
+): string {
+  if (input.id !== undefined) return input.id
+  const found = callerTab(tx, input.terminalSessionId)
+  return of === 'Tab' ? found.id : found.runspaceId
 }

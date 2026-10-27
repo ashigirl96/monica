@@ -4,7 +4,7 @@ import { implement } from '@orpc/server'
 import { eq, getTableColumns, inArray, isNotNull, or } from 'drizzle-orm'
 
 import { listAgentSessions } from './agent-session.ts'
-import { callerTab } from './caller.ts'
+import { idOrCaller } from './caller.ts'
 import { contract } from './contract.ts'
 import { openInEditor, resolveEditorPaths } from './editor.ts'
 import { asTab, readLayout } from './layout.ts'
@@ -51,14 +51,13 @@ export const router = os.router({
     }),
     remove: os.runspace.remove.handler(({ context: { db, workbenchLedger }, input }) =>
       db.transaction((tx) => {
-        const runspaceId = input.id ?? callerTab(tx, input.terminalSessionId).runspaceId
+        const runspaceId = idOrCaller(tx, input, 'Runspace')
         layoutWritesOf(workbenchLedger).removeRunspace(tx, runspaceId)
         return { runspaceId }
       }),
     ),
     show: os.runspace.show.handler(({ context: { db, workbenchLedger }, input }) => {
-      const runspaceId =
-        input.id ?? db.transaction((tx) => callerTab(tx, input.terminalSessionId).runspaceId)
+      const runspaceId = db.transaction((tx) => idOrCaller(tx, input, 'Runspace'))
       return showRunspace(db, workbenchLedger, runspaceId)
     }),
     move: os.runspace.move.handler(({ context: { db, workbenchLedger }, input }) => {
@@ -87,12 +86,12 @@ export const router = os.router({
     }),
     close: os.tab.close.handler(({ context: { db, workbenchLedger }, input }) =>
       db.transaction((tx) => {
-        const tabId = input.id ?? callerTab(tx, input.terminalSessionId).id
+        const tabId = idOrCaller(tx, input, 'Tab')
         return { tabId, ...layoutWritesOf(workbenchLedger).closeTab(tx, tabId) }
       }),
     ),
     show: os.tab.show.handler(({ context: { db, workbenchLedger }, input }) => {
-      const tabId = input.id ?? db.transaction((tx) => callerTab(tx, input.terminalSessionId).id)
+      const tabId = db.transaction((tx) => idOrCaller(tx, input, 'Tab'))
       return showTab(db, workbenchLedger, tabId)
     }),
     move: os.tab.move.handler(({ context: { db, workbenchLedger }, input }) => {

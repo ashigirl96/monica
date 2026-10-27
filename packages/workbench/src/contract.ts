@@ -19,7 +19,7 @@ export const LayoutSchema = z.object({
 
 export const AgentSessionSchema = createSelectSchema(agentSession)
 
-export const SessionProcessSchema = z.object({
+export const ProcessInfoSchema = z.object({
   pid: z.number().int(),
   ppid: z.number().int(),
   pgid: z.number().int(),
@@ -34,7 +34,7 @@ export const ShownTabSchema = z.object({
   tab: TabSchema,
   terminalSession: createSelectSchema(terminalSession),
   processes: z
-    .array(SessionProcessSchema)
+    .array(ProcessInfoSchema)
     .nullable()
     .describe(
       "the Terminal Session Processes and the shell's descendants that left its session, or null when monica-ptyd could not list them",
