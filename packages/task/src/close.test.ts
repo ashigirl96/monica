@@ -1,5 +1,5 @@
 import { afterEach, expect, mock, spyOn, test } from 'bun:test'
-import { existsSync, mkdirSync, rmSync, writeFileSync } from 'node:fs'
+import { chmodSync, existsSync, mkdirSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 
 import { runspace } from '@monica/workbench/schema'
@@ -14,13 +14,15 @@ import {
   tabsOf,
   terminated,
   terminatedAfterClose,
+  trashed,
   tracked,
   withWorktreeBench,
 } from './close-fixture.ts'
 import type { TaskChange } from './contract.ts'
 import { commit, git, stackedThenRebased } from './fake-ghq.ts'
 import { issue } from './schema.ts'
-import { cleanUp, failure } from './testing.ts'
+import { cleanUp, failure, onCleanup } from './testing.ts'
+import { trashOf } from './trash.ts'
 
 afterEach(() => {
   mock.restore()
@@ -45,6 +47,7 @@ test('close takes down the Bench of a Task no guard stops: the worktree, the bra
   })
   const checkout = ghq.checkout('acme/app')
   expect(existsSync(cwd)).toBe(false)
+  expect(trashed(fixture)).toEqual([{ tree: true, mark: false }])
   expect(hasBranch(checkout, 'issue-12')).toBe(false)
   expect(git(checkout, 'worktree', 'list', '--porcelain')).not.toContain('issue-12')
   expect(db.select().from(runspace).all()).toEqual([])
@@ -367,7 +370,7 @@ test('close goes on with the local copy when GitHub cannot be reached, and warns
   expect((await fixture.client.list({ closed: true })).tasks).toMatchObject([{ ref }])
 })
 
-test('when git fails, close stops, and the Task, its Bench and its Tabs stay as they were', async () => {
+test('a locked worktree stops close, and the Task, its Bench and its Tabs stay as they were', async () => {
   const fixture = await withWorktreeBench()
   const { db, client, ghq, cwd, claudeTab } = fixture
   git(ghq.checkout('acme/app'), 'worktree', 'lock', cwd)
@@ -375,13 +378,49 @@ test('when git fails, close stops, and the Task, its Bench and its Tabs stay as 
   const error = await failure(client.close({ ref }))
 
   expect(error.code).toBe('PRECONDITION_FAILED')
-  expect(error.message).toContain('git worktree remove failed')
+  expect(error.message).toBe(`could not close ${ref}: the worktree ${cwd} is locked`)
   expect(existsSync(cwd)).toBe(true)
+  expect(trashed(fixture)).toEqual([])
   expect(benchOf(fixture)).toBeDefined()
   expect(db.select().from(runspace).all()).toMatchObject([{ owned: true }])
   expect(tabsOf(fixture)).toEqual([{ terminalSessionId: claudeTab }])
   expect((await client.list({})).tasks).toMatchObject([{ ref }])
   expect(terminated(fixture)).toEqual([])
+})
+
+test('a forced close moves a worktree with changes into the trash and deletes the branch issue-n', async () => {
+  const fixture = await withWorktreeBench()
+  const { client, ghq, cwd } = fixture
+  writeFileSync(join(cwd, 'draft.txt'), 'draft\n')
+
+  expect(await client.close({ ref, force: true })).toMatchObject({
+    removedWorktree: cwd,
+    deletedBranch: 'issue-12',
+  })
+  const checkout = ghq.checkout('acme/app')
+  expect(existsSync(cwd)).toBe(false)
+  expect(trashed(fixture)).toEqual([{ tree: true, mark: false }])
+  expect(hasBranch(checkout, 'issue-12')).toBe(false)
+  expect(git(checkout, 'worktree', 'list', '--porcelain')).not.toContain('issue-12')
+})
+
+test('close falls back to removing the worktree in place when it cannot be moved into the trash', async () => {
+  const fixture = await withWorktreeBench()
+  const { client, ghq, cwd, home } = fixture
+  const trash = trashOf(home)
+  mkdirSync(trash, { recursive: true })
+  chmodSync(trash, 0o555)
+  onCleanup(() => chmodSync(trash, 0o755))
+
+  expect(await client.close({ ref })).toMatchObject({
+    removedWorktree: cwd,
+    deletedBranch: 'issue-12',
+  })
+  const checkout = ghq.checkout('acme/app')
+  expect(existsSync(cwd)).toBe(false)
+  expect(trashed(fixture)).toEqual([])
+  expect(hasBranch(checkout, 'issue-12')).toBe(false)
+  expect(git(checkout, 'worktree', 'list', '--porcelain')).not.toContain('issue-12')
 })
 
 test('close drops the registration of a worktree that is gone, and still deletes the branch issue-n', async () => {

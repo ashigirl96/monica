@@ -1,10 +1,12 @@
 import { afterEach, expect, test } from 'bun:test'
-import { existsSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdtempSync, readdirSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { dirname, join } from 'node:path'
+import { dirname, join, relative } from 'node:path'
+
+import { writeFakeExecutable } from '@monica/workbench/testing'
 
 import { commit, fakeGhq, type Files, git, stackedThenRebased } from './fake-ghq.ts'
-import { inspectWorktree, removeWorktree } from './teardown.ts'
+import { type InspectedWorktree, inspectWorktree, removeWorktree } from './teardown.ts'
 
 const cleanups: (() => void)[] = []
 afterEach(() => {
@@ -48,15 +50,54 @@ function hasBranch(checkout: string, branch: string): boolean {
   ).success
 }
 
+const trashBeside = ({ path }: { path: string }) => join(dirname(path), 'trash')
+
+const removeBeside = (inspected: InspectedWorktree) =>
+  removeWorktree(inspected, { force: false, trash: trashBeside(inspected) })
+
 test('without force, changes written to the worktree after it was inspected stop the removal, and the files stay', async () => {
   const { checkout, path, inspected } = await inspectedClean()
   writeFileSync(join(path, 'late.txt'), 'late\n')
 
-  await expect(removeWorktree(inspected, { force: false })).rejects.toThrow(
-    'git worktree remove failed',
+  await expect(removeBeside(inspected)).rejects.toThrow(
+    `the worktree ${path} got changes after it was inspected`,
   )
 
   expect(existsSync(join(path, 'late.txt'))).toBe(true)
+  expect(hasBranch(checkout, 'issue-12')).toBe(true)
+  expect(readdirSync(trashBeside(inspected))).toEqual([])
+})
+
+test('without force, a git that fails in the trash stops the removal, and the worktree goes back to its path', async () => {
+  const { checkout, path, inspected } = await inspectedClean()
+  // 相対の gitdir は元の path からしか辿れないので、捨て場でだけ git が動かない。
+  const gitdir = git(path, 'rev-parse', '--absolute-git-dir')
+  writeFileSync(join(path, '.git'), `gitdir: ${relative(realpathSync(path), gitdir)}\n`)
+
+  await expect(removeBeside(inspected)).rejects.toThrow('git status --porcelain failed')
+
+  expect(git(path, 'status', '--porcelain')).toBe('')
+  expect(hasBranch(checkout, 'issue-12')).toBe(true)
+  expect(readdirSync(trashBeside(inspected))).toEqual([])
+})
+
+test('without force, commits made in the trash before the registration is dropped keep the branch, with a warning', async () => {
+  const { checkout, inspected, path } = await inspectedClean()
+  // 捨て場で取り直す git status が fsmonitor の hook を呼ぶので、その中で issue-12 に commit を積む。
+  const hook = join(dirname(path), 'commit-once')
+  const once = join(dirname(path), 'committed')
+  writeFakeExecutable(
+    hook,
+    `[ -e '${once}' ] && exit 1\ntouch '${once}'\ngit update-ref refs/heads/issue-12 "$(git commit-tree 'HEAD^{tree}' -p HEAD -m late)"\nexit 1`,
+  )
+  git(checkout, 'config', 'core.fsmonitor', hook)
+
+  expect(await removeBeside(inspected)).toEqual({
+    removedWorktree: path,
+    deletedBranch: null,
+    warnings: ['branch issue-12 got commits on no remote while closing, so it stays'],
+  })
+  expect(existsSync(once)).toBe(true)
   expect(hasBranch(checkout, 'issue-12')).toBe(true)
 })
 
@@ -64,7 +105,7 @@ test('without force, commits on no remote made after the inspection keep the bra
   const { checkout, inspected, path } = await inspectedClean()
   commit(path, { 'late.txt': { content: 'late\n' } }, 'late')
 
-  expect(await removeWorktree(inspected, { force: false })).toEqual({
+  expect(await removeBeside(inspected)).toEqual({
     removedWorktree: path,
     deletedBranch: null,
     warnings: ['branch issue-12 got commits on no remote while closing, so it stays'],
@@ -77,7 +118,7 @@ test('without force, commits made after the inspection on top of the head of a m
   const { checkout, inspected, path } = await inspectedClean({ squashMerged: true })
   commit(path, { 'late.txt': { content: 'late\n' } }, 'late')
 
-  expect(await removeWorktree(inspected, { force: false })).toMatchObject({
+  expect(await removeBeside(inspected)).toMatchObject({
     deletedBranch: null,
     warnings: ['branch issue-12 got commits on no remote while closing, so it stays'],
   })
@@ -97,7 +138,7 @@ test('the removal drops only the registration of its own missing worktree, leavi
     forIssue,
     [],
   )
-  await removeWorktree(inspected, { force: false })
+  await removeBeside(inspected)
 
   const registered = git(checkout, 'worktree', 'list', '--porcelain')
   expect(registered).toContain(`worktree ${another}\n`)
@@ -187,7 +228,7 @@ test('without force, a commit whose patch no merged head has, made after the ins
   const inspected = await inspect()
   commit(path, { 'c.txt': { content: 'c\n' } }, 'c1')
 
-  expect(await removeWorktree(inspected, { force: false })).toMatchObject({
+  expect(await removeBeside(inspected)).toMatchObject({
     deletedBranch: null,
     warnings: ['branch issue-12 got commits on no remote while closing, so it stays'],
   })

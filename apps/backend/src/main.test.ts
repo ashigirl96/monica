@@ -404,6 +404,7 @@ test('the Backend hands the Job Ledger the system Jobs of task and note', async 
   expect(json.jobs.map(({ name }) => name)).toEqual([
     'task.sync',
     'task.setup-log-cleanup',
+    'task.worktree-sweep',
     'note.image-cleanup',
   ])
 })

@@ -1,3 +1,4 @@
+import { existsSync, readdirSync } from 'node:fs'
 import { join } from 'node:path'
 
 import { tab } from '@monica/workbench/schema'
@@ -5,6 +6,7 @@ import { tab } from '@monica/workbench/schema'
 import type { Files } from './fake-ghq.ts'
 import { bench } from './schema.ts'
 import { setup } from './testing.ts'
+import { trashOf } from './trash.ts'
 
 export const ref = 'acme/app#12'
 
@@ -46,6 +48,15 @@ export function hasBranch(checkout: string, branch: string): boolean {
     ['git', '-C', checkout, 'rev-parse', '--verify', '--quiet', `refs/heads/${branch}`],
     { env: process.env },
   ).success
+}
+
+export function trashed({ home }: Pick<Fixture, 'home'>) {
+  const trash = trashOf(home)
+  if (!existsSync(trash)) return []
+  return readdirSync(trash).map((name) => ({
+    tree: existsSync(join(trash, name, 'tree')),
+    mark: existsSync(join(trash, name, 'restore-to')),
+  }))
 }
 
 export function terminated({ ptyd }: Pick<Fixture, 'ptyd'>) {
