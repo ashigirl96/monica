@@ -36,8 +36,6 @@ export type Entry =
   | { kind: 'terminalSession'; terminalSessionId: string }
   | { kind: 'cycleRunspace'; direction: 'up' | 'down' }
   | { kind: 'cycleTab'; direction: 'left' | 'right' }
-  // 閉じた後に読み直した layout には閉じた Tab の位置が無いので、閉じる前の Runspace を渡す。
-  | { kind: 'tabClosed'; runspace: Runspace; tabId: string }
   | { kind: 'layout'; previous: World }
   | { kind: 'restore' }
 
@@ -159,8 +157,6 @@ export function navigate(state: Navigation, entry: Entry, world: World): Step {
       const next = cycle(runspace.tabs, activeTabOf(state, runspace), step)
       return withoutFocus(next ? activate(state, world, runspace.id, next.id) : state)
     }
-    case 'tabClosed':
-      return withoutFocus(closeTab(state, entry.runspace, entry.tabId))
     case 'layout':
       return withoutFocus(readLayout(state, entry.previous, world))
     case 'restore':
@@ -203,21 +199,37 @@ function cycle<T>(items: T[], current: T | null | undefined, step: 1 | -1): T | 
   return items[(index + step + items.length) % items.length]
 }
 
-function closeTab(state: Navigation, runspace: Runspace, tabId: string): Navigation {
-  if (activeTabOf(state, runspace)?.id !== tabId) return state
-  const rest = runspace.tabs.filter((t) => t.id !== tabId)
-  const next = atOrAbove(
-    rest,
-    runspace.tabs.findIndex((t) => t.id === tabId),
-  )
-  if (!next) return state
-  return { ...state, activeTabIds: { ...state.activeTabIds, [runspace.id]: next.id } }
+function tabSuccessorOf(
+  state: Navigation,
+  previous: Runspace,
+  runspace: Runspace,
+): string | undefined {
+  const id = state.activeTabIds[runspace.id]
+  if (id === undefined || runspace.tabs.some((t) => t.id === id)) return undefined
+  const index = previous.tabs.findIndex((t) => t.id === id)
+  if (index === -1) return undefined
+  const remains = (t: Tab) => runspace.tabs.some((r) => r.id === t.id)
+  return (previous.tabs.slice(index).find(remains) ?? previous.tabs.findLast(remains))?.id
+}
+
+function withTabSuccessors(state: Navigation, previous: World, world: World): Navigation {
+  const successors = world.runspaces.flatMap((runspace) => {
+    const before = previous.runspaces.find((r) => r.id === runspace.id)
+    const next = before && tabSuccessorOf(state, before, runspace)
+    return next ? [[runspace.id, next] as const] : []
+  })
+  if (successors.length === 0) return state
+  return {
+    ...state,
+    activeTabIds: { ...state.activeTabIds, ...Object.fromEntries(successors) },
+  }
 }
 
 // pin と pin を外す操作も、CLI の Attach で Tab が動くのも、layout の変化として届く。
-function readLayout(state: Navigation, previous: World, world: World): Navigation {
-  const before = activeRunspaceOf(state, previous.runspaces)
-  const front = before && activeTabOf(state, before)
+function readLayout(current: Navigation, previous: World, world: World): Navigation {
+  const before = activeRunspaceOf(current, previous.runspaces)
+  const front = before && activeTabOf(current, before)
+  const state = withTabSuccessors(current, previous, world)
   // 見ていた端末が画面から消えないよう、手前の Tab はどの経路で移っても移った先までついていく。
   const moved =
     front &&
@@ -341,12 +353,6 @@ export const cycleRunspaceAtom = entryAtom((direction: 'up' | 'down') => ({
 export const cycleTerminalTabAtom = entryAtom((direction: 'left' | 'right') => ({
   kind: 'cycleTab',
   direction,
-}))
-
-export const tabClosedAtom = entryAtom((runspace: Runspace, tabId: string) => ({
-  kind: 'tabClosed',
-  runspace,
-  tabId,
 }))
 
 export const pickTileByNumberAtom = atom(null, (get, set, n: number): boolean => {

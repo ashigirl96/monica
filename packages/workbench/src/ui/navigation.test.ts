@@ -95,6 +95,10 @@ function reload(state: Navigation, previous: World, world: World): Navigation {
   return navigate(state, { kind: 'layout', previous }, world).state
 }
 
+function withoutTabs(rows: Runspace[], tabIds: string[]): Runspace[] {
+  return rows.map((r) => ({ ...r, tabs: r.tabs.filter((t) => !tabIds.includes(t.id)) }))
+}
+
 function shownIn(state: Navigation, world: World): string[] {
   return shownRunspaceIds(world.tiles, selectedTileOf(state, world), world.collapsed)
 }
@@ -265,18 +269,59 @@ test.each([
   ['the active Tab moves to the Tab to its right', 'a.1', 'a.1', 'a.2'],
   ['the active Tab that was the last moves to the Tab to its left', 'a.2', 'a.2', 'a.1'],
   ['a Tab behind leaves the active Tab', 'a.0', 'a.2', 'a.0'],
-])('closing %s', (_, active, closed, shown) => {
-  const before = runspace('a', APP, { tabs: 3 })
-  const after = { ...before, tabs: before.tabs.filter((t) => t.id !== closed) }
-  const front = run(worldOf([before]), [row('a'), tab(active)]).state
+])('a Tab gone from the layout however it was closed: %s', (_, active, closed, shown) => {
+  const rows = [runspace('a', APP, { tabs: 3 })]
+  const before = worldOf(rows)
+  const after = worldOf(withoutTabs(rows, [closed]))
+  const front = run(before, [row('a'), tab(active)]).state
 
-  const step = navigate(
-    front,
-    { kind: 'tabClosed', runspace: before, tabId: closed },
-    worldOf([after]),
-  )
+  expect(onScreen(reload(front, before, after), after).tab).toBe(shown)
+})
 
-  expect(onScreen(step.state, worldOf([after])).tab).toBe(shown)
+test('the Tab last shown in a Runspace not shown, once gone, gives way to the Tab next to it when that Runspace is opened', () => {
+  const rows = [runspace('a', APP, { tabs: 3 }), runspace('l', LIB)]
+  const before = worldOf(rows)
+  const after = worldOf(withoutTabs(rows, ['a.1']))
+  const away = run(before, [row('a'), tab('a.1'), row('l')]).state
+
+  const opened = run(after, [row('a')], reload(away, before, after)).state
+
+  expect(onScreen(opened, after)).toEqual({ tile: 'acme/app', runspace: 'a', tab: 'a.2' })
+})
+
+test.each([
+  ['brings up the first Tab left after where they were', 'a.1', ['a.1', 'a.2'], 'a.3'],
+  [
+    'counts from where the active one was, even with a Tab before it gone',
+    'a.1',
+    ['a.0', 'a.1'],
+    'a.2',
+  ],
+  ['brings up the last Tab left when none is left after them', 'a.2', ['a.2', 'a.3'], 'a.1'],
+])('two Tabs gone in one reload %s', (_, active, gone, shown) => {
+  const rows = [runspace('a', APP, { tabs: 4 })]
+  const before = worldOf(rows)
+  const after = worldOf(withoutTabs(rows, gone))
+  const front = run(before, [row('a'), tab(active)]).state
+
+  expect(onScreen(reload(front, before, after), after).tab).toBe(shown)
+})
+
+test('a Tab not in front moved into another Runspace leaves the view, and its Runspace brings up the Tab next to it', () => {
+  const lib = runspace('l', LIB)
+  const app = runspace('a', APP, { tabs: 3 })
+  const before = worldOf([app, lib])
+  const after = worldOf([
+    ...withoutTabs([app], ['a.1']),
+    { ...lib, tabs: [...lib.tabs, app.tabs[1]!] },
+  ])
+  const away = run(before, [row('a'), tab('a.1'), row('l')]).state
+
+  const moved = reload(away, before, after)
+  const opened = run(after, [row('a')], moved).state
+
+  expect(onScreen(moved, after)).toEqual({ tile: 'acme/lib', runspace: 'l', tab: 'l.0' })
+  expect(onScreen(opened, after).tab).toBe('a.2')
 })
 
 test('unpinning the Tab of the Pinned Runspace being shown brings up the Tile that Runspace goes back to, with its row shown there', () => {
