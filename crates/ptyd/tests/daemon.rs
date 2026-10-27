@@ -380,6 +380,16 @@ fn start_session_children(
     [foreground, background, nohup, stubborn]
 }
 
+/// The 7 seconds the spec allows after the shell ends, and a little for the `ps` runs and the poll.
+const LEFT_BEHIND_ENDED_WITHIN: Duration = Duration::from_millis(7500);
+
+fn wait_until_ended(exited: Instant, pids: &[u32]) {
+    wait_until(
+        LEFT_BEHIND_ENDED_WITHIN.saturating_sub(exited.elapsed()),
+        || pids.iter().all(|&pid| !process_alive(pid)),
+    );
+}
+
 fn wait_for_exit(rx: &mpsc::Receiver<ClientEvent>, session_id: &str) {
     let end = Instant::now() + Duration::from_secs(10);
     while Instant::now() < end {
@@ -430,18 +440,17 @@ fn terminate_ends_what_is_left_in_the_shells_session_and_spares_the_rest() {
         })
         .unwrap();
     wait_for_exit(&rx, "ts-1");
+    let exited = Instant::now();
 
     // A claude got SIGHUP with its shell and still needs time to send SessionEnd.
-    std::thread::sleep(Duration::from_secs(1));
+    std::thread::sleep(Duration::from_millis(1800));
     let [_, _, nohup, _] = children;
     assert!(
         process_alive(nohup),
         "SIGTERM must wait 2 seconds after the shell ends"
     );
 
-    wait_until(Duration::from_secs(10), || {
-        children.iter().all(|&pid| !process_alive(pid))
-    });
+    wait_until_ended(exited, &children);
     for (pid, what) in [
         (escaped, "the setsid child"),
         (other_session, "the other Terminal Session's child"),
@@ -478,10 +487,9 @@ fn a_shell_that_exits_on_its_own_takes_what_is_left_in_its_session() {
         std::thread::sleep(Duration::from_millis(300));
     }
     wait_for_exit(&rx, "ts-1");
+    let exited = Instant::now();
 
-    wait_until(Duration::from_secs(10), || {
-        children.iter().all(|&pid| !process_alive(pid))
-    });
+    wait_until_ended(exited, &children);
 }
 
 fn processes(client: &PtydClient, session_id: &str) -> Vec<ProcessInfo> {
