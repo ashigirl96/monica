@@ -81,7 +81,7 @@ worktree の session では、guard が中身を読み切れない command を�
     MONICA_HOME=${TMPDIR%/}/monica-s2 MONICA_TERMINAL_SESSION_ID=ts-… scripts/monica-dev workbench hook claude
   ```
 
-- HTTP: `/health` は token 無しで返る。port と token は `backend.json` にある。procedure は `POST /rpc/<domain>/<path>`（`/rpc/workbench/runspace/create` など）に `Authorization: Bearer <token>` と `{"json": <input>}` の body を送って呼び、応答の `json` が output になる。CLI に出ていない procedure（`tab.open`・`tab.pin`・`tab.close` など）もこれで呼べる。
+- HTTP: `/health` は token 無しで返る。port と token は `backend.json` にある。procedure は `POST /rpc/<domain>/<path>`（`/rpc/workbench/runspace/create` など）に `Authorization: Bearer <token>` と `{"json": <input>}` の body を送って呼び、応答の `json` が output になる。CLI に出ていない procedure（`tab.open`・`tab.pin` など）もこれで呼べる。
 - ptyd にだけある session を作るには、Backend を止めてから socket に直接 `hello` と `create` を送る。ptyd は Backend が止まっても残る。Backend を起こし直すと reconcile がその session を terminate し、Exit を受けて Reap するので、ptyd の `list` から消え、`create` の応答の pid の shell も終わる（ADR-0023）。protocol は `crates/terminal-protocol/src/lib.rs`。
 
   ```bash
