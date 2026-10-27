@@ -37,6 +37,14 @@ _Avoid_: Project, repository
 Task の上で動いた Agent Session 1 回分の対応。Bench の Tab にいる live な Agent Session は、どの Run でもなければその Bench の Task の Run になる（Bench の Tab で始まった時も、Tab を Bench に移した時も）。その Agent Session が終わるまで、Tab がどこに移っても Task に属し続ける。状態は持たず、agent の状態は Agent Session から導く。Run どうしに主従は無い。
 _Avoid_: TaskRun, Main Run, primary run, side run
 
+**Active Run**:
+live な Run（Agent Session が終了でない Run）のうち、Agent Session が Terminating な Terminal Session にいないもの。強制でない Task の close を止める。表示状態と Run Button は Terminating な Terminal Session にいる Run も live と読むので、live な Run は Active Run より広い。
+_Avoid_: live な Run（Terminating な Terminal Session にいる Run も含む）
+
+**Run の起動**:
+Run を起こすために claude の Tab を開いてから、その Tab の Agent Session が Run になるまでの間。1 つの Task に 1 つまでで、その Tab が無くなるか、しばらく Run にならなければ外れる。この間、Run Button は `Running` を出し、同じ Task への 2 本目の Run と強制でない Task の close を断る。まだ Run ではないので、表示状態には現れない。
+_Avoid_: launch（単独で使わない）, 起動中の Run（まだ Run ではない）
+
 **Bench**:
 Task が 1 つ所有する Runspace。最初に開いた時か、Bench の無い Task に Attach した時に作られ、cwd（worktree か Repo の checkout か）はその後変えない。Workbench で最後の Tab を閉じると Task を close する。close の guard で止まったときと、Tab を外へ移したときは、Tab が無くても残る。guard で止まった Bench は、Workbench で止めた理由と、2 度押して強制で close する「Close anyway」を出す。止めた理由の無い Tab の無い Bench は、1 度押して強制でない close をやり直す「Close」を出す。Task を close すると壊れ（close を呼んだ Tab と、強制でない close の間にその Task の Run になった Tab だけは普通の Runspace に残る）、reopen すると作り直す。Workbench（画面）とは別物。
 _Avoid_: task runspace, bench runspace
@@ -187,7 +195,7 @@ _Avoid_: 会話（単独では Agent Session の会話と紛れる）, session, 
 _Avoid_: ページの情報, page context, capture（スクリーンショットの撮影と紛れる）
 
 **Run Button**:
-Chrome Extension が GitHub の Issues の一覧の行と Issue の画面の header に差し込む、その Issue の Task の Run を起こすボタン。Task が closed なら、Run の代わりに Task を reopen する。出すか、どの prompt で起こすか、押せない理由は、Backend が GitHub の今の Issue と Task Ledger から決める。状態は、新しい Run を起こす（`Run`）、終了した Run を resume する（`Resume`）、live な Run があるか、Run を起こしている途中（claude の Tab を開いてから Run が付くまで）で押せない（`Running`）、closed な Task を reopen するだけで Run は起こさない（`Reopen`）、規則が断り押せない（closed な Issue や open な Blocker などの理由を tooltip に出す）のどれか。closed な Issue と open な Blocker が止めるのは新しい Run だけで、live な Run や終了した Run があれば `Running` か `Resume` になる。押した時に Backend の決める状態が、画面に出ていた状態と違えば、何もせずに今の状態に描き直す。GitHub から読めなかった Issue には出さない。
+Chrome Extension が GitHub の Issues の一覧の行と Issue の画面の header に差し込む、その Issue の Task の Run を起こすボタン。Task が closed なら、Run の代わりに Task を reopen する。出すか、どの prompt で起こすか、押せない理由は、Backend が GitHub の今の Issue と Task Ledger から決める。状態は、新しい Run を起こす（`Run`）、終了した Run を resume する（`Resume`）、live な Run があるか、Run の起動中で押せない（`Running`）、closed な Task を reopen するだけで Run は起こさない（`Reopen`）、規則が断り押せない（closed な Issue や open な Blocker などの理由を tooltip に出す）のどれか。closed な Issue と open な Blocker が止めるのは新しい Run だけで、live な Run や終了した Run があれば `Running` か `Resume` になる。押した時に Backend の決める状態が、画面に出ていた状態と違えば、何もせずに今の状態に描き直す。GitHub から読めなかった Issue には出さない。
 _Avoid_: Run（単独ではボタンを指さない）, 押せない Run（押せない状態の Run Button）
 
 **Backend Unreachable**:
