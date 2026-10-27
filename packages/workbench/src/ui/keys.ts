@@ -1,4 +1,4 @@
-import { atom, type Store } from 'jotai'
+import { atom, type Getter, type Setter, type Store } from 'jotai'
 
 import {
   activateRunspaceAtom,
@@ -19,6 +19,7 @@ import {
   hasLiveAgentSession,
   moveActiveRunspaceAtom,
   moveActiveTabAtom,
+  removeRunspaceAtom,
   toggleTabPinAtom,
 } from './store.ts'
 import { setUiZoomAtom, sidebarOpenAtom } from './ui-state.ts'
@@ -49,12 +50,24 @@ type Binding = {
   action: (store: Store, key: KeyFacts) => unknown
 }
 
-// 2 度目の d を待つ Tab は Jump Mode の中にだけ置き、どの経路で抜けても忘れる。
-const jumpModeAtom = atom<{ pendingCloseTabId: string | null } | null>(null)
+type CloseKey = 'd' | 'D'
+
+// 2 度目の d（Tab）か D（Runspace）を待つ相手は Jump Mode の中にだけ置き、どの経路で抜けても忘れる。
+const jumpModeAtom = atom<{ pendingClose: { key: CloseKey; id: string } | null } | null>(null)
 
 export const jumpModeActiveAtom = atom((get) => get(jumpModeAtom) !== null)
 
-export const pendingCloseTabIdAtom = atom((get) => get(jumpModeAtom)?.pendingCloseTabId ?? null)
+const pendingCloseOfAtom = (key: CloseKey) =>
+  atom((get) => {
+    const pending = get(jumpModeAtom)?.pendingClose
+    return pending?.key === key ? pending.id : null
+  })
+
+export const pendingCloseTabIdAtom = pendingCloseOfAtom('d')
+
+export const pendingRemoveRunspaceIdAtom = pendingCloseOfAtom('D')
+
+const closePendingAtom = atom((get) => get(jumpModeAtom)?.pendingClose != null)
 
 // Runspace と Tab の hint はどちらも見た目の順の数字で、Ctrl の有無で見分ける。
 const HINT_KEYS = '123456789'.split('')
@@ -67,8 +80,8 @@ type JumpHintTargets = {
 const NO_HINT_TARGETS: JumpHintTargets = { byRunspaceId: {}, byTabId: {} }
 
 export const jumpHintTargetsAtom = atom((get): JumpHintTargets => {
-  // 2 度目の d を待つ間は、数字を押しても移らず取り消すだけなので hint を出さない。
-  if (!get(jumpModeActiveAtom) || get(pendingCloseTabIdAtom)) return NO_HINT_TARGETS
+  // 2 度目の d・D を待つ間は、数字を押しても移らず取り消すだけなので hint を出さない。
+  if (!get(jumpModeActiveAtom) || get(closePendingAtom)) return NO_HINT_TARGETS
   const ordered = get(shownRunspaceIdsAtom)
   const tabs = get(activeRunspaceAtom)?.tabs ?? []
 
@@ -97,26 +110,68 @@ const jumpToHintAtom = atom(null, (get, set, input: { key: string; runspace: boo
   }
 })
 
-// d は c（新しい Tab）の隣のキーなので、claude の居る Tab は打ち損じで消さないよう 2 度目の d を待つ。
-const closeTabFromJumpModeAtom = action(async (get, set) => {
-  const front = get(activeTerminalTabAtom)
-  const pending = get(pendingCloseTabIdAtom)
-  // 尋ねた Tab が shell の終了で先に閉じたら、手前に来た別の Tab は誰も確かめていない。
-  if (!front || front.pinned || (pending !== null && pending !== front.id)) {
+type CloseTarget = {
+  id: string
+  refused: boolean
+  terminalSessionIds: string[]
+  close: () => Promise<void>
+}
+
+// d は c（新しい Tab）の隣のキーなので、claude の居る Tab や Runspace は打ち損じで消さないよう 2 度目を待つ。
+async function closeFromJumpMode(
+  get: Getter,
+  set: Setter,
+  key: CloseKey,
+  target: CloseTarget | null,
+) {
+  const pending = get(jumpModeAtom)?.pendingClose ?? null
+  // 尋ねた相手が shell の終了で先に閉じたら、手前に来た別の相手は誰も確かめていない。
+  if (!target || target.refused || (pending && (pending.key !== key || pending.id !== target.id))) {
     set(jumpModeAtom, null)
     return
   }
-  if (pending !== front.id) {
-    const live = await hasLiveAgentSession(get, front.terminalSessionId)
+  if (!pending) {
+    const live = await hasLiveAgentSession(get, target.terminalSessionIds)
     // 聞く間にほかのキーや Tab の切り替えで Jump Mode を抜けていたら、その操作を優先する。
     if (!get(jumpModeAtom)) return
     if (live) {
-      set(jumpModeAtom, { pendingCloseTabId: front.id })
+      set(jumpModeAtom, { pendingClose: { key, id: target.id } })
       return
     }
   }
   set(jumpModeAtom, null)
-  await set(closeTerminalTabAtom, front.id)
+  await target.close()
+}
+
+const closeTabFromJumpModeAtom = action(async (get, set) => {
+  const front = get(activeTerminalTabAtom)
+  await closeFromJumpMode(
+    get,
+    set,
+    'd',
+    front && {
+      id: front.id,
+      refused: front.pinned,
+      terminalSessionIds: [front.terminalSessionId],
+      close: () => set(closeTerminalTabAtom, front.id),
+    },
+  )
+})
+
+// Bench は Task の close の guard を通さずに消せず、pin された Tab は閉じない約束なので、どちらも消さない。
+const removeRunspaceFromJumpModeAtom = action(async (get, set) => {
+  const runspace = get(activeRunspaceAtom)
+  await closeFromJumpMode(
+    get,
+    set,
+    'D',
+    runspace && {
+      id: runspace.id,
+      refused: runspace.owned || runspace.tabs.some((t) => t.pinned),
+      terminalSessionIds: runspace.tabs.map((t) => t.terminalSessionId),
+      close: () => set(removeRunspaceAtom, runspace),
+    },
+  )
 })
 
 const frontAtom = atom((get) => `${get(activeRunspaceAtom)?.id}/${get(activeTerminalTabAtom)?.id}`)
@@ -137,13 +192,16 @@ function taken(result: unknown): Pressed {
 function pressInJumpMode(store: Store, key: KeyFacts): Pressed {
   if (MODIFIER_KEYS.has(key.key)) return NOT_TAKEN
 
-  if (key.key === 'd' && !key.ctrl) {
-    // 長押しの自動の繰り返しを 2 度目の d と数えると、確認を待たずに claude の居る Tab を閉じる。
-    return taken(key.repeat ? undefined : store.set(closeTabFromJumpModeAtom))
+  if ((key.key === 'd' || key.key === 'D') && !key.ctrl) {
+    // 長押しの自動の繰り返しを 2 度目と数えると、確認を待たずに claude の居る Tab や Runspace を消す。
+    if (key.repeat) return taken(undefined)
+    return taken(
+      store.set(key.key === 'd' ? closeTabFromJumpModeAtom : removeRunspaceFromJumpModeAtom),
+    )
   }
 
-  // 2 度目の d を待つ間は hint を隠しているので、ほかのキーは見えない hint へ移らずに取り消すだけにする。
-  if (store.get(pendingCloseTabIdAtom) !== null || (key.ctrl && key.key === 't')) {
+  // 2 度目の d・D を待つ間は hint を隠しているので、ほかのキーは見えない hint へ移らずに取り消すだけにする。
+  if (store.get(closePendingAtom) || (key.ctrl && key.key === 't')) {
     store.set(jumpModeAtom, null)
     return taken(undefined)
   }
@@ -223,7 +281,7 @@ export const keymap = createKeymap([
     ctrl: true,
     key: 't',
     editable: true,
-    action: (s) => s.set(jumpModeAtom, { pendingCloseTabId: null }),
+    action: (s) => s.set(jumpModeAtom, { pendingClose: null }),
   },
   { meta: true, key: 'b', editable: true, action: (s) => s.set(sidebarOpenAtom, (v) => !v) },
   // macOS の印刷ダイアログは preventDefault で抑えられる。

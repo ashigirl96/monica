@@ -75,7 +75,7 @@ Workbench Ledger のうち、Runspace の並び、各 Runspace の Tab の並び
 _Avoid_: 配置, 並び（単独で使わない）, arrangement
 
 **Jump Mode**:
-Workbench で、sidebar に見えている Runspace と、active な Runspace の Tab に番号を出し、番号で選ぶ間の状態。この間は Tab を閉じる・新しく開く・並べ替えることもできる。選ぶか、表示する Tab が替わるか、Workbench をクリックするか、取り消すと抜ける。live な Agent Session がいる Tab を閉じるときは、閉じる操作をもう一度求める。
+Workbench で、sidebar に見えている Runspace と、active な Runspace の Tab に番号を出し、番号で選ぶ間の状態。この間は Tab を閉じる・新しく開く・並べ替えることと、active な Runspace を Tab ごと消すこともできる。Bench と、pin された Tab のある Runspace は消さない。選ぶか、表示する Tab が替わるか、Workbench をクリックするか、取り消すと抜ける。live な Agent Session がいる Tab を閉じるときと、そうした Tab を含む Runspace を消すときは、同じ操作をもう一度求める。
 _Avoid_: jump hint モード, ジャンプ, hint mode
 
 **Terminal Session**:
