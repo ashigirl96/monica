@@ -20,6 +20,7 @@ import {
   workbenchClientAtom,
 } from './store.ts'
 import { TabContextMenu, type TabMenuItems } from './tab-context-menu.tsx'
+import { releaseTabsLeavingLayout } from './terminal-connections.ts'
 import { type BenchLabelOf, benchLabelOfAtom } from './tile-assignment.ts'
 import { persistUiState } from './ui-state-persistence.ts'
 import { sidebarOpenAtom, sidebarResizingAtom, sidebarWidthAtom, uiZoomAtom } from './ui-state.ts'
@@ -81,6 +82,7 @@ export function Workbench({
   useEffect(() => appendRunspacesJoiningTile(store), [store])
   useEffect(() => followMetaHold(store), [store])
   useEffect(() => followKeys(store), [store])
+  useEffect(() => releaseTabsLeavingLayout(store), [store])
   const setLastTabClosed = useSetAtom(lastTabClosedAtom)
   useEffect(
     () => setLastTabClosed(() => onLastTabClosed ?? null),
