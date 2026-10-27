@@ -20,7 +20,7 @@ Terminal Session Process は、session id（`getsid`）がその Terminal Sessio
 
 ## Consequences
 
-- 最初の 2 秒は、SIGHUP を受けた claude が SessionEnd を送り終える時間で、ADR-0023 が SIGKILL を足さなかった理由をこの待ちで守る。SIGTERM から SIGKILL までの 5 秒は、SIGTERM に応じる process が片付けを終える時間。port は長くても 7 秒で空く。
+- 最初の 2 秒は、SIGHUP を受けた claude が SessionEnd を送り終える時間で、ADR-0023 が SIGKILL を足さなかった理由をこの待ちで守る。この待ちが守るのは claude が走らせる SessionEnd の hook の後始末で、monica の hook が送る SessionEnd は、Terminal Session がすでに終わっているので記録されない（ADR-0008 の既知のずれ）。SIGTERM から SIGKILL までの 5 秒は、SIGTERM に応じる process が片付けを終える時間。port は長くても 7 秒で空く。
 - Tab の中から nohup で起こした process を、Tab より長生きさせる手段は無くなる。Tab より長生きさせる process は、setsid で自分の session を作って起こすか、monica の Tab の外で起こす。
 - setsid で抜けた process は Tab を閉じても残る。claude の Bash tool が background で起こす command も自分の session にいるので、止めるのは claude 自身の片付けに任せる。
 - pin された Tab の shell が終わって張り直すときも、前の Terminal Session の process は止める。張り直した Terminal Session の shell は別の pid で、別の session を持つ。
