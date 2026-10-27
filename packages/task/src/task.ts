@@ -1,12 +1,15 @@
+import { agentSession } from '@monica/workbench/schema'
 import type { Db, WorkbenchLedger } from '@monica/workbench/server'
 import { EventPublisher } from '@orpc/server'
+import { eq } from 'drizzle-orm'
 
 import { type BenchDeps, failInterruptedPreparations } from './bench.ts'
 import type { BackgroundSyncError, TaskChange } from './contract.ts'
 import { defaultGitHub, type GitHub } from './github.ts'
 import { defaultGhq, type Ghq, killSetups } from './prepare.ts'
+import { formatRef } from './ref.ts'
 import { createReservations } from './reservation.ts'
-import { applyRunInvariant, type RunOrigin, refOfRunTask } from './run.ts'
+import { applyRunInvariant, createRunLaunches, type RunOrigin, taskOfRun } from './run.ts'
 import { sweepSetupLogs } from './setup-log.ts'
 import { SYNC_TIMEOUT_MS, type SyncDeps, syncOpenTasks } from './sync.ts'
 
@@ -67,7 +70,7 @@ export function createTaskLedger(deps: {
     publish: syncDeps.publish,
     stopped: stopped.signal,
     setups: new Set(),
-    reservations: createReservations(db),
+    reservations: createReservations(db, createRunLaunches()),
   }
   let backgroundSyncError: BackgroundSyncError | null = null
   let unsubscribe: (() => void) | undefined
@@ -76,9 +79,9 @@ export function createTaskLedger(deps: {
   function onAgentSessionChanged(agentSessionId: string) {
     if (stopped.signal.aborted) return
     try {
-      applyRunInvariant(db, 'started', agentSessionId)
-      const ref = refOfRunTask(db, agentSessionId)
-      if (ref) syncDeps.publish({ type: 'task', ref })
+      db.transaction((tx) => applyRunInvariant(tx, 'started', agentSessionId))
+      const found = taskOfRun(db, eq(agentSession.sessionId, agentSessionId))
+      if (found) syncDeps.publish({ type: 'task', ref: formatRef(found.issue) })
     } catch (error) {
       console.error(`[task] could not make a Run of ${agentSessionId}: ${error}`)
     }
@@ -87,7 +90,8 @@ export function createTaskLedger(deps: {
   function applyRunInvariantToAll(origin: RunOrigin) {
     if (stopped.signal.aborted) return
     try {
-      for (const ref of applyRunInvariant(db, origin)) syncDeps.publish({ type: 'task', ref })
+      for (const ref of db.transaction((tx) => applyRunInvariant(tx, origin)))
+        syncDeps.publish({ type: 'task', ref })
     } catch (error) {
       console.error(`[task] could not make Runs of the Agent Sessions in the Benches: ${error}`)
     }

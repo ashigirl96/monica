@@ -3,7 +3,7 @@ import { mkdirSync } from 'node:fs'
 
 import { tab } from '@monica/workbench/schema'
 
-import { LAUNCH_TIMEOUT_MS } from './reservation.ts'
+import { LAUNCH_TIMEOUT_MS } from './run.ts'
 import { run } from './schema.ts'
 import { cleanUp, failure, setup } from './testing.ts'
 
