@@ -1,4 +1,4 @@
-import { afterEach, expect, test } from 'bun:test'
+import { afterEach, expect, spyOn, test } from 'bun:test'
 import { join } from 'node:path'
 
 import { startFakePtyd, tempHome } from './fake-ptyd.ts'
@@ -29,6 +29,36 @@ test('a cwd whose multibyte character straddles two socket chunks is read intact
   onCleanup(() => opened.close())
 
   expect((await opened.list()).map((s) => s.cwd)).toEqual(['/work/日本語'])
+})
+
+test('a processes request that an older ptyd leaves unanswered is unknown after 2 seconds and no longer awaited', async () => {
+  const realSetTimeout = globalThis.setTimeout
+  let fireTimeout: (() => void) | undefined
+  const spy = spyOn(globalThis, 'setTimeout').mockImplementation(((
+    callback: () => void,
+    ms?: number,
+  ) => {
+    if (ms !== 2000) return realSetTimeout(callback, ms)
+    fireTimeout = callback
+    return realSetTimeout(() => {}, 0)
+  }) as typeof setTimeout)
+  onCleanup(() => spy.mockRestore())
+  const home = tempHome(onCleanup)
+  const ptyd = startFakePtyd(home)
+  onCleanup(() => ptyd.stop())
+  ptyd.holdNext('processes')
+  const opened = await openDaemon(
+    { home, ptydPath: join(home, 'no-ptyd') },
+    { onExit: () => {}, onClose: () => {} },
+  )
+  onCleanup(() => opened.close())
+
+  const processes = opened.processes('ts-a')
+  await ptyd.received((op) => op.op === 'processes')
+  fireTimeout!()
+
+  expect(await processes).toEqual({ kind: 'unknown' })
+  expect(opened['pending'].size).toBe(0)
 })
 
 test("the env passed on to ptyd and setup drops the Backend's MONICA_*, CLAUDECODE and CLAUDE_CODE_* and keeps the rest", () => {
