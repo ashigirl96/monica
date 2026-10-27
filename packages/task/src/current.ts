@@ -1,14 +1,14 @@
 import { agentSession, tab } from '@monica/workbench/schema'
 import type { Db } from '@monica/workbench/server'
 import { ORPCError } from '@orpc/server'
-import { and, eq, type SQL } from 'drizzle-orm'
+import { and, eq } from 'drizzle-orm'
 
 import type { CurrentOutput } from './contract.ts'
 import { displayState } from './display-state.ts'
 import { taskLabel } from './label.ts'
 import { formatRef } from './ref.ts'
-import { liveAgentSession, runAgentSessionsByTask } from './run.ts'
-import { bench, issue, run, task } from './schema.ts'
+import { liveAgentSession, liveRunsOf, taskOfRun } from './run.ts'
+import { bench, issue, task } from './schema.ts'
 
 export function callerTerminalSession(terminalSessionId: string | undefined): string {
   if (!terminalSessionId) {
@@ -31,11 +31,15 @@ export function currentTask(db: Db, caller: string | undefined): CurrentOutput {
       message: `Terminal Session ${terminalSessionId} runs no Run of a Task, and its Tab is not in a Bench`,
     })
   }
-  const runsOf = runAgentSessionsByTask(db, [found.task.issueId])
   return {
     ref: formatRef(found.issue),
     title: found.issue.title,
-    displayState: displayState(found.task, found.issue, found.bench, runsOf(found.task.issueId)),
+    displayState: displayState(
+      found.task,
+      found.issue,
+      found.bench,
+      liveRunsOf(db, found.task.issueId),
+    ),
     agentSessionId: byRun?.agentSessionId ?? null,
     source: byRun ? 'run' : 'bench',
   }
@@ -47,18 +51,6 @@ export function nameAgentSession(db: Db, agentSessionId: string): string | null 
     taskOfRun(db, eq(agentSession.sessionId, agentSessionId)) ??
     taskOfBenchHosting(db, agentSessionId)
   return found ? taskLabel(formatRef(found.issue), found.issue.title) : null
-}
-
-function taskOfRun(db: Db, agentSessionMatches: SQL | undefined) {
-  return db
-    .select({ task, issue, bench, agentSessionId: agentSession.sessionId })
-    .from(agentSession)
-    .innerJoin(run, eq(run.agentSessionId, agentSession.sessionId))
-    .innerJoin(task, eq(task.issueId, run.taskIssueId))
-    .innerJoin(issue, eq(issue.id, task.issueId))
-    .leftJoin(bench, eq(bench.taskIssueId, task.issueId))
-    .where(agentSessionMatches)
-    .get()
 }
 
 function taskOfBench(db: Db, terminalSessionId: string) {

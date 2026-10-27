@@ -1,9 +1,8 @@
-import { agentSession } from '@monica/workbench/schema'
 import type { Db } from '@monica/workbench/server'
 import { ORPCError, type ORPCErrorConstructorMap } from '@orpc/server'
-import { and, desc, eq, gte } from 'drizzle-orm'
+import { eq } from 'drizzle-orm'
 
-import { type Bench, type BenchDeps, refuseInPlace } from './bench.ts'
+import { type BenchDeps, refuseInPlace } from './bench.ts'
 import { reopenTask } from './close.ts'
 import type {
   Pressable,
@@ -20,8 +19,8 @@ import { type FoundTask, TaskStateRefusal, taskIfTracked } from './open-task.ts'
 import { key, parsedOrNull, readIssue, readIssues } from './read-issues.ts'
 import { formatRef, type IssueRef, parseRef } from './ref.ts'
 import { type Launch, newRun, openRun, refuseUnsendable, resumeOf } from './run-claude.ts'
-import { isResumable, runAgentSessionsByTask } from './run.ts'
-import { issue, run } from './schema.ts'
+import { liveRunsOf, runToResume } from './run.ts'
+import { issue } from './schema.ts'
 import type { SyncDeps } from './sync.ts'
 
 type Deps = SyncDeps & BenchDeps
@@ -47,7 +46,7 @@ type IssueFacts = IssueRef &
     parent: (Linked & Labelled) | null
   }
 
-type Resumable = NonNullable<ReturnType<typeof resumableRunOf>>
+type Resumable = NonNullable<ReturnType<typeof runToResume>>
 
 type Resuming = { type: 'resume'; resumable: Resumable; kind?: PromptKind }
 
@@ -268,7 +267,7 @@ function freshestFacts(
   return read && !copyIsSynced ? read : copyFacts(db, issueId)
 }
 
-type Launches = Pick<BenchDeps['reservations'], 'launchingRun'>
+type Launches = Pick<BenchDeps['reservations'], 'hasRunLaunch'>
 
 const isLaunchable = (decided: Decision): decided is Launchable =>
   decided.type === 'new' || decided.type === 'resume'
@@ -314,17 +313,18 @@ function fromLedger(
     }
   }
   // Run は SessionStart の hook で付くので、Tab を開いてから claude が起動するまでは live な Run に出ない。
-  if (found && launches.launchingRun(reader, found.issue.id)) {
+  if (found && launches.hasRunLaunch(reader, found.issue.id)) {
     return { type: 'running', message: `${ref} has a Run being started; ${ALONGSIDE}` }
   }
   // spec の Run が子を実装している最中なので、子の Run を起こすと resume でも同じ子に 2 つの agent が動く。
   const spec = facts.parent && isSpec(facts.parent) ? facts.parent : null
-  if (!rules.force && spec && hasLiveRun(reader, spec)) {
+  const specTask = spec && !rules.force ? taskIfTracked(reader, isAsked(spec)) : undefined
+  if (spec && specTask && liveRunsOf(reader, specTask.issue.id).length > 0) {
     return refused(`${ref} is under ${formatRef(spec)}, a spec with a live Run`, rules, {
       forceHint: 'pass --force to run it anyway',
     })
   }
-  const resumable = found?.bench && resumableRunOf(reader, found.issue.id, found.bench)
+  const resumable = found?.bench && runToResume(reader, found.issue.id, found.bench)
   return resumable ? { type: 'resume', resumable } : undefined
 }
 
@@ -383,34 +383,6 @@ const PAST_THE_GATE = 'pass --force to start a Run anyway'
 
 const closedIssue = (ref: string, rules: Rules) =>
   refused(`${ref} is a closed Issue`, rules, { forceHint: PAST_THE_GATE })
-
-const liveRunsOf = (reader: Pick<Db, 'select'>, taskIssueId: number) =>
-  runAgentSessionsByTask(reader, [taskIssueId])(taskIssueId)
-
-function hasLiveRun(reader: Pick<Db, 'select'>, linked: Linked): boolean {
-  const tracked = taskIfTracked(reader, isAsked(linked))
-  return tracked !== undefined && liveRunsOf(reader, tracked.issue.id).length > 0
-}
-
-// Bench より前の Run は reopen の前の挑戦で、Agent Session Transcript の無い Agent Session（claude は最初の prompt まで書かない）は --resume が会話を見つけられないので、どちらも候補にしない。
-function resumableRunOf(
-  reader: Pick<Db, 'select'>,
-  taskIssueId: number,
-  since: Pick<Bench, 'createdAt'>,
-) {
-  return reader
-    .select({
-      agentSessionId: agentSession.sessionId,
-      cwd: agentSession.cwd,
-      transcriptPath: agentSession.transcriptPath,
-    })
-    .from(run)
-    .innerJoin(agentSession, eq(agentSession.sessionId, run.agentSessionId))
-    .where(and(eq(run.taskIssueId, taskIssueId), gte(run.startedAt, since.createdAt)))
-    .orderBy(desc(agentSession.lastEventAt), desc(run.id))
-    .all()
-    .find(isResumable)
-}
 
 const STATE_LABELS = ['needs-triage', 'ready-for-agent', 'ready-for-human', 'needs-info', 'wontfix']
 

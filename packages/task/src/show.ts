@@ -1,12 +1,12 @@
 import { agentSession } from '@monica/workbench/schema'
 import type { Db } from '@monica/workbench/server'
-import { desc, eq } from 'drizzle-orm'
+import { eq } from 'drizzle-orm'
 
 import type { ShowOutput } from './contract.ts'
 import { isIssue } from './copy.ts'
 import { findTrackedTask } from './open-task.ts'
 import { formatRef, parseRef } from './ref.ts'
-import { isResumable } from './run.ts'
+import { isResumable, latestRunFirst } from './run.ts'
 import { run } from './schema.ts'
 
 export function showTask(db: Db, asked: string): ShowOutput {
@@ -26,7 +26,7 @@ export function showTask(db: Db, asked: string): ShowOutput {
     .from(run)
     .innerJoin(agentSession, eq(agentSession.sessionId, run.agentSessionId))
     .where(eq(run.taskIssueId, found.issue.id))
-    .orderBy(desc(agentSession.lastEventAt), desc(run.id))
+    .orderBy(...latestRunFirst)
     .all()
   return {
     ref: formatRef(found.issue),

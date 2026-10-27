@@ -1,13 +1,23 @@
-import { afterEach, expect, mock, test } from 'bun:test'
+import { afterEach, expect, mock, setSystemTime, test } from 'bun:test'
+import { mkdirSync, writeFileSync } from 'node:fs'
+import { dirname, join } from 'node:path'
 
 import type { WorkbenchChange } from '@monica/workbench/contract'
 import { eq } from 'drizzle-orm'
 
+import {
+  activeRunsBesides,
+  createRunLaunches,
+  LAUNCH_TIMEOUT_MS,
+  liveRunsOf,
+  runToResume,
+} from './run.ts'
 import { issue, run } from './schema.ts'
 import { cleanUp, setup } from './testing.ts'
 
 afterEach(() => {
   mock.restore()
+  setSystemTime()
   cleanUp()
 })
 
@@ -206,4 +216,147 @@ test('start signals the Tasks whose Runs it makes', async () => {
   fixture.taskLedger.start()
 
   expect(changes).toContainEqual({ type: 'task', ref })
+})
+
+const at = (minute: number) => new Date(Date.UTC(2026, 9, 13, 9, minute))
+
+const taskIdOf = ({ db }: Fixture) =>
+  db.select({ id: issue.id }).from(issue).where(eq(issue.number, 12)).get()!.id
+
+const liveIds = (fixture: Fixture) =>
+  liveRunsOf(fixture.db, taskIdOf(fixture)).map((r) => r.sessionId)
+
+const activeIds = (fixture: Fixture, caller?: string) =>
+  activeRunsBesides(fixture.db, taskIdOf(fixture), caller).map((r) => r.agentSessionId)
+
+function transcriptOf({ home }: Fixture, sessionId: string, { written = true } = {}) {
+  const path = join(home, 'transcripts', `${sessionId}.jsonl`)
+  if (written) {
+    mkdirSync(dirname(path), { recursive: true })
+    writeFileSync(path, '{}\n')
+  }
+  return path
+}
+
+test('a Run whose Tab was closed stays live until its exit is recorded, but is no longer an Active Run', async () => {
+  const fixture = started()
+  const runspaceId = await fixture.openBench(ref)
+  const closing = fixture.openTab(runspaceId)
+  const ended = fixture.openTab(runspaceId)
+  await fixture.hook(closing, 's-1', 'SessionStart', { source: 'startup' })
+  await fixture.hook(ended, 's-2', 'SessionStart', { source: 'startup' })
+  await fixture.hook(ended, 's-2', 'SessionEnd', { reason: 'prompt_input_exit' })
+
+  expect(liveIds(fixture)).toEqual(['s-1'])
+  expect(activeIds(fixture)).toEqual(['s-1'])
+
+  await fixture.closeTab(closing)
+
+  expect(liveIds(fixture)).toEqual(['s-1'])
+  expect(activeIds(fixture)).toEqual([])
+})
+
+test('the Active Runs leave out the Run in the Terminal Session that asks', async () => {
+  const fixture = started()
+  const runspaceId = await fixture.openBench(ref)
+  const caller = fixture.openTab(runspaceId)
+  const other = fixture.openTab(runspaceId)
+  await fixture.hook(caller, 's-1', 'SessionStart', { source: 'startup' })
+  await fixture.hook(other, 's-2', 'SessionStart', { source: 'startup' })
+
+  expect(activeIds(fixture, caller)).toEqual(['s-2'])
+})
+
+test('a Run launch holds from opening its Tab until the claude in it becomes a Run', async () => {
+  const fixture = started()
+  const launches = createRunLaunches()
+  const terminalSessionId = fixture.openTab(await fixture.openBench(ref))
+  launches.begin(taskIdOf(fixture), terminalSessionId)
+
+  expect(launches.hasRunLaunch(fixture.db, taskIdOf(fixture))).toBe(true)
+
+  await fixture.hook(terminalSessionId, 's-1', 'SessionStart', { source: 'startup' })
+
+  expect(launches.hasRunLaunch(fixture.db, taskIdOf(fixture))).toBe(false)
+})
+
+test('a Run launch ends once its Tab is closed, before the exit is recorded', async () => {
+  const fixture = started()
+  const launches = createRunLaunches()
+  const terminalSessionId = fixture.openTab(await fixture.openBench(ref))
+  launches.begin(taskIdOf(fixture), terminalSessionId)
+
+  await fixture.closeTab(terminalSessionId)
+
+  expect(launches.hasRunLaunch(fixture.db, taskIdOf(fixture))).toBe(false)
+})
+
+test('a Run launch ends once its Terminal Session exits', async () => {
+  const fixture = started()
+  const launches = createRunLaunches()
+  const terminalSessionId = fixture.openTab(await fixture.openBench(ref))
+  launches.begin(taskIdOf(fixture), terminalSessionId)
+
+  await fixture.exit(terminalSessionId)
+
+  expect(launches.hasRunLaunch(fixture.db, taskIdOf(fixture))).toBe(false)
+})
+
+test('a Run launch whose claude neither becomes a Run nor ends lapses 60 seconds after it began, and does not come back', async () => {
+  const fixture = started()
+  const launches = createRunLaunches()
+  const terminalSessionId = fixture.openTab(await fixture.openBench(ref))
+  const began = Date.now()
+  launches.begin(taskIdOf(fixture), terminalSessionId)
+
+  setSystemTime(new Date(began + LAUNCH_TIMEOUT_MS - 1_000))
+  expect(launches.hasRunLaunch(fixture.db, taskIdOf(fixture))).toBe(true)
+  setSystemTime(new Date(began + LAUNCH_TIMEOUT_MS + 1))
+  expect(launches.hasRunLaunch(fixture.db, taskIdOf(fixture))).toBe(false)
+  setSystemTime(new Date(began))
+  expect(launches.hasRunLaunch(fixture.db, taskIdOf(fixture))).toBe(false)
+})
+
+test('a Run launch ends when it is ended', async () => {
+  const fixture = started()
+  const launches = createRunLaunches()
+  const terminalSessionId = fixture.openTab(await fixture.openBench(ref))
+  launches.begin(taskIdOf(fixture), terminalSessionId)
+
+  launches.end(taskIdOf(fixture))
+
+  expect(launches.hasRunLaunch(fixture.db, taskIdOf(fixture))).toBe(false)
+})
+
+test('the Run to resume is the latest one since the Bench whose transcript is still there', async () => {
+  const fixture = started()
+  setSystemTime(at(0))
+  const runspaceId = await fixture.openBench(ref)
+  const claudeAt = async (minute: number, sessionId: string, fields: object) => {
+    setSystemTime(at(minute))
+    const terminalSessionId = fixture.openTab(runspaceId)
+    await fixture.hook(terminalSessionId, sessionId, 'SessionStart', {
+      source: 'startup',
+      ...fields,
+    })
+    return terminalSessionId
+  }
+  const before = await claudeAt(1, 's-before', {
+    transcript_path: transcriptOf(fixture, 's-before'),
+  })
+  const gone = await claudeAt(3, 's-gone', {
+    transcript_path: transcriptOf(fixture, 's-gone', { written: false }),
+  })
+  await claudeAt(4, 's-kept', { transcript_path: transcriptOf(fixture, 's-kept') })
+  setSystemTime(at(8))
+  await fixture.hook(gone, 's-gone', 'UserPromptSubmit', { prompt: 'go on' })
+  setSystemTime(at(9))
+  await fixture.hook(before, 's-before', 'UserPromptSubmit', { prompt: 'go on' })
+
+  expect(runToResume(fixture.db, taskIdOf(fixture), { createdAt: at(0) })?.agentSessionId).toBe(
+    's-before',
+  )
+  expect(runToResume(fixture.db, taskIdOf(fixture), { createdAt: at(2) })?.agentSessionId).toBe(
+    's-kept',
+  )
 })
