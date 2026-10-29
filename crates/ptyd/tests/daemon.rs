@@ -716,3 +716,45 @@ fn without_monica_home_the_daemon_lives_in_dot_monica_under_home() {
     let (client, _rx) = connect(&daemon);
     assert_eq!(client.hello().unwrap(), PROTOCOL_VERSION);
 }
+
+#[test]
+fn closing_a_remote_view_keeps_the_desktop_connection_and_pty_size_running() {
+    let daemon = start_daemon("remote-close");
+    let (desktop, output) = connect(&daemon);
+    let pid = create_attached_zsh(&desktop, "shared");
+    desktop
+        .notify(RequestOp::Resize {
+            session_id: "shared".into(),
+            rows: 31,
+            cols: 97,
+        })
+        .unwrap();
+    let (remote, remote_output) = connect(&daemon);
+    remote
+        .request(RequestOp::Attach {
+            session_id: "shared".into(),
+            replay_bytes: None,
+        })
+        .unwrap();
+    remote.close().unwrap();
+    assert!(remote_output
+        .try_iter()
+        .any(|e| matches!(e, ClientEvent::Disconnected)));
+    assert!(process_alive(pid));
+    match desktop.request(RequestOp::List).unwrap() {
+        ResponseBody::Sessions { sessions } => {
+            let session = &sessions[0];
+            assert!(session.running);
+            assert_eq!((session.rows, session.cols), (31, 97));
+        }
+        other => panic!("unexpected list: {other:?}"),
+    }
+    desktop
+        .notify(RequestOp::Write {
+            session_id: "shared".into(),
+            data: b64(b"echo desktop-continues-$((6*7))\r"),
+        })
+        .unwrap();
+    wait_for_output(&output, "desktop-continues-42", Duration::from_secs(10));
+    desktop.close().unwrap();
+}

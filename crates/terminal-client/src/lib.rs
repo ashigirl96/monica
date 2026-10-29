@@ -3,9 +3,10 @@
 
 use std::collections::HashMap;
 use std::io::{BufReader, BufWriter};
+use std::net::Shutdown;
 use std::os::unix::net::UnixStream;
 use std::path::Path;
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{mpsc, Arc, Mutex};
 use std::time::Duration;
 
@@ -37,10 +38,13 @@ struct ClientInner {
     writer: Mutex<BufWriter<UnixStream>>,
     pending: Mutex<PendingMap>,
     next_id: AtomicU64,
+    closed: AtomicBool,
+    shutdown: UnixStream,
 }
 
 pub struct PtydClient {
     inner: Arc<ClientInner>,
+    reader: Mutex<Option<std::thread::JoinHandle<()>>>,
 }
 
 fn lock<T>(mutex: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
@@ -60,13 +64,15 @@ impl PtydClient {
             .try_clone()
             .context("failed to clone daemon stream")?;
         let inner = Arc::new(ClientInner {
+            shutdown: stream.try_clone()?,
+            closed: AtomicBool::new(false),
             writer: Mutex::new(BufWriter::new(stream)),
             pending: Mutex::new(HashMap::new()),
             next_id: AtomicU64::new(1),
         });
 
         let reader_inner = Arc::clone(&inner);
-        std::thread::Builder::new()
+        let reader = std::thread::Builder::new()
             .name("ptyd-client-reader".to_string())
             .spawn(move || {
                 let reader = BufReader::new(read_stream);
@@ -103,6 +109,7 @@ impl PtydClient {
                         }
                     }
                 }
+                reader_inner.closed.store(true, Ordering::SeqCst);
                 for (_, tx) in lock(&reader_inner.pending).drain() {
                     let _ = tx.try_send(Err("daemon disconnected".to_string()));
                 }
@@ -110,7 +117,10 @@ impl PtydClient {
             })
             .context("failed to spawn client reader thread")?;
 
-        Ok(Self { inner })
+        Ok(Self {
+            inner,
+            reader: Mutex::new(Some(reader)),
+        })
     }
 
     /// Exchange protocol versions; returns the daemon's. The caller decides whether a
@@ -127,7 +137,13 @@ impl PtydClient {
     pub fn request(&self, op: RequestOp) -> Result<ResponseBody> {
         let id = self.inner.next_id.fetch_add(1, Ordering::Relaxed);
         let (tx, rx) = mpsc::sync_channel(1);
-        lock(&self.inner.pending).insert(id, tx);
+        {
+            let mut pending = lock(&self.inner.pending);
+            if self.inner.closed.load(Ordering::SeqCst) {
+                bail!("daemon disconnected");
+            }
+            pending.insert(id, tx);
+        }
         if let Err(e) = self.send_line(&Request { id: Some(id), op }) {
             lock(&self.inner.pending).remove(&id);
             return Err(e);
@@ -147,7 +163,36 @@ impl PtydClient {
         self.send_line(&Request { id: None, op })
     }
 
+    /// Call outside the event callback: completion includes joining that callback's reader.
+    pub fn close(&self) -> Result<()> {
+        self.inner.closed.store(true, Ordering::SeqCst);
+        let shutdown = self.inner.shutdown.shutdown(Shutdown::Both);
+        for (_, tx) in lock(&self.inner.pending).drain() {
+            let _ = tx.try_send(Err("daemon disconnected".into()));
+        }
+        let mut reader = lock(&self.reader);
+        if let Some(handle) = reader.as_ref() {
+            if handle.thread().id() == std::thread::current().id() {
+                bail!("cannot join the daemon reader from its callback");
+            }
+        }
+        if let Some(handle) = reader.take() {
+            handle
+                .join()
+                .map_err(|_| anyhow::anyhow!("daemon reader panicked"))?;
+        }
+        match shutdown {
+            Err(error) if error.kind() != std::io::ErrorKind::NotConnected => {
+                Err(error).context("failed to shut down daemon socket")
+            }
+            _ => Ok(()),
+        }
+    }
+
     fn send_line(&self, request: &Request) -> Result<()> {
+        if self.inner.closed.load(Ordering::SeqCst) {
+            bail!("daemon disconnected");
+        }
         let mut writer = lock(&self.inner.writer);
         write_frame(&mut *writer, request)?;
         Ok(())
