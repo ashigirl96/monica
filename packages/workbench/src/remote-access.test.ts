@@ -700,6 +700,12 @@ async function terminalFixture() {
     })
     socket.send(JSON.stringify({ type: 'open', ...target }))
     return {
+      async prepare() {
+        socket.send('{"type":"prepare"}')
+      },
+      async input(command) {
+        socket.send(JSON.stringify(command))
+      },
       async next() {
         if (frames.length) return frames.shift()
         waiting = Promise.withResolvers<unknown>()
@@ -721,7 +727,16 @@ async function terminalFixture() {
     },
     async subscribe() {},
   })
-  return { ...f, ...approved, shell, target, terminal, remote, relay }
+  async function rendererControl(action: 'ready' | 'stall' | 'disconnect') {
+    await relay.stdin.write(
+      `${JSON.stringify({ rendererControl: action, session: target.terminalSessionId })}\n`,
+    )
+    const response = relay.stdout.getReader()
+    const value = await response.read()
+    response.releaseLock()
+    return JSON.parse(new TextDecoder().decode(value.value))
+  }
+  return { ...f, ...approved, shell, target, terminal, remote, relay, rendererControl }
 }
 
 test('RemoteWorkbench.openTerminal orders pre-response and replay-time live output after replay and detaches without lifecycle operations', async () => {
@@ -1011,4 +1026,93 @@ test('successful local resize notification is not treated as applied until async
   await sized.promise
   expect(sizes).toEqual([[45, 123]])
   expect(await view.close()).toBe(true)
+})
+
+test('RemoteWorkbench.input reaches the existing session once through authenticated WSS and stops on a stalled Mac renderer', async () => {
+  const f = await terminalFixture()
+  const ready = Promise.withResolvers<void>()
+  const unavailable = Promise.withResolvers<void>()
+  let wasReady = false
+  const view = f.remote.openTerminal(f.target, {
+    async write() {},
+    size() {},
+    state() {},
+    inputReady(value) {
+      if (value) {
+        wasReady = true
+        ready.resolve()
+      } else if (wasReady) unavailable.resolve()
+    },
+  })
+  expect(await view.input(new TextEncoder().encode('before'))).toBe('not-sent')
+  await f.rendererControl('ready')
+  await ready.promise
+  expect(await view.input(new Uint8Array(65537))).toBe('not-sent')
+  const bytes = new TextEncoder().encode('é'.repeat(32768))
+  expect(await view.input(bytes)).toBe('accepted')
+  await f.ptyd.received((op) => op.op === 'write')
+  const writes = f.ptyd.receivedAll((op) => op.op === 'write')
+  expect(writes).toHaveLength(1)
+  expect(writes[0]).toMatchObject({
+    op: 'write',
+    session_id: f.target.terminalSessionId,
+    data: Buffer.from(bytes).toString('base64'),
+  })
+  await f.rendererControl('stall')
+  await unavailable.promise
+  expect(await view.input(new TextEncoder().encode('after'))).toBe('not-sent')
+  expect(await view.close()).toBe(true)
+  await f.client.runspace.create({ cwd: '/input-barrier', rows: 24, cols: 80 })
+  await f.ptyd.receivedAtLeast(2, (op) => op.op === 'create')
+  expect(f.ptyd.receivedAll((op) => op.op === 'write')).toHaveLength(1)
+})
+
+test('a lost input acceptance ACK is uncertain and never resent through the real authenticated relay', async () => {
+  const f = await terminalFixture()
+  const ready = Promise.withResolvers<void>()
+  const lost = Promise.withResolvers<void>()
+  const remote = new RemoteWorkbench({
+    async read() {
+      return []
+    },
+    async subscribe() {},
+    async terminal() {
+      const stream = await f.terminal()
+      return {
+        ...stream,
+        async next() {
+          for (;;) {
+            const frame = await stream.next()
+            if (
+              typeof frame === 'object' &&
+              frame &&
+              'type' in frame &&
+              frame.type === 'input_result'
+            ) {
+              lost.resolve()
+              continue
+            }
+            return frame
+          }
+        },
+      }
+    },
+  })
+  const view = remote.openTerminal(f.target, {
+    async write() {},
+    size() {},
+    state() {},
+    inputReady(value) {
+      if (value) ready.resolve()
+    },
+  })
+  await f.rendererControl('ready')
+  await ready.promise
+  const result = view.input(new TextEncoder().encode('only-once\r'))
+  await lost.promise
+  expect(await view.close()).toBe(true)
+  expect(await result).toBe('uncertain')
+  expect(await view.input(new TextEncoder().encode('offline'))).toBe('not-sent')
+  await f.ptyd.received((op) => op.op === 'write')
+  expect(f.ptyd.receivedAll((op) => op.op === 'write')).toHaveLength(1)
 })

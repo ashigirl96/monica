@@ -218,7 +218,7 @@ fn exit_during_size_readback(name: &str, later: bool, reap: bool) {
     }
     let proxy = Proxy::start(&daemon, !later);
     let sizes = Arc::new(Sizes::default());
-    let relay = RemoteServer::start(proxy.path.clone(), sizes.clone()).unwrap();
+    let relay = RemoteServer::start(proxy.path.clone(), sizes.clone(), Arc::default()).unwrap();
     let mut phone = UnixStream::connect(&relay.path).unwrap();
     phone
         .set_read_timeout(Some(Duration::from_secs(8)))

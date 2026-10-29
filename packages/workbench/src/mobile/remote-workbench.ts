@@ -8,7 +8,12 @@ import {
   type ListedAgentSession,
   type TerminalSession,
 } from '../contract.ts'
-import { TerminalFrameSchema } from '../remote-terminal.ts'
+import {
+  TerminalFrameSchema,
+  type RendererGeneration,
+  type TerminalInput,
+  type InputResult,
+} from '../remote-terminal.ts'
 
 export type RemoteUnavailable =
   | 'unavailable'
@@ -33,6 +38,8 @@ export type RemoteState =
 
 export type TerminalTarget = { tabId: string; terminalSessionId: string }
 export type TerminalStream = {
+  prepare(): Promise<void>
+  input(command: TerminalInput): Promise<void>
   next(): Promise<unknown>
   ack(sequence: number): Promise<void>
   close(): Promise<boolean>
@@ -40,11 +47,15 @@ export type TerminalStream = {
 export type TerminalDisplay = {
   write(bytes: Uint8Array): Promise<void>
   size(rows: number, cols: number): void
+  inputReady?(ready: boolean): void
   state(
     state: 'waiting' | 'viewing' | 'exited' | 'closed' | 'detach-pending' | RemoteUnavailable,
   ): void
 }
-export type TerminalView = { close(): Promise<boolean> }
+export type TerminalView = {
+  input(bytes: Uint8Array): Promise<InputResult>
+  close(): Promise<boolean>
+}
 
 export type RemoteTransport = {
   terminal(target: TerminalTarget): Promise<TerminalStream>
@@ -72,10 +83,50 @@ export class RemoteWorkbench {
     let stream: TerminalStream | undefined
     let closing: Promise<boolean> | undefined
     let opened: Promise<TerminalStream | undefined>
+    let renderer: RendererGeneration | undefined
+    let replayed = false
+    let uncertain = false
+    let inputId = 0
+    let pending: { id: number; resolve: (result: InputResult) => void } | undefined
+    const finishInput = (result: InputResult) => {
+      pending?.resolve(result)
+      pending = undefined
+      if (result === 'uncertain') {
+        uncertain = true
+        display.inputReady?.(false)
+      }
+    }
     const view: TerminalView = {
+      input: async (bytes) => {
+        if (
+          !active ||
+          !stream ||
+          !replayed ||
+          !renderer ||
+          uncertain ||
+          pending ||
+          bytes.length > 65536 ||
+          bytes.length === 0
+        )
+          return 'not-sent'
+        const result = Promise.withResolvers<InputResult>()
+        const id = ++inputId
+        pending = { id, resolve: result.resolve }
+        const timer = setTimeout(() => finishInput('uncertain'), 6000)
+        try {
+          let data = ''
+          for (const byte of bytes) data += String.fromCharCode(byte)
+          await stream.input({ type: 'input', id, data: btoa(data), generation: renderer })
+        } catch {
+          finishInput('uncertain')
+        }
+        return result.promise.finally(() => clearTimeout(timer))
+      },
       close: () => {
         if (closing) return closing
         active = false
+        display.inputReady?.(false)
+        finishInput('uncertain')
         closing = (async () => {
           const connection = stream ?? (await opened.catch(() => undefined))
           const confirmed = connection ? await connection.close().catch(() => false) : true
@@ -99,10 +150,23 @@ export class RemoteWorkbench {
       try {
         stream = await opened
         if (!active || !stream) return
+        await stream.prepare()
         for (;;) {
           const frame = TerminalFrameSchema.parse(await stream.next())
           if (!active) return
+          if (frame.type === 'input_result') {
+            if (frame.id === pending?.id) finishInput(frame.result)
+            continue
+          }
+          if (frame.type === 'renderer') {
+            renderer = frame.generation ?? undefined
+            display.inputReady?.(!!renderer && replayed && !uncertain)
+            continue
+          }
           if (frame.type === 'closed') {
+            active = false
+            display.inputReady?.(false)
+            finishInput('uncertain')
             if (!exited) display.state('closed')
             return
           }
@@ -120,10 +184,14 @@ export class RemoteWorkbench {
               )
               break
             case 'replay_end':
+              replayed = true
+              display.inputReady?.(!!renderer && !uncertain)
               display.state('viewing')
               break
             case 'exit':
               exited = true
+              replayed = false
+              display.inputReady?.(false)
               display.state('exited')
               break
           }
@@ -133,6 +201,8 @@ export class RemoteWorkbench {
       } catch (error) {
         if (!active) return
         active = false
+        finishInput('uncertain')
+        display.inputReady?.(false)
         display.state(error instanceof RemoteError ? error.state : 'unavailable')
         if (stream) {
           closing = stream.close().catch(() => false)

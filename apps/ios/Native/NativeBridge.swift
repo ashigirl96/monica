@@ -22,9 +22,9 @@ final class NativeBridge: NSObject, WKScriptMessageHandlerWithReply {
                                replyHandler: @escaping (Any?, String?) -> Void) {
         guard permits(mainFrame: message.frameInfo.isMainFrame, url: message.frameInfo.request.url),
               message.webView === controller?.webview,
-              let body = message.body as? [String: String], Set(body.keys).isSubset(of: ["operation", "id", "tabId", "terminalSessionId", "sequence"]),
+              let body = message.body as? [String: String], Set(body.keys).isSubset(of: ["operation", "id", "tabId", "terminalSessionId", "sequence", "data", "renderer", "connection"]),
               let operation = body["operation"], active,
-              Set(body.keys).isSubset(of: operation == "terminal-open" ? ["operation", "id", "tabId", "terminalSessionId"] : operation == "terminal-ack" ? ["operation", "id", "sequence"] : ["operation", "id"])
+              Set(body.keys).isSubset(of: operation == "terminal-open" ? ["operation", "id", "tabId", "terminalSessionId"] : operation == "terminal-input" ? ["operation", "id", "data", "sequence", "renderer", "connection"] : operation == "terminal-ack" ? ["operation", "id", "sequence"] : ["operation", "id"])
         else { replyHandler(["state": "unavailable"], nil); return }
         let readId = ReadProcedure(rawValue: operation) == nil ? nil : body["id"]
         let task = Task {
@@ -84,6 +84,20 @@ final class NativeBridge: NSObject, WKScriptMessageHandlerWithReply {
             do { try await opened.open(tab: tab, session: session) }
             catch { _ = await opened.close(); throw error }
             guard active, terminal === opened else { _ = await opened.close(); throw RemoteFailure.unavailable }
+            return NSNull()
+        case "terminal-prepare":
+            guard let terminal, terminal.id == id else { throw RemoteFailure.unavailable }
+            try await terminal.prepare()
+            return NSNull()
+        case "terminal-input":
+            guard let terminal, terminal.id == id,
+                  let sequence = fields["sequence"].flatMap(Int.init), sequence > 0,
+                  let renderer = fields["renderer"].flatMap(Int.init), renderer > 0,
+                  let connection = fields["connection"].flatMap(Int.init), connection >= 0,
+                  let data = fields["data"], data.utf8.count <= 87_384,
+                  let bytes = Data(base64Encoded: data), bytes.count <= 65_536
+            else { throw RemoteFailure.unavailable }
+            try await terminal.input(sequence: sequence, renderer: renderer, connection: connection, data: data)
             return NSNull()
         case "terminal-next":
             guard let terminal, terminal.id == id else { throw RemoteFailure.unavailable }

@@ -20,7 +20,7 @@ final class TerminalConnection {
 
     private func send(_ value: [String: Any]) async throws {
         let data = try JSONSerialization.data(withJSONObject: value)
-        guard data.count <= 65_536, let text = String(data: data, encoding: .utf8) else { throw RemoteFailure.incompatible }
+        guard data.count <= 90_112, let text = String(data: data, encoding: .utf8) else { throw RemoteFailure.incompatible }
         try await socket.send(.string(text))
     }
 
@@ -41,6 +41,16 @@ final class TerminalConnection {
         let value = try decode(message)
         if value["type"] as? String == "closed" { confirmed = true }
         return value
+    }
+
+    func prepare() async throws {
+        guard !stopped else { throw RemoteFailure.unavailable }
+        try await send(["type": "prepare"])
+    }
+
+    func input(sequence: Int, renderer: Int, connection: Int, data: String) async throws {
+        guard !stopped else { throw RemoteFailure.unavailable }
+        try await send(["type": "input", "id": sequence, "generation": ["renderer": renderer, "connection": connection], "data": data])
     }
 
     func ack(_ sequence: Int) async throws {

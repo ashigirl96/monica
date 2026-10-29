@@ -2,7 +2,7 @@ import { lstatSync } from 'node:fs'
 import { connect } from 'node:net'
 import { dirname } from 'node:path'
 
-import { TerminalFrameSchema, type TerminalFrame } from './remote-terminal.ts'
+import { TerminalFrameSchema, type TerminalFrame, type TerminalInput } from './remote-terminal.ts'
 
 export type ShellEndpoint = { path: string; secret: string }
 
@@ -23,6 +23,7 @@ export function attachShell(
   let outstanding: number | undefined
   let next = 1
   let closing = false
+  let preparing = false
   let confirmed = false
   let closePromise: Promise<boolean> | undefined
   const completion = Promise.withResolvers<boolean>()
@@ -34,6 +35,7 @@ export function attachShell(
   socket.on('connect', () => {
     socket.write(`${JSON.stringify({ secret: endpoint.secret, session })}\n`)
     if (closing) socket.write('{"type":"close"}\n')
+    else if (preparing) socket.write('{"type":"prepare"}\n')
   })
   socket.on('data', (chunk) => {
     try {
@@ -59,6 +61,10 @@ export function attachShell(
           continue
         }
         if (closing) continue
+        if (frame.type === 'renderer' || frame.type === 'input_result') {
+          receive(frame)
+          continue
+        }
         if (outstanding !== undefined || frame.sequence !== next++)
           throw new Error('Unordered Shell frame')
         outstanding = frame.sequence
@@ -76,6 +82,21 @@ export function attachShell(
     }
   })
   return {
+    prepare() {
+      preparing = true
+      if (!closing && !socket.connecting) socket.write('{"type":"prepare"}\n')
+    },
+    input(command: TerminalInput) {
+      const frame = `${JSON.stringify(command)}\n`
+      if (
+        closing ||
+        socket.destroyed ||
+        socket.writableLength + Buffer.byteLength(frame) > 1_048_576
+      )
+        return false
+      socket.write(frame)
+      return true
+    },
     ack(sequence: number) {
       if (closing || outstanding !== sequence) return fail()
       outstanding = undefined

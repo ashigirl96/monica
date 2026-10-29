@@ -109,6 +109,8 @@ test('openTerminal waits for replay parsing before draw ACK and close releases o
     async subscribe() {},
     async terminal() {
       return {
+        async prepare() {},
+        async input() {},
         async next() {
           return frames.shift() ?? new Promise(() => {})
         },
@@ -170,6 +172,8 @@ test('closing a view while its transport opens releases the late stream without 
   )
   const closed = view.close()
   opened.resolve({
+    async prepare() {},
+    async input() {},
     async next() {
       throw new Error('closed view read')
     },
@@ -192,6 +196,8 @@ test('a late parse callback after close cannot acknowledge output or reopen its 
   const remote = new RemoteWorkbench({
     async terminal() {
       return {
+        async prepare() {},
+        async input() {},
         async next() {
           return { version: 1, type: 'output', sequence: 1, data: btoa('tail') }
         },
@@ -224,4 +230,60 @@ test('a late parse callback after close cannot acknowledge output or reopen its 
   release.resolve()
   await flush()
   expect(acknowledgements).toEqual([])
+})
+
+test('input is not queued before ready, is bounded in decoded bytes, and a lost ACK is uncertain without retry', async () => {
+  const frames: unknown[] = []
+  let receive: ((frame: unknown) => void) | undefined
+  const sends: unknown[] = []
+  const push = (frame: unknown) => {
+    if (receive) {
+      const next = receive
+      receive = undefined
+      next(frame)
+    } else frames.push(frame)
+  }
+  const remote = new RemoteWorkbench({
+    async read() {
+      return []
+    },
+    async subscribe() {},
+    async terminal() {
+      return {
+        async next() {
+          return frames.length
+            ? frames.shift()
+            : new Promise((resolve) => {
+                receive = resolve
+              })
+        },
+        async ack() {},
+        async prepare() {},
+        async input(command) {
+          sends.push(command)
+          throw new Error('ACK lost after send')
+        },
+        async close() {
+          return true
+        },
+      }
+    },
+  })
+  const view = remote.openTerminal(
+    { tabId: 'tab', terminalSessionId: 'session' },
+    {
+      async write() {},
+      size() {},
+      state() {},
+    },
+  )
+  expect(await view.input(new TextEncoder().encode('before'))).toBe('not-sent')
+  push({ version: 1, type: 'replay_end', sequence: 1 })
+  push({ version: 1, type: 'renderer', generation: { renderer: 1, connection: 2 } })
+  await flush()
+  expect(await view.input(new Uint8Array(65537))).toBe('not-sent')
+  expect(await view.input(new TextEncoder().encode('command\r'))).toBe('uncertain')
+  expect(await view.input(new TextEncoder().encode('later'))).toBe('not-sent')
+  expect(sends).toHaveLength(1)
+  await view.close()
 })

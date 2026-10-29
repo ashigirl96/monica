@@ -200,3 +200,5 @@ impl PtydClient {
 }
 
 pub mod remote;
+
+pub mod renderer;

@@ -32,9 +32,12 @@ export function terminalResize(sessionId: string, rows: number, cols: number): P
 
 export function onTerminalOutput(
   sessionId: string,
-  cb: (data: string) => void,
+  cb: (data: string, progress: { generation: RendererGeneration; sequence: number } | null) => void,
 ): Promise<UnlistenFn> {
-  return listen<string>(`terminal:output:${sessionId}`, (event) => cb(event.payload))
+  return listen<{
+    data: string
+    progress: { generation: RendererGeneration; sequence: number } | null
+  }>(`terminal:output:${sessionId}`, (event) => cb(event.payload.data, event.payload.progress))
 }
 
 export function onTerminalExit(
@@ -42,4 +45,22 @@ export function onTerminalExit(
   cb: (code: number | null) => void,
 ): Promise<UnlistenFn> {
   return listen<number | null>(`terminal:exit:${sessionId}`, (event) => cb(event.payload))
+}
+
+export type RendererGeneration = { renderer: number; connection: number }
+export function registerRenderer(sessionId: string): Promise<RendererGeneration> {
+  return shell('terminal_renderer_register', { sessionId })
+}
+export function rendererParsed(
+  sessionId: string,
+  generation: RendererGeneration,
+  sequence: number,
+): Promise<void> {
+  return shell('terminal_renderer_parsed', { sessionId, generation, sequence })
+}
+export function removeRenderer(sessionId: string, generation: RendererGeneration): Promise<void> {
+  return shell('terminal_renderer_remove', { sessionId, generation })
+}
+export function onRendererRequest(prepare: (sessionId: string) => void): Promise<UnlistenFn> {
+  return listen<string>('terminal:prepare', (event) => prepare(event.payload))
 }

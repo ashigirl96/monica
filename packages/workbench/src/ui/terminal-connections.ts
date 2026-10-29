@@ -15,11 +15,18 @@ import {
   terminalAttach,
   terminalResize,
   terminalWrite,
+  registerRenderer,
+  rendererParsed,
+  removeRenderer,
+  type RendererGeneration,
 } from './terminal.ts'
 
-// Module-level so StrictMode's double effects share one connection per tab.
+// The mounted renderer owns one connection per Tab.
 export type TabConnection = {
   state: 'connecting' | 'attached' | 'dead'
+  generation?: RendererGeneration
+  ready?: boolean
+  parsed?: number
   sessionId?: string
   inFlight?: Promise<void>
   unlisteners: UnlistenFn[]
@@ -41,10 +48,7 @@ export function openTabConnection(tabId: string): TabConnection {
   return conn
 }
 
-// tab → the Terminal currently mounted for it. Session listeners and the in-flight
-// connect outlive a React mount (StrictMode double-mounts), so writes must resolve the
-// *current* instance instead of closing over one that may have been disposed — xterm
-// throws renderer TypeErrors when written to after dispose.
+// Resolve the mounted instance before applying asynchronous output.
 const tabTerminals = new Map<string, Terminal>()
 
 // WebGL で描いた Tab の文字は DOM に無いので、tauri-mcp で画面を確かめる dev のときだけ晒す。
@@ -57,7 +61,10 @@ export function setTabTerminal(tabId: string, term: Terminal) {
 }
 
 export function clearTabTerminal(tabId: string, term: Terminal) {
-  if (tabTerminals.get(tabId) === term) tabTerminals.delete(tabId)
+  if (tabTerminals.get(tabId) === term) {
+    tabTerminals.delete(tabId)
+    releaseTabConnection(tabId)
+  }
 }
 
 export function getTabTerminal(tabId: string): Terminal | undefined {
@@ -69,6 +76,7 @@ export function releaseTabConnection(tabId: string): void {
   const conn = tabConnections.get(tabId)
   if (!conn) return
   tabConnections.delete(tabId)
+  if (conn.sessionId && conn.generation) void removeRenderer(conn.sessionId, conn.generation)
   for (const unlisten of conn.unlisteners) unlisten()
   // The connect error path also unlistens whatever is left; clearing here keeps a
   // release racing that path from double-invoking the same UnlistenFns.
@@ -103,6 +111,7 @@ type ConnectingTab = {
   tabId: string
   sessionId: string
   status?: TerminalSessionStatus
+  hidden?: boolean
   onExit: (exitCode: number | null) => void
 }
 
@@ -137,18 +146,36 @@ function dropListeners(conn: TabConnection) {
 /// without sequence numbers.
 async function runConnect(
   store: Store,
-  { tabId, sessionId, onExit }: ConnectingTab,
+  { tabId, sessionId, onExit, hidden }: ConnectingTab,
   conn: TabConnection,
 ) {
   try {
     conn.sessionId = sessionId
 
+    const term = getTabTerminal(tabId)
+    conn.generation = await registerRenderer(sessionId)
+    if (tabConnections.get(tabId) !== conn || getTabTerminal(tabId) !== term) {
+      if (conn.generation) void removeRenderer(sessionId, conn.generation)
+      return
+    }
     let live = false
-    const pending: string[] = []
+    const pending: { data: string; sequence: number }[] = []
+    const parsed = (sequence: number) => {
+      if (tabConnections.get(tabId) !== conn || getTabTerminal(tabId) !== term) return
+      conn.parsed = sequence
+      heartbeatRenderer(tabId)
+    }
+    const write = (data: string, sequence: number) =>
+      term?.write(fromBase64(data), () => parsed(sequence))
     // Await before reading conn.unlisteners: a release while subscribing replaces the array.
-    const unlistenOutput = await onTerminalOutput(sessionId, (data) => {
-      if (live) getTabTerminal(tabId)?.write(fromBase64(data))
-      else pending.push(data)
+    const unlistenOutput = await onTerminalOutput(sessionId, (data, progress) => {
+      const sequence =
+        progress?.generation.renderer === conn.generation?.renderer &&
+        progress?.generation.connection === conn.generation?.connection
+          ? (progress?.sequence ?? 0)
+          : 0
+      if (live) write(data, sequence)
+      else pending.push({ data, sequence })
     })
     conn.unlisteners.push(unlistenOutput)
     const unlistenExit = await onTerminalExit(sessionId, onExit)
@@ -170,8 +197,8 @@ async function runConnect(
     // instance — the connection guard prevents double-attach — and Terminal.reset()
     // corrupts the WebGL renderer (blank canvas, "this._renderer.value.dimensions"
     // TypeErrors) once WebglAddon is loaded.
-    const term = getTabTerminal(tabId)
     if (term) {
+      if (hidden) term.resize(attach.cols, attach.rows)
       if (attach.replay) {
         // Queries recorded in the replay were already answered (or abandoned) when they
         // were live; answering them again would inject the responses into the shell's
@@ -179,11 +206,16 @@ async function runConnect(
         // is parsed and before the pending (live) writes below, which keep responding.
         conn.replaying = true
         term.write(fromBase64(attach.replay), () => {
+          if (tabConnections.get(tabId) !== conn || getTabTerminal(tabId) !== term) return
           conn.replaying = false
+          conn.ready = true
+          heartbeatRenderer(tabId)
         })
       }
+      if (!attach.replay) conn.ready = true
       live = true
-      for (const data of pending) term.write(fromBase64(data))
+      for (const { data, sequence } of pending) write(data, sequence)
+      heartbeatRenderer(tabId)
       pending.length = 0
     } else {
       live = true
@@ -192,16 +224,24 @@ async function runConnect(
     store.set(setTerminalSessionStatusAtom, sessionId, { status: 'running' })
 
     // The session was created, or last attached, at another size than this pane.
-    if (term?.element && (term.rows !== attach.rows || term.cols !== attach.cols)) {
+    if (!hidden && term?.element && (term.rows !== attach.rows || term.cols !== attach.cols)) {
       void terminalResize(sessionId, term.rows, term.cols)
     }
   } catch (e) {
     console.warn(`terminal connect failed for tab ${tabId}:`, e)
+    if (tabConnections.get(tabId) !== conn) return
     conn.state = 'dead'
     dropListeners(conn)
     // No pretend-reconnect: a session we cannot attach to is honestly lost.
     store.set(setTerminalSessionStatusAtom, sessionId, { status: 'lost' })
   } finally {
     conn.inFlight = undefined
+  }
+}
+
+export function heartbeatRenderer(tabId: string): void {
+  const conn = tabConnections.get(tabId)
+  if (conn?.ready && conn.sessionId && conn.generation && getTabTerminal(tabId)) {
+    void rendererParsed(conn.sessionId, conn.generation, conn.parsed ?? 0).catch(() => {})
   }
 }
