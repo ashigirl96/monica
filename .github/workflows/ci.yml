@@ -24,6 +24,8 @@ jobs:
         with:
           bun-version-file: package.json
       - run: bun install --frozen-lockfile
+      - run: rustup toolchain install
+      - uses: Swatinem/rust-cache@v2
       - run: bun run check:ts
       - run: docker run --rm -v "$PWD:/repo" --workdir /repo rhysd/actionlint:1.7.12 -color
 
@@ -55,6 +57,11 @@ jobs:
         with:
           filters: |
             ios:
+              - "crates/terminal-client/**"
+              - "crates/terminal-protocol/**"
+              - "Cargo.lock"
+              - "Cargo.toml"
+              - "rust-toolchain.toml"
               - "apps/ios/**"
               - "packages/workbench/**"
               - "package.json"
@@ -94,6 +101,8 @@ jobs:
         with:
           bun-version-file: package.json
       - run: bun install --frozen-lockfile
+      - run: rustup toolchain install
+      - uses: Swatinem/rust-cache@v2
       - run: bun run check:ios
         env:
           MONICA_IOS_LOG_DIR: ${{ runner.temp }}/monica-ios

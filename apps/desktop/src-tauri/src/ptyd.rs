@@ -17,12 +17,14 @@ const CONNECT_RETRY_INTERVAL: Duration = Duration::from_millis(50);
 
 pub struct PtydHandle {
     client: Mutex<Option<Arc<PtydClient>>>,
+    pub sizes: Arc<monica_terminal_client::remote::Sizes>,
 }
 
 impl PtydHandle {
     pub fn new() -> Self {
         Self {
             client: Mutex::new(None),
+            sizes: Arc::default(),
         }
     }
 

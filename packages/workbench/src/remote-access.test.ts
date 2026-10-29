@@ -1,17 +1,27 @@
 import { afterEach, expect, setDefaultTimeout, spyOn, test, setSystemTime } from 'bun:test'
 import { randomBytes } from 'node:crypto'
-import { readFileSync, statSync } from 'node:fs'
+import { chmodSync, readFileSync, statSync } from 'node:fs'
 import https from 'node:https'
+import { connect, createServer } from 'node:net'
 import { join } from 'node:path'
 import type { Duplex } from 'node:stream'
 import { checkServerIdentity } from 'node:tls'
 
-import { RemoteWorkbench, type RemoteState } from './mobile/remote-workbench.ts'
+import {
+  RemoteWorkbench,
+  type TerminalStream,
+  type RemoteState,
+} from './mobile/remote-workbench.ts'
 import { remoteDevice } from './schema.ts'
 import { cleanUp, onCleanup, setup } from './testing.ts'
 
 setDefaultTimeout(30_000)
-afterEach(() => {
+const shellProcesses: ReturnType<typeof Bun.spawn>[] = []
+afterEach(async () => {
+  for (const child of shellProcesses.splice(0)) {
+    child.kill()
+    await child.exited
+  }
   setSystemTime()
   cleanUp()
 })
@@ -19,8 +29,8 @@ afterEach(() => {
 const syntheticTailnetAddress = [100, 64, 0, 1].join('.')
 const secret = () => `monica-remote-v1.${randomBytes(32).toString('hex')}`
 
-async function listening() {
-  const fixture = setup()
+async function listening(shell?: import('./remote-shell.ts').ShellEndpoint) {
+  const fixture = setup({ shell })
   const free = Bun.serve({ hostname: '127.0.0.1', port: 0, fetch: () => new Response() })
   const port = free.port!
   await free.stop(true)
@@ -419,7 +429,7 @@ test('restart discards an unconsumed invitation while retaining the TLS identity
 })
 
 test('an unprotected or symlinked identity is refused rather than replaced or served', async () => {
-  const { chmodSync, renameSync, symlinkSync } = await import('node:fs')
+  const { renameSync, symlinkSync } = await import('node:fs')
   const f = await listening()
   const path = join(f.home, 'remote', 'identity.json')
   const before = readFileSync(path, 'utf8')
@@ -437,7 +447,6 @@ test('an unprotected or symlinked identity is refused rather than replaced or se
 })
 
 test('disable still closes authenticated WSS when persisting the disabled setting fails', async () => {
-  const { chmodSync } = await import('node:fs')
   const f = await listening()
   const approved = await f.approved()
   const active = await f.websocket(approved.credential)
@@ -518,6 +527,9 @@ test('RemoteWorkbench.observe reads the real empty Ledger without creating a Run
   const states: RemoteState[] = []
   let notify: (() => void) | undefined
   const remote = new RemoteWorkbench({
+    async terminal() {
+      throw new Error('not used by observation')
+    },
     async subscribe(changed, signal) {
       const ws = await f.websocket(credential, '/workbench/changes')
       signal.addEventListener('abort', () => ws.socket.destroy(), { once: true })
@@ -598,6 +610,9 @@ test('RemoteWorkbench.observe receives a complete UTF-8 Layout larger than one r
   expect(Buffer.byteLength(JSON.stringify(expected))).toBeGreaterThan(65536)
   const result = Promise.withResolvers<RemoteState>()
   const remote = new RemoteWorkbench({
+    async terminal() {
+      throw new Error('not used by observation')
+    },
     async subscribe(changed, signal) {
       const ws = await f.websocket(credential, '/workbench/changes')
       signal.addEventListener('abort', () => ws.socket.destroy(), { once: true })
@@ -620,4 +635,355 @@ test('RemoteWorkbench.observe receives a complete UTF-8 Layout larger than one r
   onCleanup(stop)
   expect(await result.promise).toMatchObject({ state: 'available', layout: expected })
   expect(await f.client.layout.get()).toEqual(expected)
+})
+
+let relayBuilt = false
+async function terminalFixture() {
+  if (!relayBuilt) {
+    const build = Bun.spawn(
+      ['cargo', 'build', '-p', 'monica-terminal-client', '--example', 'remote-fixture'],
+      { env: process.env, stdout: 'ignore', stderr: 'inherit' },
+    )
+    expect(await build.exited).toBe(0)
+    relayBuilt = true
+  }
+  const shell = { path: '', secret: '' }
+  const f = await listening(shell)
+  const relay = Bun.spawn(['target/debug/examples/remote-fixture', f.home], {
+    env: process.env,
+    stdin: 'pipe',
+    stdout: 'pipe',
+    stderr: 'inherit',
+  })
+  shellProcesses.push(relay)
+  const reader = relay.stdout.getReader()
+  const first = await reader.read()
+  Object.assign(shell, JSON.parse(new TextDecoder().decode(first.value)))
+  reader.releaseLock()
+  const approved = await f.approved()
+  await f.workbenchLedger.start()
+  await f.client.runspace.create({ cwd: '/remote-test', rows: 31, cols: 97 })
+  const tab = (await f.client.layout.get()).runspaces[0]!.tabs[0]!
+  await f.settled(tab.terminalSessionId)
+  const target = { tabId: tab.id, terminalSessionId: tab.terminalSessionId }
+  async function terminal(): Promise<TerminalStream> {
+    const Socket = WebSocket as unknown as {
+      new (url: string, options: Bun.WebSocketOptions): WebSocket
+    }
+    const socket = new Socket(`wss://127.0.0.1:${f.port}/workbench/terminal`, {
+      headers: { authorization: `Bearer ${approved.credential}`, 'x-monica-wire-version': '1' },
+      tls: { ca: f.identity.cert, serverName: syntheticTailnetAddress },
+    })
+    onCleanup(() => socket.close())
+    const frames: unknown[] = []
+    let waiting: ReturnType<typeof Promise.withResolvers<unknown>> | undefined
+    const closed = Promise.withResolvers<boolean>()
+    let confirmed = false
+    socket.addEventListener('message', (event) => {
+      const frame = JSON.parse(String(event.data))
+      if (frame.type === 'closed') {
+        confirmed = true
+        closed.resolve(true)
+      }
+      if (waiting) {
+        waiting.resolve(frame)
+        waiting = undefined
+      } else frames.push(frame)
+    })
+    socket.addEventListener('close', () => {
+      closed.resolve(confirmed)
+      waiting?.reject(new Error('closed'))
+    })
+    await new Promise<void>((resolve, reject) => {
+      socket.addEventListener('open', () => resolve())
+      socket.addEventListener('error', reject)
+    })
+    socket.send(JSON.stringify({ type: 'open', ...target }))
+    return {
+      async next() {
+        if (frames.length) return frames.shift()
+        waiting = Promise.withResolvers<unknown>()
+        return waiting.promise
+      },
+      async ack(sequence) {
+        socket.send(JSON.stringify({ type: 'ack', sequence }))
+      },
+      async close() {
+        if (!confirmed && socket.readyState === WebSocket.OPEN) socket.send('{"type":"close"}')
+        return closed.promise
+      },
+    }
+  }
+  const remote = new RemoteWorkbench({
+    terminal,
+    async read() {
+      return []
+    },
+    async subscribe() {},
+  })
+  return { ...f, ...approved, shell, target, terminal, remote, relay }
+}
+
+test('RemoteWorkbench.openTerminal orders pre-response and replay-time live output after replay and detaches without lifecycle operations', async () => {
+  const f = await terminalFixture()
+  f.ptyd.output(f.target.terminalSessionId, 'retained-tail')
+  const releaseAttach = f.ptyd.holdNext('attach')
+  const replay = Promise.withResolvers<void>()
+  const parsing = Promise.withResolvers<void>()
+  const live = Promise.withResolvers<void>()
+  const rendered: string[] = []
+  const sizes: number[][] = []
+  const view = f.remote.openTerminal(f.target, {
+    size: (rows, cols) => sizes.push([rows, cols]),
+    async write(bytes) {
+      const text = new TextDecoder().decode(bytes)
+      rendered.push(text)
+      if (text === 'retained-tail') {
+        parsing.resolve()
+        await replay.promise
+      }
+      if (text === 'during-replay') live.resolve()
+    },
+    state() {},
+  })
+  await f.ptyd.received((op) => op.op === 'attach')
+  f.ptyd.output(f.target.terminalSessionId, 'before-response')
+  releaseAttach()
+  await parsing.promise
+  f.ptyd.output(f.target.terminalSessionId, 'during-replay')
+  expect(rendered).toEqual(['retained-tail'])
+  replay.resolve()
+  await live.promise
+  expect(rendered).toEqual(['retained-tail', 'before-response', 'during-replay'])
+  expect(sizes).toEqual([[31, 97]])
+  expect(await view.close()).toBe(true)
+  expect(f.ptyd.receivedAll((op) => op.op === 'attach')).toHaveLength(1)
+  await f.client.runspace.create({ cwd: '/barrier', rows: 24, cols: 80 })
+  await f.ptyd.receivedAtLeast(2, (op) => op.op === 'create')
+  expect(
+    f.ptyd.receivedAll((op) =>
+      ['terminate', 'reap', 'shutdown', 'write', 'resize'].includes(op.op),
+    ),
+  ).toEqual([])
+  expect(f.ptyd.sessions[0]).toMatchObject({ running: true, rows: 31, cols: 97 })
+  expect(f.ptyd.connections).toBe(1)
+})
+
+test('remote size initialization discards an older List read-back when Mac resizes during it', async () => {
+  const f = await terminalFixture()
+  const release = f.ptyd.holdNext('list')
+  const sized = Promise.withResolvers<void>()
+  const sizes: number[][] = []
+  const view = f.remote.openTerminal(f.target, {
+    async write() {},
+    state() {},
+    size(rows, cols) {
+      sizes.push([rows, cols])
+      sized.resolve()
+    },
+  })
+  await f.ptyd.receivedAtLeast(2, (op) => op.op === 'list')
+  await f.relay.stdin.write(
+    `${JSON.stringify({ op: 'resize', session_id: f.target.terminalSessionId, rows: 42, cols: 111 })}\n`,
+  )
+  await f.ptyd.received((op) => op.op === 'resize')
+  release()
+  await sized.promise
+  expect(sizes).toEqual([[42, 111]])
+  expect(await view.close()).toBe(true)
+  expect(f.ptyd.receivedAll((op) => op.op === 'list').length).toBeGreaterThanOrEqual(3)
+})
+
+test('a view closed while Attach is pending delivers Shell cleanup ACK without waiting for the reply and never writes replay', async () => {
+  const f = await terminalFixture()
+  const release = f.ptyd.holdNext('attach')
+  const writes: string[] = []
+  const view = f.remote.openTerminal(f.target, {
+    async write(bytes) {
+      writes.push(new TextDecoder().decode(bytes))
+    },
+    size() {},
+    state() {},
+  })
+  await f.ptyd.received((op) => op.op === 'attach')
+  expect(await view.close()).toBe(true)
+  expect(writes).toEqual([])
+  release()
+  expect(f.ptyd.connections).toBe(1)
+})
+
+test('revocation denies new requests first and confirms Shell detach while replay parsing is held', async () => {
+  const f = await terminalFixture()
+  f.ptyd.output(f.target.terminalSessionId, 'held-replay')
+  const parsing = Promise.withResolvers<void>()
+  const release = Promise.withResolvers<void>()
+  const view = f.remote.openTerminal(f.target, {
+    async write() {
+      parsing.resolve()
+      await release.promise
+    },
+    size() {},
+    state() {},
+  })
+  await parsing.promise
+  const revoking = f.client.remote.revoke({ id: f.id })
+  expect((await f.request('/check', f.credential)).status).toBe(401)
+  await revoking
+  expect(
+    (await f.client.remote.status()).devices.find((device) => device.id === f.id)?.detachPending,
+  ).toBe(false)
+  expect(f.ptyd.connections).toBe(1)
+  release.resolve()
+  await view.close()
+})
+
+test('remote Exit follows all replay and live output before dedicated cleanup', async () => {
+  const f = await terminalFixture()
+  f.ptyd.output(f.target.terminalSessionId, 'tail')
+  const parsed = Promise.withResolvers<void>()
+  const release = Promise.withResolvers<void>()
+  const exited = Promise.withResolvers<void>()
+  const events: string[] = []
+  const view = f.remote.openTerminal(f.target, {
+    async write(bytes) {
+      events.push(new TextDecoder().decode(bytes))
+      if (events.length === 1) {
+        parsed.resolve()
+        await release.promise
+      }
+    },
+    size() {},
+    state(state) {
+      if (state === 'exited') {
+        events.push('exit')
+        exited.resolve()
+      }
+    },
+  })
+  await parsed.promise
+  f.ptyd.output(f.target.terminalSessionId, 'last-live')
+  f.ptyd.exit(f.target.terminalSessionId, 0)
+  release.resolve()
+  await exited.promise
+  expect(events).toEqual(['tail', 'last-live', 'exit'])
+  await view.close()
+  expect(f.ptyd.receivedAll((op) => op.op === 'attach')).toHaveLength(1)
+})
+
+test('a stalled phone draw ACK closes only its dedicated connection when the bounded live queue fills', async () => {
+  const f = await terminalFixture()
+  const stream = await f.terminal()
+  await stream.next()
+  for (let i = 0; i < 30; i++) f.ptyd.output(f.target.terminalSessionId, new Uint8Array(45 * 1024))
+  await expect(stream.next()).rejects.toThrow('closed')
+  await f.client.runspace.create({ cwd: '/desktop-still-works', rows: 24, cols: 80 })
+  await f.ptyd.receivedAtLeast(2, (op) => op.op === 'create')
+  expect(f.ptyd.sessions[0]).toMatchObject({ running: true, rows: 31, cols: 97 })
+  expect(f.ptyd.receivedAll((op) => ['terminate', 'reap', 'shutdown'].includes(op.op))).toEqual([])
+})
+
+test('lost Shell detach ACK leaves a revoked device denied and explicitly pending rather than reporting completion', async () => {
+  const f = await terminalFixture()
+  const realPath = f.shell.path
+  const proxyPath = join(f.home, 'ack-loss.sock')
+  const peers = new Set<ReturnType<typeof connect>>()
+  const proxy = createServer((backend) => {
+    const shell = connect(realPath)
+    peers.add(shell)
+    peers.add(backend)
+    backend.pipe(shell)
+    let buffered = ''
+    shell.on('data', (data) => {
+      buffered += data.toString()
+      for (;;) {
+        const newline = buffered.indexOf('\n')
+        if (newline < 0) break
+        const line = buffered.slice(0, newline)
+        buffered = buffered.slice(newline + 1)
+        if (JSON.parse(line).type !== 'closed') backend.write(`${line}\n`)
+      }
+    })
+    shell.on('end', () => backend.end())
+    shell.on('error', () => backend.destroy())
+    backend.on('error', () => shell.destroy())
+  })
+  onCleanup(() => {
+    for (const peer of peers) peer.destroy()
+    proxy.close()
+  })
+  await new Promise<void>((resolve) => proxy.listen(proxyPath, resolve))
+  chmodSync(proxyPath, 0o600)
+  f.shell.path = proxyPath
+  const stream = await f.terminal()
+  await stream.next()
+  expect(await f.client.remote.revoke({ id: f.id })).toEqual({ state: 'detach-pending' })
+  const status = await f.client.remote.status()
+  expect(status.detachPending).toBe(true)
+  expect(status.devices.find((device) => device.id === f.id)).toMatchObject({
+    detachPending: true,
+    revokedAt: expect.any(Date),
+  })
+  expect((await f.request('/check', f.credential)).status).toBe(401)
+  expect(f.ptyd.connections).toBe(1)
+})
+
+test('the private Shell socket refuses a wrong secret and an unprotected endpoint without attaching', async () => {
+  const f = await terminalFixture()
+  const before = f.ptyd.receivedAll((op) => op.op === 'hello').length
+  const attacker = connect(f.shell.path)
+  const ended = new Promise<void>((resolve) => attacker.once('close', resolve))
+  attacker.on('error', () => {})
+  attacker.write(
+    `${JSON.stringify({ secret: '0'.repeat(64), session: f.target.terminalSessionId })}\n`,
+  )
+  await ended
+  chmodSync(f.shell.path, 0o666)
+  const stream = await f.terminal()
+  await expect(stream.next()).rejects.toThrow('closed')
+  await f.client.runspace.create({ cwd: '/auth-barrier', rows: 24, cols: 80 })
+  await f.ptyd.receivedAtLeast(2, (op) => op.op === 'create')
+  expect(f.ptyd.receivedAll((op) => op.op === 'hello')).toHaveLength(before)
+  expect(f.ptyd.receivedAll((op) => op.op === 'attach')).toEqual([])
+})
+
+test('large UTF-8 replay is split below 64KiB and switching views creates a fresh single attachment', async () => {
+  const f = await terminalFixture()
+  const tail = Buffer.from('あ😀'.repeat(45000)).subarray(-262144)
+  f.ptyd.output(f.target.terminalSessionId, tail)
+  const stream = await f.terminal()
+  const chunks: Buffer[] = []
+  for (;;) {
+    const frame = (await stream.next()) as { type: string; sequence: number; data?: string }
+    expect(Buffer.byteLength(JSON.stringify(frame))).toBeLessThanOrEqual(65536)
+    if (frame.type === 'output') {
+      const bytes = Buffer.from(frame.data!, 'base64')
+      expect(bytes.length).toBeLessThanOrEqual(65536)
+      chunks.push(bytes)
+    }
+    await stream.ack(frame.sequence)
+    if (frame.type === 'replay_end') break
+  }
+  expect(Buffer.concat(chunks)).toEqual(tail)
+  expect(chunks.length).toBeGreaterThan(1)
+  expect(await stream.close()).toBe(true)
+  const next = await f.terminal()
+  await next.next()
+  expect(await next.close()).toBe(true)
+  expect(f.ptyd.receivedAll((op) => op.op === 'attach')).toHaveLength(2)
+  expect(f.ptyd.connections).toBe(1)
+})
+
+test('missing draw acknowledgements time out and remote disable releases the Shell while desktop stays running', async () => {
+  const f = await terminalFixture()
+  const stream = await f.terminal()
+  await stream.next()
+  const closed = await stream.next()
+  expect(closed).toMatchObject({ type: 'closed' })
+  expect(f.ptyd.connections).toBe(1)
+  const next = await f.terminal()
+  await next.next()
+  await f.client.remote.disable()
+  expect((await f.client.remote.status()).detachPending).toBe(false)
+  expect(f.ptyd.connections).toBe(1)
+  expect(f.ptyd.sessions[0]).toMatchObject({ running: true, rows: 31, cols: 97 })
 })

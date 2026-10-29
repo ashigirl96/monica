@@ -13,6 +13,9 @@ test('observe waits for subscription acknowledgement and refreshes again for cha
   let change: (() => void) | undefined
   const calls: string[] = []
   const transport: RemoteTransport = {
+    async terminal() {
+      throw new Error('not used by observation')
+    },
     async subscribe(changed) {
       change = changed
       await ack.promise
@@ -42,6 +45,9 @@ test('closing an observation aborts its subscription and discards a late snapsho
   let subscribed: AbortSignal | undefined
   const states: RemoteState[] = []
   const transport: RemoteTransport = {
+    async terminal() {
+      throw new Error('not used by observation')
+    },
     async subscribe(_changed, signal) {
       subscribed = signal
     },
@@ -65,6 +71,9 @@ test('an incompatible snapshot clears availability and aborts the installed subs
   const states: RemoteState[] = []
   const complete = Promise.withResolvers<void>()
   const stop = new RemoteWorkbench({
+    async terminal() {
+      throw new Error('not used by observation')
+    },
     async subscribe(_changed, subscribed) {
       signal = subscribed
     },
@@ -79,4 +88,60 @@ test('an incompatible snapshot clears availability and aborts the installed subs
   expect(states.at(-1)).toEqual({ state: 'incompatible' })
   expect(signal?.aborted).toBe(true)
   stop()
+})
+
+test('openTerminal waits for replay parsing before draw ACK and close releases only that view', async () => {
+  const parsed = Promise.withResolvers<void>()
+  const frames = [
+    { version: 1, type: 'size', sequence: 1, generation: 0, rows: 31, cols: 97 },
+    { version: 1, type: 'output', sequence: 2, data: btoa('tail') },
+    { version: 1, type: 'replay_end', sequence: 3 },
+    { version: 1, type: 'output', sequence: 4, data: btoa('live') },
+    { version: 1, type: 'exit', sequence: 5, exitCode: 0 },
+  ]
+  const acknowledgements: number[] = []
+  const written: string[] = []
+  let closes = 0
+  const remote = new RemoteWorkbench({
+    async read() {
+      return []
+    },
+    async subscribe() {},
+    async terminal() {
+      return {
+        async next() {
+          return frames.shift() ?? new Promise(() => {})
+        },
+        async ack(sequence) {
+          acknowledgements.push(sequence)
+        },
+        async close() {
+          closes++
+          return true
+        },
+      }
+    },
+  })
+  const view = remote.openTerminal(
+    { tabId: 'tab', terminalSessionId: 'session' },
+    {
+      size(rows, cols) {
+        expect([rows, cols]).toEqual([31, 97])
+      },
+      async write(bytes) {
+        written.push(new TextDecoder().decode(bytes))
+        if (written.length === 1) await parsed.promise
+      },
+      state() {},
+    },
+  )
+  await flush()
+  expect(written).toEqual(['tail'])
+  expect(acknowledgements).toEqual([1])
+  parsed.resolve()
+  await flush()
+  expect(written).toEqual(['tail', 'live'])
+  expect(acknowledgements).toEqual([1, 2, 3, 4, 5])
+  expect(await view.close()).toBe(true)
+  expect(closes).toBe(1)
 })

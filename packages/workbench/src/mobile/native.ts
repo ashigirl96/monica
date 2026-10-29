@@ -23,16 +23,38 @@ declare global {
   }
 }
 
-export async function nativeCall(operation: string, id?: string): Promise<unknown> {
+export async function nativeCall(
+  operation: string,
+  id?: string,
+  fields: Record<string, string> = {},
+): Promise<unknown> {
   const reply = ReplySchema.parse(
-    // oxlint-disable-next-line unicorn/require-post-message-target-origin -- WKScriptMessageHandlerWithReply is not Window.postMessage.
-    await window.webkit.messageHandlers.monica.postMessage({ operation, ...(id && { id }) }),
+    /* oxlint-disable unicorn/require-post-message-target-origin -- WKScriptMessageHandlerWithReply is not Window.postMessage. */
+    await window.webkit.messageHandlers.monica.postMessage({
+      operation,
+      ...(id && { id }),
+      ...fields,
+    }),
+    /* oxlint-enable unicorn/require-post-message-target-origin */
   )
   if (reply.state !== 'ok') throw new RemoteError(reply.state)
   return reply.value
 }
 
 export const nativeTransport: RemoteTransport = {
+  async terminal(target) {
+    const id = crypto.randomUUID()
+    await nativeCall('terminal-open', id, target)
+    return {
+      next: () => nativeCall('terminal-next', id),
+      async ack(sequence) {
+        await nativeCall('terminal-ack', id, { sequence: String(sequence) })
+      },
+      async close() {
+        return z.boolean().parse(await nativeCall('terminal-close', id))
+      },
+    }
+  },
   async read(procedure, signal) {
     signal.throwIfAborted()
     const id = crypto.randomUUID()

@@ -123,7 +123,12 @@ export const RemoteStatusSchema = z.object({
   pending: z
     .object({ id: z.string(), name: z.string(), sourceAddress: z.string(), expiresAt: z.number() })
     .nullable(),
-  devices: z.array(createSelectSchema(remoteDevice).omit({ secretHash: true })),
+  detachPending: z.boolean(),
+  devices: z.array(
+    createSelectSchema(remoteDevice)
+      .omit({ secretHash: true })
+      .extend({ detachPending: z.boolean() }),
+  ),
 })
 
 export const contract = {
@@ -137,7 +142,7 @@ export const contract = {
       .output(z.void()),
     disable: meta
       .meta({ description: 'Disable remote access and close its connections' })
-      .output(z.void()),
+      .output(z.object({ state: z.enum(['detached', 'detach-pending']) })),
     invite: meta
       .meta({ description: 'Create a five minute single-use registration QR' })
       .output(z.object({ payload: z.string(), qr: z.string(), expiresAt: z.number() })),
@@ -152,7 +157,7 @@ export const contract = {
     revoke: meta
       .meta({ description: 'Revoke a device and close its remote connections' })
       .input(z.object({ id: z.string() }))
-      .output(z.void()),
+      .output(z.object({ state: z.enum(['detached', 'detach-pending']) })),
     renewIdentity: meta
       .meta({
         description:

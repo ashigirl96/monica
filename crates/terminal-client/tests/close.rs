@@ -47,3 +47,32 @@ fn close_delivers_eof_resolves_pending_and_waits_for_the_reader() {
     peer.join().unwrap();
     std::fs::remove_file(path).unwrap();
 }
+
+#[test]
+fn close_cannot_complete_until_the_reader_callback_has_returned() {
+    let path = std::env::temp_dir().join(format!("monica-join-{}.sock", std::process::id()));
+    let listener = UnixListener::bind(&path).unwrap();
+    let (entered_tx, entered_rx) = mpsc::channel();
+    let (release_tx, release_rx) = mpsc::channel();
+    let client = PtydClient::connect(&path, move |event| {
+        if matches!(event, ClientEvent::Disconnected) {
+            entered_tx.send(()).unwrap();
+            release_rx.recv().unwrap();
+        }
+    })
+    .unwrap();
+    let (_peer, _) = listener.accept().unwrap();
+    let (finished_tx, finished_rx) = mpsc::channel();
+    let closer = std::thread::spawn(move || {
+        client.close().unwrap();
+        finished_tx.send(()).unwrap();
+    });
+    entered_rx.recv_timeout(Duration::from_secs(2)).unwrap();
+    assert!(finished_rx
+        .recv_timeout(Duration::from_millis(100))
+        .is_err());
+    release_tx.send(()).unwrap();
+    finished_rx.recv_timeout(Duration::from_secs(2)).unwrap();
+    closer.join().unwrap();
+    std::fs::remove_file(path).unwrap();
+}

@@ -8,6 +8,7 @@ import {
   type ListedAgentSession,
   type TerminalSession,
 } from '../contract.ts'
+import { TerminalFrameSchema } from '../remote-terminal.ts'
 
 export type RemoteUnavailable =
   | 'unavailable'
@@ -30,7 +31,23 @@ export type RemoteState =
       agentSessions: ListedAgentSession[]
     }
 
+export type TerminalTarget = { tabId: string; terminalSessionId: string }
+export type TerminalStream = {
+  next(): Promise<unknown>
+  ack(sequence: number): Promise<void>
+  close(): Promise<boolean>
+}
+export type TerminalDisplay = {
+  write(bytes: Uint8Array): Promise<void>
+  size(rows: number, cols: number): void
+  state(
+    state: 'waiting' | 'viewing' | 'exited' | 'closed' | 'detach-pending' | RemoteUnavailable,
+  ): void
+}
+export type TerminalView = { close(): Promise<boolean> }
+
 export type RemoteTransport = {
+  terminal(target: TerminalTarget): Promise<TerminalStream>
   read(
     procedure: 'layout/get' | 'terminalSession/list' | 'agentSession/list',
     signal: AbortSignal,
@@ -44,8 +61,86 @@ export type RemoteTransport = {
 
 export class RemoteWorkbench {
   private readonly transport: RemoteTransport
+  private view: TerminalView | undefined
   constructor(transport: RemoteTransport) {
     this.transport = transport
+  }
+
+  openTerminal(target: TerminalTarget, display: TerminalDisplay): TerminalView {
+    const previous = this.view
+    let active = true
+    let stream: TerminalStream | undefined
+    let closing: Promise<boolean> | undefined
+    let opened: Promise<TerminalStream | undefined>
+    const view: TerminalView = {
+      close: () => {
+        if (closing) return closing
+        active = false
+        closing = (async () => {
+          const connection = stream ?? (await opened.catch(() => undefined))
+          const confirmed = connection ? await connection.close().catch(() => false) : true
+          display.state(confirmed ? 'closed' : 'detach-pending')
+          return confirmed
+        })()
+        return closing
+      },
+    }
+    this.view = view
+    display.state('waiting')
+    opened = (async () => {
+      if (previous && !(await previous.close())) throw new RemoteError('unavailable')
+      if (!active) return undefined
+      return this.transport.terminal(target)
+    })()
+    void (async () => {
+      let next = 1
+      let generation = -1
+      let exited = false
+      try {
+        stream = await opened
+        if (!active || !stream) return
+        for (;;) {
+          const frame = TerminalFrameSchema.parse(await stream.next())
+          if (!active) return
+          if (frame.type === 'closed') {
+            if (!exited) display.state('closed')
+            return
+          }
+          if (frame.sequence !== next++) throw new RemoteError('incompatible')
+          switch (frame.type) {
+            case 'size':
+              if (frame.generation > generation) {
+                generation = frame.generation
+                display.size(frame.rows, frame.cols)
+              }
+              break
+            case 'output':
+              await display.write(
+                Uint8Array.from(atob(frame.data), (character) => character.charCodeAt(0)),
+              )
+              break
+            case 'replay_end':
+              display.state('viewing')
+              break
+            case 'exit':
+              exited = true
+              display.state('exited')
+              break
+          }
+          if (!active) return
+          await stream.ack(frame.sequence)
+        }
+      } catch (error) {
+        if (!active) return
+        active = false
+        display.state(error instanceof RemoteError ? error.state : 'unavailable')
+        if (stream) {
+          closing = stream.close().catch(() => false)
+          if (!(await closing)) display.state('detach-pending')
+        }
+      }
+    })()
+    return view
   }
 
   observe(receive: (state: RemoteState) => void): () => void {

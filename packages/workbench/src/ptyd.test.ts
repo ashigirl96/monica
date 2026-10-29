@@ -67,6 +67,8 @@ test("the env passed on to ptyd and setup drops the Backend's MONICA_*, CLAUDECO
     CLAUDE_CODE_ENTRYPOINT: 'cli',
     MONICA_TERMINAL_SESSION_ID: 'ts-backend',
     MONICA_HOME: '/backend/home',
+    MONICA_SHELL_SECRET: 'private-launch-secret',
+    MONICA_SHELL_SOCKET: '/private/shell.sock',
     UNRELATED_TO_MONICA: 'kept',
   }
   const saved = Object.keys(backendEnv).map((key) => [key, process.env[key]] as const)
@@ -85,6 +87,8 @@ test("the env passed on to ptyd and setup drops the Backend's MONICA_*, CLAUDECO
     'CLAUDE_CODE_ENTRYPOINT',
     'MONICA_TERMINAL_SESSION_ID',
     'MONICA_HOME',
+    'MONICA_SHELL_SECRET',
+    'MONICA_SHELL_SOCKET',
   ])
   expect(env.UNRELATED_TO_MONICA).toBe('kept')
 })

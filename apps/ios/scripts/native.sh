@@ -12,6 +12,7 @@ cleanup() {
 }
 trap cleanup EXIT
 bun run --cwd apps/ios build
+cargo build -p monica-terminal-client --example remote-fixture > "$log_dir/shell-build.log" 2>&1
 bun apps/ios/testing.ts > "$log_dir/fixtures.log" 2>&1 &
 fixture=$!
 for ((i=0; i<100; i++)); do

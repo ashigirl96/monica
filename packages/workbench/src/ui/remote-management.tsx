@@ -77,7 +77,11 @@ function RemoteSettings({ client, onClose }: { client: WorkbenchClient; onClose:
     }
   }, [client])
 
-  async function act(operation: () => Promise<Invitation | void>) {
+  async function act(
+    operation: () => Promise<
+      Invitation | Awaited<ReturnType<WorkbenchClient['remote']['revoke']>> | void
+    >,
+  ) {
     if (busy.current) return
     busy.current = true
     revision.current++
@@ -87,7 +91,7 @@ function RemoteSettings({ client, onClose }: { client: WorkbenchClient; onClose:
     try {
       const result = await operation()
       if (!mounted.current) return
-      if (result) setInvitation(result)
+      if (result && 'qr' in result) setInvitation(result)
       const next = await client.remote.status()
       if (mounted.current) setStatus(next)
     } catch (failure) {
@@ -143,6 +147,9 @@ function RemoteSettings({ client, onClose }: { client: WorkbenchClient; onClose:
         <p role="alert" className="mb-3 text-sm text-red-400">
           {error ?? readError ?? status?.error}
         </p>
+      )}
+      {status?.detachPending && (
+        <p role="status">拒否済み・解除待ち。Shellの解除完了を確認できていません。</p>
       )}
       <fieldset disabled={working || !status} className="space-y-4 disabled:opacity-60">
         <form
@@ -261,7 +268,13 @@ function RemoteSettings({ client, onClose }: { client: WorkbenchClient; onClose:
                 <p>
                   {device.sourceAddress} / {device.id}
                 </p>
-                <p>{device.revokedAt ? '失効済み' : '登録済み'}</p>
+                <p>
+                  {device.detachPending
+                    ? '拒否済み・解除待ち'
+                    : device.revokedAt
+                      ? '失効済み'
+                      : '登録済み'}
+                </p>
               </div>
               {!device.revokedAt && (
                 <button

@@ -9,6 +9,7 @@
 /* Begin PBXBuildFile section */
 		205FE56832AF93607327D88E /* NativeBridge.swift in Sources */ = {isa = PBXBuildFile; fileRef = A04E39F5901EDA6EE6B857A6 /* NativeBridge.swift */; };
 		2E679A7889249397B6B835DB /* WorkbenchController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3803666CDC895AF15CD7E8B6 /* WorkbenchController.swift */; };
+		8EFEA7D7B0E7FEA41CA580C4 /* TerminalConnection.swift in Sources */ = {isa = PBXBuildFile; fileRef = CDB2503FBFBACDFF9FEB3790 /* TerminalConnection.swift */; };
 		9B303F499B5646D7080EC5D8 /* CredentialStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1F6591116DD21DD0CCA32CAB /* CredentialStore.swift */; };
 		CAD3C048446E373720044B32 /* Fixtures in Resources */ = {isa = PBXBuildFile; fileRef = 76066118292D13A6162BC746 /* Fixtures */; };
 		CFD1FC38AD665EB5501974DA /* NativeTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = ED41674AB006938F4FDEA395 /* NativeTests.swift */; };
@@ -34,6 +35,7 @@
 		5825CCA1F23A0FFF10E776CB /* Monica.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = Monica.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		76066118292D13A6162BC746 /* Fixtures */ = {isa = PBXFileReference; lastKnownFileType = folder; name = Fixtures; path = Tests/Fixtures; sourceTree = SOURCE_ROOT; };
 		A04E39F5901EDA6EE6B857A6 /* NativeBridge.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NativeBridge.swift; sourceTree = "<group>"; };
+		CDB2503FBFBACDFF9FEB3790 /* TerminalConnection.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TerminalConnection.swift; sourceTree = "<group>"; };
 		ED41674AB006938F4FDEA395 /* NativeTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NativeTests.swift; sourceTree = "<group>"; };
 		F188370FE424687406218368 /* RemoteHTTP.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RemoteHTTP.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
@@ -73,6 +75,7 @@
 				1F6591116DD21DD0CCA32CAB /* CredentialStore.swift */,
 				A04E39F5901EDA6EE6B857A6 /* NativeBridge.swift */,
 				F188370FE424687406218368 /* RemoteHTTP.swift */,
+				CDB2503FBFBACDFF9FEB3790 /* TerminalConnection.swift */,
 				3803666CDC895AF15CD7E8B6 /* WorkbenchController.swift */,
 			);
 			path = Native;
@@ -184,6 +187,7 @@
 				9B303F499B5646D7080EC5D8 /* CredentialStore.swift in Sources */,
 				205FE56832AF93607327D88E /* NativeBridge.swift in Sources */,
 				FE1B03B809E06634DB083B82 /* RemoteHTTP.swift in Sources */,
+				8EFEA7D7B0E7FEA41CA580C4 /* TerminalConnection.swift in Sources */,
 				2E679A7889249397B6B835DB /* WorkbenchController.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;

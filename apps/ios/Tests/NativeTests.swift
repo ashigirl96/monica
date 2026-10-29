@@ -365,4 +365,67 @@ final class NativeTests: XCTestCase {
         XCTAssertEqual(frameResult, "unavailable")
 
     }
+    @MainActor
+    func testPhoneXtermShowsReplayAndLiveWithoutRepliesClipboardOrResizeAndBackDetaches() async throws {
+        let all = try fixtures()
+        let store = CredentialStore()
+        try store.save(registration(all["large"]!))
+        defer { try? store.remove() }
+        let control = RemoteHTTP(registration(all["terminal-control"]!))
+        defer { control.close() }
+        let controller = WorkbenchController()
+        controller.loadViewIfNeeded()
+        let scene = try XCTUnwrap(UIApplication.shared.connectedScenes.first as? UIWindowScene)
+        let window = try XCTUnwrap(scene.windows.first(where: { $0.isKeyWindow }))
+        (window.rootViewController as? WorkbenchController)?.bridge.suspend()
+        window.rootViewController = controller
+        defer { controller.bridge.suspend() }
+        let webview = controller.webview!
+        func until(_ expression: String) async throws {
+            for _ in 0..<100 {
+                if let result = try? await webview.evaluateJavaScript(expression) as? Bool, result { return }
+                try await Task.sleep(for: .milliseconds(50))
+            }
+            let state = try? await webview.evaluateJavaScript("document.querySelector('[aria-label=\"Terminal Sessionの閲覧\"] [role=status]')?.textContent")
+            XCTFail("Never observed: \(expression); state \(String(describing: state))")
+        }
+        try await until("document.querySelectorAll('article').length === 12")
+        UIPasteboard.general.string = "explicit-user-copy"
+        _ = try await webview.evaluateJavaScript("document.querySelector('article button').click()")
+        try await until("document.body.textContent.includes('閲覧中')")
+        try await until("document.querySelector('.xterm-accessibility-tree')?.textContent.includes('retained-phone-tail') === true")
+        XCTAssertEqual(UIPasteboard.general.string, "explicit-user-copy")
+        _ = try await webview.evaluateJavaScript("document.querySelector('.xterm-helper-textarea').dispatchEvent(new KeyboardEvent('keydown',{key:'a',bubbles:true})); document.querySelector('.xterm-helper-textarea').dispatchEvent(new InputEvent('input',{data:'phone-input',bubbles:true}))")
+        let rejected = try await webview.callAsyncJavaScript("return (await window.webkit.messageHandlers.monica.postMessage({operation:'terminal-input',id:crypto.randomUUID()})).state", arguments: [:], in: nil, contentWorld: .page) as? String
+        XCTAssertEqual(rejected, "unavailable")
+        let before = try JSONSerialization.jsonObject(with: await control.read(.layout)) as! [String: Any]
+        XCTAssertEqual(before["writes"] as? Int, 0)
+        XCTAssertEqual(before["connections"] as? Int, 2)
+        _ = try await control.read(.terminalSessions)
+        try await until("document.querySelector('.xterm-accessibility-tree')?.textContent.includes('live-phone-output') === true")
+        _ = try await control.read(.agentSessions)
+        try await until("document.querySelector('.xterm-accessibility-tree')?.children.length === 31")
+        _ = try await webview.callAsyncJavaScript("await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))", arguments: [:], in: nil, contentWorld: .page)
+        let image = try await webview.takeSnapshot(configuration: nil)
+        let attachment = XCTAttachment(image: image)
+        attachment.name = "Read-only phone xterm at the applied Mac grid"
+        attachment.lifetime = .keepAlways
+        add(attachment)
+        _ = try await webview.evaluateJavaScript("document.querySelector('[aria-label=\"Terminal Sessionの閲覧\"] button').click()")
+        try await until("document.querySelector('.xterm') === null")
+        var after: [String: Any] = [:]
+        for _ in 0..<100 {
+            after = try JSONSerialization.jsonObject(with: await control.read(.layout)) as! [String: Any]
+            if after["connections"] as? Int == 1 { break }
+            try await Task.sleep(for: .milliseconds(20))
+        }
+        XCTAssertEqual(after["connections"] as? Int, 1)
+        XCTAssertEqual(after["writes"] as? Int, 0)
+        XCTAssertEqual(after["lifecycle"] as? Int, 0)
+        let sessions = try XCTUnwrap(after["sessions"] as? [[String: Any]])
+        XCTAssertTrue(sessions.allSatisfy { $0["running"] as? Bool == true })
+        XCTAssertEqual(sessions.first?["rows"] as? Int, 31)
+        XCTAssertEqual(sessions.first?["cols"] as? Int, 97)
+    }
+
 }

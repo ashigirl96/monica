@@ -62,7 +62,14 @@ export function setup({
   nameAgentSession = () => null,
   unread = () => {},
   register = onCleanup,
-}: Partial<NotificationDeps & { unread: Unread; register: (cleanup: () => void) => void }> = {}) {
+  shell,
+}: Partial<
+  NotificationDeps & {
+    unread: Unread
+    shell: import('./remote-shell.ts').ShellEndpoint
+    register: (cleanup: () => void) => void
+  }
+> = {}) {
   const home = tempHome(register)
   const ptyd = startFakePtyd(home)
   register(() => ptyd.stop())
@@ -80,6 +87,7 @@ export function setup({
       notify,
       nameAgentSession,
       unread,
+      shell,
     })
     register(() => workbenchLedger.stop())
     const client = createRouterClient(router, { context: { db, workbenchLedger } })
