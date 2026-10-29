@@ -1679,7 +1679,7 @@ test('a slow draw ACK closes only the terminal without retrying a healthy Backen
   }
 })
 
-test.each(['before-second-write', 'pending-second-ACK'] as const)(
+test.each(['between-chunks', 'before-second-write', 'pending-second-ACK'] as const)(
   'an interrupted paste at %s stays bound to its old attachment across foreground recovery and explicit reselection',
   async (interruption) => {
     const f = await terminalFixture()
@@ -1708,23 +1708,31 @@ test.each(['before-second-write', 'pending-second-ACK'] as const)(
             }
             await stream.input(command)
           },
-          async next() {
-            const frame = await stream.next()
-            if (
-              ordinal === 1 &&
-              interruption === 'pending-second-ACK' &&
-              typeof frame === 'object' &&
-              frame &&
-              'type' in frame &&
-              frame.type === 'input_result' &&
-              'id' in frame &&
-              frame.id === 2
-            ) {
-              remote.setForeground(false)
-              interrupted.resolve()
-              await lateACK.promise
-            }
-            return frame
+          next() {
+            const delivered = Promise.withResolvers<unknown>()
+            void stream.next().then(async (frame) => {
+              const inputResult =
+                ordinal === 1 &&
+                typeof frame === 'object' &&
+                frame &&
+                'type' in frame &&
+                frame.type === 'input_result' &&
+                'id' in frame
+              if (inputResult && frame.id === 2 && interruption === 'pending-second-ACK') {
+                remote.setForeground(false)
+                interrupted.resolve()
+                await lateACK.promise
+              }
+              delivered.resolve(frame)
+              if (inputResult && frame.id === 1 && interruption === 'between-chunks') {
+                // Deliver the ACK before suspension, but suspend before the paste continuation.
+                queueMicrotask(() => {
+                  remote.setForeground(false)
+                  interrupted.resolve()
+                })
+              }
+            }, delivered.reject)
+            return delivered.promise
           },
         }
       },
@@ -1776,7 +1784,7 @@ test.each(['before-second-write', 'pending-second-ACK'] as const)(
       ...(interruption === 'pending-second-ACK' ? ['p'.repeat(65536)] : []),
       'explicit-new-input',
     ])
-    expect(sends).toBe(3)
+    expect(sends).toBe(interruption === 'between-chunks' ? 2 : 3)
     expect(f.ptyd.receivedAll((op) => op.op === 'attach')).toHaveLength(3)
     expect(
       f.ptyd.receivedAll((op) => ['resize', 'terminate', 'reap', 'shutdown'].includes(op.op)),
