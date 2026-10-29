@@ -21,10 +21,10 @@ const deliveryLabels = {
 const keys = [
   { name: 'Esc', text: 'Esc', bytes: '\x1b' },
   { name: 'Tab', text: 'Tab', bytes: '\t' },
-  { name: '上矢印', text: '↑', bytes: '\x1b[A' },
-  { name: '下矢印', text: '↓', bytes: '\x1b[B' },
-  { name: '左矢印', text: '←', bytes: '\x1b[D' },
-  { name: '右矢印', text: '→', bytes: '\x1b[C' },
+  { name: '上矢印', text: '↑', cursor: 'A' },
+  { name: '下矢印', text: '↓', cursor: 'B' },
+  { name: '左矢印', text: '←', cursor: 'D' },
+  { name: '右矢印', text: '→', cursor: 'C' },
   { name: '削除', text: '⌫', bytes: '\x7f' },
   { name: 'Enter', text: '↵', bytes: '\r' },
 ]
@@ -87,7 +87,9 @@ export function TerminalOutput({
     }
   }, [])
   useEffect(() => {
-    if (!container.current) return
+    const surface = container.current
+    const panViewport = viewportRef.current
+    if (!surface || !panViewport) return
     let current = true
     const term = new Terminal({
       disableStdin: true,
@@ -99,8 +101,62 @@ export function TerminalOutput({
     term.parser.registerOscHandler(52, () => true)
     term.parser.registerOscHandler(1337, () => true)
     term.attachCustomKeyEventHandler(() => false)
-    term.open(container.current)
+    term.open(surface)
     terminal.current = term
+    let touch: { identifier: number; x: number; y: number; remainder: number } | null = null
+    const startPan = (event: TouchEvent) => {
+      event.stopPropagation()
+      const point = event.touches.length === 1 ? event.touches[0] : undefined
+      touch = point
+        ? { identifier: point.identifier, x: point.clientX, y: point.clientY, remainder: 0 }
+        : null
+    }
+    const movePan = (event: TouchEvent) => {
+      event.stopPropagation()
+      const point = event.touches.length === 1 ? event.touches[0] : undefined
+      if (!touch || !point || point.identifier !== touch.identifier) {
+        touch = null
+        return
+      }
+      event.preventDefault()
+      const height = term.element?.clientHeight ?? 0
+      const lineHeight = height / term.rows
+      if (!lineHeight) return
+      const buffer = term.buffer.active
+      const top = Math.max(
+        0,
+        Math.min(
+          buffer.baseY * lineHeight + panViewport.scrollHeight - panViewport.clientHeight,
+          buffer.viewportY * lineHeight +
+            panViewport.scrollTop +
+            touch.remainder +
+            touch.y -
+            point.clientY,
+        ),
+      )
+      const line = Math.min(buffer.baseY, Math.floor(top / lineHeight))
+      term.scrollToLine(line)
+      panViewport.scrollTop = top - line * lineHeight
+      panViewport.scrollLeft += touch.x - point.clientX
+      following.current =
+        line === buffer.baseY &&
+        panViewport.scrollTop + panViewport.clientHeight >= terminalCursorBottom(term) - 1
+      touch = {
+        identifier: point.identifier,
+        x: point.clientX,
+        y: point.clientY,
+        remainder: top - (buffer.viewportY * lineHeight + panViewport.scrollTop),
+      }
+    }
+    const endPan = (event: TouchEvent) => {
+      event.stopPropagation()
+      touch = null
+    }
+    // Own reading touches before xterm's document Gesture listener turns them into input.
+    surface.addEventListener('touchstart', startPan, { capture: true, passive: true })
+    surface.addEventListener('touchmove', movePan, { capture: true, passive: false })
+    surface.addEventListener('touchend', endPan, true)
+    surface.addEventListener('touchcancel', endPan, true)
     const view = remote.openTerminal(target, {
       write: (bytes) =>
         new Promise((resolve) =>
@@ -137,6 +193,10 @@ export function TerminalOutput({
       viewRef.current = undefined
       terminal.current = undefined
       current = false
+      surface.removeEventListener('touchstart', startPan, true)
+      surface.removeEventListener('touchmove', movePan, true)
+      surface.removeEventListener('touchend', endPan, true)
+      surface.removeEventListener('touchcancel', endPan, true)
       void view.close()
       term.dispose()
     }
@@ -257,6 +317,7 @@ export function TerminalOutput({
           const viewport = event.currentTarget
           if (term)
             following.current =
+              term.buffer.active.viewportY === term.buffer.active.baseY &&
               viewport.scrollTop + viewport.clientHeight >= terminalCursorBottom(term) - 1
         }}
       >
@@ -315,7 +376,11 @@ export function TerminalOutput({
               onMouseDown={(event) => event.preventDefault()}
               onClick={() => {
                 setCtrl(false)
-                void send(key.name, (view) => view.input(new TextEncoder().encode(key.bytes)))
+                const bytes =
+                  'cursor' in key
+                    ? `\x1b${terminal.current?.modes.applicationCursorKeysMode ? 'O' : '['}${key.cursor}`
+                    : key.bytes
+                void send(key.name, (view) => view.input(new TextEncoder().encode(bytes)))
               }}
             >
               {key.text}

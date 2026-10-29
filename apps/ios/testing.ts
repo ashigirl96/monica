@@ -325,7 +325,8 @@ fixtures['lifecycle-control'] = {
   credential,
 }
 await ledger.start()
-const terminalTab = (await client.layout.get()).runspaces[0]!.tabs[0]!
+const terminalRunspace = (await client.layout.get()).runspaces[0]!
+const terminalTab = terminalRunspace.tabs[0]!
 await ptyd.receivedAtLeast(12, (op) => op.op === 'create')
 ptyd.output(
   terminalTab.terminalSessionId,
@@ -404,20 +405,36 @@ const touchControl = Bun.serve({
   hostname: '127.0.0.1',
   port: 0,
   tls: good,
-  fetch(request) {
+  async fetch(request) {
     if (request.headers.get('authorization') !== `Bearer ${credential}`)
       return new Response('Unauthorized', { status: 401 })
     const path = new URL(request.url).pathname
+    if (path.endsWith('layout/get')) {
+      const checkpoint = await client.tab.open({
+        runspaceId: terminalRunspace.id,
+        rows: 24,
+        cols: 80,
+      })
+      await ptyd.received(
+        (op) => op.op === 'create' && op.session_id === checkpoint.terminalSessionId,
+      )
+      await client.tab.close({ id: checkpoint.id })
+    }
     if (path.endsWith('terminalSession/list'))
       ptyd.output(
         terminalTab.terminalSessionId,
-        Array.from(
-          { length: 100 },
-          (_, index) => `phone-scroll-${index} ${'wide-'.repeat(30)}\r\n`,
-        ).join('') + `phone-normal-end-${++normalOutput}`,
+        '\x1b[?1049l\x1b[?1l' +
+          Array.from(
+            { length: 100 },
+            (_, index) => `phone-scroll-${index} ${'wide-'.repeat(30)}\r\n`,
+          ).join('') +
+          `phone-normal-end-${++normalOutput}`,
       )
     if (path.endsWith('agentSession/list'))
-      ptyd.output(terminalTab.terminalSessionId, '\x1b[?1049h\x1b[?1003h\x1b[?1006hphone-tui-mouse')
+      ptyd.output(
+        terminalTab.terminalSessionId,
+        '\x1b[?1049h\x1b[?1h\x1b[?1003h\x1b[?1006hphone-tui-mouse',
+      )
     return response({
       sessions: ptyd.sessions,
       resizes: ptyd.receivedAll((op) => op.op === 'resize').length,

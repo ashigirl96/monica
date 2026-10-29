@@ -558,7 +558,8 @@ final class NativeTests: XCTestCase {
         try await js("document.querySelector('article button').click()")
         try await until("document.querySelector('form button')?.disabled === false")
         try await until("document.querySelector('.xterm-accessibility-tree')?.children.length === 31")
-        let baseline = try await writes().count
+        let beforeViewing = try JSONSerialization.jsonObject(with: await touchControl.read(.layout)) as! [String: Any]
+        let baseline = (beforeViewing["writes"] as! [[String: Any]]).count
         // These are synthetic composition events, not a Japanese OS keyboard acceptance test.
         try await js("""
             window.field = document.querySelector('form input');
@@ -613,7 +614,9 @@ final class NativeTests: XCTestCase {
         for (name, bytes) in [("Esc", "\u{1b}"), ("Tab", "\t"), ("上矢印", "\u{1b}[A"), ("左矢印", "\u{1b}[D"), ("下矢印", "\u{1b}[B"), ("右矢印", "\u{1b}[C"), ("削除", "\u{7f}")] {
             try await js("document.querySelector('[aria-label=\"\(name)\"]').click()")
             try await until("document.querySelector('[aria-label=\"Esc\"]').disabled === false")
-            sent = try await writes(atLeast: sent.count + 1)
+            let expectedWrites = sent.count + 1
+            sent = try await writes(atLeast: expectedWrites)
+            XCTAssertEqual(sent.count, expectedWrites, "Only the explicit auxiliary key may write")
             XCTAssertEqual(sent.last, Data(bytes.utf8).base64EncodedString(), name)
         }
         try await js("document.querySelector('[aria-label=\"Ctrl\"]').click(); setDraft('c'); document.querySelector('[data-send-text]').click()")
@@ -682,8 +685,80 @@ final class NativeTests: XCTestCase {
             """)
         let panned = try await webview.evaluateJavaScript("outputViewport.scrollLeft > 0 && outputViewport.scrollTop > 0") as? Bool
         XCTAssertEqual(panned, true, "The Mac grid must remain pannable on the phone")
+        try await js("""
+            window.touchTarget = document.querySelector('.xterm-screen');
+            window.xtermGestures = 0;
+            touchTarget.addEventListener('-xterm-gesturechange', () => xtermGestures++);
+            window.previousTouches = [];
+            window.touch = (type, points) => {
+                const touches = points.map(([identifier, clientX, clientY]) => new Touch({identifier, target:touchTarget, clientX, clientY, pageX:clientX, pageY:clientY}));
+                const changedTouches = type === 'touchend' || type === 'touchcancel' ? previousTouches : touches;
+                touchTarget.dispatchEvent(new TouchEvent(type, {bubbles:true, cancelable:true, touches, targetTouches:touches, changedTouches}));
+                previousTouches = touches;
+            };
+            window.pan = (dx, dy) => {
+                touch('touchstart', [[1,200,200]]);
+                touch('touchmove', [[1,200+dx,200+dy]]);
+                touch('touchend', []);
+            };
+            window.historyBefore = document.querySelector('.xterm-rows').textContent;
+            pan(-100, 180);
+            """)
+        let normalTouch = try await webview.evaluateJavaScript("outputViewport.scrollLeft >= 190 && document.querySelector('.xterm-rows').textContent !== historyBefore && xtermGestures === 0") as? Bool
+        XCTAssertEqual(normalTouch, true, "Real WKWebView TouchEvents must pan horizontally and reveal normal history without xterm consuming them")
+        try await js("pan(10000,100000)")
+        try await until("document.querySelector('.xterm-rows').textContent.includes('phone-scroll-0 ')")
+        try await js("""
+            outputViewport.style.flex = 'none';
+            outputViewport.style.height = '1000px';
+            window.fittingHistory = document.querySelector('.xterm-rows').textContent;
+            touch('touchstart', [[1,200,200]]);
+            for (let y = 195; y >= 140; y -= 5) touch('touchmove', [[1,200,y]]);
+            touch('touchend', []);
+            """)
+        let fittingHistory = try await webview.evaluateJavaScript("document.querySelector('.xterm-rows').textContent !== fittingHistory") as? Bool
+        XCTAssertEqual(fittingHistory, true, "Small touch moves accumulate through history even when the entire Mac grid fits")
+        try await js("outputViewport.style.flex = ''; outputViewport.style.height = ''; pan(-100000,-100000)")
+        let normalEdges = try await webview.evaluateJavaScript("outputViewport.scrollLeft + outputViewport.clientWidth >= outputViewport.scrollWidth - 1 && outputViewport.scrollTop + outputViewport.clientHeight >= outputViewport.scrollHeight - 1") as? Bool
+        XCTAssertEqual(normalEdges, true, "Normal fixed-grid bottom and right edge remain reachable after reading history")
         _ = try await touchControl.read(.agentSessions)
         try await until("document.querySelector('.xterm-accessibility-tree').textContent.includes('phone-tui-mouse')")
+        _ = try await control.read(.terminalSessions)
+        try await until("document.querySelector('[aria-label=\"Esc\"]').disabled === false")
+        for (name, bytes) in [("上矢印", "\u{1b}OA"), ("下矢印", "\u{1b}OB"), ("左矢印", "\u{1b}OD"), ("右矢印", "\u{1b}OC")] {
+            try await js("document.querySelector('[aria-label=\"\(name)\"]').click()")
+            try await until("document.querySelector('[aria-label=\"Esc\"]').disabled === false")
+            let expectedWrites = sent.count + 1
+            sent = try await writes(atLeast: expectedWrites)
+            XCTAssertEqual(sent.count, expectedWrites, "Only the explicit auxiliary key may write")
+            XCTAssertEqual(sent.last, Data(bytes.utf8).base64EncodedString(), "DECCKM " + name)
+        }
+        try await js("pan(100000,100000)")
+        let tuiTopLeft = try await webview.evaluateJavaScript("outputViewport.scrollLeft === 0 && outputViewport.scrollTop === 0") as? Bool
+        XCTAssertEqual(tuiTopLeft, true)
+        try await js("""
+            touch('touchstart', [[1,200,200]]);
+            touch('touchmove', [[1,160,160]]);
+            touch('touchmove', [[1,180,180]]);
+            touch('touchend', []);
+            """)
+        let reversed = try await webview.evaluateJavaScript("Math.abs(outputViewport.scrollLeft - 20) < 1 && Math.abs(outputViewport.scrollTop - 20) < 1") as? Bool
+        XCTAssertEqual(reversed, true, "Pan follows each move 1:1 and reverses before release")
+        try await js("""
+            touch('touchstart', [[1,200,200]]);
+            touch('touchcancel', []);
+            touch('touchmove', [[1,100,100]]);
+            touch('touchend', []);
+            touch('touchstart', [[1,200,200]]);
+            touch('touchstart', [[1,200,200],[2,220,220]]);
+            touch('touchmove', [[1,100,100]]);
+            touch('touchend', []);
+            """)
+        let cancelledPan = try await webview.evaluateJavaScript("Math.abs(outputViewport.scrollLeft - 20) < 1 && Math.abs(outputViewport.scrollTop - 20) < 1") as? Bool
+        XCTAssertEqual(cancelledPan, true, "Cancellation and additional fingers abandon the reading pan")
+        try await js("pan(-100000,-100000)")
+        let tuiEdges = try await webview.evaluateJavaScript("outputViewport.scrollLeft + outputViewport.clientWidth >= outputViewport.scrollWidth - 1 && outputViewport.scrollTop + outputViewport.clientHeight >= outputViewport.scrollHeight - 1 && xtermGestures === 0") as? Bool
+        XCTAssertEqual(tuiEdges, true, "Alternate-buffer mouse tracking cannot consume fixed-grid reading touches")
         try await js("""
             const terminal = document.querySelector('.xterm');
             terminal.dispatchEvent(new WheelEvent('wheel',{deltaY:200,bubbles:true,cancelable:true}));
@@ -697,13 +772,23 @@ final class NativeTests: XCTestCase {
         XCTAssertEqual(gestureWrites.count, sent.count + 1, "Normal/TUI viewing gestures must not generate terminal mouse or key bytes")
         XCTAssertEqual(gestureWrites.last, Data([27]).base64EncodedString())
         sent = gestureWrites
+        _ = try await touchControl.read(.terminalSessions)
+        try await until("document.querySelector('.xterm-accessibility-tree').textContent.includes('phone-normal-end-3')")
+        for (name, bytes) in [("上矢印", "\u{1b}[A"), ("下矢印", "\u{1b}[B"), ("左矢印", "\u{1b}[D"), ("右矢印", "\u{1b}[C")] {
+            try await js("document.querySelector('[aria-label=\"\(name)\"]').click()")
+            try await until("document.querySelector('[aria-label=\"Esc\"]').disabled === false")
+            let expectedWrites = sent.count + 1
+            sent = try await writes(atLeast: expectedWrites)
+            XCTAssertEqual(sent.count, expectedWrites, "Only the explicit auxiliary key may write")
+            XCTAssertEqual(sent.last, Data(bytes.utf8).base64EncodedString(), "Reset DECCKM " + name)
+        }
         try await js("document.querySelector('[data-select-output]').click()")
         try await until("document.querySelector('[data-output-text]') !== null")
         try await js("const output = document.querySelector('[data-output-text]'); output.setSelectionRange(0,8); document.querySelector('[data-copy-output]').click()")
         try await until("document.body.textContent.includes('コピーしました')")
         XCTAssertEqual(UIPasteboard.general.string?.count, 8)
-        try await js("document.querySelector('[data-select-output]').click(); document.querySelector('[data-zoom-in]').click()")
         let beforeViewport = try JSONSerialization.jsonObject(with: await touchControl.read(.layout)) as! [String: Any]
+        try await js("document.querySelector('[data-select-output]').click(); document.querySelector('[data-zoom-in]').click()")
         let gridBefore = try await webview.evaluateJavaScript("document.querySelector('.xterm-accessibility-tree').children.length") as? Int
         controller.view.frame.size = CGSize(width: 740, height: 360)
         controller.view.layoutIfNeeded()
@@ -712,6 +797,8 @@ final class NativeTests: XCTestCase {
         XCTAssertEqual(gridBefore, gridAfter)
         let afterViewport = try JSONSerialization.jsonObject(with: await touchControl.read(.layout)) as! [String: Any]
         XCTAssertEqual(afterViewport["resizes"] as? Int, beforeViewport["resizes"] as? Int, "Viewing operations never resize the PTY")
+        XCTAssertEqual(afterViewport["resizes"] as? Int, beforeViewing["resizes"] as? Int, "Normal/TUI gestures, selection and zoom leave the Mac grid unchanged after a later actual Create")
+        XCTAssertEqual((afterViewport["writes"] as? [[String: Any]])?.count, sent.count)
         let controlsVisible = try await webview.evaluateJavaScript("""
             [...document.querySelectorAll('.terminal-state, .terminal-keys, #terminal-draft, form button')].every(element => {
                 const rect = element.getBoundingClientRect();
@@ -739,6 +826,9 @@ final class NativeTests: XCTestCase {
         try await js("setDraft('must-not-carry-to-another-terminal'); document.querySelectorAll('article button')[1].click()")
         let newDraft = try await webview.evaluateJavaScript("document.querySelector('#terminal-draft').value") as? String
         XCTAssertEqual(newDraft, "", "Draft and paste state belong to exactly one Terminal Session")
+        try await js("window.disposedPosition = [outputViewport.scrollLeft, outputViewport.scrollTop]; pan(100,100)")
+        let disposedPan = try await webview.evaluateJavaScript("outputViewport.scrollLeft === disposedPosition[0] && outputViewport.scrollTop === disposedPosition[1]") as? Bool
+        XCTAssertEqual(disposedPan, true, "The disposed renderer must release its reading listeners")
         try await js("document.querySelector('article button').click()")
         try await until("document.querySelector('form button')?.disabled === false")
         _ = try await control.read(.agentSessions)
@@ -801,6 +891,7 @@ final class NativeTests: XCTestCase {
         await fulfillment(of: [hidden], timeout: 3)
         let after = try JSONSerialization.jsonObject(with: await audit.read(.layout)) as! [String: Any]
         XCTAssertEqual(before["resizes"] as? Int, after["resizes"] as? Int)
+        XCTAssertEqual((before["writes"] as? [[String: Any]])?.count, (after["writes"] as? [[String: Any]])?.count)
         XCTAssertGreaterThan(webview.frame.maxY, keyboardTop)
     }
 
