@@ -462,4 +462,53 @@ final class NativeTests: XCTestCase {
         _ = try await webview.evaluateJavaScript("window.requestAnimationFrame = window.savedAnimationFrame; for (const callback of window.heldFrames) requestAnimationFrame(callback); void 0")
     }
 
+    @MainActor
+    func testZBasicSharedInputIsAcceptedOnceAndMacParseStallDisablesIt() async throws {
+        let all = try fixtures()
+        let store = CredentialStore()
+        try store.save(registration(all["large"]!))
+        defer { try? store.remove() }
+        let control = RemoteHTTP(registration(all["input-control"]!))
+        defer { control.close() }
+        let controller = WorkbenchController()
+        controller.loadViewIfNeeded()
+        let scene = try XCTUnwrap(UIApplication.shared.connectedScenes.first as? UIWindowScene)
+        let window = try XCTUnwrap(scene.windows.first(where: { $0.isKeyWindow }))
+        (window.rootViewController as? WorkbenchController)?.bridge.suspend()
+        window.rootViewController = controller
+        defer { controller.bridge.suspend() }
+        let webview = controller.webview!
+        func until(_ expression: String) async throws {
+            for _ in 0..<100 {
+                if let result = try? await webview.evaluateJavaScript(expression) as? Bool, result { return }
+                try await Task.sleep(for: .milliseconds(50))
+            }
+            XCTFail("Never observed: \(expression)")
+        }
+        try await until("document.querySelectorAll('article').length === 12")
+        _ = try await webview.evaluateJavaScript("document.querySelector('article button').click()")
+        try await until("document.body.textContent.includes('閲覧中')")
+        let disabled = try await webview.evaluateJavaScript("document.querySelector('form button').disabled") as? Bool
+        XCTAssertEqual(disabled, true)
+        _ = try await control.read(.terminalSessions)
+        try await until("document.querySelector('form button')?.disabled === false")
+        _ = try await webview.evaluateJavaScript("const field = document.querySelector('form input'); Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').set.call(field,'phone-basic-input'); field.dispatchEvent(new Event('input',{bubbles:true})); void 0")
+        _ = try await webview.evaluateJavaScript("document.querySelector('form button').click()")
+        try await until("document.body.textContent.includes('Macの中継が受理しました')")
+        let accepted = try JSONSerialization.jsonObject(with: await control.read(.layout)) as! [String: Any]
+        let writes = try XCTUnwrap(accepted["writes"] as? [[String: Any]])
+        XCTAssertEqual(writes.count, 1)
+        XCTAssertEqual(writes.first?["data"] as? String, Data("phone-basic-input\r".utf8).base64EncodedString())
+        try await until("document.querySelector('.xterm-accessibility-tree')?.textContent.includes('shared-input-result') === true")
+        _ = try await control.read(.agentSessions)
+        try await until("document.querySelector('form button')?.disabled === true")
+        let stopped = try JSONSerialization.jsonObject(with: await control.read(.layout)) as! [String: Any]
+        XCTAssertEqual((stopped["writes"] as? [[String: Any]])?.count, 1, "Phone replay and live queries must never become input")
+        let image = try await webview.takeSnapshot(configuration: nil)
+        let attachment = XCTAttachment(image: image)
+        attachment.name = "Shared input accepted then disabled by Mac parse stall"
+        attachment.lifetime = .keepAlways
+        add(attachment)
+    }
+
 }

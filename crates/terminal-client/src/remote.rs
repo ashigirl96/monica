@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::fs::{self, DirBuilder, File};
 use std::io::{BufRead, BufReader, Read};
 use std::net::Shutdown;
@@ -17,6 +17,7 @@ use monica_terminal_protocol::{write_frame, RequestOp, ResponseBody, PROTOCOL_VE
 use serde::Deserialize;
 use serde_json::json;
 
+use crate::renderer::{RendererGeneration, Renderers};
 use crate::{lock, ClientEvent, PtydClient};
 
 const CHUNK: usize = 45 * 1024;
@@ -59,7 +60,7 @@ pub struct RemoteServer {
 }
 
 impl RemoteServer {
-    pub fn start(ptyd: PathBuf, sizes: Arc<Sizes>) -> Result<Self> {
+    pub fn start(ptyd: PathBuf, sizes: Arc<Sizes>, renderers: Arc<Renderers>) -> Result<Self> {
         let mut random = [0u8; 48];
         File::open("/dev/urandom")?.read_exact(&mut random)?;
         let secret: String = random[..32]
@@ -100,8 +101,9 @@ impl RemoteServer {
                         let secret = credential.clone();
                         let ptyd = ptyd.clone();
                         let sizes = sizes.clone();
+                        let renderers = renderers.clone();
                         workers.push(thread::spawn(move || {
-                            let _ = serve(stream, &ptyd, &secret, &sizes);
+                            let _ = serve(stream, &ptyd, &secret, &sizes, renderers);
                             lock(&active).remove(&id);
                         }));
                     }
@@ -197,7 +199,7 @@ fn frame(reader: &mut BufReader<UnixStream>) -> Result<serde_json::Value> {
             .iter()
             .position(|&byte| byte == b'\n')
             .map_or(available.len(), |n| n + 1);
-        if bytes.len() + count > 65536 {
+        if bytes.len() + count > 90_112 {
             bail!("remote message too large");
         }
         bytes.extend_from_slice(&available[..count]);
@@ -217,8 +219,16 @@ struct Open {
 #[derive(Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
 enum Control {
-    Ack { sequence: u64 },
+    Ack {
+        sequence: u64,
+    },
     Close,
+    Prepare,
+    Input {
+        id: u64,
+        data: String,
+        generation: RendererGeneration,
+    },
 }
 
 enum Output {
@@ -227,7 +237,13 @@ enum Output {
     Lost,
 }
 
-fn serve(mut stream: UnixStream, ptyd: &Path, secret: &str, sizes: &Sizes) -> Result<()> {
+fn serve(
+    mut stream: UnixStream,
+    ptyd: &Path,
+    secret: &str,
+    sizes: &Sizes,
+    renderers: Arc<Renderers>,
+) -> Result<()> {
     stream.set_nonblocking(false)?;
     stream.set_read_timeout(Some(DRAW_TIMEOUT))?;
     stream.set_write_timeout(Some(DRAW_TIMEOUT))?;
@@ -247,14 +263,39 @@ fn serve(mut stream: UnixStream, ptyd: &Path, secret: &str, sizes: &Sizes) -> Re
     }
     stream.set_read_timeout(None)?;
     let generation = sizes.subscribe(&open.session);
-    let (output_tx, output) = mpsc::sync_channel(8);
+    let queued = Arc::new(Mutex::new(VecDeque::<Output>::new()));
+    let producer = queued.clone();
+    let (output_tx, output) = mpsc::sync_channel(1);
     let abort_stream = stream.try_clone()?;
     let session = open.session.clone();
     let client = Arc::new(PtydClient::connect(ptyd, move |event| {
         let send = |value| {
-            if output_tx.try_send(value).is_err() {
-                let _ = abort_stream.shutdown(Shutdown::Both);
+            let mut queue = lock(&producer);
+            match value {
+                Output::Data(bytes) => {
+                    let mut rest = bytes.as_slice();
+                    if let Some(Output::Data(tail)) = queue.back_mut() {
+                        let count = rest.len().min(CHUNK - tail.len());
+                        tail.extend_from_slice(&rest[..count]);
+                        rest = &rest[count..];
+                    }
+                    for chunk in rest.chunks(CHUNK) {
+                        if queue.len() == 8 {
+                            let _ = abort_stream.shutdown(Shutdown::Both);
+                            return;
+                        }
+                        queue.push_back(Output::Data(chunk.to_vec()));
+                    }
+                }
+                value => {
+                    if queue.len() == 8 {
+                        let _ = abort_stream.shutdown(Shutdown::Both);
+                        return;
+                    }
+                    queue.push_back(value);
+                }
             }
+            let _ = output_tx.try_send(());
         };
         match event {
             ClientEvent::Output { session_id, data } if session_id == session => {
@@ -281,11 +322,57 @@ fn serve(mut stream: UnixStream, ptyd: &Path, secret: &str, sizes: &Sizes) -> Re
     let closing = Arc::new(AtomicBool::new(false));
     let closed = closing.clone();
     let input_client = client.clone();
+    let writer = Arc::new(Mutex::new(stream.try_clone()?));
+    let input_writer = writer.clone();
+    let input_renderers = renderers.clone();
+    let input_session = open.session.clone();
+    let preparing = Arc::new(AtomicBool::new(false));
+    let input_preparing = preparing.clone();
     let input = thread::spawn(move || {
+        let mut last_input = 0;
         while let Ok(value) = frame(&mut reader) {
             match serde_json::from_value::<Control>(value) {
                 Ok(Control::Ack { sequence }) => {
                     if control_tx.try_send(sequence).is_err() {
+                        break;
+                    }
+                }
+                Ok(Control::Prepare) => {
+                    input_preparing.store(true, Ordering::SeqCst);
+                    input_renderers.request(&input_session);
+                }
+                Ok(Control::Input {
+                    id,
+                    data,
+                    generation,
+                }) => {
+                    if id <= last_input {
+                        break;
+                    }
+                    last_input = id;
+                    let Ok(bytes) = BASE64_STANDARD.decode(&data) else {
+                        break;
+                    };
+                    if bytes.len() > 65536 {
+                        break;
+                    }
+                    let result = input_renderers.admit(&input_session, generation, || {
+                        input_client.notify(RequestOp::Write {
+                            session_id: input_session.clone(),
+                            data,
+                        })
+                    });
+                    let result = match result {
+                        None => "not-sent",
+                        Some(Ok(())) => "accepted",
+                        Some(Err(_)) => "uncertain",
+                    };
+                    if write_frame(
+                        &mut *lock(&input_writer),
+                        &json!({"version":1,"type":"input_result","id":id,"result":result}),
+                    )
+                    .is_err()
+                    {
                         break;
                     }
                 }
@@ -317,7 +404,7 @@ fn serve(mut stream: UnixStream, ptyd: &Path, secret: &str, sizes: &Sizes) -> Re
             sequence += 1;
             value["sequence"] = json!(sequence);
             value["version"] = json!(1);
-            write_frame(&mut stream, &value)?;
+            write_frame(&mut *lock(&writer), &value)?;
             if control.recv_timeout(DRAW_TIMEOUT)? != sequence {
                 bail!("invalid draw ACK");
             }
@@ -374,24 +461,39 @@ fn serve(mut stream: UnixStream, ptyd: &Path, secret: &str, sizes: &Sizes) -> Re
             send(json!({"type":"output", "data":BASE64_STANDARD.encode(chunk)}))?;
         }
         send(json!({"type":"replay_end"}))?;
+        let mut readiness = None;
+        let mut reported = false;
         loop {
+            if preparing.load(Ordering::SeqCst) {
+                let current = renderers.current(&open.session, Instant::now());
+                if !reported || current != readiness {
+                    write_frame(
+                        &mut *lock(&writer),
+                        &json!({"version":1,"type":"renderer","generation":current}),
+                    )?;
+                    readiness = current;
+                    reported = true;
+                }
+            }
             if closing.load(Ordering::SeqCst) {
                 break;
             }
             if let Some(value) = size()? {
                 send(value)?;
             }
-            match output.recv_timeout(Duration::from_millis(20)) {
-                Ok(Output::Data(bytes)) => {
+            let next = lock(&queued).pop_front();
+            match next {
+                Some(Output::Data(bytes)) => {
                     send(json!({"type":"output", "data":BASE64_STANDARD.encode(bytes)}))?
                 }
-                Ok(Output::Exit(code)) => {
+                Some(Output::Exit(code)) => {
                     send(json!({"type":"exit", "exitCode":code}))?;
                     break;
                 }
-                Ok(Output::Lost) => bail!("daemon disconnected"),
-                Err(mpsc::RecvTimeoutError::Timeout) => {}
-                Err(_) => break,
+                Some(Output::Lost) => bail!("daemon disconnected"),
+                None => {
+                    let _ = output.recv_timeout(Duration::from_millis(20));
+                }
             }
         }
         Ok(())

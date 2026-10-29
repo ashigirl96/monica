@@ -151,6 +151,7 @@ impl Supervisor {
         let remote = monica_terminal_client::remote::RemoteServer::start(
             self.home.join("ptyd.sock"),
             app.state::<crate::ptyd::PtydHandle>().sizes.clone(),
+            app.state::<crate::ptyd::PtydHandle>().renderers.clone(),
         )
         .inspect_err(|error| eprintln!("[shell] remote byte socket unavailable: {error}"))
         .ok();

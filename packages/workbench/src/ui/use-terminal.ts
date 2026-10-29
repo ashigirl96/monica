@@ -20,6 +20,7 @@ import {
   endReplay,
   replyToShell,
   setTabTerminal,
+  heartbeatRenderer,
 } from './terminal-connections.ts'
 import { attachTerminalLinks } from './terminal-links.ts'
 import type { TerminalSessionStatus } from './terminal-sessions.ts'
@@ -31,7 +32,7 @@ import {
   TERMINAL_THEME,
 } from './terminal-setup.ts'
 import { terminalFontSizeAtom, zoomTerminalAtom } from './terminal-zoom.ts'
-import { terminalResize, terminalWrite } from './terminal.ts'
+import { onRendererRequest, terminalResize, terminalWrite } from './terminal.ts'
 import { webglRendererPool } from './webgl-renderer.ts'
 
 function fitAndResize(fit: FitAddon, term: Terminal, sessionId: string): void {
@@ -170,6 +171,27 @@ export function useTerminal(
       )
     }
 
+    let disposed = false
+    const prepare = (sessionId: string) => {
+      if (disposed || sessionId !== optionsRef.current.sessionId || !container) return
+      if (!openedRef.current) {
+        term.open(container)
+        openedRef.current = true
+      }
+      connectTab(store, {
+        tabId: options.tabId,
+        sessionId,
+        status: optionsRef.current.sessionStatus,
+        onExit: (code) => optionsRef.current.onExit(sessionId, code),
+      })
+    }
+    void onRendererRequest(prepare).then((unlisten) => {
+      if (disposed) unlisten()
+      else cleanup.add(unlisten)
+    })
+    const heartbeat = setInterval(() => heartbeatRenderer(options.tabId), 2000)
+    cleanup.add(() => clearInterval(heartbeat))
+
     const unsubFontSize = store.sub(terminalFontSizeAtom, () => {
       const size = store.get(terminalFontSizeAtom)
       term.options.fontSize = size
@@ -180,10 +202,7 @@ export function useTerminal(
     cleanup.add(unsubFontSize)
 
     return () => {
-      // The tab connection (session listeners) deliberately survives unmount/remount;
-      // it is released when the tab closes, leaves the layout, or starts a new shell. The
-      // terminal registry entry must go first so in-flight writes stop resolving to a
-      // disposed instance.
+      disposed = true
       clearTabTerminal(options.tabId, term)
       endReplay(options.tabId)
       // Release before disposeAll: the pool must not keep a GL context alive because

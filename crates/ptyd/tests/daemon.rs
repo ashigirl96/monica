@@ -770,7 +770,7 @@ fn shell_remote_close_ack_follows_dedicated_client_cleanup_and_desktop_continues
     create_attached_zsh(&desktop, "shared");
     let sizes = Arc::new(Sizes::default());
     sizes.resize(&desktop, "shared".into(), 31, 97).unwrap();
-    let relay = RemoteServer::start(daemon.socket.clone(), sizes).unwrap();
+    let relay = RemoteServer::start(daemon.socket.clone(), sizes, Arc::default()).unwrap();
     let mut stream = UnixStream::connect(&relay.path).unwrap();
     stream
         .set_read_timeout(Some(Duration::from_secs(2)))
@@ -817,7 +817,12 @@ fn backend_eof_releases_the_shell_relay_without_ending_desktop_or_pty() {
     let daemon = start_daemon("backend-eof");
     let (desktop, output) = connect(&daemon);
     create_attached_zsh(&desktop, "shared");
-    let relay = RemoteServer::start(daemon.socket.clone(), Arc::new(Sizes::default())).unwrap();
+    let relay = RemoteServer::start(
+        daemon.socket.clone(),
+        Arc::new(Sizes::default()),
+        Arc::default(),
+    )
+    .unwrap();
     let mut backend = UnixStream::connect(&relay.path).unwrap();
     backend
         .set_read_timeout(Some(Duration::from_secs(2)))

@@ -12,6 +12,7 @@ import {
   type TerminalStream,
   type RemoteState,
 } from './mobile/remote-workbench.ts'
+import { TerminalFrameSchema } from './remote-terminal.ts'
 import { remoteDevice } from './schema.ts'
 import { cleanUp, onCleanup, setup } from './testing.ts'
 
@@ -700,6 +701,12 @@ async function terminalFixture() {
     })
     socket.send(JSON.stringify({ type: 'open', ...target }))
     return {
+      async prepare() {
+        socket.send('{"type":"prepare"}')
+      },
+      async input(command) {
+        socket.send(JSON.stringify(command))
+      },
       async next() {
         if (frames.length) return frames.shift()
         waiting = Promise.withResolvers<unknown>()
@@ -721,7 +728,16 @@ async function terminalFixture() {
     },
     async subscribe() {},
   })
-  return { ...f, ...approved, shell, target, terminal, remote, relay }
+  async function rendererControl(action: 'ready' | 'stall' | 'disconnect') {
+    await relay.stdin.write(
+      `${JSON.stringify({ rendererControl: action, session: target.terminalSessionId })}\n`,
+    )
+    const response = relay.stdout.getReader()
+    const value = await response.read()
+    response.releaseLock()
+    return JSON.parse(new TextDecoder().decode(value.value))
+  }
+  return { ...f, ...approved, shell, target, terminal, remote, relay, rendererControl }
 }
 
 test('RemoteWorkbench.openTerminal orders pre-response and replay-time live output after replay and detaches without lifecycle operations', async () => {
@@ -742,7 +758,7 @@ test('RemoteWorkbench.openTerminal orders pre-response and replay-time live outp
         parsing.resolve()
         await replay.promise
       }
-      if (text === 'during-replay') live.resolve()
+      if (text.includes('during-replay')) live.resolve()
     },
     state() {},
   })
@@ -754,7 +770,7 @@ test('RemoteWorkbench.openTerminal orders pre-response and replay-time live outp
   expect(rendered).toEqual(['retained-tail'])
   replay.resolve()
   await live.promise
-  expect(rendered).toEqual(['retained-tail', 'before-response', 'during-replay'])
+  expect(rendered.join('')).toBe('retained-tailbefore-responseduring-replay')
   expect(sizes).toEqual([[31, 97]])
   expect(await view.close()).toBe(true)
   expect(f.ptyd.receivedAll((op) => op.op === 'attach')).toHaveLength(1)
@@ -1011,4 +1027,209 @@ test('successful local resize notification is not treated as applied until async
   await sized.promise
   expect(sizes).toEqual([[45, 123]])
   expect(await view.close()).toBe(true)
+})
+
+test('RemoteWorkbench.input reaches the existing session once through authenticated WSS and stops on a stalled Mac renderer', async () => {
+  const f = await terminalFixture()
+  const ready = Promise.withResolvers<void>()
+  const unavailable = Promise.withResolvers<void>()
+  let wasReady = false
+  const view = f.remote.openTerminal(f.target, {
+    async write() {},
+    size() {},
+    state() {},
+    inputReady(value) {
+      if (value) {
+        wasReady = true
+        ready.resolve()
+      } else if (wasReady) unavailable.resolve()
+    },
+  })
+  expect(await view.input(new TextEncoder().encode('before'))).toBe('not-sent')
+  await f.rendererControl('ready')
+  await ready.promise
+  expect(await view.input(new Uint8Array(65537))).toBe('not-sent')
+  const bytes = new TextEncoder().encode('é'.repeat(32768))
+  expect(await view.input(bytes)).toBe('accepted')
+  await f.ptyd.received((op) => op.op === 'write')
+  const writes = f.ptyd.receivedAll((op) => op.op === 'write')
+  expect(writes).toHaveLength(1)
+  expect(writes[0]).toMatchObject({
+    op: 'write',
+    session_id: f.target.terminalSessionId,
+    data: Buffer.from(bytes).toString('base64'),
+  })
+  expect(await view.input(new TextEncoder().encode('second\r'))).toBe('accepted')
+  await f.ptyd.receivedAtLeast(2, (op) => op.op === 'write')
+  expect(
+    f.ptyd.receivedAll((op) => op.op === 'write').map((op) => (op.op === 'write' ? op.data : null)),
+  ).toEqual([Buffer.from(bytes).toString('base64'), btoa('second\r')])
+  await f.rendererControl('stall')
+  await unavailable.promise
+  expect(await view.input(new TextEncoder().encode('after'))).toBe('not-sent')
+  expect(await view.close()).toBe(true)
+  await f.client.runspace.create({ cwd: '/input-barrier', rows: 24, cols: 80 })
+  await f.ptyd.receivedAtLeast(2, (op) => op.op === 'create')
+  expect(f.ptyd.receivedAll((op) => op.op === 'write')).toHaveLength(2)
+})
+
+test('a lost input acceptance ACK is uncertain and never resent through the real authenticated relay', async () => {
+  const f = await terminalFixture()
+  const ready = Promise.withResolvers<void>()
+  const lost = Promise.withResolvers<void>()
+  const remote = new RemoteWorkbench({
+    async read() {
+      return []
+    },
+    async subscribe() {},
+    async terminal() {
+      const stream = await f.terminal()
+      return {
+        ...stream,
+        async next() {
+          for (;;) {
+            const frame = await stream.next()
+            if (
+              typeof frame === 'object' &&
+              frame &&
+              'type' in frame &&
+              frame.type === 'input_result'
+            ) {
+              lost.resolve()
+              continue
+            }
+            return frame
+          }
+        },
+      }
+    },
+  })
+  const view = remote.openTerminal(f.target, {
+    async write() {},
+    size() {},
+    state() {},
+    inputReady(value) {
+      if (value) ready.resolve()
+    },
+  })
+  await f.rendererControl('ready')
+  await ready.promise
+  const result = view.input(new TextEncoder().encode('only-once\r'))
+  await lost.promise
+  expect(await view.close()).toBe(true)
+  expect(await result).toBe('uncertain')
+  expect(await view.input(new TextEncoder().encode('offline'))).toBe('not-sent')
+  await f.ptyd.received((op) => op.op === 'write')
+  expect(f.ptyd.receivedAll((op) => op.op === 'write')).toHaveLength(1)
+})
+
+test('the Shell rejects replaced renderer generations and revocation precedes every later input admission', async () => {
+  const f = await terminalFixture()
+  const stream = await f.terminal()
+  const first = await f.rendererControl('ready')
+  await stream.prepare()
+  async function frameOf(type: string) {
+    for (;;) {
+      const frame = TerminalFrameSchema.parse(await stream.next())
+      if ('sequence' in frame) await stream.ack(frame.sequence)
+      if (frame.type === type) return frame
+    }
+  }
+  await frameOf('renderer')
+  const replacement = await f.rendererControl('ready')
+  await frameOf('renderer')
+  await stream.input({ type: 'input', id: 1, generation: first.generation, data: btoa('stale') })
+  expect(await frameOf('input_result')).toMatchObject({ result: 'not-sent' })
+  await stream.input({
+    type: 'input',
+    id: 2,
+    generation: replacement.generation,
+    data: btoa('admitted-before-revoke'),
+  })
+  expect(await frameOf('input_result')).toMatchObject({ result: 'accepted' })
+  await f.ptyd.received((op) => op.op === 'write')
+  expect(await f.client.remote.revoke({ id: f.id })).toMatchObject({ state: 'detached' })
+  await stream
+    .input({ type: 'input', id: 3, generation: replacement.generation, data: btoa('after-revoke') })
+    .catch(() => {})
+  await f.client.runspace.create({ cwd: '/revoke-input-barrier', rows: 24, cols: 80 })
+  await f.ptyd.receivedAtLeast(2, (op) => op.op === 'create')
+  expect(f.ptyd.receivedAll((op) => op.op === 'write')).toEqual([
+    { op: 'write', session_id: f.target.terminalSessionId, data: btoa('admitted-before-revoke') },
+  ])
+})
+
+test('input admitted before revocation may arrive during detach, but no later input reaches the Shell before or after cleanup ACK', async () => {
+  const f = await terminalFixture()
+  const realPath = f.shell.path
+  const proxyPath = join(f.home, 'input-admission.sock')
+  const admitted = Promise.withResolvers<void>()
+  const peers = new Set<ReturnType<typeof connect>>()
+  let release: (() => void) | undefined
+  let inputs = 0
+  const proxy = createServer((backend) => {
+    const shell = connect(realPath)
+    peers.add(shell)
+    peers.add(backend)
+    shell.pipe(backend)
+    let buffered = ''
+    const held: string[] = []
+    let paused = false
+    release = () => {
+      paused = false
+      for (const line of held.splice(0)) shell.write(`${line}\n`)
+    }
+    backend.on('data', (data) => {
+      buffered += data.toString()
+      for (;;) {
+        const newline = buffered.indexOf('\n')
+        if (newline < 0) break
+        const line = buffered.slice(0, newline)
+        buffered = buffered.slice(newline + 1)
+        if (JSON.parse(line).type === 'input') {
+          inputs++
+          paused = true
+          admitted.resolve()
+        }
+        if (paused) held.push(line)
+        else shell.write(`${line}\n`)
+      }
+    })
+    shell.on('error', () => backend.destroy())
+    backend.on('error', () => shell.destroy())
+  })
+  onCleanup(() => {
+    for (const peer of peers) peer.destroy()
+    proxy.close()
+  })
+  await new Promise<void>((resolve) => proxy.listen(proxyPath, resolve))
+  chmodSync(proxyPath, 0o600)
+  f.shell.path = proxyPath
+  const stream = await f.terminal()
+  const ready = await f.rendererControl('ready')
+  await stream.prepare()
+  for (;;) {
+    const frame = TerminalFrameSchema.parse(await stream.next())
+    if ('sequence' in frame) await stream.ack(frame.sequence)
+    if (frame.type === 'renderer' && frame.generation) break
+  }
+  await stream.input({ type: 'input', id: 1, generation: ready.generation, data: btoa('before') })
+  await admitted.promise
+  const revoking = f.client.remote.revoke({ id: f.id })
+  expect((await f.request('/check', f.credential)).status).toBe(401)
+  await stream
+    .input({ type: 'input', id: 2, generation: ready.generation, data: btoa('during') })
+    .catch(() => {})
+  release!()
+  expect(await revoking).toEqual({ state: 'detached' })
+  await stream
+    .input({ type: 'input', id: 3, generation: ready.generation, data: btoa('after') })
+    .catch(() => {})
+  await f.client.runspace.create({ cwd: '/admission-barrier', rows: 24, cols: 80 })
+  await f.ptyd.receivedAtLeast(2, (op) => op.op === 'create')
+  expect(inputs).toBe(1)
+  expect(f.ptyd.receivedAll((op) => op.op === 'write')).toEqual([
+    { op: 'write', session_id: f.target.terminalSessionId, data: btoa('before') },
+  ])
+  expect(f.ptyd.connections).toBe(1)
 })

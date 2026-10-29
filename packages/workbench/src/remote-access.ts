@@ -47,6 +47,7 @@ type Connection = {
   changes: boolean
   terminal: boolean
   abort: AbortController
+  target?: { tabId: string; terminalSessionId: string }
   attachment?: ShellAttachment
   opened?: boolean
 }
@@ -303,7 +304,7 @@ export function createRemoteAccess({
       idleTimeout: 15,
       fetch,
       websocket: {
-        maxPayloadLength: 64 * 1024,
+        maxPayloadLength: 90_112,
         idleTimeout: 15,
         open(socket) {
           const device = db
@@ -368,6 +369,30 @@ export function createRemoteAccess({
             if (command.type === 'close') {
               if (socket.data.attachment) void detach(socket.data.attachment)
               else socket.close()
+            } else if (command.type === 'prepare') {
+              if (!socket.data.attachment) throw new Error('No attachment')
+              socket.data.attachment.prepare()
+            } else if (command.type === 'input') {
+              const target = socket.data.target
+              const current =
+                target &&
+                readLayout(db)
+                  .runspaces.flatMap((r) => r.tabs)
+                  .find((t) => t.id === target.tabId)
+              const attachment =
+                current?.terminalSessionId === target?.terminalSessionId
+                  ? socket.data.attachment
+                  : undefined
+              if (!attachment || !attachment.input(command)) {
+                socket.send(
+                  JSON.stringify({
+                    version: 1,
+                    type: 'input_result',
+                    id: command.id,
+                    result: 'not-sent',
+                  }),
+                )
+              }
             } else if (command.type === 'ack') {
               if (!socket.data.attachment) throw new Error('No attachment')
               socket.data.attachment.ack(command.sequence)
@@ -381,6 +406,7 @@ export function createRemoteAccess({
               )
                 throw new Error('Shell attachment unavailable')
               socket.data.opened = true
+              socket.data.target = command
               const tab = readLayout(db)
                 .runspaces.flatMap((runspace) => runspace.tabs)
                 .find((item) => item.id === command.tabId)

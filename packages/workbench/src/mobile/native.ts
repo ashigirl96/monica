@@ -46,6 +46,17 @@ export const nativeTransport: RemoteTransport = {
     const id = crypto.randomUUID()
     await nativeCall('terminal-open', id, target)
     return {
+      async prepare() {
+        await nativeCall('terminal-prepare', id)
+      },
+      async input(command) {
+        await nativeCall('terminal-input', id, {
+          data: command.data,
+          sequence: String(command.id),
+          renderer: String(command.generation.renderer),
+          connection: String(command.generation.connection),
+        })
+      },
       next: () => nativeCall('terminal-next', id),
       async ack(sequence) {
         await nativeCall('terminal-ack', id, { sequence: String(sequence) })
