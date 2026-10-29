@@ -1,6 +1,6 @@
 import { afterEach, expect, setDefaultTimeout, spyOn, test, setSystemTime } from 'bun:test'
 import { randomBytes } from 'node:crypto'
-import { chmodSync, readFileSync, statSync } from 'node:fs'
+import { chmodSync, mkdirSync, readFileSync, rmSync, statSync } from 'node:fs'
 import https from 'node:https'
 import { connect, createServer } from 'node:net'
 import { join } from 'node:path'
@@ -326,6 +326,43 @@ test('TLS verification uses a trust anchor and hostname, identity files are prot
   ).toBe(true)
   expect((await f.client.remote.status()).identity).toBeNull()
   expect(credential).not.toBe(f.identity.key)
+})
+
+test('identity removal failure still signals committed revocation and reports the disabled, partially completed renewal', async () => {
+  const f = await listening()
+  await f.approved()
+  const previous = (await f.client.remote.status()).identity
+  const path = join(f.home, 'remote', 'identity.json')
+  rmSync(path)
+  mkdirSync(path)
+  const revokedAtSignals: boolean[] = []
+  onCleanup(
+    f.workbenchLedger.events.subscribe('change', (change) => {
+      if (change.type === 'remote')
+        revokedAtSignals.push(
+          f.db
+            .select()
+            .from(remoteDevice)
+            .all()
+            .every((d) => d.revokedAt !== null),
+        )
+    }),
+  )
+
+  const failure = await f.client.remote.renewIdentity().catch((error: unknown) => error)
+  expect(revokedAtSignals).toContain(true)
+  expect(failure).toMatchObject({
+    code: 'INTERNAL_SERVER_ERROR',
+    message: expect.stringContaining('all devices are revoked'),
+    cause: expect.objectContaining({ code: 'ERR_FS_EISDIR' }),
+  })
+  const status = await f.client.remote.status()
+  expect(status.state).toBe('disabled')
+  expect(status.devices.every((d) => d.revokedAt !== null)).toBe(true)
+  expect(status.identity).toEqual(previous)
+  expect(status.error).toContain('TLS identity could not be removed')
+  expect(status.error).toContain('EISDIR')
+  expect(statSync(path).isDirectory()).toBe(true)
 })
 
 test.skipIf(process.platform !== 'darwin')(

@@ -58,8 +58,13 @@ impl Daemon {
 
     fn create(&self, client: &PtydClient) {
         let shell = self.home.join("child");
-        fs::write(&shell, b"#!/bin/sh\nprintf 'retained-marker\\n'\nwhile [ ! -e \"$HOME/finish\" ]; do /bin/sleep 0.01; done\nprintf 'final-marker\\n'\nexit 7\n").unwrap();
-        fs::set_permissions(&shell, fs::Permissions::from_mode(0o700)).unwrap();
+        fs::write(self.home.join("child.sh"), b"printf 'retained-marker\\n'\nwhile [ ! -e \"$HOME/finish\" ]; do /bin/sleep 0.01; done\nprintf 'final-marker\\n'\nexit 7\n").unwrap();
+        std::os::unix::fs::symlink(
+            PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+                .join("../../packages/workbench/src/fake-executable.sh"),
+            &shell,
+        )
+        .unwrap();
         client
             .request(RequestOp::Create(CreateParams {
                 session_id: "shared".into(),
@@ -67,10 +72,12 @@ impl Daemon {
                 shell: Some(shell.to_string_lossy().into_owned()),
                 rows: 31,
                 cols: 97,
-                env: Some(vec![(
-                    "HOME".into(),
-                    self.home.to_string_lossy().into_owned(),
-                )]),
+                env: Some(
+                    ["HOME", "ZDOTDIR", "MONICA_HOME"]
+                        .into_iter()
+                        .map(|key| (key.into(), self.home.to_string_lossy().into_owned()))
+                        .collect(),
+                ),
             }))
             .unwrap();
     }
@@ -432,12 +439,39 @@ fn attach_replay_limits_and_exited_session_rejection_match_the_protocol() {
 }
 
 #[test]
+fn fake_shell_uses_the_shared_launcher_and_a_nonexecutable_profile() {
+    let daemon = Daemon::start("shell-launcher");
+    let (desktop, _) = daemon.desktop();
+    daemon.create(&desktop);
+    let shell = daemon.home.join("child");
+    assert_eq!(
+        fs::read_link(&shell).unwrap(),
+        PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../../packages/workbench/src/fake-executable.sh")
+    );
+    assert_eq!(
+        fs::metadata(daemon.home.join("child.sh"))
+            .unwrap()
+            .permissions()
+            .mode()
+            & 0o111,
+        0
+    );
+    desktop.close().unwrap();
+}
+
+#[test]
 fn small_echo_bursts_keep_remote_input_and_both_views_on_the_existing_pty() {
     let daemon = Daemon::start("input-burst");
     let (desktop, events) = daemon.desktop();
     let shell = daemon.home.join("input-child");
-    fs::write(&shell, b"#!/bin/sh\nstty -echo\nprintf 'ready\\n'\nread value\nprintf 'first\\n'\nwhile [ ! -e \"$HOME/burst\" ]; do /bin/sleep 0.01; done\ni=0; while [ $i -lt 5000 ]; do printf x; i=$((i+1)); done\nprintf '\\nresult:%s\\n' \"$value\"\nwhile [ ! -e \"$HOME/finish\" ]; do /bin/sleep 0.01; done\n").unwrap();
-    fs::set_permissions(&shell, fs::Permissions::from_mode(0o700)).unwrap();
+    fs::write(daemon.home.join("input-child.sh"), b"stty -echo\nprintf 'ready\\n'\nread value\nprintf 'first\\n'\nwhile [ ! -e \"$HOME/burst\" ]; do /bin/sleep 0.01; done\ni=0; while [ $i -lt 5000 ]; do printf x; i=$((i+1)); done\nprintf '\\nresult:%s\\n' \"$value\"\nwhile [ ! -e \"$HOME/finish\" ]; do /bin/sleep 0.01; done\n").unwrap();
+    std::os::unix::fs::symlink(
+        PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../../packages/workbench/src/fake-executable.sh"),
+        &shell,
+    )
+    .unwrap();
     desktop
         .request(RequestOp::Create(CreateParams {
             session_id: "shared".into(),

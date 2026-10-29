@@ -129,8 +129,10 @@ function RemoteSettings({ client, onClose }: { client: WorkbenchClient; onClose:
         </button>
       </div>
       <p className="mb-4 text-sm">
-        許可した端末には Mac ユーザーの shell 権限を与えます。API の制限はコマンドの sandbox
-        ではありません。この版は登録と接続確認のみで、一覧と端末操作は公開しません。
+        許可した端末は Workbench の一覧と既存 Terminal Session の出力を読み、Mac
+        と共有で入力できます。 Mac ユーザーの shell 権限を与えるため、API の制限はコマンドの sandbox
+        ではありません。
+        失効は新しい操作を拒否し、接続を解除しますが、既に届いた入力や実行したコマンドは取り消せません。
       </p>
       <p role="status" className="mb-3 text-sm">
         {working

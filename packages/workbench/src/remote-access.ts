@@ -601,9 +601,15 @@ export function createRemoteAccess({
     await disabling
     if (stopped || generation !== configurationGeneration) throw new ORPCError('CONFLICT')
     db.update(remoteDevice).set({ revokedAt: new Date() }).run()
-    rmSync(join(remoteDirectory(home), 'identity.json'), { force: true })
-    identity = null
-    changed()
+    try {
+      rmSync(join(remoteDirectory(home), 'identity.json'), { force: true })
+      identity = null
+    } catch (cause) {
+      error = `Remote access is disabled and all devices are revoked, but the TLS identity could not be removed: ${cause instanceof Error ? cause.message : String(cause)}`
+      throw new ORPCError('INTERNAL_SERVER_ERROR', { message: error, cause })
+    } finally {
+      changed()
+    }
   }
   return {
     start,
