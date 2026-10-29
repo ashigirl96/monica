@@ -1,14 +1,17 @@
 import { useEffect, useState } from 'react'
-import { z } from 'zod'
 
-import { nativeCall, nativeTransport } from './native.ts'
+import {
+  nativeCall,
+  nativeTransport,
+  observeRegistration,
+  type RegistrationState,
+} from './native.ts'
 import { RemoteError, RemoteWorkbench, type RemoteState } from './remote-workbench.ts'
 
 export { RemoteWorkbench, RemoteError } from './remote-workbench.ts'
 export type { RemoteState, RemoteTransport } from './remote-workbench.ts'
 
 const remote = new RemoteWorkbench(nativeTransport)
-const RegistrationSchema = z.enum(['approved', 'pending', 'rejected', 'expired', 'unregistered'])
 const labels = {
   waiting: '接続待ち',
   available: '利用可能',
@@ -20,41 +23,24 @@ const labels = {
 }
 
 export function MobileWorkbench() {
-  const [registration, setRegistration] =
-    useState<z.infer<typeof RegistrationSchema>>('unregistered')
+  const [registration, setRegistration] = useState<RegistrationState>('unregistered')
   const [state, setState] = useState<RemoteState>({ state: 'waiting' })
   const [selected, setSelected] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
   const [revision, setRevision] = useState(0)
 
   useEffect(() => {
-    let active = true
-    let timer: ReturnType<typeof setTimeout> | undefined
     let stop: (() => void) | undefined
-    const check = async () => {
-      try {
-        const result = RegistrationSchema.parse(await nativeCall('registration'))
-        if (!active) return
+    const stopRegistration = observeRegistration(
+      (result) => {
         setRegistration(result)
         if (result === 'approved') stop = remote.observe(setState)
-        else {
-          setState({ state: 'approval-required' })
-        }
-        if (result === 'pending')
-          timer = setTimeout(() => {
-            void check()
-          }, 2000)
-      } catch (error) {
-        if (!active) return
-        setState({
-          state: error instanceof RemoteError ? error.state : 'unavailable',
-        })
-      }
-    }
-    void check()
+        else setState({ state: 'approval-required' })
+      },
+      (error) => setState({ state: error.state }),
+    )
     return () => {
-      active = false
-      clearTimeout(timer)
+      stopRegistration()
       stop?.()
     }
     // oxlint-disable-next-line react/exhaustive-effect-dependencies -- Explicit reconnect replaces the observation and its generation.

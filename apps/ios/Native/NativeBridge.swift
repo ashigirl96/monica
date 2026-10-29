@@ -109,7 +109,7 @@ final class NativeBridge: NSObject, WKScriptMessageHandlerWithReply {
                 let acknowledgement = try await socket.receive()
                 guard current == generation, active else { throw RemoteFailure.unavailable }
                 let message = try decode(acknowledgement)
-                guard message["type"] as? String == "subscribed" else { throw RemoteFailure.incompatible }
+                guard message == "subscribed" else { throw RemoteFailure.incompatible }
             } catch {
                 let stillCurrent = current == generation && active
                 unsubscribe(id: id)
@@ -124,7 +124,7 @@ final class NativeBridge: NSObject, WKScriptMessageHandlerWithReply {
                         let message = try await socket.receive()
                         guard let self, current == self.generation else { return }
                         let decoded = try self.decode(message)
-                        guard decoded["type"] as? String == "changed" else { throw RemoteFailure.incompatible }
+                        guard decoded == "changed" else { throw RemoteFailure.incompatible }
                         self.emit(id: id, state: "changed")
                     }
                 } catch {
@@ -148,11 +148,16 @@ final class NativeBridge: NSObject, WKScriptMessageHandlerWithReply {
         }
     }
 
-    private func decode(_ message: URLSessionWebSocketTask.Message) throws -> [String: Any] {
-        guard case .string(let text) = message, text.utf8.count <= 65_536,
-              let decoded = try JSONSerialization.jsonObject(with: Data(text.utf8)) as? [String: Any],
-              decoded["version"] as? Int == 1 else { throw RemoteFailure.incompatible }
-        return decoded
+    private struct ChangeMessage: Decodable {
+        let version: Int
+        let type: String
+    }
+
+    private func decode(_ message: URLSessionWebSocketTask.Message) throws -> String {
+        guard case .string(let text) = message, text.utf8.count <= 65_536 else { throw RemoteFailure.incompatible }
+        let decoded = try JSONDecoder().decode(ChangeMessage.self, from: Data(text.utf8))
+        guard decoded.version == 1 else { throw RemoteFailure.incompatible }
+        return decoded.type
     }
 
     private func unsubscribe(id: String? = nil) {

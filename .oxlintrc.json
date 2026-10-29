@@ -145,6 +145,10 @@
               },
               {
                 "group": [
+                  "node:*",
+                  "bun",
+                  "bun:ffi",
+                  "bun:jsc",
                   "@tauri-apps/**",
                   "@monica/workbench/ui",
                   "**/ui/**",
@@ -762,6 +766,8 @@
                 "group": [
                   "@monica/cli",
                   "@monica/cli/*",
+                  "@monica/ios",
+                  "@monica/ios/*",
                   "@monica/desktop",
                   "@monica/desktop/*",
                   "@monica/extension",

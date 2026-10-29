@@ -10,7 +10,7 @@
 		205FE56832AF93607327D88E /* NativeBridge.swift in Sources */ = {isa = PBXBuildFile; fileRef = A04E39F5901EDA6EE6B857A6 /* NativeBridge.swift */; };
 		2E679A7889249397B6B835DB /* WorkbenchController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3803666CDC895AF15CD7E8B6 /* WorkbenchController.swift */; };
 		9B303F499B5646D7080EC5D8 /* CredentialStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1F6591116DD21DD0CCA32CAB /* CredentialStore.swift */; };
-		C5A25854E50B7D277F0B227D /* fixtures.json in Resources */ = {isa = PBXBuildFile; fileRef = 8F1CF68ADC84A19B489FB3C1 /* fixtures.json */; };
+		CAD3C048446E373720044B32 /* Fixtures in Resources */ = {isa = PBXBuildFile; fileRef = 76066118292D13A6162BC746 /* Fixtures */; };
 		CFD1FC38AD665EB5501974DA /* NativeTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = ED41674AB006938F4FDEA395 /* NativeTests.swift */; };
 		FC2EADC14439F4D02069B7FB /* dist in Resources */ = {isa = PBXBuildFile; fileRef = 3EC9EFF4A2E6C244DD4B3A89 /* dist */; };
 		FE1B03B809E06634DB083B82 /* RemoteHTTP.swift in Sources */ = {isa = PBXBuildFile; fileRef = F188370FE424687406218368 /* RemoteHTTP.swift */; };
@@ -32,7 +32,7 @@
 		3EC9EFF4A2E6C244DD4B3A89 /* dist */ = {isa = PBXFileReference; lastKnownFileType = folder; path = dist; sourceTree = SOURCE_ROOT; };
 		460F5A324444F494A379AFF5 /* MonicaTests.xctest */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.cfbundle; path = MonicaTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		5825CCA1F23A0FFF10E776CB /* Monica.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = Monica.app; sourceTree = BUILT_PRODUCTS_DIR; };
-		8F1CF68ADC84A19B489FB3C1 /* fixtures.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = fixtures.json; sourceTree = "<group>"; };
+		76066118292D13A6162BC746 /* Fixtures */ = {isa = PBXFileReference; lastKnownFileType = folder; name = Fixtures; path = Tests/Fixtures; sourceTree = SOURCE_ROOT; };
 		A04E39F5901EDA6EE6B857A6 /* NativeBridge.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NativeBridge.swift; sourceTree = "<group>"; };
 		ED41674AB006938F4FDEA395 /* NativeTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NativeTests.swift; sourceTree = "<group>"; };
 		F188370FE424687406218368 /* RemoteHTTP.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RemoteHTTP.swift; sourceTree = "<group>"; };
@@ -43,6 +43,7 @@
 			isa = PBXGroup;
 			children = (
 				3EC9EFF4A2E6C244DD4B3A89 /* dist */,
+				76066118292D13A6162BC746 /* Fixtures */,
 				D54A9AA806237AEB42C80435 /* Native */,
 				BCB944F6933955B39ACB8946 /* Tests */,
 				92068F3CBF9893C6329B75DE /* Products */,
@@ -61,7 +62,6 @@
 		BCB944F6933955B39ACB8946 /* Tests */ = {
 			isa = PBXGroup;
 			children = (
-				8F1CF68ADC84A19B489FB3C1 /* fixtures.json */,
 				ED41674AB006938F4FDEA395 /* NativeTests.swift */,
 			);
 			path = Tests;
@@ -170,7 +170,7 @@
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				C5A25854E50B7D277F0B227D /* fixtures.json in Resources */,
+				CAD3C048446E373720044B32 /* Fixtures in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

@@ -71,7 +71,7 @@ export class RemoteWorkbench {
               : 'unavailable'
         receive({ state })
         if (state === 'unavailable') {
-          const delay = Math.min(10_000, 500 * 2 ** attempt++) * (0.8 + Math.random() * 0.2)
+          const delay = Math.min(10_000, 500 * 2 ** attempt++ * (1 + Math.random() * 0.2))
           timer = setTimeout(() => {
             void connect()
           }, delay)

@@ -133,16 +133,16 @@ final class RemoteHTTP: NSObject, URLSessionDelegate, URLSessionTaskDelegate, @u
                 guard !ended, line.count < 65_536 else { throw RemoteFailure.incompatible }
                 if byte != 10 { line.append(byte); continue }
                 guard let frame = try JSONSerialization.jsonObject(with: line) as? [String: Any],
-                      frame["version"] as? Int == 1, let type = frame["type"] as? String else { throw RemoteFailure.incompatible }
+                      integer(frame["version"]) == 1, let type = frame["type"] as? String else { throw RemoteFailure.incompatible }
                 if type == "data" {
-                    guard Set(frame.keys) == ["version", "type", "index", "data"], frame["index"] as? Int == index,
+                    guard Set(frame.keys) == ["version", "type", "index", "data"], integer(frame["index"]) == index,
                           let encoded = frame["data"] as? String, let part = Data(base64Encoded: encoded),
                           !part.isEmpty, part.count <= 45 * 1024, snapshot.count + part.count <= 64 * 1024 * 1024
                     else { throw RemoteFailure.incompatible }
                     snapshot.append(part)
                     index += 1
                 } else if type == "end" {
-                    guard Set(frame.keys) == ["version", "type", "count"], frame["count"] as? Int == index else { throw RemoteFailure.incompatible }
+                    guard Set(frame.keys) == ["version", "type", "count"], integer(frame["count"]) == index else { throw RemoteFailure.incompatible }
                     ended = true
                 } else { throw RemoteFailure.incompatible }
                 line.removeAll(keepingCapacity: true)
@@ -150,6 +150,11 @@ final class RemoteHTTP: NSObject, URLSessionDelegate, URLSessionTaskDelegate, @u
             guard ended, line.isEmpty else { throw RemoteFailure.incompatible }
             return snapshot
         } onCancel: { bytes.task.cancel() }
+    }
+
+    private func integer(_ value: Any?) -> Int? {
+        guard let number = value as? NSNumber, CFGetTypeID(number) != CFBooleanGetTypeID() else { return nil }
+        return value as? Int
     }
 
     private func validate(_ response: URLResponse) throws {

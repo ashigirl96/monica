@@ -149,11 +149,15 @@ function serve(name: string, tls: typeof good, pinned = tls, redirect?: string) 
         return new Response('Unauthorized', { status: 401 })
       if (redirect) return Response.redirect(redirect, 302)
       if (request.headers.get('upgrade') === 'websocket') {
-        if (listener.upgrade(request, { data: {} })) return undefined
+        if (listener.upgrade(request)) return undefined
       }
       if (name === 'audit') return response(audit)
       if (name === 'truncated')
         return new Response(frame({ runspaces: [] }, false), {
+          headers: { 'content-type': 'application/x-ndjson' },
+        })
+      if (name === 'malformed')
+        return new Response(JSON.stringify({ version: true, type: 'end', count: false }) + '\n', {
           headers: { 'content-type': 'application/x-ndjson' },
         })
       if (name === 'oversized')
@@ -201,6 +205,7 @@ serve('redirect', good, good, redirectTarget)
 serve('audit', good)
 serve('truncated', good)
 serve('oversized', good)
+serve('malformed', good)
 serve('cancel', good)
 serve('revoked', good)
 fixtures.qr = {
@@ -276,7 +281,7 @@ for (let i = 0; i < 12; i++)
     cols: 80,
   })
 fixtures.large = { endpoint: `https://127.0.0.1:${port}`, certificate: good.der, credential }
-writeFileSync(join(import.meta.dir, 'Tests/fixtures.json'), JSON.stringify(fixtures))
+writeFileSync(join(import.meta.dir, 'Tests/Fixtures/fixtures.json'), JSON.stringify(fixtures))
 process.stdout.write('Native HTTPS/WSS fixtures ready\n')
 function stop() {
   ledger.stop()

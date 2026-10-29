@@ -68,3 +68,43 @@ export const nativeTransport: RemoteTransport = {
     await nativeCall('subscribe', id)
   },
 }
+
+const RegistrationSchema = z.enum(['approved', 'pending', 'rejected', 'expired', 'unregistered'])
+export type RegistrationState = z.infer<typeof RegistrationSchema>
+
+export function observeRegistration(
+  receive: (state: RegistrationState) => void,
+  failed: (error: RemoteError) => void,
+): () => void {
+  let active = true
+  let timer: ReturnType<typeof setTimeout> | undefined
+  let attempt = 0
+  const check = async () => {
+    try {
+      const result = RegistrationSchema.parse(await nativeCall('registration'))
+      if (!active) return
+      receive(result)
+      attempt = 0
+      if (result === 'pending')
+        timer = setTimeout(() => {
+          void check()
+        }, 2000)
+    } catch (error) {
+      if (!active) return
+      const failure = error instanceof RemoteError ? error : new RemoteError('incompatible')
+      failed(failure)
+      if (failure.state === 'unavailable')
+        timer = setTimeout(
+          () => {
+            void check()
+          },
+          Math.min(10000, 500 * 2 ** attempt++ * (1 + Math.random() * 0.2)),
+        )
+    }
+  }
+  void check()
+  return () => {
+    active = false
+    clearTimeout(timer)
+  }
+}

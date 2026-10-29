@@ -147,10 +147,11 @@ dev の desktop は `MONICA_HOME` ごとに identifier と vite の port が分�
 1. 上の手順で自分の dev desktop を起こし、Workbench 右上の **Remote access** を開く。初回の表示が「無効」であることを確かめる。ユーザーの `~/.monica` は試験に使わない。
 2. Mac の Tailscale address と専用 TLS port（既定 19443）を入力して有効化する。「TLS 接続を受付中」と接続先、identity の SHA-256、有効期限が出たら bind できている。「Remote を開始できません」なら address、port の競合、`<home>/remote` の所有者と権限を確認する。local の Tab はそのまま操作できることを確かめる。
 3. tailnet 管理者に、指定 iPhone から指定 Mac のこの port だけを許す grants と、重なる広い許可を確認してもらう。試験のために policy を書き換えない。Serve、Funnel、ルーター公開は使わない。
-4. **5 分間の招待 QR を作成** を押す。QR を自分の端末だけに読み取らせる。QR、招待、端末 secret を screenshot、URL、ログへ保存しない。申請の端末名、ID、TCP source を iPhone 側の表示と照合して **承認** または **拒否** を押す。申請は同時に 1 件で、招待も申請も 5 分で失効する。
-5. 登録済み端末の **失効** を押す。接続確認の WSS が閉じ、同じ資格の新規 HTTPS 接続確認が拒否されることを確かめる。**無効化** でも接続が閉じる。これは Tab を閉じる操作ではない。この版が公開する remote 操作は登録と接続確認のみで、Workbench 一覧と端末の stream は公開しない。
+4. **5 分間の招待 QR を作成** を押す。QR を自分の端末だけに読み取らせる。QR、招待、端末 secret を screenshot、URL、ログへ保存しない。申請の端末名と TCP source を Tailscale の iPhone と照合して **承認** または **拒否** を押す。申請は同時に 1 件で、招待も申請も 5 分で失効する。
+5. 登録済み端末の **失効** を押す。接続確認の WSS が閉じ、同じ資格の新規 HTTPS 接続確認が拒否されることを確かめる。**無効化** でも接続が閉じる。これは Tab を閉じる操作ではない。iPhone の一覧購読も閉じ、利用可能な一覧が消えることを確認する。限定された Workbench 一覧だけを公開し、端末の出力・入力は公開しない。
 6. identity の期限切れや Mac の address 変更時は **Identity の更新と再登録** から全端末を失効して identity を破棄する。有効化すると新しい identity になる。新しい QR で明示的に再登録する。port 変更時も grants と端末の登録先を更新する。証明書検証を無効化して繋ぎ直さない。
-7. 同じ home で Backend を起こし直す。登録済み端末と identity は残り、未消費の招待と未承認申請は消える。desktop の入力が続くことも確かめる。最後に remote を無効化してから、下の手順で自分の desktop と home を片付ける。
+7. iPhone で Mac と別の Tab を選び、Mac の選択と未読が変わらず、空一覧から Runspace が自動作成されないことを確かめる。Mac で Tab を開く・閉じると iPhone の一覧が変わる。iOS 導入は `.claude/skills/ios-dev/SKILL.md` に従う。
+8. 同じ home で Backend を起こし直す。登録済み端末と identity は残り、未消費の招待と未承認申請は消える。desktop の入力が続くことも確かめる。最後に remote を無効化してから、下の手順で自分の desktop と home を片付ける。
 
 端末を承認すると Mac ユーザーの shell 権限を与える。API の限定は shell コマンドの sandbox ではない。既に実行したコマンドは失効しても取り消せない。
 

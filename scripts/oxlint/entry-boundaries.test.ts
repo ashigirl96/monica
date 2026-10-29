@@ -14,7 +14,7 @@ function forbiddenImports(domain: string): Record<string, string[]> {
   return {
     cli: db,
     ui: db,
-    mobile: [...db, '@tauri-apps/api/core', '@monica/workbench/ui', '@monica/desktop'],
+    mobile: [...db, 'node:fs', '@tauri-apps/api/core', '@monica/workbench/ui', '@monica/desktop'],
     body: db,
     schema: ['bun:sqlite', 'zod', `@monica/${domain}/server`],
   }

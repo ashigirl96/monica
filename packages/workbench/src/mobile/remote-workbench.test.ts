@@ -59,3 +59,24 @@ test('closing an observation aborts its subscription and discards a late snapsho
   await flush()
   expect(states).toHaveLength(before)
 })
+
+test('an incompatible snapshot clears availability and aborts the installed subscription', async () => {
+  let signal: AbortSignal | undefined
+  const states: RemoteState[] = []
+  const complete = Promise.withResolvers<void>()
+  const stop = new RemoteWorkbench({
+    async subscribe(_changed, subscribed) {
+      signal = subscribed
+    },
+    async read() {
+      return { incompatible: true }
+    },
+  }).observe((state) => {
+    states.push(state)
+    if (state.state === 'incompatible') complete.resolve()
+  })
+  await complete.promise
+  expect(states.at(-1)).toEqual({ state: 'incompatible' })
+  expect(signal?.aborted).toBe(true)
+  stop()
+})

@@ -8,7 +8,7 @@ fixture=""
 cleanup() {
   if [[ -n "$fixture" ]]; then kill "$fixture" 2>/dev/null || true; wait "$fixture" 2>/dev/null || true; fi
   if [[ -n "$simulator" ]]; then xcrun simctl shutdown "$simulator" >/dev/null 2>&1 || true; xcrun simctl delete "$simulator"; fi
-  rm -f apps/ios/Tests/fixtures.json
+  rm -f apps/ios/Tests/Fixtures/fixtures.json
 }
 trap cleanup EXIT
 bun run --cwd apps/ios build

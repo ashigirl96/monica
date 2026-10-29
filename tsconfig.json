@@ -29,6 +29,7 @@
     "packages/*/migrations",
     "packages/*/drizzle.config.ts",
     "mods/*/render",
-    "scripts"
+    "scripts",
+    "apps/ios/testing.ts"
   ]
 }

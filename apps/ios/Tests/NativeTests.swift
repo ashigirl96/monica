@@ -10,7 +10,7 @@ final class NativeTests: XCTestCase {
         let credential: String
     }
     func fixtures() throws -> [String: Fixture] {
-        let url = try XCTUnwrap(Bundle(for: Self.self).url(forResource: "fixtures", withExtension: "json"))
+        let url = try XCTUnwrap(Bundle(for: Self.self).url(forResource: "fixtures", withExtension: "json", subdirectory: "Fixtures"))
         return try JSONDecoder().decode([String: Fixture].self, from: Data(contentsOf: url))
     }
     func registration(_ fixture: Fixture, certificate: Data? = nil) -> Registration {
@@ -120,7 +120,7 @@ final class NativeTests: XCTestCase {
         let runspaces = try XCTUnwrap(object["runspaces"] as? [[String: Any]])
         XCTAssertEqual(runspaces.count, 12)
         XCTAssertEqual(runspaces.last?["cwd"] as? String, "/simulator-11-" + String(repeating: "あ😀", count: 1000))
-        for name in ["truncated", "oversized"] {
+        for name in ["truncated", "oversized", "malformed"] {
             let broken = RemoteHTTP(registration(f[name]!))
             defer { broken.close() }
             do { _ = try await broken.read(.layout); XCTFail("Accepted \(name) transfer") }
@@ -174,7 +174,10 @@ final class NativeTests: XCTestCase {
         XCTAssertEqual(listCount, 12)
         let firstButtonHeight = try await webview.evaluateJavaScript("document.querySelector('button').getBoundingClientRect().height") as? Double
         XCTAssertGreaterThanOrEqual(firstButtonHeight ?? 0, 44)
-        let image = UIGraphicsImageRenderer(bounds: controller.view.bounds).image { _ in controller.view.drawHierarchy(in: controller.view.bounds, afterScreenUpdates: true) }
+        _ = try await webview.callAsyncJavaScript("await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))", arguments: [:], in: nil, contentWorld: .page)
+        let configuration = WKSnapshotConfiguration()
+        configuration.afterScreenUpdates = true
+        let image = try await webview.takeSnapshot(configuration: configuration)
         let attachment = XCTAttachment(image: image)
         attachment.name = "Bundled Workbench with actual Ledger snapshot"
         attachment.lifetime = .keepAlways

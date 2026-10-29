@@ -108,10 +108,10 @@ worktree の session では、guard が中身を読み切れない command を�
 2. `invite()` の QR を管理画面で確認する。試験用 native client は QR の `endpoint` と DER `certificate` を読み、登録 host に限定した trust anchor、hostname、期限、通常の TLS 検証に fingerprint の照合を併用する。`-k` や `rejectUnauthorized: false` は試験にも使わない。
 3. native 側で 32 byte 以上の乱数を生成し、端末専用・unlock 時のみの Keychain に保存してから申請する。資格の wire 表記は `monica-remote-v1.<64 桁の小文字 hex>`。`POST /registration/request` に `Authorization: Bearer <資格>`、`X-Monica-Invitation: <招待>` の header と `{"version":1,"name":"端末名"}` の body を送る。資格と招待を URL、JS、localStorage、ログへ渡さない。
 4. 202 の申請 ID と実 TCP source を local の `status()` で確認して承認する。同じ資格で `POST /registration/status` を呼ぶと `pending`、`rejected`、`approved` を読める。招待を再送して申請し直さない。承認応答を失っても同じ資格で照会する。転送 header は source として使われない。source address が変わった端末は Mac で再登録する。
-5. 承認した資格だけで `GET /check` を呼び、wire version 1 と device ID が返ることを確かめる。同じ path を header 付き WSS で開くと接続確認を 1 回受け取れる。端末ごとに前景 1 本で、任意の message は 1008 で閉じる。Workbench の RPC はこの口に無い。Origin 付き request、query 付き URL、64 KiB を超える body も拒否される。
+5. 承認した資格だけで `GET /check` を呼び、wire version 1 と device ID が返ることを確かめる。同じ path を header 付き WSS で開くと接続確認を 1 回受け取れる。端末ごとに前景 1 本で、任意の message は 1008 で閉じる。既存 root router の proxy はこの口に無い。一覧は `X-Monica-Wire-Version: 1` を付けた `GET /workbench/layout/get`、`/workbench/terminalSession/list`、`/workbench/agentSession/list` だけを使う。`/workbench/changes` の WSS で購読成立の ACK を受けてから読み直す。Origin 付き request、query 付き URL、64 KiB を超える body も拒否される。
 6. `revoke` 後の新しい要求が 401 になり、既存 WSS が閉じることを確認する。`disable`、SIGTERM、stdin EOF では remote listener 自体が閉じる。再起動では `<home>/remote/settings.json` の有効設定と `identity.json`、DB の登録済み端末だけが残り、招待と pending は消える。ファイルは 0600、directory は 0700 で同じ UID が所有する。identity の更新には `renewIdentity`、有効化、新しい QR による再登録を順に行う。
 
-headless で確かめられるのは登録・認可と HTTP/TLS/WSS の入口まで。Shell と Mac renderer が必要な remote 端末 E2E、hidden Tab、自動応答、PTY サイズの検証は代用しない。実 iPhone の到達性と grants の監査も別に実施する。ユーザーの policy と稼働 home を試験のために変更しない。
+headless では登録・認可、限定された Workbench 一覧と HTTP/TLS/WSS の入口を確かめる。iOS の組み立てと native/Simulator 試験は `.claude/skills/ios-dev/SKILL.md` を読む。Shell と Mac renderer が必要な remote 端末 E2E、hidden Tab、自動応答、PTY サイズの検証は代用しない。実 iPhone の到達性と grants の監査も別に実施する。ユーザーの policy と稼働 home を試験のために変更しない。
 
 ## Task の Bench を確かめる
 
