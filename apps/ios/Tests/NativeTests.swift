@@ -783,6 +783,14 @@ final class NativeTests: XCTestCase {
         let keyboardTop = controller.view.keyboardLayoutGuide.layoutFrame.minY
         XCTAssertLessThan(keyboardTop, controller.view.bounds.height - 100, "A real Simulator software keyboard must be shown, not a synthetic viewport event")
         XCTAssertLessThanOrEqual(webview.frame.maxY, keyboardTop + 0.5)
+        _ = try await webview.callAsyncJavaScript("await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))", arguments: [:], in: nil, contentWorld: .page)
+        let focusedDraftVisible = try await webview.evaluateJavaScript("""
+            (() => {
+                const rect = document.querySelector('#terminal-draft').getBoundingClientRect();
+                return rect.top >= 0 && rect.bottom <= window.innerHeight;
+            })()
+            """) as? Bool
+        XCTAssertEqual(focusedDraftVisible, true, "The focused draft must actually be visible above the software keyboard, including accessibility text sizes")
         let image = try await webview.takeSnapshot(configuration: nil)
         let attachment = XCTAttachment(image: image)
         attachment.name = "Actual WKWebView above the Simulator software keyboard"

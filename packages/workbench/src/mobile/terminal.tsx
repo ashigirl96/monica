@@ -51,6 +51,7 @@ export function TerminalOutput({
   const composing = useRef(false)
   const busy = useRef(false)
   const selection = useRef<HTMLTextAreaElement>(null)
+  const draftRef = useRef<HTMLInputElement>(null)
   const pastePreview = useRef<HTMLDivElement>(null)
   const [ready, setReady] = useState(false)
   const [text, setText] = useState('')
@@ -70,6 +71,10 @@ export function TerminalOutput({
         `${viewport?.height ?? window.innerHeight}px`,
       )
       workspace.current?.style.setProperty('--terminal-top', `${viewport?.offsetTop ?? 0}px`)
+      requestAnimationFrame(() => {
+        const draft = draftRef.current
+        if (draft && document.activeElement === draft) draft.scrollIntoView({ block: 'nearest' })
+      })
     }
     update()
     viewport?.addEventListener('resize', update)
@@ -328,6 +333,8 @@ export function TerminalOutput({
           </label>
           <input
             id="terminal-draft"
+            ref={draftRef}
+            onFocus={(event) => event.currentTarget.scrollIntoView({ block: 'nearest' })}
             aria-label="共有Terminal Sessionへの入力"
             value={text}
             onChange={(event) => setText(event.target.value)}
