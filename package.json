@@ -52,6 +52,7 @@
       "prosemirror-model": "^1.25.12",
       "prosemirror-state": "^1.4.4",
       "prosemirror-view": "^1.42.6",
+      "qrcode-generator": "^2.0.4",
       "react": "^19.3.0",
       "react-dom": "^19.3.0",
       "react-markdown": "^10.1.0",
