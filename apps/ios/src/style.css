@@ -61,3 +61,13 @@ button:disabled {
     border-color: CanvasText;
   }
 }
+
+.terminal-viewport {
+  overflow: auto;
+  max-height: 65vh;
+  background: #000;
+}
+.terminal-viewport > div {
+  width: max-content;
+  min-width: 100%;
+}

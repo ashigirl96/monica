@@ -7,7 +7,13 @@ import {
   scanRegistration,
   type RegistrationState,
 } from './native.ts'
-import { RemoteError, RemoteWorkbench, type RemoteState } from './remote-workbench.ts'
+import {
+  RemoteError,
+  RemoteWorkbench,
+  type RemoteState,
+  type TerminalTarget,
+} from './remote-workbench.ts'
+import { TerminalOutput } from './terminal.tsx'
 
 export { RemoteWorkbench, RemoteError } from './remote-workbench.ts'
 export type { RemoteState, RemoteTransport } from './remote-workbench.ts'
@@ -27,6 +33,7 @@ export function MobileWorkbench() {
   const [registration, setRegistration] = useState<RegistrationState>('unregistered')
   const [state, setState] = useState<RemoteState>({ state: 'waiting' })
   const [selected, setSelected] = useState<string | null>(null)
+  const [target, setTarget] = useState<TerminalTarget | null>(null)
   const [busy, setBusy] = useState(false)
   const [revision, setRevision] = useState(0)
   const [scanError, setScanError] = useState<string | null>(null)
@@ -38,7 +45,17 @@ export function MobileWorkbench() {
       (result) => {
         setRegistration(result)
         stop?.()
-        if (result === 'approved') stop = remote.observe(setState)
+        if (result === 'approved')
+          stop = remote.observe((next) => {
+            setState(next)
+            setTarget((current) => {
+              if (!current || next.state !== 'available') return null
+              const tab = next.layout.runspaces
+                .flatMap((runspace) => runspace.tabs)
+                .find((item) => item.id === current.tabId)
+              return tab && tab.terminalSessionId !== current.terminalSessionId ? null : current
+            })
+          })
         else setState({ state: 'approval-required' })
       },
       (error) => setState({ state: error.state }),
@@ -64,6 +81,7 @@ export function MobileWorkbench() {
         return
       }
       replacing = true
+      setTarget(null)
       stopObservation.current?.()
       setState({ state: 'waiting' })
       await registerCandidate()
@@ -97,6 +115,7 @@ export function MobileWorkbench() {
         <button
           disabled={busy}
           onClick={() => {
+            setTarget(null)
             setRevision((value) => value + 1)
           }}
         >
@@ -113,6 +132,7 @@ export function MobileWorkbench() {
           <p role="alert">登録の期限が切れました。Macで新しい招待を作ってください。</p>
         )}
       </section>
+      {target && <TerminalOutput remote={remote} target={target} back={() => setTarget(null)} />}
       {state.state === 'available' && (
         <section aria-label="Runspace一覧">
           {state.layout.runspaces.length === 0 && (
@@ -133,7 +153,10 @@ export function MobileWorkbench() {
                     <li key={tab.id}>
                       <button
                         aria-pressed={selected === tab.id}
-                        onClick={() => setSelected(tab.id)}
+                        onClick={() => {
+                          setSelected(tab.id)
+                          setTarget({ tabId: tab.id, terminalSessionId: tab.terminalSessionId })
+                        }}
                       >
                         {tab.cwd}
                         {tab.pinned ? ' · Pin' : ''}

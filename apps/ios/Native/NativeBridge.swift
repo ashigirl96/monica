@@ -10,6 +10,7 @@ final class NativeBridge: NSObject, WKScriptMessageHandlerWithReply {
     private var candidate: (invitation: Invitation, registration: Registration)?
     private var requests: [String: Task<Void, Never>] = [:]
     private var subscription: (id: String, task: Task<Void, Never>?, socket: URLSessionWebSocketTask)?
+    private var terminal: TerminalConnection?
     private var active = true
     private var generation = 0
 
@@ -21,14 +22,15 @@ final class NativeBridge: NSObject, WKScriptMessageHandlerWithReply {
                                replyHandler: @escaping (Any?, String?) -> Void) {
         guard permits(mainFrame: message.frameInfo.isMainFrame, url: message.frameInfo.request.url),
               message.webView === controller?.webview,
-              let body = message.body as? [String: String], Set(body.keys).isSubset(of: ["operation", "id"]),
-              let operation = body["operation"], active
+              let body = message.body as? [String: String], Set(body.keys).isSubset(of: ["operation", "id", "tabId", "terminalSessionId", "sequence"]),
+              let operation = body["operation"], active,
+              Set(body.keys).isSubset(of: operation == "terminal-open" ? ["operation", "id", "tabId", "terminalSessionId"] : operation == "terminal-ack" ? ["operation", "id", "sequence"] : ["operation", "id"])
         else { replyHandler(["state": "unavailable"], nil); return }
         let readId = ReadProcedure(rawValue: operation) == nil ? nil : body["id"]
         let task = Task {
             defer { if let readId { requests.removeValue(forKey: readId) } }
             do {
-                let value = try await perform(operation, id: body["id"])
+                let value = try await perform(operation, id: body["id"], fields: body)
                 replyHandler(["state": "ok", "value": value], nil)
             } catch is DecodingError {
                 replyHandler(["state": "incompatible"], nil)
@@ -47,6 +49,8 @@ final class NativeBridge: NSObject, WKScriptMessageHandlerWithReply {
         requests.removeAll()
         if let subscription { emit(id: subscription.id, state: "unavailable") }
         unsubscribe()
+        if let terminal { Task { _ = await terminal.close() } }
+        terminal = nil
         client?.close()
         client = nil
     }
@@ -62,12 +66,37 @@ final class NativeBridge: NSObject, WKScriptMessageHandlerWithReply {
         return opened
     }
 
-    private func perform(_ operation: String, id: String?) async throws -> Any {
+    private func perform(_ operation: String, id: String?, fields: [String: String]) async throws -> Any {
         if let procedure = ReadProcedure(rawValue: operation) {
             guard let id, UUID(uuidString: id) != nil else { throw RemoteFailure.unavailable }
             return try JSONSerialization.jsonObject(with: await connection().read(procedure))
         }
         switch operation {
+        case "terminal-open":
+            guard let id, UUID(uuidString: id) != nil,
+                  let tab = fields["tabId"], let session = fields["terminalSessionId"],
+                  !tab.isEmpty, tab.utf8.count <= 128, !session.isEmpty, session.utf8.count <= 128
+            else { throw RemoteFailure.unavailable }
+            if let terminal { guard await terminal.close() else { throw RemoteFailure.unavailable } }
+            guard active else { throw RemoteFailure.unavailable }
+            let opened = TerminalConnection(id: id, socket: try connection().terminal())
+            terminal = opened
+            do { try await opened.open(tab: tab, session: session) }
+            catch { _ = await opened.close(); throw error }
+            guard active, terminal === opened else { _ = await opened.close(); throw RemoteFailure.unavailable }
+            return NSNull()
+        case "terminal-next":
+            guard let terminal, terminal.id == id else { throw RemoteFailure.unavailable }
+            return try await terminal.next()
+        case "terminal-ack":
+            guard let terminal, terminal.id == id, let sequence = fields["sequence"].flatMap(Int.init) else { throw RemoteFailure.unavailable }
+            try await terminal.ack(sequence)
+            return NSNull()
+        case "terminal-close":
+            guard let terminal, terminal.id == id else { return false }
+            let confirmed = await terminal.close()
+            if self.terminal === terminal { self.terminal = nil }
+            return confirmed
         case "scan":
             guard let controller else { throw RemoteFailure.unavailable }
             candidate = nil
@@ -82,6 +111,7 @@ final class NativeBridge: NSObject, WKScriptMessageHandlerWithReply {
             self.candidate = nil
             let (invitation, registration) = candidate
             try store.save(registration)
+            if let terminal { _ = await terminal.close(); self.terminal = nil }
             unsubscribe()
             client?.close()
             client = nil

@@ -103,6 +103,7 @@ enum ReadProcedure: String, CaseIterable {
 final class RemoteHTTP: NSObject, URLSessionDelegate, URLSessionTaskDelegate, @unchecked Sendable {
     let registration: Registration
     private var session: URLSession!
+    private var streamSession: URLSession!
     private let trustLock = NSLock()
     private var trustRejected = false
 
@@ -117,9 +118,11 @@ final class RemoteHTTP: NSObject, URLSessionDelegate, URLSessionTaskDelegate, @u
         configuration.timeoutIntervalForResource = 20
         configuration.tlsMinimumSupportedProtocolVersion = .TLSv12
         session = URLSession(configuration: configuration, delegate: self, delegateQueue: nil)
+        configuration.timeoutIntervalForResource = 604800
+        streamSession = URLSession(configuration: configuration, delegate: self, delegateQueue: nil)
     }
 
-    func close() { session.invalidateAndCancel() }
+    func close() { session.invalidateAndCancel(); streamSession.invalidateAndCancel() }
 
     private func request(_ path: String, post: Bool = false) throws -> URLRequest {
         guard Trust.accepts(certificate: registration.certificate, host: registration.host) else { throw RemoteFailure.identityChanged }
@@ -212,12 +215,16 @@ final class RemoteHTTP: NSObject, URLSessionDelegate, URLSessionTaskDelegate, @u
         return .unavailable
     }
 
-    func changes() throws -> URLSessionWebSocketTask {
-        var request = try request("workbench/changes")
+    func changes() throws -> URLSessionWebSocketTask { try webSocket("workbench/changes") }
+
+    func terminal() throws -> URLSessionWebSocketTask { try webSocket("workbench/terminal") }
+
+    private func webSocket(_ path: String) throws -> URLSessionWebSocketTask {
+        var request = try request(path)
         var components = URLComponents(url: request.url!, resolvingAgainstBaseURL: false)!
         components.scheme = "wss"
         request.url = components.url!
-        let task = session.webSocketTask(with: request)
+        let task = streamSession.webSocketTask(with: request)
         task.maximumMessageSize = 65_536
         task.resume()
         return task

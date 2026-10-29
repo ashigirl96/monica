@@ -148,10 +148,20 @@ dev の desktop は `MONICA_HOME` ごとに identifier と vite の port が分�
 2. Mac の Tailscale address と専用 TLS port（既定 19443）を入力して有効化する。「TLS 接続を受付中」と接続先、identity の SHA-256、有効期限が出たら bind できている。「Remote を開始できません」なら address、port の競合、`<home>/remote` の所有者と権限を確認する。local の Tab はそのまま操作できることを確かめる。
 3. tailnet 管理者に、指定 iPhone から指定 Mac のこの port だけを許す grants と、重なる広い許可を確認してもらう。試験のために policy を書き換えない。Serve、Funnel、ルーター公開は使わない。
 4. **5 分間の招待 QR を作成** を押す。QR を自分の端末だけに読み取らせる。QR、招待、端末 secret を screenshot、URL、ログへ保存しない。申請の端末名と TCP source を Tailscale の iPhone と照合して **承認** または **拒否** を押す。申請は同時に 1 件で、招待も申請も 5 分で失効する。
-5. 登録済み端末の **失効** を押す。接続確認の WSS が閉じ、同じ資格の新規 HTTPS 接続確認が拒否されることを確かめる。**無効化** でも接続が閉じる。これは Tab を閉じる操作ではない。iPhone の一覧購読も閉じ、利用可能な一覧が消えることを確認する。限定された Workbench 一覧だけを公開し、端末の出力・入力は公開しない。
+5. 登録済み端末の **失効** を押す。接続確認の WSS が閉じ、同じ資格の新規 HTTPS 接続確認が拒否されることを確かめる。**無効化** でも接続が閉じる。これは Tab を閉じる操作ではない。iPhone の一覧購読も閉じ、利用可能な一覧が消えることを確認する。一覧と選んだ既存 Terminal Session の出力を閲覧できる。入力は許可しない。解除 ACK が届かなければ「拒否済み・解除待ち」であり、完了と扱わない。
 6. identity の期限切れや Mac の address 変更時は **Identity の更新と再登録** から全端末を失効して identity を破棄する。有効化すると新しい identity になる。新しい QR で明示的に再登録する。port 変更時も grants と端末の登録先を更新する。証明書検証を無効化して繋ぎ直さない。
 7. iPhone で Mac と別の Tab を選び、Mac の選択と未読が変わらず、空一覧から Runspace が自動作成されないことを確かめる。Mac で Tab を開く・閉じると iPhone の一覧が変わる。iOS 導入は `.claude/skills/ios-dev/SKILL.md` に従う。
 8. 同じ home で Backend を起こし直す。登録済み端末と identity は残り、未消費の招待と未承認申請は消える。desktop の入力が続くことも確かめる。最後に remote を無効化してから、下の手順で自分の desktop と home を片付ける。
+
+### 端末の閲覧と表示解除
+
+1. Mac で継続出力する作業を開き、iPhone で同じ Tab を選ぶ。保持された末尾の後に live 出力が出ることと、履歴・TUI 復元の制限表示を確認する。Mac の選択、focus、未読は変わらない。iPhone のキーや terminal query から Write は出ない。
+2. Mac の窓を resize する。iPhone は Mac が適用した rows/cols に追従する。iPhone の回転と表示領域の変更では PTY サイズが変わらない。Shell は通知への登録後に attach し、resize 通知の送信成功ではなく非同期 List の read-back を確認する。
+3. iPhone の「一覧へ戻る · 表示解除」、別 Tab の選択、背景移行を順に試す。専用 ptyd 接続だけが減り、Mac の出力と入力、PTY の running とサイズが残ることを確認する。表示解除は Close Tab ではない。`lsof -U -a -p <Shell の pid>` で専用接続の増減を比べ、共有 desktop 接続まで消えていないことを見る。
+4. 閲覧中に Backend を終了し、Shell が専用接続を片付けても desktop の入力が続くことを確認する。端末の自動再接続は行わない。復帰後は一覧から選び直す。失効・無効化は先に認可を拒否し、Shell の socket shutdown と reader 終了の ACK が確認できたときだけ完了になる。
+5. 自動境界試験は `bun test packages/workbench/src/remote-access.test.ts` と `cargo test -p monica-ptyd --test daemon`。前者は既存 fake ptyd と実 Rust relay、隔離 TLS/WSS、実 Ledger を使う。後者は実 ptyd の EOF と desktop 継続を見る。実機・desktop 画面の確認をこれだけで済ませない。
+
+Shell は Backend の起動ごとに同 UID 専用の 0700 directory と 0600 Unix socket、起動ごとの secret を用意する。socket path と secret は Backend の環境だけへ渡し、PTY へは継承しない。資格を調べるために process の全環境をログへ出さない。
 
 端末を承認すると Mac ユーザーの shell 権限を与える。API の限定は shell コマンドの sandbox ではない。既に実行したコマンドは失効しても取り消せない。
 

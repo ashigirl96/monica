@@ -68,11 +68,9 @@ pub async fn terminal_resize(
 ) -> CmdResult<()> {
     off_main(move || {
         let client = app.state::<PtydHandle>().ensure_connected(&app)?;
-        client.notify(RequestOp::Resize {
-            session_id,
-            rows,
-            cols,
-        })
+        app.state::<PtydHandle>()
+            .sizes
+            .resize(&client, session_id, rows, cols)
     })
     .await
 }

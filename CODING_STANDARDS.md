@@ -83,7 +83,7 @@ review で差分に当てる規則。どれも判断が要るもので、理由�
 - テストが起こした process（Backend、偽の claude、偽の ptyd）は、居なくなるのを待ってから home を消す。走査の途中で他の process が子を消すと、Bun の `rmSync({ recursive: true, force: true })` は例外を出さずに止まり、home が TMPDIR に残るため。
 - 一時 directory は `finally` で消さず、hook（`afterAll` など）で消す。timeout で打ち切られた test は `finally` を飛ばすため。
 - hook は test file に書く。共有の module は片付けの関数を出し、呼び手の test file に登録させる（`scripts/oxlint/lint-probes.ts` の `cleanUpLintProbes`）。bun test は同じ process の test file どうしで module を使い回し、module の top level で登録した hook は最初に import した file にしか付かないため。
-- iOS の TS CI は `RemoteWorkbench.observe` と実 SQLite・Ledger・fake ptyd の一覧結合と境界 lint を見る。native CI は実 URLSession の HTTPS/WSS・限定 trust・redirect・Keychain と、Simulator の実 WKWebView に同梱 React を載せる試験を見る。Simulator 用の ad-hoc signature は Keychain 試験に必要だが、Apple account、証明書、provisioning profile は不要。実機署名・カメラ・実回線の試験とは区別して報告する。
+- iOS の TS CI は `RemoteWorkbench.observe`・`openTerminal` と実 SQLite・Ledger・fake ptyd、実 Rust Shell relay の結合と境界 lint を見る。端末 lifecycle の実 PTY は Rust 試験で補う。native CI は実 URLSession の HTTPS/WSS・限定 trust・redirect・Keychain と、Simulator の実 WKWebView に同梱 React・xterm を載せる試験を見る。parse ACK だけで描画成功にせず、生成 style の適用と実 screenshot も確認する。Simulator 用の ad-hoc signature は Keychain 試験に必要だが、Apple account、証明書、provisioning profile は不要。実機署名・カメラ・実回線の試験とは区別して報告する。
 - bun test に DOM の環境（happy-dom など）を入れない。
 - GFM に合わせる markdown の読み（表のセルの区切り、backslash の escape）は、同じ入力を `gh api markdown -f mode=gfm -f text='…'` に通し、cmark-gfm の描画と比べて決める。cmark-gfm の文法（`ext_scanners.re`）を読むだけだと、re2c の最長一致を見落として読み違えるため。
 - 相手が body を読みやめられたこと（stream の cancel）を確かめるテストは、cancel が 200ms のうちに届くことを見る。Bun は読みやめたまま捨てた body も GC で 1 秒ほど後に cancel するので、長く待つと cancel を呼ばない実装も通るため。

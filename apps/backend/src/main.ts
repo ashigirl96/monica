@@ -101,6 +101,10 @@ for (const m of [
 }
 
 const workbenchLedger = createWorkbenchLedger({
+  shell:
+    process.env.MONICA_SHELL_SOCKET && process.env.MONICA_SHELL_SECRET
+      ? { path: process.env.MONICA_SHELL_SOCKET, secret: process.env.MONICA_SHELL_SECRET }
+      : undefined,
   db,
   home,
   ptydPath,

@@ -219,7 +219,19 @@ const db = drizzle(sqlite)
 migrate(db, { migrationsFolder: migrations.folder, migrationsTable: migrations.table })
 const ptydHome = mkdtempSync(join(tmpdir(), 'm455-'))
 const ptyd = startFakePtyd(ptydHome)
+const shellProcess = Bun.spawn(['target/debug/examples/remote-fixture', ptydHome], {
+  env: process.env,
+  stdin: 'pipe',
+  stdout: 'pipe',
+  stderr: 'inherit',
+})
+const shellReader = shellProcess.stdout.getReader()
+const shellEndpoint: { path: string; secret: string } = JSON.parse(
+  new TextDecoder().decode((await shellReader.read()).value),
+)
+shellReader.releaseLock()
 const ledger = createWorkbenchLedger({
+  shell: shellEndpoint,
   db,
   home: ptydHome,
   ptydPath: join(ptydHome, 'no-ptyd'),
@@ -312,10 +324,51 @@ fixtures['lifecycle-control'] = {
   certificate: good.der,
   credential,
 }
+await ledger.start()
+const terminalTab = (await client.layout.get()).runspaces[0]!.tabs[0]!
+await ptyd.receivedAtLeast(12, (op) => op.op === 'create')
+ptyd.output(
+  terminalTab.terminalSessionId,
+  'retained-phone-tail\r\n\x1b[c\x1b[6n\x1b]10;?\x07\x1b[?u\x1b]52;c;ZXZpbA==\x07',
+)
+const terminalControl = Bun.serve({
+  hostname: '127.0.0.1',
+  port: 0,
+  tls: good,
+  fetch(request) {
+    if (request.headers.get('authorization') !== `Bearer ${credential}`)
+      return new Response('Unauthorized', { status: 401 })
+    const path = new URL(request.url).pathname
+    if (path.endsWith('terminalSession/list'))
+      ptyd.output(
+        terminalTab.terminalSessionId,
+        'live-phone-output\r\n\x1b[c\x1b[6n\x1b]10;?\x07\x1b[?u',
+      )
+    if (path.endsWith('agentSession/list'))
+      void shellProcess.stdin.write(
+        `${JSON.stringify({ op: 'resize', session_id: terminalTab.terminalSessionId, rows: 31, cols: 97 })}\n`,
+      )
+    return response({
+      target: { tabId: terminalTab.id, terminalSessionId: terminalTab.terminalSessionId },
+      connections: ptyd.connections,
+      writes: ptyd.receivedAll((op) => op.op === 'write').length,
+      lifecycle: ptyd.receivedAll((op) => ['terminate', 'reap', 'shutdown'].includes(op.op)).length,
+      sessions: ptyd.sessions,
+    })
+  },
+})
+servers.push(terminalControl)
+fixtures['terminal-control'] = {
+  endpoint: `https://127.0.0.1:${terminalControl.port}`,
+  certificate: good.der,
+  credential,
+}
 writeFileSync(join(import.meta.dir, 'Tests/Fixtures/fixtures.json'), JSON.stringify(fixtures))
 process.stdout.write('Native HTTPS/WSS fixtures ready\n')
-function stop() {
+async function stop() {
   ledger.stop()
+  await shellProcess.stdin.end()
+  await shellProcess.exited
   ptyd.stop()
   sqlite.close()
   rmSync(ptydHome, { recursive: true, force: true })
@@ -323,5 +376,9 @@ function stop() {
   rmSync(home, { recursive: true, force: true })
   process.exit()
 }
-process.on('SIGTERM', stop)
-process.on('SIGINT', stop)
+process.on('SIGTERM', () => {
+  void stop()
+})
+process.on('SIGINT', () => {
+  void stop()
+})

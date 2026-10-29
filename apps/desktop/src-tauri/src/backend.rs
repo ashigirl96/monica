@@ -44,6 +44,7 @@ struct Running {
     // write 側を握ったまま何も書かない。Shell が死ぬと閉じ、Backend は stdin の EOF で抜ける。
     _stdin: ChildStdin,
     notifications: UnreadNotifications,
+    _remote: Option<monica_terminal_client::remote::RemoteServer>,
 }
 
 impl Supervisor {
@@ -147,7 +148,22 @@ impl Supervisor {
         if state.stopping {
             return Ok(None);
         }
-        let child = Arc::new(SharedChild::spawn(&mut command(&self.home))?);
+        let remote = monica_terminal_client::remote::RemoteServer::start(
+            self.home.join("ptyd.sock"),
+            app.state::<crate::ptyd::PtydHandle>().sizes.clone(),
+        )
+        .inspect_err(|error| eprintln!("[shell] remote byte socket unavailable: {error}"))
+        .ok();
+        let mut command = command(&self.home);
+        command
+            .env_remove("MONICA_SHELL_SOCKET")
+            .env_remove("MONICA_SHELL_SECRET");
+        if let Some(remote) = &remote {
+            command
+                .env("MONICA_SHELL_SOCKET", &remote.path)
+                .env("MONICA_SHELL_SECRET", remote.secret());
+        }
+        let child = Arc::new(SharedChild::spawn(&mut command)?);
         let stdin = child.take_stdin().expect("stdin is piped");
         let stdout = child.take_stdout().expect("stdout is piped");
         let stderr = child.take_stderr().expect("stderr is piped");
@@ -155,6 +171,7 @@ impl Supervisor {
             child: child.clone(),
             _stdin: stdin,
             notifications: UnreadNotifications::default(),
+            _remote: remote,
         });
         relay(app.clone(), stdout, child.clone());
         let log = self.log.clone();

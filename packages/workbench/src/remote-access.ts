@@ -21,7 +21,9 @@ import {
   writeProtected,
   type RemoteIdentity,
 } from './remote-identity.ts'
+import { attachShell, type ShellAttachment, type ShellEndpoint } from './remote-shell.ts'
 import { remoteSnapshot } from './remote-snapshot.ts'
+import { TerminalControlSchema } from './remote-terminal.ts'
 import { remoteDevice } from './schema.ts'
 
 const LIFETIME = 5 * 60_000
@@ -39,7 +41,15 @@ type Pending = {
   expiresAt: number
   state: 'pending' | 'rejected'
 }
-type Connection = { deviceId: string; changes: boolean; abort: AbortController }
+type Connection = {
+  deviceId: string
+  sourceAddress: string
+  changes: boolean
+  terminal: boolean
+  abort: AbortController
+  attachment?: ShellAttachment
+  opened?: boolean
+}
 const hash = (value: string) => createHash('sha256').update(value).digest('hex')
 const matches = (value: string, hashed: string) =>
   timingSafeEqual(Buffer.from(hash(value), 'hex'), Buffer.from(hashed, 'hex'))
@@ -55,11 +65,13 @@ export function createRemoteAccess({
   changed,
   events,
   unary = (_path, next) => next(),
+  shell,
 }: {
   db: Db
   home: string
   changed: () => void
   events: EventPublisher<{ change: WorkbenchChange }>
+  shell?: ShellEndpoint
   unary?: (path: string[], next: () => Promise<unknown>) => Promise<unknown>
 }) {
   let settings: Settings | null = null
@@ -72,6 +84,21 @@ export function createRemoteAccess({
   let configurationGeneration = 0
   const hasPending = () => pending?.state === 'pending'
   const sockets = new Set<ServerWebSocket<Connection>>()
+  const attachments = new Map<ShellAttachment, string>()
+  const detaching = new Set<ShellAttachment>()
+  const detachPending = (id?: string) =>
+    [...attachments].some(
+      ([attachment, device]) =>
+        detaching.has(attachment) && !attachment.confirmed && (!id || device === id),
+    )
+  async function detach(attachment: ShellAttachment) {
+    detaching.add(attachment)
+    if (await attachment.close()) {
+      attachments.delete(attachment)
+      detaching.delete(attachment)
+    }
+    changed()
+  }
   let attempts = { start: 0, requests: 0, polls: 0 }
 
   function expire() {
@@ -86,6 +113,7 @@ export function createRemoteAccess({
         : settings
           ? ('unavailable' as const)
           : ('disabled' as const),
+      detachPending: detachPending(),
       settings,
       identity: identity ? describeIdentity(identity) : null,
       error,
@@ -107,7 +135,11 @@ export function createRemoteAccess({
           revokedAt: remoteDevice.revokedAt,
         })
         .from(remoteDevice)
-        .all(),
+        .all()
+        .map((device) => ({
+          ...device,
+          detachPending: device.revokedAt !== null && detachPending(device.id),
+        })),
     }
   }
   function authorized(request: Request, sourceAddress: string) {
@@ -214,13 +246,26 @@ export function createRemoteAccess({
         return remoteSnapshot(result)
       }
       if (
-        url.pathname === '/workbench/changes' &&
+        (url.pathname === '/workbench/changes' || url.pathname === '/workbench/terminal') &&
         request.headers.get('upgrade')?.toLowerCase() === 'websocket'
       ) {
-        for (const socket of sockets) if (socket.data.deviceId === device.id) socket.terminate()
+        for (const socket of sockets)
+          if (
+            socket.data.deviceId === device.id &&
+            socket.data.terminal === (url.pathname === '/workbench/terminal')
+          ) {
+            if (socket.data.attachment) void detach(socket.data.attachment)
+            socket.terminate()
+          }
         if (
           server.upgrade(request, {
-            data: { deviceId: device.id, changes: true, abort: new AbortController() },
+            data: {
+              deviceId: device.id,
+              sourceAddress,
+              terminal: url.pathname === '/workbench/terminal',
+              changes: url.pathname === '/workbench/changes',
+              abort: new AbortController(),
+            },
           })
         )
           return undefined
@@ -233,7 +278,13 @@ export function createRemoteAccess({
       for (const socket of sockets) if (socket.data.deviceId === device.id) socket.terminate()
       if (
         server.upgrade(request, {
-          data: { deviceId: device.id, changes: false, abort: new AbortController() },
+          data: {
+            deviceId: device.id,
+            sourceAddress,
+            terminal: false,
+            changes: false,
+            abort: new AbortController(),
+          },
         })
       )
         return undefined
@@ -260,11 +311,18 @@ export function createRemoteAccess({
             .from(remoteDevice)
             .where(eq(remoteDevice.id, socket.data.deviceId))
             .get()
-          if (!listener || stopped || !device || device.revokedAt !== null) {
+          if (
+            !listener ||
+            stopped ||
+            !device ||
+            device.revokedAt !== null ||
+            device.sourceAddress !== socket.data.sourceAddress
+          ) {
             socket.terminate()
             return
           }
           sockets.add(socket)
+          if (socket.data.terminal) return
           if (!socket.data.changes) {
             socket.send(JSON.stringify({ version: WIRE_VERSION, deviceId: device.id }))
             return
@@ -288,11 +346,105 @@ export function createRemoteAccess({
             }
           })()
         },
-        message(socket) {
-          socket.close(1008, 'No client messages')
+        message(socket, message) {
+          if (!socket.data.terminal) return socket.close(1008, 'No client messages')
+          const device = db
+            .select()
+            .from(remoteDevice)
+            .where(eq(remoteDevice.id, socket.data.deviceId))
+            .get()
+          if (
+            !listener ||
+            stopped ||
+            !device ||
+            device.revokedAt !== null ||
+            device.sourceAddress !== socket.data.sourceAddress
+          ) {
+            socket.terminate()
+            return
+          }
+          try {
+            const command = TerminalControlSchema.parse(JSON.parse(String(message)))
+            if (command.type === 'close') {
+              if (socket.data.attachment) void detach(socket.data.attachment)
+              else socket.close()
+            } else if (command.type === 'ack') {
+              if (!socket.data.attachment) throw new Error('No attachment')
+              socket.data.attachment.ack(command.sequence)
+            } else {
+              if (
+                !shell ||
+                socket.data.opened ||
+                [...attachments].some(
+                  ([attachment, id]) => id === device.id && !attachment.confirmed,
+                )
+              )
+                throw new Error('Shell attachment unavailable')
+              socket.data.opened = true
+              const tab = readLayout(db)
+                .runspaces.flatMap((runspace) => runspace.tabs)
+                .find((item) => item.id === command.tabId)
+              if (!tab || tab.terminalSessionId !== command.terminalSessionId)
+                throw new Error('Terminal Session changed')
+              const attachment = attachShell(
+                shell,
+                command.terminalSessionId,
+                (frame) => {
+                  if (socket.data.abort.signal.aborted) return
+                  if (
+                    socket.send(JSON.stringify(frame)) <= 0 ||
+                    socket.getBufferedAmount() > 1_048_576
+                  ) {
+                    void detach(attachment)
+                    socket.terminate()
+                  }
+                  if (frame.type === 'closed') {
+                    attachments.delete(attachment)
+                    socket.close()
+                  }
+                },
+                () => {
+                  socket.terminate()
+                },
+              )
+              socket.data.attachment = attachment
+              attachments.set(attachment, device.id)
+              const changes = events.subscribe('change', {
+                signal: socket.data.abort.signal,
+                maxBufferedEvents: 1,
+              })
+              void (async () => {
+                try {
+                  for await (const _change of changes) {
+                    const current = readLayout(db)
+                      .runspaces.flatMap((runspace) => runspace.tabs)
+                      .find((item) => item.id === command.tabId)
+                    if (current?.terminalSessionId === command.terminalSessionId) continue
+                    if (
+                      !current &&
+                      !listTerminalSessions(db).some(
+                        (session) =>
+                          session.id === command.terminalSessionId &&
+                          ['starting', 'running'].includes(session.status),
+                      )
+                    )
+                      continue
+                    void detach(attachment)
+                    socket.terminate()
+                    break
+                  }
+                } catch {
+                  socket.terminate()
+                }
+              })()
+            }
+          } catch {
+            socket.close(1008, 'Invalid terminal message')
+          }
         },
         close(socket) {
           socket.data.abort.abort()
+          if (socket.data.attachment) void detach(socket.data.attachment)
           sockets.delete(socket)
         },
       },
@@ -312,6 +464,8 @@ export function createRemoteAccess({
     }
   }
   async function disconnect(deviceId?: string) {
+    const previous = deviceId ? null : listener
+    if (!deviceId) listener = null
     for (const socket of sockets) {
       if (!deviceId || socket.data.deviceId === deviceId) {
         socket.data.abort.abort()
@@ -319,10 +473,14 @@ export function createRemoteAccess({
         sockets.delete(socket)
       }
     }
+    const stopping = previous?.stop(true)
+    await Promise.all(
+      [...attachments]
+        .filter(([, id]) => !deviceId || deviceId === id)
+        .map(([attachment]) => detach(attachment)),
+    )
     if (!deviceId) {
-      const previous = listener
-      listener = null
-      await previous?.stop(true)
+      await stopping
     }
   }
   function stop() {
@@ -344,6 +502,7 @@ export function createRemoteAccess({
       changed()
       await disconnecting
     }
+    return { state: detachPending() ? ('detach-pending' as const) : ('detached' as const) }
   }
   async function enable(input: Settings) {
     const config = RemoteSettingsSchema.parse(input)
@@ -408,6 +567,7 @@ export function createRemoteAccess({
     db.update(remoteDevice).set({ revokedAt: new Date() }).where(eq(remoteDevice.id, id)).run()
     changed()
     await disconnect(id)
+    return { state: detachPending(id) ? ('detach-pending' as const) : ('detached' as const) }
   }
   async function renewIdentity() {
     const disabling = disable()

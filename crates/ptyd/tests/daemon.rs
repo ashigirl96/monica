@@ -716,3 +716,139 @@ fn without_monica_home_the_daemon_lives_in_dot_monica_under_home() {
     let (client, _rx) = connect(&daemon);
     assert_eq!(client.hello().unwrap(), PROTOCOL_VERSION);
 }
+
+#[test]
+fn closing_a_remote_view_keeps_the_desktop_connection_and_pty_size_running() {
+    let daemon = start_daemon("remote-close");
+    let (desktop, output) = connect(&daemon);
+    let pid = create_attached_zsh(&desktop, "shared");
+    desktop
+        .notify(RequestOp::Resize {
+            session_id: "shared".into(),
+            rows: 31,
+            cols: 97,
+        })
+        .unwrap();
+    let (remote, remote_output) = connect(&daemon);
+    remote
+        .request(RequestOp::Attach {
+            session_id: "shared".into(),
+            replay_bytes: None,
+        })
+        .unwrap();
+    remote.close().unwrap();
+    assert!(remote_output
+        .try_iter()
+        .any(|e| matches!(e, ClientEvent::Disconnected)));
+    assert!(process_alive(pid));
+    match desktop.request(RequestOp::List).unwrap() {
+        ResponseBody::Sessions { sessions } => {
+            let session = &sessions[0];
+            assert!(session.running);
+            assert_eq!((session.rows, session.cols), (31, 97));
+        }
+        other => panic!("unexpected list: {other:?}"),
+    }
+    desktop
+        .notify(RequestOp::Write {
+            session_id: "shared".into(),
+            data: b64(b"echo desktop-continues-$((6*7))\r"),
+        })
+        .unwrap();
+    wait_for_output(&output, "desktop-continues-42", Duration::from_secs(10));
+    desktop.close().unwrap();
+}
+
+#[test]
+fn shell_remote_close_ack_follows_dedicated_client_cleanup_and_desktop_continues() {
+    use monica_terminal_client::remote::{RemoteServer, Sizes};
+    use std::io::{BufRead, BufReader, Write};
+    use std::os::unix::net::UnixStream;
+    use std::sync::Arc;
+    let daemon = start_daemon("shell-remote");
+    let (desktop, output) = connect(&daemon);
+    create_attached_zsh(&desktop, "shared");
+    let sizes = Arc::new(Sizes::default());
+    sizes.resize(&desktop, "shared".into(), 31, 97).unwrap();
+    let relay = RemoteServer::start(daemon.socket.clone(), sizes).unwrap();
+    let mut stream = UnixStream::connect(&relay.path).unwrap();
+    stream
+        .set_read_timeout(Some(Duration::from_secs(2)))
+        .unwrap();
+    writeln!(
+        stream,
+        "{}",
+        serde_json::json!({"secret":relay.secret(), "session":"shared"})
+    )
+    .unwrap();
+    let mut reader = BufReader::new(stream.try_clone().unwrap());
+    let mut line = String::new();
+    reader.read_line(&mut line).unwrap();
+    let size: serde_json::Value = serde_json::from_str(&line).unwrap();
+    assert_eq!(size["type"], "size");
+    assert_eq!(size["rows"], 31);
+    assert_eq!(size["cols"], 97);
+    writeln!(stream, "{}", serde_json::json!({"type":"close"})).unwrap();
+    line.clear();
+    reader.read_line(&mut line).unwrap();
+    assert_eq!(
+        serde_json::from_str::<serde_json::Value>(&line).unwrap()["type"],
+        "closed"
+    );
+    line.clear();
+    assert_eq!(reader.read_line(&mut line).unwrap(), 0);
+    desktop
+        .notify(RequestOp::Write {
+            session_id: "shared".into(),
+            data: b64(b"echo relay-detached-$((6*7))\r"),
+        })
+        .unwrap();
+    wait_for_output(&output, "relay-detached-42", Duration::from_secs(10));
+    desktop.close().unwrap();
+}
+
+#[test]
+fn backend_eof_releases_the_shell_relay_without_ending_desktop_or_pty() {
+    use monica_terminal_client::remote::{RemoteServer, Sizes};
+    use std::io::{BufRead, BufReader, Write};
+    use std::net::Shutdown;
+    use std::os::unix::net::UnixStream;
+    use std::sync::Arc;
+    let daemon = start_daemon("backend-eof");
+    let (desktop, output) = connect(&daemon);
+    create_attached_zsh(&desktop, "shared");
+    let relay = RemoteServer::start(daemon.socket.clone(), Arc::new(Sizes::default())).unwrap();
+    let mut backend = UnixStream::connect(&relay.path).unwrap();
+    backend
+        .set_read_timeout(Some(Duration::from_secs(2)))
+        .unwrap();
+    writeln!(
+        backend,
+        "{}",
+        serde_json::json!({"secret":relay.secret(), "session":"shared"})
+    )
+    .unwrap();
+    let mut line = String::new();
+    BufReader::new(backend.try_clone().unwrap())
+        .read_line(&mut line)
+        .unwrap();
+    assert_eq!(
+        serde_json::from_str::<serde_json::Value>(&line).unwrap()["type"],
+        "size"
+    );
+    backend.shutdown(Shutdown::Both).unwrap();
+    let began = Instant::now();
+    drop(relay);
+    assert!(
+        began.elapsed() < Duration::from_secs(2),
+        "relay drop joins every attachment worker"
+    );
+    desktop
+        .notify(RequestOp::Write {
+            session_id: "shared".into(),
+            data: b64(b"echo backend-gone-$((6*7))\r"),
+        })
+        .unwrap();
+    wait_for_output(&output, "backend-gone-42", Duration::from_secs(10));
+    desktop.close().unwrap();
+}

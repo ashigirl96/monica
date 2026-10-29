@@ -68,6 +68,7 @@ export function createWorkbenchLedger(
     home: string
     ptydPath: string
     unread: Unread
+    shell?: import('./remote-shell.ts').ShellEndpoint
     remoteUnary?: (path: string[], next: () => Promise<unknown>) => Promise<unknown>
   },
 ): WorkbenchLedger {
@@ -79,6 +80,7 @@ export function createWorkbenchLedger(
     home,
     events,
     unary: deps.remoteUnary,
+    shell: deps.shell,
     changed: () => publish({ type: 'remote' }),
   })
 
