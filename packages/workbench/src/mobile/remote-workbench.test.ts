@@ -425,3 +425,74 @@ test('a late send rejection and expired timer cannot finish a newer input ID', a
     timer.mockRestore()
   }
 })
+
+test('paste preflights the entire UTF-8 limit then preserves byte boundaries and excludes other input until every ACK', async () => {
+  const sends: TerminalInput[] = []
+  const { view, result } = inputFixture(async (command) => {
+    sends.push(command)
+  })
+  await flush()
+  expect(await view.paste('あ'.repeat(87382))).toEqual({
+    result: 'not-sent',
+    acceptedBytes: 0,
+    totalBytes: 262146,
+  })
+  expect(await view.paste('x'.repeat(262145))).toEqual({
+    result: 'not-sent',
+    acceptedBytes: 0,
+    totalBytes: 262145,
+  })
+  expect(await view.paste('')).toEqual({ result: 'not-sent', acceptedBytes: 0, totalBytes: 0 })
+  expect(sends).toEqual([])
+  const text = 'x'.repeat(65535) + '😀' + 'あ'.repeat(65535) // exactly 256 KiB, with a split emoji
+  const paste = view.paste(text)
+  expect(sends).toHaveLength(1)
+  expect(await view.input(new Uint8Array([3]))).toBe('not-sent')
+  expect((await view.paste('concurrent')).result).toBe('not-sent')
+  for (let id = 1; id <= 4; id++) {
+    expect(sends).toHaveLength(id)
+    expect(atob(sends[id - 1]!.data)).toHaveLength(65536)
+    result(id, 'accepted')
+    await flush()
+  }
+  expect(await paste).toEqual({ result: 'accepted', acceptedBytes: 262144, totalBytes: 262144 })
+  const bytes = Buffer.concat(sends.map(({ data }) => Buffer.from(data, 'base64')))
+  expect(bytes.equals(Buffer.from(text))).toBe(true)
+  await view.close()
+})
+
+test('a paste stops at a refused chunk, reports the accepted prefix as partial uncertain delivery, and never sends the remainder', async () => {
+  const sends: TerminalInput[] = []
+  const { view, result, ready } = inputFixture(async (command) => {
+    sends.push(command)
+  })
+  await flush()
+  const paste = view.paste('a'.repeat(131073))
+  result(1, 'accepted')
+  await flush()
+  result(2, 'not-sent')
+  expect(await paste).toEqual({ result: 'uncertain', acceptedBytes: 65536, totalBytes: 131073 })
+  expect(sends).toHaveLength(2)
+  expect(ready.at(-1)).toBe(false)
+  expect(await view.input(new Uint8Array([13]))).toBe('not-sent')
+  await view.close()
+})
+
+test('closing during a paste makes only its in-flight chunk uncertain and never retries any remainder', async () => {
+  const sends: TerminalInput[] = []
+  const { view, result } = inputFixture(async (command) => {
+    sends.push(command)
+  })
+  expect(await view.paste('before-ready')).toEqual({
+    result: 'not-sent',
+    acceptedBytes: 0,
+    totalBytes: 12,
+  })
+  await flush()
+  const paste = view.paste('a'.repeat(131073))
+  result(1, 'accepted')
+  await flush()
+  await view.close()
+  expect(await paste).toEqual({ result: 'uncertain', acceptedBytes: 65536, totalBytes: 131073 })
+  expect(sends).toHaveLength(2)
+})

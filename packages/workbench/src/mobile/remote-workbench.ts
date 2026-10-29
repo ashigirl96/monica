@@ -52,7 +52,9 @@ export type TerminalDisplay = {
     state: 'waiting' | 'viewing' | 'exited' | 'closed' | 'detach-pending' | RemoteUnavailable,
   ): void
 }
+export type PasteResult = { result: InputResult; acceptedBytes: number; totalBytes: number }
 export type TerminalView = {
+  paste(text: string): Promise<PasteResult>
   input(bytes: Uint8Array): Promise<InputResult>
   close(): Promise<boolean>
 }
@@ -97,33 +99,60 @@ export class RemoteWorkbench {
         display.inputReady?.(false)
       }
     }
+    let pasting = false
+    const input = async (bytes: Uint8Array): Promise<InputResult> => {
+      if (
+        !active ||
+        !stream ||
+        !replayed ||
+        !renderer ||
+        uncertain ||
+        pending ||
+        bytes.length > 65536 ||
+        bytes.length === 0
+      )
+        return 'not-sent'
+      const result = Promise.withResolvers<InputResult>()
+      const id = ++inputId
+      pending = { id, resolve: result.resolve }
+      const timer = setTimeout(() => finishInput('uncertain', id), 6000)
+      try {
+        let data = ''
+        for (const byte of bytes) data += String.fromCharCode(byte)
+        void stream
+          .input({ type: 'input', id, data: btoa(data), generation: renderer })
+          .catch(() => finishInput('uncertain', id))
+      } catch {
+        finishInput('uncertain', id)
+      }
+      return result.promise.finally(() => clearTimeout(timer))
+    }
     const view: TerminalView = {
-      input: async (bytes) => {
-        if (
-          !active ||
-          !stream ||
-          !replayed ||
-          !renderer ||
-          uncertain ||
-          pending ||
-          bytes.length > 65536 ||
-          bytes.length === 0
-        )
-          return 'not-sent'
-        const result = Promise.withResolvers<InputResult>()
-        const id = ++inputId
-        pending = { id, resolve: result.resolve }
-        const timer = setTimeout(() => finishInput('uncertain', id), 6000)
+      input: (bytes) => (pasting ? Promise.resolve('not-sent') : input(bytes)),
+      paste: async (text) => {
+        const bytes = new TextEncoder().encode(text)
+        const totalBytes = bytes.length
+        let acceptedBytes = 0
+        if (pasting || pending || !totalBytes || totalBytes > 262144)
+          return { result: 'not-sent', acceptedBytes, totalBytes }
+        pasting = true
         try {
-          let data = ''
-          for (const byte of bytes) data += String.fromCharCode(byte)
-          void stream
-            .input({ type: 'input', id, data: btoa(data), generation: renderer })
-            .catch(() => finishInput('uncertain', id))
-        } catch {
-          finishInput('uncertain', id)
+          for (let offset = 0; offset < totalBytes; offset += 65536) {
+            const chunk = bytes.subarray(offset, offset + 65536)
+            const result = await input(chunk)
+            if (result !== 'accepted') {
+              if (acceptedBytes > 0) {
+                uncertain = true
+                display.inputReady?.(false)
+              }
+              return { result: acceptedBytes > 0 ? 'uncertain' : result, acceptedBytes, totalBytes }
+            }
+            acceptedBytes += chunk.length
+          }
+          return { result: 'accepted', acceptedBytes, totalBytes }
+        } finally {
+          pasting = false
         }
-        return result.promise.finally(() => clearTimeout(timer))
       },
       close: () => {
         if (closing) return closing

@@ -1233,3 +1233,93 @@ test('input admitted before revocation may arrive during detach, but no later in
   ])
   expect(f.ptyd.connections).toBe(1)
 })
+
+test('RemoteWorkbench.paste preflights UTF-8 and sends a full 256KiB byte-exact ordered paste through the authenticated relay', async () => {
+  const f = await terminalFixture()
+  const ready = Promise.withResolvers<void>()
+  const view = f.remote.openTerminal(f.target, {
+    async write() {},
+    size() {},
+    state() {},
+    inputReady(value) {
+      if (value) ready.resolve()
+    },
+  })
+  await f.rendererControl('ready')
+  await ready.promise
+  expect(await view.paste('あ'.repeat(87382))).toEqual({
+    result: 'not-sent',
+    acceptedBytes: 0,
+    totalBytes: 262146,
+  })
+  const text = 'x'.repeat(65535) + '😀' + 'あ'.repeat(65535)
+  expect(await view.paste(text)).toEqual({
+    result: 'accepted',
+    acceptedBytes: 262144,
+    totalBytes: 262144,
+  })
+  await f.ptyd.receivedAtLeast(4, (op) => op.op === 'write')
+  const chunks = f.ptyd
+    .receivedAll((op) => op.op === 'write')
+    .map((op) => Buffer.from(op.op === 'write' ? op.data : '', 'base64'))
+  expect(chunks.map((chunk) => chunk.length)).toEqual([65536, 65536, 65536, 65536])
+  expect(Buffer.concat(chunks).equals(Buffer.from(text))).toBe(true)
+  expect(await view.close()).toBe(true)
+  await f.client.runspace.create({ cwd: '/paste-barrier', rows: 24, cols: 80 })
+  await f.ptyd.receivedAtLeast(2, (op) => op.op === 'create')
+  expect(f.ptyd.receivedAll((op) => op.op === 'write')).toHaveLength(4)
+})
+
+test('a paste with a lost second ACK stops all remaining chunks without retry through the real authenticated relay', async () => {
+  const f = await terminalFixture()
+  const ready = Promise.withResolvers<void>()
+  const lost = Promise.withResolvers<void>()
+  const remote = new RemoteWorkbench({
+    async read() {
+      return []
+    },
+    async subscribe() {},
+    async terminal() {
+      const stream = await f.terminal()
+      return {
+        ...stream,
+        async next() {
+          for (;;) {
+            const frame = await stream.next()
+            if (
+              typeof frame === 'object' &&
+              frame &&
+              'type' in frame &&
+              frame.type === 'input_result' &&
+              'id' in frame &&
+              frame.id === 2
+            ) {
+              lost.resolve()
+              continue
+            }
+            return frame
+          }
+        },
+      }
+    },
+  })
+  const view = remote.openTerminal(f.target, {
+    async write() {},
+    size() {},
+    state() {},
+    inputReady(value) {
+      if (value) ready.resolve()
+    },
+  })
+  await f.rendererControl('ready')
+  await ready.promise
+  const paste = view.paste('あ'.repeat(87381))
+  await lost.promise
+  expect(await view.close()).toBe(true)
+  expect(await paste).toEqual({ result: 'uncertain', acceptedBytes: 65536, totalBytes: 262143 })
+  expect((await view.paste('offline')).result).toBe('not-sent')
+  await f.ptyd.receivedAtLeast(2, (op) => op.op === 'write')
+  await f.client.runspace.create({ cwd: '/partial-paste-barrier', rows: 24, cols: 80 })
+  await f.ptyd.receivedAtLeast(2, (op) => op.op === 'create')
+  expect(f.ptyd.receivedAll((op) => op.op === 'write')).toHaveLength(2)
+})
