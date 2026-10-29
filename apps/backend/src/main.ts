@@ -104,6 +104,7 @@ const workbenchLedger = createWorkbenchLedger({
   db,
   home,
   ptydPath,
+  remoteUnary: (path, next) => usageLedger.count({ path, context: { caller: 'webview' }, next }),
   notify: ({ title, body, terminalSessionId }) =>
     announce({ type: 'notify', title, body, terminalSessionId }),
   nameAgentSession,

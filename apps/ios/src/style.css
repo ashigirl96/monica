@@ -1,0 +1,63 @@
+:root {
+  font: -apple-system-body;
+  color-scheme: light dark;
+  color: CanvasText;
+  background: Canvas;
+}
+body {
+  margin: 0;
+}
+main {
+  padding: max(1rem, env(safe-area-inset-top)) max(1rem, env(safe-area-inset-right))
+    max(1rem, env(safe-area-inset-bottom)) max(1rem, env(safe-area-inset-left));
+}
+h1 {
+  font-size: 2rem;
+  line-height: 1.1;
+  letter-spacing: -0.02em;
+}
+h2 {
+  font-size: 1.2rem;
+  overflow-wrap: anywhere;
+}
+p {
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+section {
+  margin-block: 1.5rem;
+}
+ul {
+  padding: 0;
+  list-style: none;
+}
+li {
+  padding-block: 0.75rem;
+  border-bottom: 1px solid GrayText;
+}
+button {
+  font: inherit;
+  min-height: 44px;
+  padding: 0.65em 0.9em;
+  margin: 0.25rem;
+  color: ButtonText;
+  background: ButtonFace;
+  border: 1px solid GrayText;
+  border-radius: 0.6rem;
+  touch-action: manipulation;
+  overflow-wrap: anywhere;
+}
+button:active,
+button[aria-pressed="true"] {
+  background: Highlight;
+  color: HighlightText;
+}
+button:disabled {
+  opacity: 0.6;
+}
+@media (prefers-contrast: more) {
+  button,
+  li {
+    border-color: CanvasText;
+  }
+}

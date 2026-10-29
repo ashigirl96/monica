@@ -8,7 +8,8 @@
     "./server": "./src/server.ts",
     "./ui": "./src/ui/index.ts",
     "./cli": "./src/cli.ts",
-    "./testing": "./src/fake-ptyd.ts"
+    "./testing": "./src/fake-ptyd.ts",
+    "./mobile": "./src/mobile/index.tsx"
   },
   "scripts": {
     "generate": "drizzle-kit generate"

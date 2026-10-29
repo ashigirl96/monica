@@ -63,12 +63,24 @@ export function processesOf(workbenchLedger: WorkbenchLedger): Internals['proces
 }
 
 export function createWorkbenchLedger(
-  deps: NotificationDeps & { db: Db; home: string; ptydPath: string; unread: Unread },
+  deps: NotificationDeps & {
+    db: Db
+    home: string
+    ptydPath: string
+    unread: Unread
+    remoteUnary?: (path: string[], next: () => Promise<unknown>) => Promise<unknown>
+  },
 ): WorkbenchLedger {
   const { db, home, ptydPath, notify, nameAgentSession, unread } = deps
   const events = new EventPublisher<{ change: WorkbenchChange }>()
   const publish = (change: WorkbenchChange) => events.publish('change', change)
-  const remoteAccess = createRemoteAccess({ db, home, changed: () => publish({ type: 'remote' }) })
+  const remoteAccess = createRemoteAccess({
+    db,
+    home,
+    events,
+    unary: deps.remoteUnary,
+    changed: () => publish({ type: 'remote' }),
+  })
 
   let stopFollowingUnread: (() => void) | null = null
   let client: PtydClient | null = null

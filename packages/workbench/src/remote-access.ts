@@ -2,14 +2,17 @@ import { createHash, randomBytes, randomUUID, timingSafeEqual } from 'node:crypt
 import { rmSync } from 'node:fs'
 import { join } from 'node:path'
 
-import { ORPCError } from '@orpc/server'
+import { type EventPublisher, ORPCError } from '@orpc/server'
 import type { Server, ServerWebSocket } from 'bun'
 import { eq } from 'drizzle-orm'
 import createQrCode from 'qrcode-generator'
 import { z } from 'zod'
 
-import { RemoteSettingsSchema } from './contract.ts'
+import { listAgentSessions } from './agent-session.ts'
+import { RemoteSettingsSchema, type WorkbenchChange } from './contract.ts'
 import type { Db } from './db.ts'
+import { readLayout } from './layout.ts'
+import { listTerminalSessions } from './reads.ts'
 import {
   describeIdentity,
   loadIdentity,
@@ -18,6 +21,7 @@ import {
   writeProtected,
   type RemoteIdentity,
 } from './remote-identity.ts'
+import { remoteSnapshot } from './remote-snapshot.ts'
 import { remoteDevice } from './schema.ts'
 
 const LIFETIME = 5 * 60_000
@@ -35,7 +39,7 @@ type Pending = {
   expiresAt: number
   state: 'pending' | 'rejected'
 }
-type Connection = { deviceId: string }
+type Connection = { deviceId: string; changes: boolean; abort: AbortController }
 const hash = (value: string) => createHash('sha256').update(value).digest('hex')
 const matches = (value: string, hashed: string) =>
   timingSafeEqual(Buffer.from(hash(value), 'hex'), Buffer.from(hashed, 'hex'))
@@ -49,10 +53,14 @@ export function createRemoteAccess({
   db,
   home,
   changed,
+  events,
+  unary = (_path, next) => next(),
 }: {
   db: Db
   home: string
   changed: () => void
+  events: EventPublisher<{ change: WorkbenchChange }>
+  unary?: (path: string[], next: () => Promise<unknown>) => Promise<unknown>
 }) {
   let settings: Settings | null = null
   let listener: Server<Connection> | null = null
@@ -190,11 +198,45 @@ export function createRemoteAccess({
     }
     const device = authorized(request, sourceAddress)
     if (!device) return deny()
+    if (url.pathname.startsWith('/workbench/')) {
+      if (request.headers.get('x-monica-wire-version') !== String(WIRE_VERSION))
+        return json({ version: WIRE_VERSION }, 426)
+      if (request.method !== 'GET') return new Response('Not found', { status: 404 })
+      const reads = {
+        '/workbench/layout/get': () => readLayout(db),
+        '/workbench/terminalSession/list': () => listTerminalSessions(db),
+        '/workbench/agentSession/list': () => listAgentSessions(db),
+      }
+      const read = Object.entries(reads).find(([path]) => path === url.pathname)?.[1]
+      if (read) {
+        const result = await unary(url.pathname.slice(1).split('/'), async () => read())
+        if (!authorized(request, sourceAddress)) return deny()
+        return remoteSnapshot(result)
+      }
+      if (
+        url.pathname === '/workbench/changes' &&
+        request.headers.get('upgrade')?.toLowerCase() === 'websocket'
+      ) {
+        for (const socket of sockets) if (socket.data.deviceId === device.id) socket.terminate()
+        if (
+          server.upgrade(request, {
+            data: { deviceId: device.id, changes: true, abort: new AbortController() },
+          })
+        )
+          return undefined
+      }
+      return new Response('Not found', { status: 404 })
+    }
     if (url.pathname !== '/check' || request.method !== 'GET')
       return new Response('Not found', { status: 404 })
     if (request.headers.get('upgrade')?.toLowerCase() === 'websocket') {
       for (const socket of sockets) if (socket.data.deviceId === device.id) socket.terminate()
-      if (server.upgrade(request, { data: { deviceId: device.id } })) return undefined
+      if (
+        server.upgrade(request, {
+          data: { deviceId: device.id, changes: false, abort: new AbortController() },
+        })
+      )
+        return undefined
       return new Response('WebSocket upgrade failed', { status: 400 })
     }
     return json({ version: WIRE_VERSION, deviceId: device.id })
@@ -223,12 +265,34 @@ export function createRemoteAccess({
             return
           }
           sockets.add(socket)
-          socket.send(JSON.stringify({ version: WIRE_VERSION, deviceId: device.id }))
+          if (!socket.data.changes) {
+            socket.send(JSON.stringify({ version: WIRE_VERSION, deviceId: device.id }))
+            return
+          }
+          const changes = events.subscribe('change', {
+            signal: socket.data.abort.signal,
+            maxBufferedEvents: 1,
+          })
+          socket.send(JSON.stringify({ version: WIRE_VERSION, type: 'subscribed' }))
+          void (async () => {
+            try {
+              for await (const _change of changes) {
+                if (socket.data.abort.signal.aborted) break
+                if (socket.send(JSON.stringify({ version: WIRE_VERSION, type: 'changed' })) > 0)
+                  continue
+                socket.terminate()
+                break
+              }
+            } catch {
+              socket.terminate()
+            }
+          })()
         },
         message(socket) {
-          socket.close(1008, 'Connection check only')
+          socket.close(1008, 'No client messages')
         },
         close(socket) {
+          socket.data.abort.abort()
           sockets.delete(socket)
         },
       },
@@ -250,6 +314,7 @@ export function createRemoteAccess({
   async function disconnect(deviceId?: string) {
     for (const socket of sockets) {
       if (!deviceId || socket.data.deviceId === deviceId) {
+        socket.data.abort.abort()
         socket.terminate()
         sockets.delete(socket)
       }

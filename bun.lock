@@ -100,6 +100,21 @@
         "vite": "catalog:",
       },
     },
+    "apps/ios": {
+      "name": "@monica/ios",
+      "dependencies": {
+        "@monica/workbench": "workspace:*",
+        "react": "catalog:",
+        "react-dom": "catalog:",
+      },
+      "devDependencies": {
+        "@orpc/server": "catalog:",
+        "@types/react": "catalog:",
+        "@types/react-dom": "catalog:",
+        "drizzle-orm": "catalog:",
+        "vite": "catalog:",
+      },
+    },
     "apps/web": {
       "name": "@monica/web",
       "dependencies": {
@@ -450,6 +465,8 @@
     "@monica/desktop": ["@monica/desktop@workspace:apps/desktop"],
 
     "@monica/extension": ["@monica/extension@workspace:apps/extension"],
+
+    "@monica/ios": ["@monica/ios@workspace:apps/ios"],
 
     "@monica/job": ["@monica/job@workspace:packages/job"],
 
