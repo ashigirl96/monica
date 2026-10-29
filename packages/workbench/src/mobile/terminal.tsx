@@ -62,6 +62,7 @@ export function TerminalOutput({
   const [paste, setPaste] = useState<string | null>(null)
   const [snapshot, setSnapshot] = useState<string | null>(null)
   const [fontSize, setFontSize] = useState(14)
+  const fontSizeRef = useRef(14)
   const [state, setState] = useState<Parameters<TerminalDisplay['state']>[0]>('waiting')
   useEffect(() => {
     const viewport = window.visualViewport
@@ -91,82 +92,103 @@ export function TerminalOutput({
     const panViewport = viewportRef.current
     if (!surface || !panViewport) return
     let current = true
-    const term = new Terminal({
-      disableStdin: true,
-      screenReaderMode: true,
-      scrollback: 5000,
-      fontSize: 14,
-      allowProposedApi: true,
-    })
-    term.parser.registerOscHandler(52, () => true)
-    term.parser.registerOscHandler(1337, () => true)
-    term.attachCustomKeyEventHandler(() => false)
-    term.open(surface)
-    terminal.current = term
-    let touch: { identifier: number; x: number; y: number; remainder: number } | null = null
-    const startPan = (event: TouchEvent) => {
-      event.stopPropagation()
-      const point = event.touches.length === 1 ? event.touches[0] : undefined
-      touch = point
-        ? { identifier: point.identifier, x: point.clientX, y: point.clientY, remainder: 0 }
-        : null
-    }
-    const movePan = (event: TouchEvent) => {
-      event.stopPropagation()
-      const point = event.touches.length === 1 ? event.touches[0] : undefined
-      if (!touch || !point || point.identifier !== touch.identifier) {
+    let disposeTerminal = () => {}
+    const createTerminal = () => {
+      const term = new Terminal({
+        disableStdin: true,
+        screenReaderMode: true,
+        scrollback: 5000,
+        fontSize: fontSizeRef.current,
+        allowProposedApi: true,
+      })
+      term.parser.registerOscHandler(52, () => true)
+      term.parser.registerOscHandler(1337, () => true)
+      term.attachCustomKeyEventHandler(() => false)
+      term.open(surface)
+      terminal.current = term
+      let touch: { identifier: number; x: number; y: number; remainder: number } | null = null
+      const startPan = (event: TouchEvent) => {
+        event.stopPropagation()
+        const point = event.touches.length === 1 ? event.touches[0] : undefined
+        touch = point
+          ? { identifier: point.identifier, x: point.clientX, y: point.clientY, remainder: 0 }
+          : null
+      }
+      const movePan = (event: TouchEvent) => {
+        event.stopPropagation()
+        const point = event.touches.length === 1 ? event.touches[0] : undefined
+        if (!touch || !point || point.identifier !== touch.identifier) {
+          touch = null
+          return
+        }
+        event.preventDefault()
+        const height = term.element?.clientHeight ?? 0
+        const lineHeight = height / term.rows
+        if (!lineHeight) return
+        const buffer = term.buffer.active
+        const top = Math.max(
+          0,
+          Math.min(
+            buffer.baseY * lineHeight + panViewport.scrollHeight - panViewport.clientHeight,
+            buffer.viewportY * lineHeight +
+              panViewport.scrollTop +
+              touch.remainder +
+              touch.y -
+              point.clientY,
+          ),
+        )
+        const line = Math.min(buffer.baseY, Math.floor(top / lineHeight))
+        term.scrollToLine(line)
+        panViewport.scrollTop = top - line * lineHeight
+        panViewport.scrollLeft += touch.x - point.clientX
+        following.current =
+          line === buffer.baseY &&
+          panViewport.scrollTop + panViewport.clientHeight >= terminalCursorBottom(term) - 1
+        touch = {
+          identifier: point.identifier,
+          x: point.clientX,
+          y: point.clientY,
+          remainder: top - (buffer.viewportY * lineHeight + panViewport.scrollTop),
+        }
+      }
+      const endPan = (event: TouchEvent) => {
+        event.stopPropagation()
         touch = null
-        return
       }
-      event.preventDefault()
-      const height = term.element?.clientHeight ?? 0
-      const lineHeight = height / term.rows
-      if (!lineHeight) return
-      const buffer = term.buffer.active
-      const top = Math.max(
-        0,
-        Math.min(
-          buffer.baseY * lineHeight + panViewport.scrollHeight - panViewport.clientHeight,
-          buffer.viewportY * lineHeight +
-            panViewport.scrollTop +
-            touch.remainder +
-            touch.y -
-            point.clientY,
-        ),
-      )
-      const line = Math.min(buffer.baseY, Math.floor(top / lineHeight))
-      term.scrollToLine(line)
-      panViewport.scrollTop = top - line * lineHeight
-      panViewport.scrollLeft += touch.x - point.clientX
-      following.current =
-        line === buffer.baseY &&
-        panViewport.scrollTop + panViewport.clientHeight >= terminalCursorBottom(term) - 1
-      touch = {
-        identifier: point.identifier,
-        x: point.clientX,
-        y: point.clientY,
-        remainder: top - (buffer.viewportY * lineHeight + panViewport.scrollTop),
+      // Own reading touches before xterm's document Gesture listener turns them into input.
+      surface.addEventListener('touchstart', startPan, { capture: true, passive: true })
+      surface.addEventListener('touchmove', movePan, { capture: true, passive: false })
+      surface.addEventListener('touchend', endPan, true)
+      surface.addEventListener('touchcancel', endPan, true)
+      disposeTerminal = () => {
+        touch = null
+        surface.removeEventListener('touchstart', startPan, true)
+        surface.removeEventListener('touchmove', movePan, true)
+        surface.removeEventListener('touchend', endPan, true)
+        surface.removeEventListener('touchcancel', endPan, true)
+        term.dispose()
       }
+      return term
     }
-    const endPan = (event: TouchEvent) => {
-      event.stopPropagation()
-      touch = null
-    }
-    // Own reading touches before xterm's document Gesture listener turns them into input.
-    surface.addEventListener('touchstart', startPan, { capture: true, passive: true })
-    surface.addEventListener('touchmove', movePan, { capture: true, passive: false })
-    surface.addEventListener('touchend', endPan, true)
-    surface.addEventListener('touchcancel', endPan, true)
+    let term = createTerminal()
     const view = remote.openTerminal(target, {
-      write: (bytes) =>
-        new Promise((resolve) =>
-          term.write(bytes, () => {
+      reset: () => {
+        disposeTerminal()
+        following.current = true
+        term = createTerminal()
+      },
+      write: (bytes) => {
+        const renderer = term
+        return new Promise((resolve) =>
+          renderer.write(bytes, () => {
             // xterm's write callback ends parsing, not painting.
             requestAnimationFrame(() =>
               requestAnimationFrame(() => {
                 const viewport = viewportRef.current
                 if (
                   viewport &&
+                  current &&
+                  terminal.current === renderer &&
                   following.current &&
                   term.buffer.active.type === 'normal' &&
                   term.buffer.active.viewportY === term.buffer.active.baseY
@@ -179,7 +201,8 @@ export function TerminalOutput({
               }),
             )
           }),
-        ),
+        )
+      },
       inputReady: (available) => {
         if (current) setReady(available)
       },
@@ -193,15 +216,12 @@ export function TerminalOutput({
       viewRef.current = undefined
       terminal.current = undefined
       current = false
-      surface.removeEventListener('touchstart', startPan, true)
-      surface.removeEventListener('touchmove', movePan, true)
-      surface.removeEventListener('touchend', endPan, true)
-      surface.removeEventListener('touchcancel', endPan, true)
       void view.close()
-      term.dispose()
+      disposeTerminal()
     }
   }, [remote, target])
   useEffect(() => {
+    fontSizeRef.current = fontSize
     if (terminal.current) terminal.current.options.fontSize = fontSize
   }, [fontSize])
 
@@ -277,8 +297,14 @@ export function TerminalOutput({
     exited: 'Terminal Sessionは終了しました',
     closed: '表示接続を解除しました。Macの作業は継続します。',
     'detach-pending': '表示は停止しました。解除確認待ち。',
-    unavailable: '切断しました。接続状態を確認してください。',
-    'approval-required': '登録が失効しました。',
+    unavailable: '切断しました。MacとTailscaleを確認中です。入力は再送しません。',
+    background: '背景では表示接続を停止しています。',
+    removed: 'Tabは削除されました。',
+    replaced: 'Terminal Sessionが置き換わりました。一覧から選び直してください。',
+    lost: 'Terminal Sessionを失いました。Macで確認してください。',
+    failed: 'Terminal Sessionを起動できませんでした。Macで確認してください。',
+    revoked: '登録が失効しました。Macで確認して再登録してください。',
+    'approval-required': '承認が必要です。Macで登録を確認してください。',
     'identity-changed': 'Macのidentityを確認してください。',
     incompatible: 'アプリを更新してください。',
   }

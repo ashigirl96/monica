@@ -6,6 +6,7 @@ import Network
 struct RemoteFailure: Error {
     let state: String
     static let unavailable = RemoteFailure(state: "unavailable")
+    static let revoked = RemoteFailure(state: "revoked")
     static let approvalRequired = RemoteFailure(state: "approval-required")
     static let identityChanged = RemoteFailure(state: "identity-changed")
     static let incompatible = RemoteFailure(state: "incompatible")
@@ -180,10 +181,11 @@ final class RemoteHTTP: NSObject, URLSessionDelegate, URLSessionTaskDelegate, @u
 
     private func validate(_ response: URLResponse) throws {
         guard let response = response as? HTTPURLResponse else { throw RemoteFailure.unavailable }
-        if response.statusCode == 401 { throw RemoteFailure.approvalRequired }
+        if response.statusCode == 401 { throw registration.lifecycle == .approved ? RemoteFailure.revoked : RemoteFailure.approvalRequired }
         if response.statusCode == 426 || response.statusCode == 400 { throw RemoteFailure.incompatible }
         if (300...399).contains(response.statusCode) { throw RemoteFailure.identityChanged }
-        guard (200...299).contains(response.statusCode) else { throw RemoteFailure.unavailable }
+        if [502, 503, 504].contains(response.statusCode) { throw RemoteFailure.unavailable }
+        guard (200...299).contains(response.statusCode) else { throw RemoteFailure.incompatible }
     }
 
     func register(invitation: String, name: String) async throws -> Data {
@@ -212,7 +214,13 @@ final class RemoteHTTP: NSObject, URLSessionDelegate, URLSessionTaskDelegate, @u
         if trustLock.withLock({ trustRejected }) || [-1200, -1201, -1202, -1203, -1204, -1205, -1206].contains(error.errorCode) {
             return .identityChanged
         }
-        return .unavailable
+        switch error.code {
+        case .timedOut, .cannotFindHost, .cannotConnectToHost, .networkConnectionLost,
+             .dnsLookupFailed, .notConnectedToInternet, .internationalRoamingOff,
+             .callIsActive, .dataNotAllowed, .cancelled:
+            return .unavailable
+        default: return .incompatible
+        }
     }
 
     func changes() throws -> URLSessionWebSocketTask { try webSocket("workbench/changes") }

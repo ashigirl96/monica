@@ -158,7 +158,7 @@ dev の desktop は `MONICA_HOME` ごとに identifier と vite の port が分�
 1. Mac で継続出力する作業を開き、iPhone で同じ Tab を選ぶ。保持された末尾の後に live 出力が出ることと、履歴・TUI 復元の制限表示を確認する。Mac の選択、focus、未読は変わらない。iPhone の xterm 自動応答から Write は出ない。基本入力欄から送った文字と改行だけが同じ PTY に届く。
 2. Mac の窓を resize する。iPhone は Mac が適用した rows/cols に追従する。iPhone の回転と表示領域の変更では PTY サイズが変わらない。Shell は通知への登録後に attach し、resize 通知の送信成功ではなく非同期 List の read-back を確認する。
 3. iPhone の「一覧へ戻る · 表示解除」、別 Tab の選択、背景移行を順に試す。専用 ptyd 接続だけが減り、Mac の出力と入力、PTY の running とサイズが残ることを確認する。表示解除は Close Tab ではない。`lsof -U -a -p <Shell の pid>` で専用接続の増減を比べ、共有 desktop 接続まで消えていないことを見る。
-4. 閲覧中に Backend を終了し、Shell が専用接続を片付けても desktop の入力が続くことを確認する。端末の自動再接続は行わない。復帰後は一覧から選び直す。失効・無効化は先に認可を拒否し、Shell の socket shutdown と reader 終了の ACK が確認できたときだけ完了になる。
+4. 閲覧中に Backend を終了し、Shell が専用接続を片付けても desktop の入力が続くことを確認する。iPhone は購読 ACK 後に一覧を取り直し、同じ Tab と Terminal Session の場合だけ新しい専用接続へ復帰する。置換後は一覧から選び直す。既存 desktop の attach 失敗を lost として自動再接続しない規則は変えない。失効・無効化は先に認可を拒否し、Shell の socket shutdown と reader 終了の ACK が確認できたときだけ完了になる。
 5. 自動境界試験は `bun test packages/workbench/src/remote-access.test.ts` と `cargo test -p monica-ptyd --test daemon`。前者は既存 fake ptyd と実 Rust relay、隔離 TLS/WSS、実 Ledger を使う。後者は実 ptyd の EOF と desktop 継続を見る。実機・desktop 画面の確認をこれだけで済ませない。
 
 ### hidden Tab の入力と Mac renderer
@@ -171,6 +171,12 @@ dev の desktop は `MONICA_HOME` ごとに identifier と vite の port が分�
 6. `bun test packages/workbench/src/remote-access.test.ts packages/workbench/src/ui/terminal-connections.test.ts` と `cargo test -p monica-ptyd --test remote` は世代、失効、入力 ACK 喪失、細かい echo burst、Exit/Reap を見る。出力 queue は隣接 Output を最大8個の45KiB chunkへまとめ、満杯なら remote だけを切る。実 Mac WKWebView の focus・非表示 open と query 応答は実行中の隔離 desktop でも確認する。
 
 iPhone の IME・補助キー・text paste・長押し選択・コピー・TUIスクロール・倍率・accessibility の確認は `.claude/skills/ios-dev/SKILL.md` に従う。desktop の file paste や clipboard と混同せず、phone の回転と keyboard 開閉で Mac の grid と focus が変わらないことを見る。
+
+### Backend 再起動と phone の復帰
+
+1. 自分の隔離 home の `backend.json` の PID を読み、他の app の Backend でないことを確認する。その PID だけを一時停止して、Mac xterm のユーザー入力と新しい DSR 等への自動応答が続くことを見る。停止試験は finally で継続、またはその同じ PID を終了し、停止した process を残さない。
+2. その Backend を終了して Shell に再起動させる。`backend.json` の新 PID、同じ Tab/session ID と PTY PID、desktop の選択・focus・grid を照合する。remote だけが切れ、再認証・購読 ACK・一覧・fresh attach を経て戻る。stdin EOF と private socket EOF は自動試験でも確認する。phone から Backend の起動命令は送らない。
+3. iPhone を背景・foreground へ繰り返し移し、`lsof -U -a -p <Shell の pid>` と relay 試験で専用 socket の増減を見る。古い listener と接続が積み上がらないことを確認する。送達不明の入力は replay 後も送達不明で、自動再送されない。Tab 置換・削除・lost・終了と失効の確認は ios-dev の復帰手順に従う。
 
 Shell は Backend の起動ごとに同 UID 専用の 0700 directory と 0600 Unix socket、起動ごとの secret を用意する。socket path と secret は Backend の環境だけへ渡し、PTY へは継承しない。資格を調べるために process の全環境をログへ出さない。
 

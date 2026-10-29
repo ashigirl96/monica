@@ -190,6 +190,12 @@ final class NativeTests: XCTestCase {
         defer { control.close() }
         _ = try await control.read(.terminalSessions)
         let webview = relaunched.webview!
+        for _ in 0..<100 {
+            if let text = try? await webview.evaluateJavaScript("document.querySelector('header [role=status]')?.textContent") as? String, text.contains("登録が失効") { break }
+            try await Task.sleep(for: .milliseconds(20))
+        }
+        let liveRevoked = try await webview.evaluateJavaScript("document.querySelector('header [role=status]').textContent") as? String
+        XCTAssertTrue(liveRevoked?.contains("登録が失効") == true)
         _ = try await webview.evaluateJavaScript("""
             window.registrationChecks = 0;
             const handler = window.webkit.messageHandlers.monica;
@@ -212,22 +218,37 @@ final class NativeTests: XCTestCase {
         let expired = try await webview.evaluateJavaScript("document.body.textContent.includes('登録の期限が切れました')") as? Bool
         XCTAssertEqual(expired, false, "Approved credentials must not expire with their old pending deadline")
         let status = try await webview.evaluateJavaScript("document.querySelector('header [role=status]').textContent") as? String
-        XCTAssertTrue(status?.contains("承認が必要") == true)
+        XCTAssertTrue(status?.contains("登録が失効") == true)
         let count = try await webview.evaluateJavaScript("document.querySelectorAll('article').length") as? Int
         XCTAssertEqual(count, 0)
+        _ = try await webview.evaluateJavaScript("""
+            window.revokedRequests = [];
+            const revokedOriginal = window.webkit.messageHandlers.monica.postMessage.bind(window.webkit.messageHandlers.monica);
+            window.webkit.messageHandlers.monica.postMessage = message => {
+                if (['registration','subscribe','layout/get','terminal-open'].includes(message.operation)) window.revokedRequests.push(message.operation);
+                return revokedOriginal(message);
+            };
+            null;
+            """)
+        relaunched.bridge.suspend()
+        _ = try await webview.callAsyncJavaScript("await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))", arguments: [:], in: nil, contentWorld: .page)
+        relaunched.bridge.resume()
+        _ = try await webview.callAsyncJavaScript("await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))", arguments: [:], in: nil, contentWorld: .page)
+        let automaticRetries = try await webview.evaluateJavaScript("window.revokedRequests.length") as? Int
+        XCTAssertEqual(automaticRetries, 0, "Revocation requires explicit action, not foreground retry")
         relaunched.bridge.suspend()
         let revokedRelaunch = WorkbenchController()
         revokedRelaunch.loadViewIfNeeded()
         window.rootViewController = revokedRelaunch
         defer { revokedRelaunch.bridge.suspend() }
         for _ in 0..<100 {
-            if let text = try? await revokedRelaunch.webview!.evaluateJavaScript("document.querySelector('header [role=status]')?.textContent") as? String, text.contains("承認が必要") { break }
+            if let text = try? await revokedRelaunch.webview!.evaluateJavaScript("document.querySelector('header [role=status]')?.textContent") as? String, text.contains("登録が失効") { break }
             try await Task.sleep(for: .milliseconds(20))
         }
         let revokedExpired = try await revokedRelaunch.webview!.evaluateJavaScript("document.body.textContent.includes('登録の期限が切れました')") as? Bool
         XCTAssertEqual(revokedExpired, false)
         let revokedStatus = try await revokedRelaunch.webview!.evaluateJavaScript("document.querySelector('header [role=status]').textContent") as? String
-        XCTAssertTrue(revokedStatus?.contains("承認が必要") == true)
+        XCTAssertTrue(revokedStatus?.contains("登録が失効") == true)
         revokedRelaunch.bridge.suspend()
         let pending = fixtures["pending"]!
         try store.save(Registration(endpoint: pending.endpoint, certificate: pending.certificate,
@@ -437,20 +458,44 @@ final class NativeTests: XCTestCase {
         XCTAssertEqual(sessions.first?["cols"] as? Int, 97)
         _ = try await webview.evaluateJavaScript("document.querySelector('article button').click()")
         try await until("document.body.textContent.includes('閲覧中')")
-        controller.bridge.suspend()
-        try await until("document.querySelector('.xterm') === null")
-        for _ in 0..<100 {
-            after = try JSONSerialization.jsonObject(with: await control.read(.layout)) as! [String: Any]
-            if after["connections"] as? Int == 1 { break }
-            try await Task.sleep(for: .milliseconds(20))
+        _ = try await webview.evaluateJavaScript("""
+            window.recoveryOperations = [];
+            const recoveryHandler = window.webkit.messageHandlers.monica;
+            const recoveryOriginal = recoveryHandler.postMessage.bind(recoveryHandler);
+            recoveryHandler.postMessage = message => {
+                window.recoveryOperations.push({operation:message.operation,tabId:message.tabId,terminalSessionId:message.terminalSessionId});
+                return recoveryOriginal(message);
+            };
+            null;
+            """)
+        for _ in 0..<3 {
+            controller.bridge.suspend()
+            try await until("document.body.textContent.includes('背景では表示接続を停止')")
+            for _ in 0..<100 {
+                after = try JSONSerialization.jsonObject(with: await control.read(.layout)) as! [String: Any]
+                if after["connections"] as? Int == 1 { break }
+                try await Task.sleep(for: .milliseconds(20))
+            }
+            XCTAssertEqual(after["connections"] as? Int, 1)
+            controller.bridge.resume()
+            try await until("document.querySelectorAll('article').length === 12 && document.body.textContent.includes('閲覧中')")
+            try await until("document.querySelector('.xterm-accessibility-tree')?.textContent.includes('live-phone-output') === true")
+            try await until("document.querySelector('.xterm-accessibility-tree')?.children.length === 31")
+            let recovered = try JSONSerialization.jsonObject(with: await control.read(.layout)) as! [String: Any]
+            XCTAssertEqual(recovered["connections"] as? Int, 2)
+            XCTAssertEqual(recovered["writes"] as? Int, 0)
+            XCTAssertEqual(recovered["lifecycle"] as? Int, 0)
         }
-        XCTAssertEqual(after["connections"] as? Int, 1)
-        controller.bridge.resume()
-        try await until("document.querySelectorAll('article').length === 12")
-        let stillClosed = try await webview.evaluateJavaScript("document.querySelector('.xterm') === null") as? Bool
-        XCTAssertEqual(stillClosed, true)
-        _ = try await webview.evaluateJavaScript("document.querySelector('article button').click()")
-        try await until("document.body.textContent.includes('閲覧中')")
+        let operations = try await webview.evaluateJavaScript("window.recoveryOperations") as! [[String: Any]]
+        let opens = operations.filter { $0["operation"] as? String == "terminal-open" }
+        XCTAssertEqual(opens.count, 3)
+        let target = try XCTUnwrap(after["target"] as? [String: String])
+        XCTAssertTrue(opens.allSatisfy { $0["tabId"] as? String == target["tabId"] && $0["terminalSessionId"] as? String == target["terminalSessionId"] })
+        for index in operations.indices where operations[index]["operation"] as? String == "terminal-open" {
+            let preceding = operations[..<index].compactMap { $0["operation"] as? String }
+            XCTAssertTrue(preceding.contains("subscribe"))
+            XCTAssertTrue(preceding.contains("layout/get"))
+        }
         _ = try await webview.evaluateJavaScript("window.savedAnimationFrame = window.requestAnimationFrame; window.heldFrames = []; window.requestAnimationFrame = callback => { window.heldFrames.push(callback); return 0 }; void 0")
         _ = try await control.read(.terminalSessions)
         for _ in 0..<400 {
@@ -462,6 +507,55 @@ final class NativeTests: XCTestCase {
         XCTAssertEqual(after["writes"] as? Int, 0)
         XCTAssertEqual(after["lifecycle"] as? Int, 0)
         _ = try await webview.evaluateJavaScript("window.requestAnimationFrame = window.savedAnimationFrame; for (const callback of window.heldFrames) requestAnimationFrame(callback); void 0")
+    }
+
+    @MainActor
+    func testRemoteViewRecoversAfterRealLedgerListenerRestartWithoutReplayingInput() async throws {
+        let all = try fixtures()
+        let store = CredentialStore()
+        try store.save(registration(all["large"]!))
+        defer { try? store.remove() }
+        let control = RemoteHTTP(registration(all["reconnect-control"]!))
+        defer { control.close() }
+        let controller = WorkbenchController()
+        controller.loadViewIfNeeded()
+        let scene = try XCTUnwrap(UIApplication.shared.connectedScenes.first as? UIWindowScene)
+        let window = try XCTUnwrap(scene.windows.first(where: { $0.isKeyWindow }))
+        (window.rootViewController as? WorkbenchController)?.bridge.suspend()
+        window.rootViewController = controller
+        defer { controller.bridge.suspend() }
+        let webview = controller.webview!
+        func until(_ expression: String) async throws {
+            for _ in 0..<200 {
+                if let value = try? await webview.evaluateJavaScript(expression) as? Bool, value { return }
+                try await Task.sleep(for: .milliseconds(50))
+            }
+            XCTFail("Never observed: \(expression)")
+        }
+        try await until("document.querySelectorAll('article').length === 12")
+        _ = try await webview.evaluateJavaScript("""
+            window.restartOpens = [];
+            const restartHandler = window.webkit.messageHandlers.monica;
+            const restartOriginal = restartHandler.postMessage.bind(restartHandler);
+            restartHandler.postMessage = message => {
+                if (message.operation === 'terminal-open') window.restartOpens.push({tabId:message.tabId,terminalSessionId:message.terminalSessionId});
+                return restartOriginal(message);
+            };
+            document.querySelector('article button').click();
+            null;
+            """)
+        try await until("document.body.textContent.includes('閲覧中')")
+        let before = try JSONSerialization.jsonObject(with: await control.read(.layout)) as! [String: Any]
+        _ = try await control.read(.terminalSessions)
+        try await until("window.restartOpens.length === 2 && document.body.textContent.includes('閲覧中')")
+        try await until("document.querySelector('.xterm-accessibility-tree')?.textContent.includes('retained-phone-tail') === true")
+        let after = try JSONSerialization.jsonObject(with: await control.read(.layout)) as! [String: Any]
+        XCTAssertEqual(after["connections"] as? Int, 2)
+        XCTAssertEqual(after["creates"] as? Int, before["creates"] as? Int)
+        XCTAssertEqual(after["writes"] as? Int, before["writes"] as? Int)
+        XCTAssertEqual(after["lifecycle"] as? Int, before["lifecycle"] as? Int)
+        let opens = try await webview.evaluateJavaScript("window.restartOpens") as! [[String: String]]
+        XCTAssertEqual(opens, Array(repeating: try XCTUnwrap(after["target"] as? [String: String]), count: 2))
     }
 
     @MainActor
@@ -523,7 +617,8 @@ final class NativeTests: XCTestCase {
         let control = RemoteHTTP(registration(all["input-control"]!))
         let touchControl = RemoteHTTP(registration(all["touch-control"]!))
         let macControl = RemoteHTTP(registration(all["terminal-control"]!))
-        defer { control.close(); touchControl.close(); macControl.close() }
+        let reconnectControl = RemoteHTTP(registration(all["reconnect-control"]!))
+        defer { control.close(); touchControl.close(); macControl.close(); reconnectControl.close() }
         let controller = WorkbenchController()
         controller.loadViewIfNeeded()
         let scene = try XCTUnwrap(UIApplication.shared.connectedScenes.first as? UIWindowScene)
@@ -560,6 +655,54 @@ final class NativeTests: XCTestCase {
         try await until("document.querySelector('.xterm-accessibility-tree')?.children.length === 31")
         let beforeViewing = try JSONSerialization.jsonObject(with: await touchControl.read(.layout)) as! [String: Any]
         let baseline = (beforeViewing["writes"] as! [[String: Any]]).count
+        UIPasteboard.general.string = "reconnect-preview😀"
+        try await js("document.querySelector('[data-paste]').click()")
+        try await until("document.querySelector('[data-confirm-paste]') !== null")
+        try await js("""
+            window.combinedOldScreen = document.querySelector('.xterm-screen');
+            const draft = document.querySelector('form input');
+            Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').set.call(draft,'下書き😀');
+            draft.dispatchEvent(new Event('input',{bubbles:true}));
+            draft.dispatchEvent(new CompositionEvent('compositionstart',{bubbles:true}));
+            document.querySelector('[data-zoom-in]').click();
+            """)
+        _ = try await reconnectControl.read(.terminalSessions)
+        try await until("document.querySelector('.xterm-screen') !== combinedOldScreen && document.querySelector('.terminal-state').textContent.includes('閲覧中')")
+        _ = try await control.read(.terminalSessions)
+        try await until("document.querySelector('.terminal-state').textContent.includes('Macと共有入力')")
+        let preservedTargetState = try await webview.evaluateJavaScript("document.querySelector('form input').value === '下書き😀' && document.querySelector('form button').disabled && document.querySelector('.terminal-paste textarea').value === 'reconnect-preview😀' && getComputedStyle(document.querySelector('.xterm-rows')).fontSize === '16px' && document.querySelectorAll('.xterm').length === 1") as? Bool
+        XCTAssertEqual(preservedTargetState, true, "Fresh replay preserves the selected target's draft, composition and explicit preview, not an old renderer")
+        XCTAssertEqual(UIPasteboard.general.string, "reconnect-preview😀", "Fresh renderer replay must reinstall the OSC clipboard rejection")
+        try await js("""
+            document.querySelector('form input').dispatchEvent(new CompositionEvent('compositionend',{bubbles:true}));
+            document.querySelector('.terminal-paste button:last-of-type').click();
+            """)
+        _ = try await webview.evaluateJavaScript("""
+            window.combinedRAF = window.requestAnimationFrame;
+            window.combinedFrames = [];
+            window.requestAnimationFrame = callback => { combinedFrames.push(callback); return 0 };
+            null;
+            """)
+        _ = try await control.read(.terminalSessions)
+        try await until("combinedFrames.length > 0")
+        controller.bridge.suspend()
+        try await until("document.body.textContent.includes('背景では表示接続を停止')")
+        _ = try await webview.evaluateJavaScript("window.requestAnimationFrame = combinedRAF; window.combinedOldScreen = document.querySelector('.xterm-screen'); null")
+        controller.bridge.resume()
+        try await until("document.querySelector('.xterm-screen') !== combinedOldScreen && document.querySelector('form button')?.disabled === false")
+        try await js("""
+            const viewport = document.querySelector('.terminal-viewport');
+            viewport.scrollTop = 0;
+            window.positionBeforeOldFrame = viewport.scrollTop;
+            window.requestAnimationFrame = callback => { callback(); return 0 };
+            for (const callback of combinedFrames) callback();
+            window.requestAnimationFrame = combinedRAF;
+            """)
+        let oldCallbackIsolated = try await webview.evaluateJavaScript("document.querySelector('.terminal-viewport').scrollTop === positionBeforeOldFrame && document.querySelectorAll('.xterm').length === 1") as? Bool
+        XCTAssertEqual(oldCallbackIsolated, true, "Old draw completion cannot move the fresh renderer's reading position")
+        let recoveredAudit = try JSONSerialization.jsonObject(with: await touchControl.read(.layout)) as! [String: Any]
+        XCTAssertEqual((recoveredAudit["writes"] as! [[String: Any]]).count, baseline, "Restart, replay, foreground and old callbacks never replay input, after a later actual Create")
+        XCTAssertEqual(recoveredAudit["resizes"] as? Int, beforeViewing["resizes"] as? Int)
         // These are synthetic composition events, not a Japanese OS keyboard acceptance test.
         try await js("""
             window.field = document.querySelector('form input');
@@ -655,8 +798,10 @@ final class NativeTests: XCTestCase {
         try await until("document.body.textContent.includes('256KiB')")
         let oversizedWrites = try await writes().count
         XCTAssertEqual(oversizedWrites, sent.count)
-        _ = try await touchControl.read(.terminalSessions)
-        try await until("document.querySelector('.xterm-accessibility-tree').textContent.includes('phone-normal-end-1')")
+        try await js("document.querySelector('.terminal-viewport').scrollTop = 100000; document.querySelector('.terminal-viewport').dispatchEvent(new Event('scroll'))")
+        let normal1 = try JSONSerialization.jsonObject(with: await touchControl.read(.terminalSessions)) as! [String: Any]
+        let marker1 = try XCTUnwrap(normal1["normalOutput"] as? Int)
+        try await until("document.querySelector('.xterm-accessibility-tree').textContent.includes('phone-normal-end-\(marker1)')")
         let tailVisible = try await webview.evaluateJavaScript("""
             (() => {
                 const row = [...document.querySelectorAll('.xterm-rows > div')].find(element => element.textContent.includes('phone-normal-end'));
@@ -673,8 +818,9 @@ final class NativeTests: XCTestCase {
             outputViewport.scrollTop = 1;
             """)
         let readingPosition = try await webview.evaluateJavaScript("outputViewport.scrollTop") as? Double
-        _ = try await touchControl.read(.terminalSessions)
-        try await until("document.querySelector('.xterm-accessibility-tree').textContent.includes('phone-normal-end-2')")
+        let normal2 = try JSONSerialization.jsonObject(with: await touchControl.read(.terminalSessions)) as! [String: Any]
+        let marker2 = try XCTUnwrap(normal2["normalOutput"] as? Int)
+        try await until("document.querySelector('.xterm-accessibility-tree').textContent.includes('phone-normal-end-\(marker2)')")
         let afterOutputPosition = try await webview.evaluateJavaScript("outputViewport.scrollTop") as? Double
         XCTAssertEqual(readingPosition, afterOutputPosition, "New output must not steal the user's reading position")
         try await js("""
@@ -772,8 +918,9 @@ final class NativeTests: XCTestCase {
         XCTAssertEqual(gestureWrites.count, sent.count + 1, "Normal/TUI viewing gestures must not generate terminal mouse or key bytes")
         XCTAssertEqual(gestureWrites.last, Data([27]).base64EncodedString())
         sent = gestureWrites
-        _ = try await touchControl.read(.terminalSessions)
-        try await until("document.querySelector('.xterm-accessibility-tree').textContent.includes('phone-normal-end-3')")
+        let normal3 = try JSONSerialization.jsonObject(with: await touchControl.read(.terminalSessions)) as! [String: Any]
+        let marker3 = try XCTUnwrap(normal3["normalOutput"] as? Int)
+        try await until("document.querySelector('.xterm-accessibility-tree').textContent.includes('phone-normal-end-\(marker3)')")
         for (name, bytes) in [("上矢印", "\u{1b}[A"), ("下矢印", "\u{1b}[B"), ("左矢印", "\u{1b}[D"), ("右矢印", "\u{1b}[C")] {
             try await js("document.querySelector('[aria-label=\"\(name)\"]').click()")
             try await until("document.querySelector('[aria-label=\"Esc\"]').disabled === false")

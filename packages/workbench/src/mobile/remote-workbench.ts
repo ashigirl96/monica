@@ -18,6 +18,7 @@ import {
 export type RemoteUnavailable =
   | 'unavailable'
   | 'approval-required'
+  | 'revoked'
   | 'identity-changed'
   | 'incompatible'
 export class RemoteError extends Error {
@@ -28,7 +29,7 @@ export class RemoteError extends Error {
   }
 }
 export type RemoteState =
-  | { state: 'waiting' | RemoteUnavailable }
+  | { state: 'waiting' | 'background' | RemoteUnavailable }
   | {
       state: 'available'
       layout: Layout
@@ -45,11 +46,23 @@ export type TerminalStream = {
   close(): Promise<boolean>
 }
 export type TerminalDisplay = {
+  reset?(): void
   write(bytes: Uint8Array): Promise<void>
   size(rows: number, cols: number): void
   inputReady?(ready: boolean): void
   state(
-    state: 'waiting' | 'viewing' | 'exited' | 'closed' | 'detach-pending' | RemoteUnavailable,
+    state:
+      | 'waiting'
+      | 'background'
+      | 'viewing'
+      | 'removed'
+      | 'replaced'
+      | 'lost'
+      | 'failed'
+      | 'exited'
+      | 'closed'
+      | 'detach-pending'
+      | RemoteUnavailable,
   ): void
 }
 export type PasteResult = { result: InputResult; acceptedBytes: number; totalBytes: number }
@@ -75,12 +88,221 @@ export type RemoteTransport = {
 export class RemoteWorkbench {
   private readonly transport: RemoteTransport
   private view: TerminalView | undefined
+  private readonly observers = new Set<(state: RemoteState) => void>()
+  private state: RemoteState = { state: 'waiting' }
+  private foreground = true
+  private stopConnection: (() => void) | undefined
+  private failConnection: ((error: unknown) => void) | undefined
+  private blocked = false
+  private connectionReady: (() => void) | undefined
   constructor(transport: RemoteTransport) {
     this.transport = transport
   }
 
+  setForeground(foreground: boolean): void {
+    if (this.foreground === foreground) return
+    this.foreground = foreground
+    this.stopConnection?.()
+    this.stopConnection = undefined
+    this.failConnection = undefined
+    if (!foreground && !this.blocked) this.publish({ state: 'background' })
+    else if (this.observers.size && !this.blocked) this.startConnection()
+  }
+
+  private publish(state: RemoteState): void {
+    this.state = state
+    for (const receive of this.observers) receive(state)
+  }
+
+  private startConnection(): void {
+    this.stopConnection = this.connect((state) => this.publish(state))
+  }
+
+  observe(receive: (state: RemoteState) => void): () => void {
+    this.observers.add(receive)
+    if (this.observers.size === 1 && this.foreground) this.startConnection()
+    else receive(this.state)
+    return () => {
+      this.observers.delete(receive)
+      if (this.observers.size) return
+      this.stopConnection?.()
+      this.stopConnection = undefined
+      this.failConnection = undefined
+      this.blocked = false
+      this.state = { state: this.foreground ? 'waiting' : 'background' }
+    }
+  }
+
   openTerminal(target: TerminalTarget, display: TerminalDisplay): TerminalView {
     const previous = this.view
+    let attachment: Omit<TerminalView, 'paste'> | undefined
+    let released = previous?.close() ?? Promise.resolve(true)
+    let generation = 0
+    let active = true
+    let ended: 'removed' | 'replaced' | 'lost' | 'failed' | 'exited' | 'closed' | undefined
+    let uncertain = false
+    const release = () => {
+      generation++
+      display.inputReady?.(false)
+      if (attachment) {
+        released = attachment.close()
+        attachment = undefined
+      }
+      return released
+    }
+    const stop = this.observe((snapshot) => {
+      if (!active) return
+      if (snapshot.state !== 'available') {
+        void release()
+        display.state(snapshot.state)
+        return
+      }
+      if (ended) {
+        display.state(ended)
+        return
+      }
+      const tab = snapshot.layout.runspaces
+        .flatMap((runspace) => runspace.tabs)
+        .find((item) => item.id === target.tabId)
+      const session = snapshot.terminalSessions.find((item) => item.id === target.terminalSessionId)
+      const invalid =
+        tab && tab.terminalSessionId !== target.terminalSessionId
+          ? 'replaced'
+          : session?.status === 'exited'
+            ? 'exited'
+            : !tab
+              ? 'removed'
+              : !session
+                ? 'lost'
+                : session.status === 'running' || session.status === 'starting'
+                  ? undefined
+                  : session.status
+      // Final output and Exit may still be behind a draw ACK when the Tab leaves the list.
+      if ((invalid === 'exited' || invalid === 'removed') && attachment) {
+        ended = invalid
+        display.inputReady?.(false)
+        if (invalid === 'removed') display.state('removed')
+        return
+      }
+      if (invalid) {
+        ended = invalid
+        void release()
+        display.state(invalid)
+        return
+      }
+      if (attachment) return
+      if (session?.status === 'starting') {
+        display.state('waiting')
+        return
+      }
+      const current = ++generation
+      void (async () => {
+        await released
+        if (!active || ended || current !== generation) return
+        display.reset?.()
+        attachment = this.attachTerminal(target, {
+          write: (bytes) => display.write(bytes),
+          size: (rows, cols) => {
+            if (current === generation) display.size(rows, cols)
+          },
+          inputReady: (ready) => {
+            if (current === generation) display.inputReady?.(ready && !uncertain && !ended)
+          },
+          state: (state) => {
+            if (!active || current !== generation) return
+            if (state === 'viewing') this.connectionReady?.()
+            if (state === 'exited') ended = 'exited'
+            if (ended) {
+              if (state === 'exited') display.state(ended)
+              return
+            }
+            if (state === 'closed') {
+              ended = 'closed'
+              void release()
+              display.state('closed')
+            } else if (state === 'unavailable') {
+              this.failConnection?.(new RemoteError('unavailable'))
+            } else if (
+              state === 'identity-changed' ||
+              state === 'incompatible' ||
+              state === 'approval-required' ||
+              state === 'revoked'
+            ) {
+              this.failConnection?.(new RemoteError(state))
+            } else display.state(state)
+          },
+        })
+      })()
+    })
+    let pasting = false
+    const view: TerminalView = {
+      input: async (bytes) => {
+        if (!active || pasting || uncertain || ended || !attachment) return 'not-sent'
+        const result = await attachment.input(bytes)
+        if (result === 'uncertain') {
+          uncertain = true
+          if (active) display.inputReady?.(false)
+        }
+        return result
+      },
+      paste: async (text) => {
+        const bytes = new TextEncoder().encode(text)
+        const totalBytes = bytes.length
+        let acceptedBytes = 0
+        const connection = attachment
+        const current = generation
+        if (
+          !active ||
+          uncertain ||
+          ended ||
+          !connection ||
+          pasting ||
+          !totalBytes ||
+          totalBytes > 262144
+        )
+          return { result: 'not-sent', acceptedBytes, totalBytes }
+        pasting = true
+        try {
+          for (let offset = 0; offset < totalBytes; offset += 65536) {
+            const chunk = bytes.subarray(offset, offset + 65536)
+            const result =
+              current === generation && active && !ended
+                ? await connection.input(chunk)
+                : 'not-sent'
+            if (result !== 'accepted') {
+              if (acceptedBytes > 0 || result === 'uncertain') {
+                uncertain = true
+                display.inputReady?.(false)
+              }
+              return { result: acceptedBytes > 0 ? 'uncertain' : result, acceptedBytes, totalBytes }
+            }
+            acceptedBytes += chunk.length
+          }
+          return { result: 'accepted', acceptedBytes, totalBytes }
+        } finally {
+          pasting = false
+        }
+      },
+      close: () => {
+        if (!active) return released
+        active = false
+        if (this.view === view) this.view = undefined
+        stop()
+        const closing = release()
+        return closing.then((confirmed) => {
+          display.state(confirmed ? 'closed' : 'detach-pending')
+          return confirmed
+        })
+      },
+    }
+    this.view = view
+    return view
+  }
+
+  private attachTerminal(
+    target: TerminalTarget,
+    display: TerminalDisplay,
+  ): Omit<TerminalView, 'paste'> {
     let active = true
     let stream: TerminalStream | undefined
     let closing: Promise<boolean> | undefined
@@ -99,7 +321,6 @@ export class RemoteWorkbench {
         display.inputReady?.(false)
       }
     }
-    let pasting = false
     const input = async (bytes: Uint8Array): Promise<InputResult> => {
       if (
         !active ||
@@ -127,33 +348,8 @@ export class RemoteWorkbench {
       }
       return result.promise.finally(() => clearTimeout(timer))
     }
-    const view: TerminalView = {
-      input: (bytes) => (pasting ? Promise.resolve('not-sent') : input(bytes)),
-      paste: async (text) => {
-        const bytes = new TextEncoder().encode(text)
-        const totalBytes = bytes.length
-        let acceptedBytes = 0
-        if (pasting || pending || !totalBytes || totalBytes > 262144)
-          return { result: 'not-sent', acceptedBytes, totalBytes }
-        pasting = true
-        try {
-          for (let offset = 0; offset < totalBytes; offset += 65536) {
-            const chunk = bytes.subarray(offset, offset + 65536)
-            const result = await input(chunk)
-            if (result !== 'accepted') {
-              if (acceptedBytes > 0) {
-                uncertain = true
-                display.inputReady?.(false)
-              }
-              return { result: acceptedBytes > 0 ? 'uncertain' : result, acceptedBytes, totalBytes }
-            }
-            acceptedBytes += chunk.length
-          }
-          return { result: 'accepted', acceptedBytes, totalBytes }
-        } finally {
-          pasting = false
-        }
-      },
+    const view = {
+      input,
       close: () => {
         if (closing) return closing
         active = false
@@ -168,10 +364,8 @@ export class RemoteWorkbench {
         return closing
       },
     }
-    this.view = view
     display.state('waiting')
     opened = (async () => {
-      if (previous) await previous.close()
       if (!active) return undefined
       return this.transport.terminal(target)
     })()
@@ -235,22 +429,30 @@ export class RemoteWorkbench {
         active = false
         finishInput('uncertain')
         display.inputReady?.(false)
-        display.state(error instanceof RemoteError ? error.state : 'unavailable')
-        if (stream) {
-          closing = stream.close().catch(() => false)
-          if (!(await closing)) display.state('detach-pending')
-        }
+        if (stream) closing = stream.close().catch(() => false)
+        display.state(
+          error instanceof RemoteError
+            ? error.state
+            : error instanceof ZodError
+              ? 'incompatible'
+              : 'unavailable',
+        )
+        if (closing && !(await closing)) display.state('detach-pending')
       }
     })()
     return view
   }
 
-  observe(receive: (state: RemoteState) => void): () => void {
+  private connect(receive: (state: RemoteState) => void): () => void {
     const lifetime = new AbortController()
     let connection: AbortController | undefined
     let timer: ReturnType<typeof setTimeout> | undefined
     let attempt = 0
+    this.connectionReady = () => {
+      attempt = 0
+    }
     const connect = async () => {
+      if (lifetime.signal.aborted) return
       const current = new AbortController()
       connection = current
       const signal = current.signal
@@ -266,14 +468,17 @@ export class RemoteWorkbench {
             : error instanceof ZodError
               ? 'incompatible'
               : 'unavailable'
+        this.blocked = state !== 'unavailable'
         receive({ state })
         if (state === 'unavailable') {
-          const delay = Math.min(10_000, 500 * 2 ** attempt++ * (1 + Math.random() * 0.2))
+          const delay =
+            Math.min(10_000 / 1.2, 500 * 2 ** Math.min(attempt++, 5)) * (1 + Math.random() * 0.2)
           timer = setTimeout(() => {
             void connect()
           }, delay)
         }
       }
+      this.failConnection = fail
       const refresh = async () => {
         dirty = true
         if (refreshing || !subscribed) return
@@ -294,7 +499,7 @@ export class RemoteWorkbench {
               agentSessions: ListedAgentSessionSchema.array().parse(agentSessions),
             }
             if (!dirty) receive(snapshot)
-            attempt = 0
+            if (!this.view) attempt = 0
           }
         } catch (error) {
           fail(error)

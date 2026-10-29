@@ -230,7 +230,7 @@ const shellEndpoint: { path: string; secret: string } = JSON.parse(
   new TextDecoder().decode((await shellReader.read()).value),
 )
 shellReader.releaseLock()
-const ledger = createWorkbenchLedger({
+const ledgerDeps = {
   shell: shellEndpoint,
   db,
   home: ptydHome,
@@ -238,8 +238,9 @@ const ledger = createWorkbenchLedger({
   notify: () => {},
   nameAgentSession: () => null,
   unread: () => {},
-})
-const client = createRouterClient(router, { context: { db, workbenchLedger: ledger } })
+}
+let ledger = createWorkbenchLedger(ledgerDeps)
+let client = createRouterClient(router, { context: { db, workbenchLedger: ledger } })
 const remoteDirectory = join(ptydHome, 'remote')
 mkdirSync(remoteDirectory, { mode: 0o700 })
 writeFileSync(
@@ -436,6 +437,7 @@ const touchControl = Bun.serve({
         '\x1b[?1049h\x1b[?1h\x1b[?1003h\x1b[?1006hphone-tui-mouse',
       )
     return response({
+      normalOutput,
       sessions: ptyd.sessions,
       resizes: ptyd.receivedAll((op) => op.op === 'resize').length,
       writes: ptyd.receivedAll((op) => op.op === 'write'),
@@ -448,6 +450,43 @@ fixtures['touch-control'] = {
   certificate: good.der,
   credential,
 }
+
+const reconnectControl = Bun.serve({
+  hostname: '127.0.0.1',
+  port: 0,
+  tls: good,
+  async fetch(request) {
+    if (request.headers.get('authorization') !== `Bearer ${credential}`)
+      return new Response('Unauthorized', { status: 401 })
+    if (new URL(request.url).pathname.endsWith('terminalSession/list')) {
+      ledger.stop()
+      ledger = createWorkbenchLedger(ledgerDeps)
+      client = createRouterClient(router, { context: { db, workbenchLedger: ledger } })
+      const restartBind = spyOn(Bun, 'serve').mockImplementation((options) =>
+        originalServe(Object.assign(options, { hostname: '127.0.0.1' })),
+      )
+      try {
+        await ledger.start()
+      } finally {
+        restartBind.mockRestore()
+      }
+    }
+    return response({
+      target: { tabId: terminalTab.id, terminalSessionId: terminalTab.terminalSessionId },
+      connections: ptyd.connections,
+      creates: ptyd.receivedAll((op) => op.op === 'create').length,
+      writes: ptyd.receivedAll((op) => op.op === 'write').length,
+      lifecycle: ptyd.receivedAll((op) => ['terminate', 'reap', 'shutdown'].includes(op.op)).length,
+    })
+  },
+})
+servers.push(reconnectControl)
+fixtures['reconnect-control'] = {
+  endpoint: `https://127.0.0.1:${reconnectControl.port}`,
+  certificate: good.der,
+  credential,
+}
+
 writeFileSync(join(import.meta.dir, 'Tests/Fixtures/fixtures.json'), JSON.stringify(fixtures))
 process.stdout.write('Native HTTPS/WSS fixtures ready\n')
 async function stop() {

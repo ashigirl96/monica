@@ -9,8 +9,11 @@ import { checkServerIdentity } from 'node:tls'
 
 import {
   RemoteWorkbench,
+  RemoteError,
   type TerminalStream,
   type RemoteState,
+  type RemoteTransport,
+  type TerminalTarget,
 } from './mobile/remote-workbench.ts'
 import { TerminalFrameSchema } from './remote-terminal.ts'
 import { remoteDevice } from './schema.ts'
@@ -667,7 +670,7 @@ async function terminalFixture() {
   const tab = (await f.client.layout.get()).runspaces[0]!.tabs[0]!
   await f.settled(tab.terminalSessionId)
   const target = { tabId: tab.id, terminalSessionId: tab.terminalSessionId }
-  async function terminal(): Promise<TerminalStream> {
+  async function terminal(selected: TerminalTarget = target): Promise<TerminalStream> {
     const Socket = WebSocket as unknown as {
       new (url: string, options: Bun.WebSocketOptions): WebSocket
     }
@@ -699,7 +702,7 @@ async function terminalFixture() {
       socket.addEventListener('open', () => resolve())
       socket.addEventListener('error', reject)
     })
-    socket.send(JSON.stringify({ type: 'open', ...target }))
+    socket.send(JSON.stringify({ type: 'open', ...selected }))
     return {
       async prepare() {
         socket.send('{"type":"prepare"}')
@@ -721,13 +724,39 @@ async function terminalFixture() {
       },
     }
   }
-  const remote = new RemoteWorkbench({
+  const transport: RemoteTransport = {
     terminal,
-    async read() {
-      return []
+    async read(path) {
+      const response = await f.request(
+        `/workbench/${path}`,
+        approved.credential,
+        undefined,
+        undefined,
+        {
+          'x-monica-wire-version': '1',
+        },
+      )
+      if (response.status === 401) throw new RemoteError('revoked')
+      expect(response.status).toBe(200)
+      return JSON.parse(response.body)
     },
-    async subscribe() {},
-  })
+    async subscribe(changed, signal, failed) {
+      const ws = await f.websocket(approved.credential, '/workbench/changes')
+      if (signal.aborted) {
+        ws.socket.destroy()
+        return
+      }
+      signal.addEventListener('abort', () => ws.socket.destroy(), { once: true })
+      ws.socket.on('data', (data) => {
+        if (data.toString().includes('"type":"changed"')) changed()
+      })
+      void ws.closed.then(() => {
+        if (!signal.aborted) failed(new RemoteError('unavailable'))
+      })
+      await ws.greeting
+    },
+  }
+  const remote = new RemoteWorkbench(transport)
   async function rendererControl(action: 'ready' | 'stall' | 'disconnect') {
     await relay.stdin.write(
       `${JSON.stringify({ rendererControl: action, session: target.terminalSessionId })}\n`,
@@ -737,7 +766,7 @@ async function terminalFixture() {
     response.releaseLock()
     return JSON.parse(new TextDecoder().decode(value.value))
   }
-  return { ...f, ...approved, shell, target, terminal, remote, relay, rendererControl }
+  return { ...f, ...approved, shell, target, terminal, transport, remote, relay, rendererControl }
 }
 
 test('RemoteWorkbench.openTerminal orders pre-response and replay-time live output after replay and detaches without lifecycle operations', async () => {
@@ -783,6 +812,250 @@ test('RemoteWorkbench.openTerminal orders pre-response and replay-time live outp
   ).toEqual([])
   expect(f.ptyd.sessions[0]).toMatchObject({ running: true, rows: 31, cols: 97 })
   expect(f.ptyd.connections).toBe(1)
+})
+
+test('foreground recovery reauthenticates and freshly attaches the same Tab, then distinguishes removal', async () => {
+  const f = await terminalFixture()
+  const states: string[] = []
+  let changed: (() => void) | undefined
+  const remote = new RemoteWorkbench({
+    terminal: f.terminal,
+    async subscribe(change, signal) {
+      changed = change
+      const ws = await f.websocket(f.credential, '/workbench/changes')
+      signal.addEventListener('abort', () => ws.socket.destroy(), { once: true })
+      await ws.greeting
+    },
+    async read(path) {
+      const response = await f.request(`/workbench/${path}`, f.credential, undefined, undefined, {
+        'x-monica-wire-version': '1',
+      })
+      expect(response.status).toBe(200)
+      return JSON.parse(response.body)
+    },
+  })
+  const viewing = () =>
+    new Promise<void>((resolve) => {
+      onViewing = resolve
+    })
+  let onViewing: (() => void) | undefined
+  let resets = 0
+  const view = remote.openTerminal(f.target, {
+    async write() {},
+    size() {},
+    reset() {
+      resets++
+    },
+    state(value) {
+      states.push(value)
+      if (value === 'viewing') onViewing?.()
+    },
+  })
+  await viewing()
+  expect(resets).toBe(1)
+  remote.setForeground(false)
+  expect(await view.input(new TextEncoder().encode('offline'))).toBe('not-sent')
+  remote.setForeground(true)
+  await viewing()
+  expect(resets).toBe(2)
+  expect(f.ptyd.receivedAll((op) => op.op === 'attach')).toHaveLength(2)
+  expect(f.ptyd.connections).toBe(2)
+  await f.client.tab.close({ id: f.target.tabId })
+  changed?.()
+  await new Promise<void>((resolve) => {
+    const stop = remote.observe((state) => {
+      if (state.state === 'available' && state.layout.runspaces.length === 0) resolve()
+    })
+    onCleanup(stop)
+  })
+  expect(states.at(-1)).toBe('removed')
+  await view.close()
+})
+
+test('a pinned Tab replaced in the background requires explicit selection of its new Terminal Session', async () => {
+  const f = await terminalFixture()
+  await f.client.tab.pin({ id: f.target.tabId })
+  const states: string[] = []
+  let notify: (() => void) | undefined
+  const untilState = (state: string) =>
+    states.at(-1) === state
+      ? Promise.resolve()
+      : new Promise<void>((resolve) => {
+          notify = () => {
+            if (states.at(-1) === state) resolve()
+          }
+        })
+  const view = f.remote.openTerminal(f.target, {
+    async write() {},
+    size() {},
+    state(state) {
+      states.push(state)
+      notify?.()
+    },
+  })
+  await untilState('viewing')
+  f.remote.setForeground(false)
+  f.ptyd.exit(f.target.terminalSessionId, 0)
+  await f.ptyd.received((op) => op.op === 'reap' && op.session_id === f.target.terminalSessionId)
+  const replacement = await f.client.tab.respawn({ id: f.target.tabId, rows: 42, cols: 111 })
+  await f.settled(replacement.terminalSessionId)
+  f.remote.setForeground(true)
+  await untilState('replaced')
+  expect(await view.input(new TextEncoder().encode('never-new-shell'))).toBe('not-sent')
+  const sizes: number[][] = []
+  const selected = f.remote.openTerminal(
+    { tabId: replacement.id, terminalSessionId: replacement.terminalSessionId },
+    {
+      async write() {},
+      size(rows, cols) {
+        sizes.push([rows, cols])
+      },
+      state(state) {
+        states.push(state)
+        notify?.()
+      },
+    },
+  )
+  await untilState('viewing')
+  expect(sizes).toEqual([[42, 111]])
+  expect(
+    f.ptyd
+      .receivedAll((op) => op.op === 'attach')
+      .map((op) => (op.op === 'attach' ? op.session_id : null)),
+  ).toEqual([f.target.terminalSessionId, replacement.terminalSessionId])
+  await selected.close()
+  expect(f.ptyd.connections).toBe(1)
+})
+
+test('a pending input becomes uncertain on background and fresh replay never re-enables or resends it', async () => {
+  const f = await terminalFixture()
+  const lostAck = Promise.withResolvers<void>()
+  const readiness: boolean[] = []
+  const ready = Promise.withResolvers<void>()
+  const viewing: (() => void)[] = []
+  const remote = new RemoteWorkbench({
+    ...f.transport,
+    async terminal(target) {
+      const stream = await f.terminal(target)
+      return {
+        ...stream,
+        async next() {
+          for (;;) {
+            const frame = TerminalFrameSchema.parse(await stream.next())
+            if (frame.type === 'input_result') {
+              lostAck.resolve()
+              continue
+            }
+            return frame
+          }
+        },
+      }
+    },
+  })
+  const nextView = () => new Promise<void>((resolve) => viewing.push(resolve))
+  const first = nextView()
+  const view = remote.openTerminal(f.target, {
+    async write() {},
+    size() {},
+    state(state) {
+      if (state === 'viewing') viewing.shift()?.()
+    },
+    inputReady(value) {
+      readiness.push(value)
+      if (value) ready.resolve()
+    },
+  })
+  await first
+  const renderer = await f.rendererControl('ready')
+  await ready.promise
+  expect(renderer.generation.renderer).toBeGreaterThan(0)
+  const pending = view.input(new TextEncoder().encode('only-once-recovery\r'))
+  await lostAck.promise
+  remote.setForeground(false)
+  expect(await pending).toBe('uncertain')
+  expect(await view.input(new TextEncoder().encode('offline'))).toBe('not-sent')
+  const recovered = nextView()
+  remote.setForeground(true)
+  await recovered
+  expect(readiness.at(-1)).toBe(false)
+  expect(await view.input(new TextEncoder().encode('still-uncertain'))).toBe('not-sent')
+  await view.close()
+  await f.client.runspace.create({ cwd: '/uncertain-barrier', rows: 24, cols: 80 })
+  await f.ptyd.receivedAtLeast(2, (op) => op.op === 'create')
+  expect(f.ptyd.receivedAll((op) => op.op === 'write')).toHaveLength(1)
+  expect(f.ptyd.receivedAll((op) => op.op === 'attach')).toHaveLength(2)
+  expect(f.ptyd.connections).toBe(1)
+})
+
+test('Backend restart restores the authenticated same-session view without recreating the PTY or accepting offline input', async () => {
+  const f = await terminalFixture()
+  const first = Promise.withResolvers<void>()
+  const recovered = Promise.withResolvers<void>()
+  let views = 0
+  const view = f.remote.openTerminal(f.target, {
+    async write() {},
+    size() {},
+    state(state) {
+      if (state === 'viewing') {
+        if (++views === 1) first.resolve()
+        else recovered.resolve()
+      }
+    },
+  })
+  await first.promise
+  const retry = Promise.withResolvers<() => void>()
+  const random = spyOn(Math, 'random').mockReturnValue(0.5)
+  const originalTimeout = globalThis.setTimeout
+  const timer = spyOn(globalThis, 'setTimeout').mockImplementation(((
+    callback: () => void,
+    delay: number,
+    ...args: unknown[]
+  ) => {
+    if (delay === 550) {
+      retry.resolve(callback)
+      return originalTimeout(() => {}, 60000)
+    }
+    return originalTimeout(callback, delay, ...args)
+  }) as typeof setTimeout)
+  try {
+    const restarted = f.restartBackend()
+    const retryNow = await retry.promise
+    expect(await view.input(new TextEncoder().encode('offline'))).toBe('not-sent')
+    const serve = Bun.serve
+    const bind = spyOn(Bun, 'serve').mockImplementation((options) =>
+      serve(Object.assign(options, { hostname: '127.0.0.1' })),
+    )
+    try {
+      await restarted.workbenchLedger.start()
+    } finally {
+      bind.mockRestore()
+    }
+    retryNow()
+    await recovered.promise
+    expect(f.ptyd.receivedAll((op) => op.op === 'attach')).toHaveLength(2)
+    expect(f.ptyd.receivedAll((op) => op.op === 'create')).toHaveLength(1)
+    expect(f.ptyd.connections).toBe(2)
+    expect((await restarted.client.layout.get()).runspaces[0]!.tabs[0]!.terminalSessionId).toBe(
+      f.target.terminalSessionId,
+    )
+    await view.close()
+    const barrier = await restarted.client.runspace.create({
+      cwd: '/restart-barrier',
+      rows: 24,
+      cols: 80,
+    })
+    await f.ptyd.received(
+      (op) => op.op === 'create' && op.session_id === barrier.tab.terminalSessionId,
+    )
+    expect(
+      f.ptyd.receivedAll((op) => ['write', 'terminate', 'reap', 'shutdown'].includes(op.op)),
+    ).toEqual([])
+    expect(f.ptyd.connections).toBe(1)
+  } finally {
+    await view.close()
+    timer.mockRestore()
+    random.mockRestore()
+  }
 })
 
 test('remote size initialization discards an older List read-back when Mac resizes during it', async () => {
@@ -1078,10 +1351,7 @@ test('a lost input acceptance ACK is uncertain and never resent through the real
   const ready = Promise.withResolvers<void>()
   const lost = Promise.withResolvers<void>()
   const remote = new RemoteWorkbench({
-    async read() {
-      return []
-    },
-    async subscribe() {},
+    ...f.transport,
     async terminal() {
       const stream = await f.terminal()
       return {
@@ -1275,10 +1545,7 @@ test('a paste with a lost second ACK stops all remaining chunks without retry th
   const ready = Promise.withResolvers<void>()
   const lost = Promise.withResolvers<void>()
   const remote = new RemoteWorkbench({
-    async read() {
-      return []
-    },
-    async subscribe() {},
+    ...f.transport,
     async terminal() {
       const stream = await f.terminal()
       return {
@@ -1323,3 +1590,198 @@ test('a paste with a lost second ACK stops all remaining chunks without retry th
   await f.ptyd.receivedAtLeast(2, (op) => op.op === 'create')
   expect(f.ptyd.receivedAll((op) => op.op === 'write')).toHaveLength(2)
 })
+
+test('a slow draw ACK closes only the terminal without retrying a healthy Backend until explicit selection', async () => {
+  const f = await terminalFixture()
+  let opens = 0
+  let skipped = false
+  const states: string[] = []
+  const closed = Promise.withResolvers<void>()
+  const selected = Promise.withResolvers<void>()
+  const retries: (() => void)[] = []
+  const originalTimeout = globalThis.setTimeout
+  const timer = spyOn(globalThis, 'setTimeout').mockImplementation(((
+    callback: () => void,
+    delay: number,
+    ...args: unknown[]
+  ) => {
+    if (delay >= 500 && delay <= 600) {
+      retries.push(callback)
+      return originalTimeout(() => {}, 60000)
+    }
+    return originalTimeout(callback, delay, ...args)
+  }) as typeof setTimeout)
+  const remote = new RemoteWorkbench({
+    ...f.transport,
+    async terminal(target) {
+      const ordinal = ++opens
+      const stream = await f.terminal(target)
+      return {
+        ...stream,
+        async ack(sequence) {
+          if (ordinal === 1 && !skipped) {
+            skipped = true
+            return
+          }
+          await stream.ack(sequence)
+        },
+      }
+    },
+  })
+  const display = {
+    async write() {},
+    size() {},
+    state(state: string) {
+      states.push(state)
+      if (state === 'closed' || state === 'unavailable') closed.resolve()
+      if (opens === 2 && state === 'viewing') selected.resolve()
+    },
+  }
+  const stop = remote.observe(() => {})
+  let view = remote.openTerminal(f.target, display)
+  onCleanup(() => {
+    void view.close()
+    stop()
+    timer.mockRestore()
+  })
+  try {
+    await closed.promise
+    expect(states.at(-1)).toBe('closed')
+    expect(retries).toHaveLength(0)
+    expect(opens).toBe(1)
+    expect((await f.client.remote.status()).state).toBe('listening')
+    expect(await view.input(new TextEncoder().encode('not-sent'))).toBe('not-sent')
+    remote.setForeground(false)
+    remote.setForeground(true)
+    const barrier = await f.client.runspace.create({
+      cwd: '/slow-draw-barrier',
+      rows: 24,
+      cols: 80,
+    })
+    await f.ptyd.received(
+      (op) => op.op === 'create' && op.session_id === barrier.tab.terminalSessionId,
+    )
+    expect(f.ptyd.receivedAll((op) => op.op === 'attach')).toHaveLength(1)
+    expect(f.ptyd.connections).toBe(1)
+    view = remote.openTerminal(f.target, display)
+    await selected.promise
+    expect(opens).toBe(2)
+    expect(f.ptyd.receivedAll((op) => op.op === 'attach')).toHaveLength(2)
+    expect(
+      f.ptyd.receivedAll((op) => ['write', 'terminate', 'reap', 'shutdown'].includes(op.op)),
+    ).toEqual([])
+    expect(await view.close()).toBe(true)
+    expect(f.ptyd.connections).toBe(1)
+  } finally {
+    await view.close()
+    stop()
+    timer.mockRestore()
+  }
+})
+
+test.each(['before-second-write', 'pending-second-ACK'] as const)(
+  'an interrupted paste at %s stays bound to its old attachment across foreground recovery and explicit reselection',
+  async (interruption) => {
+    const f = await terminalFixture()
+    const interrupted = Promise.withResolvers<void>()
+    const lateACK = Promise.withResolvers<void>()
+    let opens = 0
+    let sends = 0
+    let remote: RemoteWorkbench
+    const recovered = Promise.withResolvers<void>()
+    const firstReady = Promise.withResolvers<void>()
+    const selectedReady = Promise.withResolvers<void>()
+    const readiness: boolean[] = []
+    remote = new RemoteWorkbench({
+      ...f.transport,
+      async terminal(target) {
+        const ordinal = ++opens
+        const stream = await f.terminal(target)
+        return {
+          ...stream,
+          async input(command) {
+            sends++
+            if (ordinal === 1 && command.id === 2 && interruption === 'before-second-write') {
+              remote.setForeground(false)
+              interrupted.resolve()
+              return
+            }
+            await stream.input(command)
+          },
+          async next() {
+            const frame = await stream.next()
+            if (
+              ordinal === 1 &&
+              interruption === 'pending-second-ACK' &&
+              typeof frame === 'object' &&
+              frame &&
+              'type' in frame &&
+              frame.type === 'input_result' &&
+              'id' in frame &&
+              frame.id === 2
+            ) {
+              remote.setForeground(false)
+              interrupted.resolve()
+              await lateACK.promise
+            }
+            return frame
+          },
+        }
+      },
+    })
+    const display = {
+      async write() {},
+      size() {},
+      state(state: string) {
+        if (opens === 2 && state === 'viewing') recovered.resolve()
+      },
+      inputReady(value: boolean) {
+        readiness.push(value)
+        if (value && opens === 1) firstReady.resolve()
+        if (value && opens === 3) selectedReady.resolve()
+      },
+    }
+    let view = remote.openTerminal(f.target, display)
+    onCleanup(() => {
+      lateACK.resolve()
+      void view.close()
+    })
+    await f.rendererControl('ready')
+    await firstReady.promise
+    const paste = view.paste('p'.repeat(196609))
+    await interrupted.promise
+    expect(await paste).toEqual({ result: 'uncertain', acceptedBytes: 65536, totalBytes: 196609 })
+    remote.setForeground(true)
+    await recovered.promise
+    expect(readiness.at(-1)).toBe(false)
+    lateACK.resolve()
+    expect(await view.input(new Uint8Array([13]))).toBe('not-sent')
+    expect((await view.paste('never-replay')).result).toBe('not-sent')
+    view = remote.openTerminal(f.target, display)
+    await selectedReady.promise
+    expect(await view.input(new TextEncoder().encode('explicit-new-input'))).toBe('accepted')
+    const barrier = await f.client.runspace.create({
+      cwd: '/combined-paste-barrier',
+      rows: 24,
+      cols: 80,
+    })
+    await f.ptyd.received(
+      (op) => op.op === 'create' && op.session_id === barrier.tab.terminalSessionId,
+    )
+    const writes = f.ptyd.receivedAll((op) => op.op === 'write')
+    expect(
+      writes.map((op) => (op.op === 'write' ? Buffer.from(op.data, 'base64').toString() : '')),
+    ).toEqual([
+      'p'.repeat(65536),
+      ...(interruption === 'pending-second-ACK' ? ['p'.repeat(65536)] : []),
+      'explicit-new-input',
+    ])
+    expect(sends).toBe(3)
+    expect(f.ptyd.receivedAll((op) => op.op === 'attach')).toHaveLength(3)
+    expect(
+      f.ptyd.receivedAll((op) => ['resize', 'terminate', 'reap', 'shutdown'].includes(op.op)),
+    ).toEqual([])
+    expect(await view.close()).toBe(true)
+    expect(f.ptyd.connections).toBe(1)
+  },
+)
