@@ -11,7 +11,7 @@ use std::sync::{mpsc, Arc, Mutex};
 use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant};
 
-use anyhow::{bail, Context, Result};
+use anyhow::{bail, Result};
 use base64::prelude::*;
 use monica_terminal_protocol::{write_frame, RequestOp, ResponseBody, PROTOCOL_VERSION};
 use serde::Deserialize;
@@ -299,11 +299,14 @@ fn serve(mut stream: UnixStream, ptyd: &Path, secret: &str, sizes: &Sizes) -> Re
         if client.hello()? != PROTOCOL_VERSION {
             bail!("incompatible ptyd");
         }
-        let replay = match client.request(RequestOp::Attach {
+        let attached_generation = lock(&generation).generation;
+        let (replay, rows, cols) = match client.request(RequestOp::Attach {
             session_id: open.session.clone(),
             replay_bytes: None,
         })? {
-            ResponseBody::Attached { replay, .. } => BASE64_STANDARD.decode(replay)?,
+            ResponseBody::Attached { replay, rows, cols } if rows > 0 && cols > 0 => {
+                (BASE64_STANDARD.decode(replay)?, rows, cols)
+            }
             _ => bail!("unexpected attach response"),
         };
         let mut sequence = 0;
@@ -320,12 +323,13 @@ fn serve(mut stream: UnixStream, ptyd: &Path, secret: &str, sizes: &Sizes) -> Re
             }
             Ok(())
         };
-        let mut applied = u64::MAX;
+        let mut applied = None;
+        let mut live = true;
         let mut size = || -> Result<Option<serde_json::Value>> {
             let deadline = Instant::now() + DRAW_TIMEOUT;
             loop {
                 let current = lock(&generation).clone();
-                if current.generation == applied {
+                if !live || Some(current.generation) == applied {
                     return Ok(None);
                 }
                 let sessions = match client.request(RequestOp::List)? {
@@ -335,10 +339,18 @@ fn serve(mut stream: UnixStream, ptyd: &Path, secret: &str, sizes: &Sizes) -> Re
                 if current != *lock(&generation) {
                     continue;
                 }
-                let session = sessions
+                let Some(session) = sessions
                     .iter()
-                    .find(|s| s.session_id == open.session)
-                    .context("session disappeared")?;
+                    .find(|s| s.session_id == open.session && s.running)
+                else {
+                    live = false;
+                    return Ok(applied.is_none().then(|| {
+                        json!({"type":"size", "generation":attached_generation, "rows":rows, "cols":cols})
+                    }));
+                };
+                if session.rows == 0 || session.cols == 0 {
+                    bail!("invalid size read-back");
+                }
                 if current
                     .requested
                     .is_some_and(|requested| requested != (session.rows, session.cols))
@@ -349,7 +361,7 @@ fn serve(mut stream: UnixStream, ptyd: &Path, secret: &str, sizes: &Sizes) -> Re
                     thread::sleep(Duration::from_millis(20));
                     continue;
                 }
-                applied = current.generation;
+                applied = Some(current.generation);
                 return Ok(Some(
                     json!({"type":"size", "generation":current.generation, "rows":session.rows, "cols":session.cols}),
                 ));
