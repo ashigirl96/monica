@@ -6,6 +6,7 @@ import { join } from 'node:path'
 import type { Duplex } from 'node:stream'
 import { checkServerIdentity } from 'node:tls'
 
+import { RemoteWorkbench, type RemoteState } from './mobile/remote-workbench.ts'
 import { remoteDevice } from './schema.ts'
 import { cleanUp, onCleanup, setup } from './testing.ts'
 
@@ -494,4 +495,57 @@ test('the remote change socket acknowledges an installed subscription, sees late
       })
     ).status,
   ).toBe(401)
+})
+
+test('RemoteWorkbench.observe reads the real empty Ledger without creating a Runspace and follows Mac changes without desktop mutations', async () => {
+  const f = await listening()
+  const { credential } = await f.approved()
+  const states: RemoteState[] = []
+  let notify: (() => void) | undefined
+  const remote = new RemoteWorkbench({
+    async subscribe(changed, signal) {
+      const ws = await f.websocket(credential, '/workbench/changes')
+      signal.addEventListener('abort', () => ws.socket.destroy(), { once: true })
+      ws.socket.on('data', (data) => {
+        if (data.toString().includes('"type":"changed"')) changed()
+      })
+      expect((await ws.greeting).toString()).toContain('"type":"subscribed"')
+    },
+    async read(path) {
+      const response = await f.request(`/workbench/${path}`, credential, undefined, undefined, {
+        'x-monica-wire-version': '1',
+      })
+      expect(response.status).toBe(200)
+      return JSON.parse(response.body)
+    },
+  })
+  const stop = remote.observe((state) => {
+    states.push(state)
+    notify?.()
+  })
+  onCleanup(stop)
+  const until = async (predicate: (state: RemoteState) => boolean) => {
+    if (states.some(predicate)) return
+    await new Promise<void>((resolve) => {
+      notify = () => {
+        if (states.some(predicate)) resolve()
+      }
+    })
+  }
+  await until((state) => state.state === 'available' && state.layout.runspaces.length === 0)
+  expect(await f.client.layout.get()).toEqual({ runspaces: [] })
+  const created = await f.client.runspace.create({ rows: 24, cols: 80 })
+  await f.settled(created.tab.terminalSessionId)
+  await until(
+    (state) =>
+      state.state === 'available' &&
+      state.layout.runspaces.some((item) => item.id === created.runspaceId) &&
+      state.terminalSessions.some((item) => item.status === 'running'),
+  )
+  stop()
+  const checkpoint = await f.client.tab.open({ runspaceId: created.runspaceId, rows: 24, cols: 80 })
+  await f.ptyd.received(
+    (op) => op.op === 'create' && op.session_id === checkpoint.terminalSessionId,
+  )
+  expect(f.ptyd.receivedAll((op) => ['terminate', 'reap', 'shutdown'].includes(op.op))).toEqual([])
 })

@@ -24,6 +24,7 @@
     "apps/desktop/vite.config.ts",
     "apps/extension/vite.config.ts",
     "apps/web/vite.config.ts",
+    "apps/ios/vite.config.ts",
     "packages/*/src",
     "packages/*/migrations",
     "packages/*/drizzle.config.ts",

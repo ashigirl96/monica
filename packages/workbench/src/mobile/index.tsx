@@ -1,0 +1,159 @@
+import { useEffect, useState } from 'react'
+import { z } from 'zod'
+
+import { nativeCall, nativeTransport } from './native.ts'
+import { RemoteWorkbench, type RemoteState } from './remote-workbench.ts'
+
+export { RemoteWorkbench, RemoteError } from './remote-workbench.ts'
+export type { RemoteState, RemoteTransport } from './remote-workbench.ts'
+
+const remote = new RemoteWorkbench(nativeTransport)
+const RegistrationSchema = z.enum(['approved', 'pending', 'rejected', 'expired', 'unregistered'])
+const labels = {
+  waiting: '接続待ち',
+  available: '利用可能',
+  unavailable: '利用不可。MacとTailscaleの接続を確認してください。',
+  'approval-required': '承認が必要です。Macで登録を確認してください。',
+  'identity-changed':
+    'Macのidentityが変更されたか、証明書が期限切れです。Macで確認して再登録してください。',
+  incompatible: '互換性がありません。MacとiPhoneのアプリを更新してください。',
+}
+
+export function MobileWorkbench() {
+  const [registration, setRegistration] =
+    useState<z.infer<typeof RegistrationSchema>>('unregistered')
+  const [state, setState] = useState<RemoteState>({ state: 'waiting' })
+  const [selected, setSelected] = useState<string | null>(null)
+  const [busy, setBusy] = useState(false)
+  const [revision, setRevision] = useState(0)
+
+  useEffect(() => {
+    let active = true
+    let timer: ReturnType<typeof setTimeout> | undefined
+    let stop: (() => void) | undefined
+    const check = async () => {
+      try {
+        const result = RegistrationSchema.parse(await nativeCall('registration'))
+        if (!active) return
+        setRegistration(result)
+        if (result === 'approved') stop = remote.observe(setState)
+        else if (result === 'pending')
+          timer = setTimeout(() => {
+            void check()
+          }, 2000)
+      } catch (error) {
+        if (!active) return
+        setState({
+          state:
+            error instanceof Error && error.message === 'identity-changed'
+              ? 'identity-changed'
+              : error instanceof Error && error.message === 'incompatible'
+                ? 'incompatible'
+                : 'unavailable',
+        })
+      }
+    }
+    void check()
+    return () => {
+      active = false
+      clearTimeout(timer)
+      stop?.()
+    }
+    // oxlint-disable-next-line react/exhaustive-effect-dependencies -- Explicit reconnect replaces the observation and its generation.
+  }, [revision])
+
+  const scan = async () => {
+    setBusy(true)
+    try {
+      await nativeCall('scan')
+      setState({ state: 'waiting' })
+      setRevision((value) => value + 1)
+    } catch (error) {
+      setState({
+        state:
+          error instanceof Error && error.message === 'incompatible'
+            ? 'incompatible'
+            : 'approval-required',
+      })
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <main>
+      <header>
+        <h1>Workbench</h1>
+        <p role="status" aria-live="polite">
+          {labels[state.state]}
+        </p>
+      </header>
+      <section aria-label="Macの登録">
+        <button
+          disabled={busy}
+          onClick={() => {
+            void scan()
+          }}
+        >
+          {busy ? '読み取り中…' : 'Macの登録QRを読み取る'}
+        </button>
+        <button
+          onClick={() => {
+            setRevision((value) => value + 1)
+          }}
+        >
+          再接続
+        </button>
+        {registration === 'pending' && (
+          <p role="status">承認待ち。Macに表示された端末名と接続元を確認して承認してください。</p>
+        )}
+        {registration === 'rejected' && (
+          <p role="alert">登録が拒否されました。Macで新しい招待を作ってください。</p>
+        )}
+        {registration === 'expired' && (
+          <p role="alert">登録の期限が切れました。Macで新しい招待を作ってください。</p>
+        )}
+      </section>
+      {state.state === 'available' && (
+        <section aria-label="Runspace一覧">
+          {state.layout.runspaces.length === 0 && (
+            <p>Runspaceはありません。Macで開いた作業がここに表示されます。</p>
+          )}
+          {state.layout.runspaces.map((runspace) => (
+            <article key={runspace.id}>
+              <h2>{runspace.cwd}</h2>
+              <ul>
+                {runspace.tabs.map((tab) => {
+                  const terminal = state.terminalSessions.find(
+                    (item) => item.id === tab.terminalSessionId,
+                  )
+                  const agents = state.agentSessions.filter(
+                    (item) => item.terminalSessionId === tab.terminalSessionId,
+                  )
+                  return (
+                    <li key={tab.id}>
+                      <button
+                        aria-pressed={selected === tab.id}
+                        onClick={() => setSelected(tab.id)}
+                      >
+                        {tab.cwd}
+                        {tab.pinned ? ' · Pin' : ''}
+                      </button>
+                      <p>Terminal Session · {terminal?.status ?? '未観測'}</p>
+                      {agents.map((agent) => (
+                        <p key={agent.sessionId}>
+                          Agent Session · {agent.sessionId} · {agent.state}
+                          {agent.unread ? ' · 未読' : ''}
+                        </p>
+                      ))}
+                    </li>
+                  )
+                })}
+              </ul>
+            </article>
+          ))}
+        </section>
+      )}
+    </main>
+  )
+}

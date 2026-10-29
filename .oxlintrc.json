@@ -122,6 +122,54 @@
       }
     },
     {
+      "files": ["packages/workbench/src/mobile/**", "apps/ios/**"],
+      "rules": {
+        "no-restricted-imports": [
+          "error",
+          {
+            "paths": [{ "name": "bun:sqlite", "message": "iOS webview は DB に触れない" }],
+            "patterns": [
+              {
+                "group": [
+                  "@monica/*/cli",
+                  "@monica/*/server",
+                  "@monica/*/schema",
+                  "**/server.ts",
+                  "**/schema.ts",
+                  "drizzle-orm",
+                  "drizzle-orm/**"
+                ],
+                "allowTypeImports": true,
+                "message": "iOS webview は限定 native 通信だけを使う"
+              },
+              {
+                "group": [
+                  "@tauri-apps/**",
+                  "@monica/workbench/ui",
+                  "**/ui/**",
+                  "@monica/task",
+                  "@monica/task/*",
+                  "@monica/ios",
+                  "@monica/ios/*",
+                  "@monica/backend",
+                  "@monica/backend/*",
+                  "@monica/desktop",
+                  "@monica/desktop/*",
+                  "@monica/cli",
+                  "@monica/cli/*",
+                  "@monica/web",
+                  "@monica/web/*",
+                  "@monica/extension",
+                  "@monica/extension/*"
+                ],
+                "message": "iOS は desktop 初期化と別 app を import しない"
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
       "files": ["packages/workbench/src/cli.ts"],
       "rules": {
         "no-restricted-imports": [
@@ -736,6 +784,8 @@
             "patterns": [
               {
                 "group": [
+                  "@monica/ios",
+                  "@monica/ios/*",
                   "@monica/backend",
                   "@monica/backend/*",
                   "@monica/desktop",
@@ -768,6 +818,8 @@
             "patterns": [
               {
                 "group": [
+                  "@monica/ios",
+                  "@monica/ios/*",
                   "@monica/backend",
                   "@monica/backend/*",
                   "@monica/desktop",
@@ -808,6 +860,8 @@
               },
               {
                 "group": [
+                  "@monica/ios",
+                  "@monica/ios/*",
                   "@monica/backend",
                   "@monica/backend/*",
                   "@monica/cli",
@@ -848,6 +902,8 @@
               },
               {
                 "group": [
+                  "@monica/ios",
+                  "@monica/ios/*",
                   "@monica/backend",
                   "@monica/backend/*",
                   "@monica/cli",
@@ -888,6 +944,8 @@
               },
               {
                 "group": [
+                  "@monica/ios",
+                  "@monica/ios/*",
                   "@monica/backend",
                   "@monica/backend/*",
                   "@monica/cli",
