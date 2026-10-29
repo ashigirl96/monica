@@ -23,7 +23,7 @@ final class NativeBridge: NSObject, WKScriptMessageHandlerWithReply {
         guard permits(mainFrame: message.frameInfo.isMainFrame, url: message.frameInfo.request.url),
               message.webView === controller?.webview,
               let body = message.body as? [String: String], Set(body.keys).isSubset(of: ["operation", "id", "tabId", "terminalSessionId", "sequence", "data", "renderer", "connection"]),
-              let operation = body["operation"], active,
+              let operation = body["operation"], (active || operation == "foreground"),
               Set(body.keys).isSubset(of: operation == "terminal-open" ? ["operation", "id", "tabId", "terminalSessionId"] : operation == "terminal-input" ? ["operation", "id", "data", "sequence", "renderer", "connection"] : operation == "terminal-ack" ? ["operation", "id", "sequence"] : ["operation", "id"])
         else { replyHandler(["state": "unavailable"], nil); return }
         let readId = ReadProcedure(rawValue: operation) == nil ? nil : body["id"]
@@ -43,6 +43,7 @@ final class NativeBridge: NSObject, WKScriptMessageHandlerWithReply {
 
     func suspend() {
         active = false
+        emitForeground()
         candidate = nil
         generation += 1
         for task in requests.values { task.cancel() }
@@ -55,7 +56,14 @@ final class NativeBridge: NSObject, WKScriptMessageHandlerWithReply {
         client = nil
     }
 
-    func resume() { active = true }
+    func resume() {
+        active = true
+        emitForeground()
+    }
+
+    private func emitForeground() {
+        controller?.webview?.evaluateJavaScript("window.dispatchEvent(new CustomEvent('monica-foreground',{detail:\(active)}))", completionHandler: nil)
+    }
 
     private func connection() throws -> RemoteHTTP {
         guard active else { throw RemoteFailure.unavailable }
@@ -72,13 +80,15 @@ final class NativeBridge: NSObject, WKScriptMessageHandlerWithReply {
             return try JSONSerialization.jsonObject(with: await connection().read(procedure))
         }
         switch operation {
+        case "foreground": return active
         case "terminal-open":
             guard let id, UUID(uuidString: id) != nil,
                   let tab = fields["tabId"], let session = fields["terminalSessionId"],
                   !tab.isEmpty, tab.utf8.count <= 128, !session.isEmpty, session.utf8.count <= 128
             else { throw RemoteFailure.unavailable }
+            let current = generation
             if let terminal { guard await terminal.close() else { throw RemoteFailure.unavailable } }
-            guard active else { throw RemoteFailure.unavailable }
+            guard active, current == generation else { throw RemoteFailure.unavailable }
             let opened = TerminalConnection(id: id, socket: try connection().terminal())
             terminal = opened
             do { try await opened.open(tab: tab, session: session) }
@@ -149,7 +159,7 @@ final class NativeBridge: NSObject, WKScriptMessageHandlerWithReply {
             do {
                 let data = try await connection().status()
                 result = try JSONDecoder().decode(RegistrationResponse.self, from: data).value()
-            } catch let error as RemoteFailure where error.state == "approval-required" {
+            } catch let error as RemoteFailure where error.state == "approval-required" || error.state == "revoked" {
                 result = ["state": "unauthorized"]
             }
             guard current == generation, active else { throw RemoteFailure.unavailable }
@@ -161,6 +171,8 @@ final class NativeBridge: NSObject, WKScriptMessageHandlerWithReply {
             guard id == String(generation), var registration = try store.load() else { throw RemoteFailure.unavailable }
             registration.lifecycle = .approved
             try store.save(registration)
+            client?.close()
+            client = nil
             return NSNull()
         case "subscribe":
             guard let id, UUID(uuidString: id) != nil else { throw RemoteFailure.unavailable }
@@ -197,6 +209,7 @@ final class NativeBridge: NSObject, WKScriptMessageHandlerWithReply {
                     var state = (error as? RemoteFailure)?.state ?? "unavailable"
                     do { _ = try await client.read(.layout) }
                     catch { state = (error as? RemoteFailure)?.state ?? "unavailable" }
+                    guard current == self.generation, self.active else { return }
                     self.emit(id: id, state: state)
                     self.unsubscribe(id: id)
                 }

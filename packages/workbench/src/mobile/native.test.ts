@@ -1,6 +1,6 @@
 import { expect, spyOn, test } from 'bun:test'
 
-import { observeRegistration, scanRegistration } from './native.ts'
+import { observeRegistration, observeForeground, scanRegistration } from './native.ts'
 
 test('registration retries a temporary native failure but stops after approval and discards cancelled results', async () => {
   let retry: (() => void) | undefined
@@ -51,6 +51,9 @@ test('registration retries a temporary native failure but stops after approval a
     for (let i = 0; i < 10; i++) await Promise.resolve()
     expect(states).toEqual(['unavailable', 'approved'])
     stop()
+    retry?.()
+    for (let i = 0; i < 10; i++) await Promise.resolve()
+    expect(calls).toBe(2)
     const cancel = observeRegistration(
       (state) => states.push(state),
       (error) => states.push(error.state),
@@ -98,7 +101,7 @@ test('only an unauthorized pending registration expires; approved and legacy cre
       )
       await complete.promise
     }
-    expect(states).toEqual(['expired', 'approval-required', 'approval-required'])
+    expect(states).toEqual(['expired', 'revoked', 'approval-required'])
   } finally {
     for (const stop of completions) stop()
     globalThis.window = previous
@@ -131,6 +134,29 @@ test('scan cancellation is a no-op and invitation expiry is decided before repla
     reply = { state: 'candidate', expiresAt: Date.now() + 600_000 }
     await expect(scanRegistration()).rejects.toMatchObject({ state: 'incompatible' })
     expect(operations).toEqual(['scan', 'scan', 'scan', 'scan'])
+  } finally {
+    globalThis.window = previous
+  }
+})
+
+test('native foreground events supersede a late initial lifecycle reply and release their listener', async () => {
+  const previous = globalThis.window
+  const initial = Promise.withResolvers<unknown>()
+  const target = new EventTarget()
+  const states: boolean[] = []
+  globalThis.window = Object.assign(target, {
+    webkit: { messageHandlers: { monica: { postMessage: () => initial.promise } } },
+  }) as unknown as Window & typeof globalThis
+  try {
+    const stop = observeForeground((value) => states.push(value))
+    target.dispatchEvent(new CustomEvent('monica-foreground', { detail: false }))
+    target.dispatchEvent(new CustomEvent('monica-foreground', { detail: true }))
+    initial.resolve({ state: 'ok', value: false })
+    for (let i = 0; i < 10; i++) await Promise.resolve()
+    expect(states).toEqual([false, true])
+    stop()
+    target.dispatchEvent(new CustomEvent('monica-foreground', { detail: false }))
+    expect(states).toEqual([false, true])
   } finally {
     globalThis.window = previous
   }

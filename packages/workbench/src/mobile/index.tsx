@@ -4,6 +4,7 @@ import {
   registerCandidate,
   nativeTransport,
   observeRegistration,
+  observeForeground,
   scanRegistration,
   type RegistrationState,
 } from './native.ts'
@@ -21,6 +22,8 @@ export type { RemoteState, RemoteTransport } from './remote-workbench.ts'
 const remote = new RemoteWorkbench(nativeTransport)
 const labels = {
   waiting: '接続待ち',
+  background: '背景では接続を停止しています。',
+  revoked: '登録が失効しました。Macで確認して再登録してください。',
   available: '利用可能',
   unavailable: '利用不可。MacとTailscaleの接続を確認してください。',
   'approval-required': '承認が必要です。Macで登録を確認してください。',
@@ -30,6 +33,7 @@ const labels = {
 }
 
 export function MobileWorkbench() {
+  const [foreground, setForeground] = useState(false)
   const [registration, setRegistration] = useState<RegistrationState>('unregistered')
   const [state, setState] = useState<RemoteState>({ state: 'waiting' })
   const [selected, setSelected] = useState<string | null>(null)
@@ -37,9 +41,20 @@ export function MobileWorkbench() {
   const [busy, setBusy] = useState(false)
   const [revision, setRevision] = useState(0)
   const [scanError, setScanError] = useState<string | null>(null)
+  const blocked = useRef(false)
   const stopObservation = useRef<(() => void) | undefined>(undefined)
 
+  useEffect(
+    () =>
+      observeForeground((active) => {
+        remote.setForeground(active)
+        setForeground(active)
+      }),
+    [],
+  )
+
   useEffect(() => {
+    if (!foreground || blocked.current) return
     let stop: (() => void) | undefined
     const stopRegistration = observeRegistration(
       (result) => {
@@ -47,18 +62,17 @@ export function MobileWorkbench() {
         stop?.()
         if (result === 'approved')
           stop = remote.observe((next) => {
+            blocked.current = !['available', 'waiting', 'background', 'unavailable'].includes(
+              next.state,
+            )
             setState(next)
-            setTarget((current) => {
-              if (!current || next.state !== 'available') return null
-              const tab = next.layout.runspaces
-                .flatMap((runspace) => runspace.tabs)
-                .find((item) => item.id === current.tabId)
-              return tab && tab.terminalSessionId !== current.terminalSessionId ? null : current
-            })
           })
         else setState({ state: 'approval-required' })
       },
-      (error) => setState({ state: error.state }),
+      (error) => {
+        blocked.current = error.state !== 'unavailable'
+        setState({ state: error.state })
+      },
     )
     const cleanup = () => {
       stopRegistration()
@@ -67,7 +81,7 @@ export function MobileWorkbench() {
     stopObservation.current = cleanup
     return cleanup
     // oxlint-disable-next-line react/exhaustive-effect-dependencies -- Explicit reconnect replaces the observation and its generation.
-  }, [revision])
+  }, [revision, foreground])
 
   const scan = async () => {
     setBusy(true)
@@ -81,6 +95,7 @@ export function MobileWorkbench() {
         return
       }
       replacing = true
+      blocked.current = false
       setTarget(null)
       stopObservation.current?.()
       setState({ state: 'waiting' })
@@ -115,6 +130,7 @@ export function MobileWorkbench() {
         <button
           disabled={busy}
           onClick={() => {
+            blocked.current = false
             setTarget(null)
             setRevision((value) => value + 1)
           }}
