@@ -182,7 +182,6 @@ export function useTerminal(
         tabId: options.tabId,
         sessionId,
         status: optionsRef.current.sessionStatus,
-        hidden: !optionsRef.current.active,
         onExit: (code) => optionsRef.current.onExit(sessionId, code),
       })
     }

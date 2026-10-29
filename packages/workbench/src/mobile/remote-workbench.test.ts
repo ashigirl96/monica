@@ -1,5 +1,6 @@
-import { expect, test } from 'bun:test'
+import { expect, spyOn, test } from 'bun:test'
 
+import type { TerminalInput } from '../remote-terminal.ts'
 import { RemoteWorkbench, type RemoteState, type RemoteTransport } from './remote-workbench.ts'
 
 const empty = { runspaces: [] }
@@ -286,4 +287,141 @@ test('input is not queued before ready, is bounded in decoded bytes, and a lost 
   expect(await view.input(new TextEncoder().encode('later'))).toBe('not-sent')
   expect(sends).toHaveLength(1)
   await view.close()
+})
+
+function inputFixture(input: (command: TerminalInput) => Promise<void>) {
+  const frames: unknown[] = [
+    { version: 1, type: 'replay_end', sequence: 1 },
+    { version: 1, type: 'renderer', generation: { renderer: 1, connection: 2 } },
+  ]
+  let receive: ((frame: unknown) => void) | undefined
+  const ready: boolean[] = []
+  const view = new RemoteWorkbench({
+    async read() {
+      return []
+    },
+    async subscribe() {},
+    async terminal() {
+      return {
+        async prepare() {},
+        input,
+        async next() {
+          return frames.length
+            ? frames.shift()
+            : new Promise((resolve) => {
+                receive = resolve
+              })
+        },
+        async ack() {},
+        async close() {
+          return true
+        },
+      }
+    },
+  }).openTerminal(
+    { tabId: 'tab', terminalSessionId: 'session' },
+    {
+      async write() {},
+      size() {},
+      state() {},
+      inputReady(value) {
+        ready.push(value)
+      },
+    },
+  )
+  return {
+    view,
+    ready,
+    result: (id: number, result: 'accepted' | 'not-sent') => {
+      const frame = { version: 1, type: 'input_result', id, result }
+      if (receive) {
+        const next = receive
+        receive = undefined
+        next(frame)
+      } else frames.push(frame)
+    },
+  }
+}
+
+test('input returns uncertain at the deadline even when sending never settles, and never retries', async () => {
+  const sends: TerminalInput[] = []
+  const { view, ready } = inputFixture((command) => {
+    sends.push(command)
+    return new Promise(() => {})
+  })
+  await flush()
+  expect(ready.at(-1)).toBe(true)
+  let expire: (() => void) | undefined
+  const timer = spyOn(globalThis, 'setTimeout').mockImplementation(((
+    callback: () => void,
+    delay?: number,
+  ) => {
+    expect(delay).toBe(6000)
+    expire = callback
+    return 1 as unknown as ReturnType<typeof setTimeout>
+  }) as typeof setTimeout)
+  try {
+    let result: string | undefined
+    const sending = view.input(new TextEncoder().encode('command\r')).then((value) => {
+      result = value
+    })
+    expect(sends).toHaveLength(1)
+    expect(await view.input(new TextEncoder().encode('concurrent'))).toBe('not-sent')
+    expect(expire).toBeDefined()
+    expire!()
+    await flush()
+    expect(result).toBe('uncertain')
+    await sending
+    expect(ready.at(-1)).toBe(false)
+    expect(await view.input(new TextEncoder().encode('later'))).toBe('not-sent')
+    expect(sends).toHaveLength(1)
+  } finally {
+    await view.close()
+    timer.mockRestore()
+  }
+})
+
+test('a late send rejection and expired timer cannot finish a newer input ID', async () => {
+  const first = Promise.withResolvers<void>()
+  const sends: TerminalInput[] = []
+  const { view, ready, result } = inputFixture((command) => {
+    sends.push(command)
+    return sends.length === 1 ? first.promise : Promise.resolve()
+  })
+  await flush()
+  const expires: (() => void)[] = []
+  const timer = spyOn(globalThis, 'setTimeout').mockImplementation(((
+    callback: () => void,
+    delay?: number,
+  ) => {
+    expect(delay).toBe(6000)
+    expires.push(callback)
+    return expires.length as unknown as ReturnType<typeof setTimeout>
+  }) as typeof setTimeout)
+  try {
+    let firstResult: string | undefined
+    const sending = view.input(new TextEncoder().encode('first')).then((value) => {
+      firstResult = value
+    })
+    result(1, 'accepted')
+    await flush()
+    expect(firstResult).toBe('accepted')
+    await sending
+    let secondResult: string | undefined
+    const second = view.input(new TextEncoder().encode('second')).then((value) => {
+      secondResult = value
+    })
+    first.reject(new Error('late send failure after ACK'))
+    expires[0]!()
+    await flush()
+    expect(secondResult).toBeUndefined()
+    expect(ready.at(-1)).toBe(true)
+    result(2, 'not-sent')
+    await second
+    expect(secondResult).toBe('not-sent')
+    expect(sends.map(({ id }) => id)).toEqual([1, 2])
+  } finally {
+    await view.close()
+    timer.mockRestore()
+  }
 })

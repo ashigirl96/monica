@@ -113,7 +113,6 @@ type ConnectingTab = {
   tabId: string
   sessionId: string
   status?: TerminalSessionStatus
-  hidden?: boolean
   onExit: (exitCode: number | null) => void
 }
 
@@ -148,7 +147,7 @@ function dropListeners(conn: TabConnection) {
 /// without sequence numbers.
 async function runConnect(
   store: Store,
-  { tabId, sessionId, onExit, hidden }: ConnectingTab,
+  { tabId, sessionId, onExit }: ConnectingTab,
   conn: TabConnection,
 ) {
   try {
@@ -198,6 +197,7 @@ async function runConnect(
       dropListeners(conn)
       return
     }
+    const hidden = !term?.element?.getClientRects().length
     // No reset before the replay: the terminal here is always a freshly mounted (empty)
     // instance — the connection guard prevents double-attach — and Terminal.reset()
     // corrupts the WebGL renderer (blank canvas, "this._renderer.value.dimensions"

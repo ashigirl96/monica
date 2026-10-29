@@ -88,8 +88,9 @@ export class RemoteWorkbench {
     let uncertain = false
     let inputId = 0
     let pending: { id: number; resolve: (result: InputResult) => void } | undefined
-    const finishInput = (result: InputResult) => {
-      pending?.resolve(result)
+    const finishInput = (result: InputResult, id = pending?.id) => {
+      if (!pending || pending.id !== id) return
+      pending.resolve(result)
       pending = undefined
       if (result === 'uncertain') {
         uncertain = true
@@ -112,13 +113,15 @@ export class RemoteWorkbench {
         const result = Promise.withResolvers<InputResult>()
         const id = ++inputId
         pending = { id, resolve: result.resolve }
-        const timer = setTimeout(() => finishInput('uncertain'), 6000)
+        const timer = setTimeout(() => finishInput('uncertain', id), 6000)
         try {
           let data = ''
           for (const byte of bytes) data += String.fromCharCode(byte)
-          await stream.input({ type: 'input', id, data: btoa(data), generation: renderer })
+          void stream
+            .input({ type: 'input', id, data: btoa(data), generation: renderer })
+            .catch(() => finishInput('uncertain', id))
         } catch {
-          finishInput('uncertain')
+          finishInput('uncertain', id)
         }
         return result.promise.finally(() => clearTimeout(timer))
       },

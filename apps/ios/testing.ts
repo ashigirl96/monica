@@ -383,6 +383,10 @@ const inputControl = Bun.serve({
         'shared-input-result\r\n\x1b[c\x1b[6n\x1b]10;?\x07\x1b[?u',
       )
     }
+    if (path.endsWith('layout/get'))
+      await ptyd.received(
+        (op) => op.op === 'write' && op.session_id === terminalTab.terminalSessionId,
+      )
     return response({
       writes: ptyd.receivedAll((op) => op.op === 'write'),
       connections: ptyd.connections,
