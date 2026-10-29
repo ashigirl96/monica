@@ -1,3 +1,5 @@
+import { ZodError } from 'zod'
+
 import {
   LayoutSchema,
   ListedAgentSessionSchema,
@@ -61,7 +63,12 @@ export class RemoteWorkbench {
       const fail = (error: unknown) => {
         if (signal.aborted || lifetime.signal.aborted) return
         current.abort()
-        const state = error instanceof RemoteError ? error.state : 'unavailable'
+        const state =
+          error instanceof RemoteError
+            ? error.state
+            : error instanceof ZodError
+              ? 'incompatible'
+              : 'unavailable'
         receive({ state })
         if (state === 'unavailable') {
           const delay = Math.min(10_000, 500 * 2 ** attempt++) * (0.8 + Math.random() * 0.2)

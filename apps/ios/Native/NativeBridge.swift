@@ -1,0 +1,161 @@
+import UIKit
+import WebKit
+
+@MainActor
+final class NativeBridge: NSObject, WKScriptMessageHandlerWithReply {
+    let entry: URL
+    weak var controller: WorkbenchController?
+    private let store = CredentialStore()
+    private var client: RemoteHTTP?
+    private var subscription: (id: String, task: Task<Void, Never>?, socket: URLSessionWebSocketTask)?
+    private var active = true
+    private var generation = 0
+
+    init(entry: URL) { self.entry = entry }
+
+    func permits(mainFrame: Bool, url: URL?) -> Bool { mainFrame && url == entry }
+
+    func userContentController(_ userContentController: WKUserContentController, didReceive message: WKScriptMessage,
+                               replyHandler: @escaping (Any?, String?) -> Void) {
+        guard permits(mainFrame: message.frameInfo.isMainFrame, url: message.frameInfo.request.url),
+              message.webView === controller?.webview,
+              let body = message.body as? [String: String], Set(body.keys).isSubset(of: ["operation", "id"]),
+              let operation = body["operation"], active
+        else { replyHandler(["state": "unavailable"], nil); return }
+        Task {
+            do {
+                let value = try await perform(operation, id: body["id"])
+                replyHandler(["state": "ok", "value": value], nil)
+            } catch {
+                replyHandler(["state": (error as? RemoteFailure)?.state ?? "unavailable"], nil)
+            }
+        }
+    }
+
+    func suspend() {
+        active = false
+        generation += 1
+        if let subscription { emit(id: subscription.id, state: "unavailable") }
+        unsubscribe()
+        client?.close()
+        client = nil
+    }
+
+    func resume() { active = true }
+
+    private func connection() throws -> RemoteHTTP {
+        guard active else { throw RemoteFailure.unavailable }
+        if let client { return client }
+        guard let registration = try store.load() else { throw RemoteFailure.approvalRequired }
+        let opened = RemoteHTTP(registration)
+        client = opened
+        return opened
+    }
+
+    private func perform(_ operation: String, id: String?) async throws -> Any {
+        if let procedure = ReadProcedure(rawValue: operation) {
+            return try JSONSerialization.jsonObject(with: await connection().read(procedure))
+        }
+        switch operation {
+        case "scan":
+            guard let controller else { throw RemoteFailure.unavailable }
+            let captured = try await controller.scan()
+            guard active else { throw RemoteFailure.unavailable }
+            let invitation = try JSONDecoder().decode(Invitation.self, from: Data(captured.utf8))
+            if invitation.expiresAt <= Date().timeIntervalSince1970 * 1000 { return "expired" }
+            let registration = try invitation.registration(credential: CredentialStore.secret())
+            unsubscribe()
+            client?.close()
+            client = nil
+            generation += 1
+            try store.save(registration)
+            let client = try connection()
+            let response = try await client.register(invitation: invitation.invitation, name: UIDevice.current.name)
+            let parsed = try JSONSerialization.jsonObject(with: response) as? [String: Any]
+            guard parsed?["state"] as? String == "pending" else { throw RemoteFailure.incompatible }
+            return "pending"
+        case "registration":
+            guard let registration = try store.load() else { return "unregistered" }
+            do {
+                let data = try await connection().status()
+                guard let result = try JSONSerialization.jsonObject(with: data) as? [String: Any],
+                      let state = result["state"] as? String else { throw RemoteFailure.incompatible }
+                if state == "approved" {
+                    guard result["version"] as? Int == 1 else { throw RemoteFailure.incompatible }
+                    return state
+                }
+                guard ["pending", "rejected"].contains(state) else { throw RemoteFailure.incompatible }
+                return state
+            } catch let error as RemoteFailure where error.state == "approval-required" {
+                if Date() >= registration.pendingUntil { return "expired" }
+                throw error
+            }
+        case "subscribe":
+            guard let id, UUID(uuidString: id) != nil else { throw RemoteFailure.unavailable }
+            unsubscribe()
+            let client = try connection()
+            let socket = client.changes()
+            generation += 1
+            let current = generation
+            subscription = (id, nil, socket)
+            do {
+                let acknowledgement = try await socket.receive()
+                guard current == generation, active else { throw RemoteFailure.unavailable }
+                let message = try decode(acknowledgement)
+                guard message["type"] as? String == "subscribed" else { throw RemoteFailure.incompatible }
+            } catch {
+                let stillCurrent = current == generation && active
+                unsubscribe(id: id)
+                guard stillCurrent else { throw RemoteFailure.unavailable }
+                // WSS upgrade errors omit the HTTP status; the same authenticated unary classifies revocation.
+                _ = try await client.read(.layout)
+                throw error
+            }
+            let task = Task { [weak self] in
+                do {
+                    while !Task.isCancelled {
+                        let message = try await socket.receive()
+                        guard let self, current == self.generation else { return }
+                        let decoded = try self.decode(message)
+                        guard decoded["type"] as? String == "changed" else { throw RemoteFailure.incompatible }
+                        self.emit(id: id, state: "changed")
+                    }
+                } catch {
+                    guard let self, !Task.isCancelled, current == self.generation else { return }
+                    var state = (error as? RemoteFailure)?.state ?? "unavailable"
+                    do { _ = try await client.read(.layout) }
+                    catch { state = (error as? RemoteFailure)?.state ?? "unavailable" }
+                    self.emit(id: id, state: state)
+                    self.unsubscribe(id: id)
+                }
+            }
+            subscription = (id, task, socket)
+            return NSNull()
+        case "unsubscribe":
+            if let id { unsubscribe(id: id) }
+            return NSNull()
+        default: throw RemoteFailure.unavailable
+        }
+    }
+
+    private func decode(_ message: URLSessionWebSocketTask.Message) throws -> [String: Any] {
+        guard case .string(let text) = message, text.utf8.count <= 65_536,
+              let decoded = try JSONSerialization.jsonObject(with: Data(text.utf8)) as? [String: Any],
+              decoded["version"] as? Int == 1 else { throw RemoteFailure.incompatible }
+        return decoded
+    }
+
+    private func unsubscribe(id: String? = nil) {
+        guard let subscription, id == nil || subscription.id == id else { return }
+        self.subscription = nil
+        generation += 1
+        subscription.task?.cancel()
+        subscription.socket.cancel(with: .goingAway, reason: nil)
+    }
+
+    private func emit(id: String, state: String) {
+        guard let data = try? JSONSerialization.data(withJSONObject: ["id": id, "state": state]),
+              let json = String(data: data, encoding: .utf8) else { return }
+        controller?.webview?.evaluateJavaScript("window.dispatchEvent(new CustomEvent('monica-change',{detail:\(json)}))", completionHandler: nil)
+    }
+}

@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import { z } from 'zod'
 
 import { nativeCall, nativeTransport } from './native.ts'
-import { RemoteWorkbench, type RemoteState } from './remote-workbench.ts'
+import { RemoteError, RemoteWorkbench, type RemoteState } from './remote-workbench.ts'
 
 export { RemoteWorkbench, RemoteError } from './remote-workbench.ts'
 export type { RemoteState, RemoteTransport } from './remote-workbench.ts'
@@ -37,19 +37,17 @@ export function MobileWorkbench() {
         if (!active) return
         setRegistration(result)
         if (result === 'approved') stop = remote.observe(setState)
-        else if (result === 'pending')
+        else {
+          setState({ state: 'approval-required' })
+        }
+        if (result === 'pending')
           timer = setTimeout(() => {
             void check()
           }, 2000)
       } catch (error) {
         if (!active) return
         setState({
-          state:
-            error instanceof Error && error.message === 'identity-changed'
-              ? 'identity-changed'
-              : error instanceof Error && error.message === 'incompatible'
-                ? 'incompatible'
-                : 'unavailable',
+          state: error instanceof RemoteError ? error.state : 'unavailable',
         })
       }
     }
@@ -65,16 +63,16 @@ export function MobileWorkbench() {
   const scan = async () => {
     setBusy(true)
     try {
-      await nativeCall('scan')
+      const result = await nativeCall('scan')
+      if (result === 'expired') {
+        setRegistration('expired')
+        setState({ state: 'approval-required' })
+        return
+      }
       setState({ state: 'waiting' })
       setRevision((value) => value + 1)
     } catch (error) {
-      setState({
-        state:
-          error instanceof Error && error.message === 'incompatible'
-            ? 'incompatible'
-            : 'approval-required',
-      })
+      setState({ state: error instanceof RemoteError ? error.state : 'unavailable' })
     } finally {
       setBusy(false)
     }

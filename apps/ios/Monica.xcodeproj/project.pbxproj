@@ -1,0 +1,450 @@
+// !$*UTF8*$!
+{
+	archiveVersion = 1;
+	classes = {
+	};
+	objectVersion = 77;
+	objects = {
+
+/* Begin PBXBuildFile section */
+		205FE56832AF93607327D88E /* NativeBridge.swift in Sources */ = {isa = PBXBuildFile; fileRef = A04E39F5901EDA6EE6B857A6 /* NativeBridge.swift */; };
+		2E679A7889249397B6B835DB /* WorkbenchController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3803666CDC895AF15CD7E8B6 /* WorkbenchController.swift */; };
+		9B303F499B5646D7080EC5D8 /* CredentialStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1F6591116DD21DD0CCA32CAB /* CredentialStore.swift */; };
+		C5A25854E50B7D277F0B227D /* fixtures.json in Resources */ = {isa = PBXBuildFile; fileRef = 8F1CF68ADC84A19B489FB3C1 /* fixtures.json */; };
+		CFD1FC38AD665EB5501974DA /* NativeTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = ED41674AB006938F4FDEA395 /* NativeTests.swift */; };
+		FC2EADC14439F4D02069B7FB /* dist in Resources */ = {isa = PBXBuildFile; fileRef = 3EC9EFF4A2E6C244DD4B3A89 /* dist */; };
+		FE1B03B809E06634DB083B82 /* RemoteHTTP.swift in Sources */ = {isa = PBXBuildFile; fileRef = F188370FE424687406218368 /* RemoteHTTP.swift */; };
+/* End PBXBuildFile section */
+
+/* Begin PBXContainerItemProxy section */
+		3DB404F065837823DE22564A /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 119794749EE9DA35CE22ABF2 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = A919BE9E3590614574A05647;
+			remoteInfo = Monica;
+		};
+/* End PBXContainerItemProxy section */
+
+/* Begin PBXFileReference section */
+		1F6591116DD21DD0CCA32CAB /* CredentialStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CredentialStore.swift; sourceTree = "<group>"; };
+		3803666CDC895AF15CD7E8B6 /* WorkbenchController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkbenchController.swift; sourceTree = "<group>"; };
+		3EC9EFF4A2E6C244DD4B3A89 /* dist */ = {isa = PBXFileReference; lastKnownFileType = folder; path = dist; sourceTree = SOURCE_ROOT; };
+		460F5A324444F494A379AFF5 /* MonicaTests.xctest */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.cfbundle; path = MonicaTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		5825CCA1F23A0FFF10E776CB /* Monica.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = Monica.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		8F1CF68ADC84A19B489FB3C1 /* fixtures.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = fixtures.json; sourceTree = "<group>"; };
+		A04E39F5901EDA6EE6B857A6 /* NativeBridge.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NativeBridge.swift; sourceTree = "<group>"; };
+		ED41674AB006938F4FDEA395 /* NativeTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NativeTests.swift; sourceTree = "<group>"; };
+		F188370FE424687406218368 /* RemoteHTTP.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RemoteHTTP.swift; sourceTree = "<group>"; };
+/* End PBXFileReference section */
+
+/* Begin PBXGroup section */
+		6BD22338405C4DA900595707 = {
+			isa = PBXGroup;
+			children = (
+				3EC9EFF4A2E6C244DD4B3A89 /* dist */,
+				D54A9AA806237AEB42C80435 /* Native */,
+				BCB944F6933955B39ACB8946 /* Tests */,
+				92068F3CBF9893C6329B75DE /* Products */,
+			);
+			sourceTree = "<group>";
+		};
+		92068F3CBF9893C6329B75DE /* Products */ = {
+			isa = PBXGroup;
+			children = (
+				5825CCA1F23A0FFF10E776CB /* Monica.app */,
+				460F5A324444F494A379AFF5 /* MonicaTests.xctest */,
+			);
+			name = Products;
+			sourceTree = "<group>";
+		};
+		BCB944F6933955B39ACB8946 /* Tests */ = {
+			isa = PBXGroup;
+			children = (
+				8F1CF68ADC84A19B489FB3C1 /* fixtures.json */,
+				ED41674AB006938F4FDEA395 /* NativeTests.swift */,
+			);
+			path = Tests;
+			sourceTree = "<group>";
+		};
+		D54A9AA806237AEB42C80435 /* Native */ = {
+			isa = PBXGroup;
+			children = (
+				1F6591116DD21DD0CCA32CAB /* CredentialStore.swift */,
+				A04E39F5901EDA6EE6B857A6 /* NativeBridge.swift */,
+				F188370FE424687406218368 /* RemoteHTTP.swift */,
+				3803666CDC895AF15CD7E8B6 /* WorkbenchController.swift */,
+			);
+			path = Native;
+			sourceTree = "<group>";
+		};
+/* End PBXGroup section */
+
+/* Begin PBXNativeTarget section */
+		0E4072E23BDDB868CB3AA4BB /* MonicaTests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 39BF58256515953102C69703 /* Build configuration list for PBXNativeTarget "MonicaTests" */;
+			buildPhases = (
+				F32C7FB0FF1C269792228557 /* Sources */,
+				771B94407A1DE7C0E71AE8C9 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				5916FC5DCBA9A829D878F088 /* PBXTargetDependency */,
+			);
+			name = MonicaTests;
+			packageProductDependencies = (
+			);
+			productName = MonicaTests;
+			productReference = 460F5A324444F494A379AFF5 /* MonicaTests.xctest */;
+			productType = "com.apple.product-type.bundle.unit-test";
+		};
+		A919BE9E3590614574A05647 /* Monica */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 4935A1F9F1BA3D25DC429BF0 /* Build configuration list for PBXNativeTarget "Monica" */;
+			buildPhases = (
+				246CE95A0AE5E3E5C34530B4 /* Sources */,
+				6C38F41008D553FDFC4E056C /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = Monica;
+			packageProductDependencies = (
+			);
+			productName = Monica;
+			productReference = 5825CCA1F23A0FFF10E776CB /* Monica.app */;
+			productType = "com.apple.product-type.application";
+		};
+/* End PBXNativeTarget section */
+
+/* Begin PBXProject section */
+		119794749EE9DA35CE22ABF2 /* Project object */ = {
+			isa = PBXProject;
+			attributes = {
+				BuildIndependentTargetsInParallel = YES;
+				LastUpgradeCheck = 1430;
+				TargetAttributes = {
+					0E4072E23BDDB868CB3AA4BB = {
+						DevelopmentTeam = "";
+						ProvisioningStyle = Automatic;
+					};
+					A919BE9E3590614574A05647 = {
+						DevelopmentTeam = "";
+						ProvisioningStyle = Automatic;
+					};
+				};
+			};
+			buildConfigurationList = E4948155F1DEFAACAF8D2763 /* Build configuration list for PBXProject "Monica" */;
+			developmentRegion = en;
+			hasScannedForEncodings = 0;
+			knownRegions = (
+				Base,
+				en,
+			);
+			mainGroup = 6BD22338405C4DA900595707;
+			minimizedProjectReferenceProxies = 1;
+			preferredProjectObjectVersion = 77;
+			productRefGroup = 92068F3CBF9893C6329B75DE /* Products */;
+			projectDirPath = "";
+			projectRoot = "";
+			targets = (
+				A919BE9E3590614574A05647 /* Monica */,
+				0E4072E23BDDB868CB3AA4BB /* MonicaTests */,
+			);
+		};
+/* End PBXProject section */
+
+/* Begin PBXResourcesBuildPhase section */
+		6C38F41008D553FDFC4E056C /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				FC2EADC14439F4D02069B7FB /* dist in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		771B94407A1DE7C0E71AE8C9 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				C5A25854E50B7D277F0B227D /* fixtures.json in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXResourcesBuildPhase section */
+
+/* Begin PBXSourcesBuildPhase section */
+		246CE95A0AE5E3E5C34530B4 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				9B303F499B5646D7080EC5D8 /* CredentialStore.swift in Sources */,
+				205FE56832AF93607327D88E /* NativeBridge.swift in Sources */,
+				FE1B03B809E06634DB083B82 /* RemoteHTTP.swift in Sources */,
+				2E679A7889249397B6B835DB /* WorkbenchController.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		F32C7FB0FF1C269792228557 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				CFD1FC38AD665EB5501974DA /* NativeTests.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXSourcesBuildPhase section */
+
+/* Begin PBXTargetDependency section */
+		5916FC5DCBA9A829D878F088 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = A919BE9E3590614574A05647 /* Monica */;
+			targetProxy = 3DB404F065837823DE22564A /* PBXContainerItemProxy */;
+		};
+/* End PBXTargetDependency section */
+
+/* Begin XCBuildConfiguration section */
+		24E7E3EF296399B9101B893D /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				GENERATE_INFOPLIST_FILE = YES;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@loader_path/Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = app.monica.iphone.tests;
+				SDKROOT = iphoneos;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/Monica.app/Monica";
+			};
+			name = Release;
+		};
+		2715410ACB588F91F6BBB270 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_IDENTITY = "iPhone Developer";
+				CURRENT_PROJECT_VERSION = 1;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_CFBundleDisplayName = monica;
+				INFOPLIST_KEY_NSCameraUsageDescription = "Macの登録QRを読み取ります。";
+				INFOPLIST_KEY_NSLocalNetworkUsageDescription = "登録したMacへTailscale経由で接続します。";
+				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
+				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
+				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = app.monica.iphone;
+				SDKROOT = iphoneos;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Release;
+		};
+		33151DF995C1386FFB7C4ABE /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_IDENTITY = "iPhone Developer";
+				CURRENT_PROJECT_VERSION = 1;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_CFBundleDisplayName = monica;
+				INFOPLIST_KEY_NSCameraUsageDescription = "Macの登録QRを読み取ります。";
+				INFOPLIST_KEY_NSLocalNetworkUsageDescription = "登録したMacへTailscale経由で接続します。";
+				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
+				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
+				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = app.monica.iphone;
+				SDKROOT = iphoneos;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Debug;
+		};
+		456028B28E5ADBDA443AFB5C /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				GENERATE_INFOPLIST_FILE = YES;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@loader_path/Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = app.monica.iphone.tests;
+				SDKROOT = iphoneos;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/Monica.app/Monica";
+			};
+			name = Debug;
+		};
+		49B5DFA49F4FFAC7DEC275C9 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++14";
+				CLANG_CXX_LIBRARY = "libc++";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				CODE_SIGN_STYLE = Automatic;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
+				DEVELOPMENT_TEAM = "";
+				ENABLE_NS_ASSERTIONS = NO;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu11;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 26.2;
+				MTL_ENABLE_DEBUG_INFO = NO;
+				MTL_FAST_MATH = YES;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = iphoneos;
+				SWIFT_COMPILATION_MODE = wholemodule;
+				SWIFT_OPTIMIZATION_LEVEL = "-O";
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Release;
+		};
+		6AE1FB94C10780A56DA7E444 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++14";
+				CLANG_CXX_LIBRARY = "libc++";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				CODE_SIGN_STYLE = Automatic;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = dwarf;
+				DEVELOPMENT_TEAM = "";
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_TESTABILITY = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu11;
+				GCC_DYNAMIC_NO_PIC = NO;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_OPTIMIZATION_LEVEL = 0;
+				GCC_PREPROCESSOR_DEFINITIONS = (
+					"$(inherited)",
+					"DEBUG=1",
+				);
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 26.2;
+				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
+				MTL_FAST_MATH = YES;
+				ONLY_ACTIVE_ARCH = YES;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = iphoneos;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG;
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Debug;
+		};
+/* End XCBuildConfiguration section */
+
+/* Begin XCConfigurationList section */
+		39BF58256515953102C69703 /* Build configuration list for PBXNativeTarget "MonicaTests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				456028B28E5ADBDA443AFB5C /* Debug */,
+				24E7E3EF296399B9101B893D /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+		4935A1F9F1BA3D25DC429BF0 /* Build configuration list for PBXNativeTarget "Monica" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				33151DF995C1386FFB7C4ABE /* Debug */,
+				2715410ACB588F91F6BBB270 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+		E4948155F1DEFAACAF8D2763 /* Build configuration list for PBXProject "Monica" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				6AE1FB94C10780A56DA7E444 /* Debug */,
+				49B5DFA49F4FFAC7DEC275C9 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+/* End XCConfigurationList section */
+	};
+	rootObject = 119794749EE9DA35CE22ABF2 /* Project object */;
+}
