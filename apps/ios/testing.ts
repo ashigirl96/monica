@@ -421,6 +421,7 @@ const touchControl = Bun.serve({
     return response({
       sessions: ptyd.sessions,
       resizes: ptyd.receivedAll((op) => op.op === 'resize').length,
+      writes: ptyd.receivedAll((op) => op.op === 'write'),
     })
   },
 })

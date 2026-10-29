@@ -521,7 +521,9 @@ final class NativeTests: XCTestCase {
         let clipboard = UIPasteboard.general.items
         defer { try? store.remove(); UIPasteboard.general.items = clipboard }
         let control = RemoteHTTP(registration(all["input-control"]!))
-        defer { control.close() }
+        let touchControl = RemoteHTTP(registration(all["touch-control"]!))
+        let macControl = RemoteHTTP(registration(all["terminal-control"]!))
+        defer { control.close(); touchControl.close(); macControl.close() }
         let controller = WorkbenchController()
         controller.loadViewIfNeeded()
         let scene = try XCTUnwrap(UIApplication.shared.connectedScenes.first as? UIWindowScene)
@@ -540,14 +542,22 @@ final class NativeTests: XCTestCase {
         func js(_ source: String) async throws {
             _ = try await webview.callAsyncJavaScript(source + "; await new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)))", arguments: [:], in: nil, contentWorld: .page)
         }
-        func writes() async throws -> [String] {
-            let object = try JSONSerialization.jsonObject(with: await control.read(.layout)) as! [String: Any]
-            return (object["writes"] as! [[String: Any]]).map { $0["data"] as! String }
+        func writes(atLeast expected: Int = 0) async throws -> [String] {
+            for _ in 0..<100 {
+                let object = try JSONSerialization.jsonObject(with: await touchControl.read(.layout)) as! [String: Any]
+                let received = (object["writes"] as! [[String: Any]]).map { $0["data"] as! String }
+                if received.count >= expected { return received }
+                try await Task.sleep(for: .milliseconds(20))
+            }
+            XCTFail("Never received \(expected) actual PTY writes")
+            return []
         }
         try await until("document.querySelectorAll('article').length === 12")
+        _ = try await macControl.read(.agentSessions)
         _ = try await control.read(.terminalSessions)
         try await js("document.querySelector('article button').click()")
         try await until("document.querySelector('form button')?.disabled === false")
+        try await until("document.querySelector('.xterm-accessibility-tree')?.children.length === 31")
         let baseline = try await writes().count
         // These are synthetic composition events, not a Japanese OS keyboard acceptance test.
         try await js("""
@@ -597,22 +607,22 @@ final class NativeTests: XCTestCase {
         XCTAssertEqual(heldWrites, baseline, "Immediate feedback is not an acceptance ACK")
         try await js("releasePhoneInput()")
         try await until("document.body.textContent.includes('Macの中継が受理しました')")
-        var sent = try await writes()
+        var sent = try await writes(atLeast: baseline + 1)
         XCTAssertEqual(sent.count, baseline + 1)
         XCTAssertEqual(sent.last, Data("日本😀\r".utf8).base64EncodedString())
         for (name, bytes) in [("Esc", "\u{1b}"), ("Tab", "\t"), ("上矢印", "\u{1b}[A"), ("左矢印", "\u{1b}[D"), ("下矢印", "\u{1b}[B"), ("右矢印", "\u{1b}[C"), ("削除", "\u{7f}")] {
             try await js("document.querySelector('[aria-label=\"\(name)\"]').click()")
             try await until("document.querySelector('[aria-label=\"Esc\"]').disabled === false")
-            sent = try await writes()
+            sent = try await writes(atLeast: sent.count + 1)
             XCTAssertEqual(sent.last, Data(bytes.utf8).base64EncodedString(), name)
         }
         try await js("document.querySelector('[aria-label=\"Ctrl\"]').click(); setDraft('c'); document.querySelector('[data-send-text]').click()")
         try await until("document.querySelector('[aria-label=\"Esc\"]').disabled === false")
-        sent = try await writes()
+        sent = try await writes(atLeast: sent.count + 1)
         XCTAssertEqual(sent.last, Data([3]).base64EncodedString())
         try await js("document.querySelector('[aria-label=\"Ctrl\"]').click(); setDraft('d'); document.querySelector('form button').click()")
         try await until("document.querySelector('[aria-label=\"Esc\"]').disabled === false")
-        sent = try await writes()
+        sent = try await writes(atLeast: sent.count + 1)
         XCTAssertEqual(sent.last, Data([4]).base64EncodedString(), "Ctrl never appends an accidental Enter")
         UIPasteboard.general.url = URL(fileURLWithPath: "/not-a-terminal-file")
         try await js("document.querySelector('[data-paste]').click()")
@@ -635,15 +645,13 @@ final class NativeTests: XCTestCase {
         XCTAssertEqual(readWrites, sent.count, "Reading clipboard must not send it")
         try await js("document.querySelector('[data-confirm-paste]').click()")
         try await until("document.querySelector('[aria-label=\"Esc\"]').disabled === false")
-        sent = try await writes()
+        sent = try await writes(atLeast: sent.count + 1)
         XCTAssertEqual(sent.last, Data("貼り付け😀\ntext".utf8).base64EncodedString())
         UIPasteboard.general.string = String(repeating: "あ", count: 87382)
         try await js("document.querySelector('[data-paste]').click()")
         try await until("document.body.textContent.includes('256KiB')")
         let oversizedWrites = try await writes().count
         XCTAssertEqual(oversizedWrites, sent.count)
-        let touchControl = RemoteHTTP(registration(all["touch-control"]!))
-        defer { touchControl.close() }
         _ = try await touchControl.read(.terminalSessions)
         try await until("document.querySelector('.xterm-accessibility-tree').textContent.includes('phone-normal-end-1')")
         let tailVisible = try await webview.evaluateJavaScript("""
@@ -685,7 +693,7 @@ final class NativeTests: XCTestCase {
             document.querySelector('[aria-label="Esc"]').click();
             """)
         try await until("document.querySelector('[aria-label=\"Esc\"]').disabled === false")
-        let gestureWrites = try await writes()
+        let gestureWrites = try await writes(atLeast: sent.count + 1)
         XCTAssertEqual(gestureWrites.count, sent.count + 1, "Normal/TUI viewing gestures must not generate terminal mouse or key bytes")
         XCTAssertEqual(gestureWrites.last, Data([27]).base64EncodedString())
         sent = gestureWrites
