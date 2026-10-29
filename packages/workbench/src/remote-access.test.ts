@@ -318,7 +318,7 @@ FileHandle.standardOutput.write(codes.first!.data(using: .utf8)!)
 `,
       ],
       {
-        env: process.env,
+        env: { ...process.env, TMPDIR: f.home },
         stdin: Buffer.from(invite.qr.slice('data:image/gif;base64,'.length), 'base64'),
         timeout: 20_000,
       },
@@ -399,4 +399,38 @@ test('restart discards an unconsumed invitation while retaining the TLS identity
   await restarted.client.remote.enable({ address: syntheticTailnetAddress, port: f.port })
   expect((await restarted.client.remote.status()).state).toBe('unavailable')
   expect(readFileSync(join(f.home, 'remote', 'identity.json'), 'utf8')).toBe(saved)
+})
+
+test('an unprotected or symlinked identity is refused rather than replaced or served', async () => {
+  const { chmodSync, renameSync, symlinkSync } = await import('node:fs')
+  const f = await listening()
+  const path = join(f.home, 'remote', 'identity.json')
+  const before = readFileSync(path, 'utf8')
+  await f.client.remote.disable()
+  chmodSync(path, 0o644)
+  await f.client.remote.enable({ address: syntheticTailnetAddress, port: f.port })
+  expect((await f.client.remote.status()).state).toBe('unavailable')
+  expect(readFileSync(path, 'utf8')).toBe(before)
+  chmodSync(path, 0o600)
+  renameSync(path, `${path}.saved`)
+  symlinkSync(`${path}.saved`, path)
+  await f.client.remote.enable({ address: syntheticTailnetAddress, port: f.port })
+  expect((await f.client.remote.status()).state).toBe('unavailable')
+  expect(readFileSync(`${path}.saved`, 'utf8')).toBe(before)
+})
+
+test('disable still closes authenticated WSS when persisting the disabled setting fails', async () => {
+  const { chmodSync } = await import('node:fs')
+  const f = await listening()
+  const approved = await f.approved()
+  const active = await f.websocket(approved.credential)
+  await active.greeting
+  const directory = join(f.home, 'remote')
+  chmodSync(directory, 0o500)
+  onCleanup(() => chmodSync(directory, 0o700))
+  await expect(f.client.remote.disable()).rejects.toThrow()
+  expect(
+    await Promise.race([active.closed.then(() => 'closed'), Bun.sleep(200).then(() => 'open')]),
+  ).toBe('closed')
+  await expect(f.request('/check', approved.credential)).rejects.toThrow()
 })

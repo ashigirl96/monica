@@ -1,5 +1,5 @@
 import { afterEach, expect, setDefaultTimeout, test } from 'bun:test'
-import { existsSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 
 import { type contract as chatContract, MAX_ASK_BODY_BYTES } from '@monica/chat/contract'
@@ -827,6 +827,20 @@ test('remote access is disabled by default, and failed Tailscale bind leaves the
     'unavailable',
   )
   expect((await viaToken(backend, 'workbench/layout/get')).status).toBe(200)
+  const startupFailure = await startBackend(freePort(), (home) => {
+    const directory = join(home, 'remote')
+    mkdirSync(directory, { mode: 0o700 })
+    writeFileSync(
+      join(directory, 'settings.json'),
+      JSON.stringify({ address: syntheticTailnetAddress, port: freePort() }),
+      { mode: 0o600 },
+    )
+    return {}
+  })
+  expect(
+    (await (await viaToken(startupFailure, 'workbench/remote/status')).json()).json.state,
+  ).toBe('unavailable')
+  expect((await viaToken(startupFailure, 'workbench/layout/get')).status).toBe(200)
   expect(
     (await viaToken({ port: backend.port, token: extensionToken }, 'chat/ask', INVALID_QUESTION))
       .status,
