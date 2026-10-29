@@ -11,11 +11,30 @@ struct RemoteFailure: Error {
     static let incompatible = RemoteFailure(state: "incompatible")
 }
 
+enum RegistrationLifecycle: String, Codable, Sendable {
+    case pending, approved
+}
+
+struct RegistrationResponse: Decodable {
+    enum State: String, Decodable { case approved, pending, rejected }
+    let state: State
+    let version: Int?
+    let expiresAt: Double?
+
+    func value() -> [String: Any] {
+        var result: [String: Any] = ["state": state.rawValue]
+        if let version { result["version"] = version }
+        if let expiresAt { result["expiresAt"] = expiresAt }
+        return result
+    }
+}
+
 struct Registration: Codable, Sendable {
     let endpoint: URL
     let certificate: Data
     let credential: String
-    let pendingUntil: Date
+    var pendingUntil: Date
+    var lifecycle: RegistrationLifecycle? = .pending
 
     var host: String { endpoint.host!.trimmingCharacters(in: CharacterSet(charactersIn: "[]")) }
 }
@@ -34,8 +53,7 @@ struct Invitation: Decodable {
               endpoint.scheme == "https", endpoint.user == nil, endpoint.password == nil,
               endpoint.query == nil, endpoint.fragment == nil, endpoint.path.isEmpty,
               let port = endpoint.port, (1024...65535).contains(port),
-              Self.isTailscale(host), expiresAt > Date().timeIntervalSince1970 * 1000,
-              expiresAt <= Date().addingTimeInterval(300).timeIntervalSince1970 * 1000 + 5000,
+              Self.isTailscale(host), expiresAt.isFinite, expiresAt >= 0,
               invitation.range(of: "^[0-9a-f]{64}$", options: .regularExpression) != nil,
               SHA256.hash(data: certificate).map({ String(format: "%02X", $0) }).joined(separator: ":") == fingerprint,
               Trust.accepts(certificate: certificate, host: host)

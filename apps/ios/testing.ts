@@ -247,33 +247,8 @@ try {
 } finally {
   bind.mockRestore()
 }
-const invitation = JSON.parse((await client.remote.invite()).payload).invitation as string
-const registration = await new Promise<string>((resolve, reject) => {
-  const request = https.request(
-    {
-      hostname: '127.0.0.1',
-      port,
-      path: '/registration/request',
-      method: 'POST',
-      ca: good.cert,
-      headers: {
-        authorization: `Bearer ${credential}`,
-        'x-monica-invitation': invitation,
-        'content-type': 'application/json',
-      },
-    },
-    (res) => {
-      let text = ''
-      res.on('data', (data) => {
-        text += data
-      })
-      res.on('end', () => resolve(text))
-    },
-  )
-  request.on('error', reject)
-  request.end(JSON.stringify({ version: 1, name: 'Simulator' }))
-})
-await client.remote.approve({ id: JSON.parse(registration).id })
+const registration = await registerDevice(credential)
+await client.remote.approve({ id: registration.id })
 for (let i = 0; i < 12; i++)
   await client.runspace.create({
     cwd: `/simulator-${i}-` + 'あ😀'.repeat(1000),
@@ -281,6 +256,62 @@ for (let i = 0; i < 12; i++)
     cols: 80,
   })
 fixtures.large = { endpoint: `https://127.0.0.1:${port}`, certificate: good.der, credential }
+async function registerDevice(deviceCredential: string) {
+  const invitation = JSON.parse((await client.remote.invite()).payload).invitation as string
+  return new Promise<{ id: string }>((resolve, reject) => {
+    const request = https.request(
+      {
+        hostname: '127.0.0.1',
+        port,
+        path: '/registration/request',
+        method: 'POST',
+        ca: good.cert,
+        headers: {
+          authorization: `Bearer ${deviceCredential}`,
+          'x-monica-invitation': invitation,
+          'content-type': 'application/json',
+        },
+      },
+      (res) => {
+        let text = ''
+        res.on('data', (data) => {
+          text += data
+        })
+        res.on('end', () => resolve(JSON.parse(text)))
+      },
+    )
+    request.on('error', reject)
+    request.end(JSON.stringify({ version: 1, name: 'Lifecycle Simulator' }))
+  })
+}
+const lifecycleCredential = `monica-remote-v1.${randomBytes(32).toString('hex')}`
+const lifecycleDevice = await registerDevice(lifecycleCredential)
+await client.remote.approve({ id: lifecycleDevice.id })
+fixtures.lifecycle = { ...fixtures.large!, credential: lifecycleCredential }
+const pendingCredential = `monica-remote-v1.${randomBytes(32).toString('hex')}`
+await registerDevice(pendingCredential)
+fixtures.pending = { ...fixtures.large!, credential: pendingCredential }
+const control = Bun.serve({
+  hostname: '127.0.0.1',
+  port: 0,
+  tls: good,
+  async fetch(request) {
+    if (request.headers.get('authorization') !== `Bearer ${credential}`)
+      return new Response('Unauthorized', { status: 401 })
+    if (new URL(request.url).pathname.endsWith('terminalSession/list')) {
+      await client.remote.revoke({ id: lifecycleDevice.id })
+      const elapsed = Date.now() + 301_000
+      spyOn(Date, 'now').mockReturnValue(elapsed)
+    }
+    return response({})
+  },
+})
+servers.push(control)
+fixtures['lifecycle-control'] = {
+  endpoint: `https://127.0.0.1:${control.port}`,
+  certificate: good.der,
+  credential,
+}
 writeFileSync(join(import.meta.dir, 'Tests/Fixtures/fixtures.json'), JSON.stringify(fixtures))
 process.stdout.write('Native HTTPS/WSS fixtures ready\n')
 function stop() {

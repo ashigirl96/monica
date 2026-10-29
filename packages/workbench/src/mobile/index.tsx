@@ -1,9 +1,10 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 
 import {
-  nativeCall,
+  registerCandidate,
   nativeTransport,
   observeRegistration,
+  scanRegistration,
   type RegistrationState,
 } from './native.ts'
 import { RemoteError, RemoteWorkbench, type RemoteState } from './remote-workbench.ts'
@@ -28,38 +29,50 @@ export function MobileWorkbench() {
   const [selected, setSelected] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
   const [revision, setRevision] = useState(0)
+  const [scanError, setScanError] = useState<string | null>(null)
+  const stopObservation = useRef<(() => void) | undefined>(undefined)
 
   useEffect(() => {
     let stop: (() => void) | undefined
     const stopRegistration = observeRegistration(
       (result) => {
         setRegistration(result)
+        stop?.()
         if (result === 'approved') stop = remote.observe(setState)
         else setState({ state: 'approval-required' })
       },
       (error) => setState({ state: error.state }),
     )
-    return () => {
+    const cleanup = () => {
       stopRegistration()
       stop?.()
     }
+    stopObservation.current = cleanup
+    return cleanup
     // oxlint-disable-next-line react/exhaustive-effect-dependencies -- Explicit reconnect replaces the observation and its generation.
   }, [revision])
 
   const scan = async () => {
     setBusy(true)
+    setScanError(null)
+    let replacing = false
     try {
-      const result = await nativeCall('scan')
+      const result = await scanRegistration()
+      if (result === 'cancelled') return
       if (result === 'expired') {
-        setRegistration('expired')
-        setState({ state: 'approval-required' })
+        setScanError('招待の期限が切れました。Macで新しい招待を作ってください。')
         return
       }
+      replacing = true
+      stopObservation.current?.()
       setState({ state: 'waiting' })
-      setRevision((value) => value + 1)
+      await registerCandidate()
     } catch (error) {
-      setState({ state: error instanceof RemoteError ? error.state : 'unavailable' })
+      const failure = error instanceof RemoteError ? error.state : 'unavailable'
+      setScanError(`QRの登録を完了できませんでした。${labels[failure]}`)
+      if (replacing) setState({ state: failure })
     } finally {
+      if (replacing) setRevision((value) => value + 1)
       setBusy(false)
     }
   }
@@ -82,12 +95,14 @@ export function MobileWorkbench() {
           {busy ? '読み取り中…' : 'Macの登録QRを読み取る'}
         </button>
         <button
+          disabled={busy}
           onClick={() => {
             setRevision((value) => value + 1)
           }}
         >
           再接続
         </button>
+        {scanError && <p role="alert">{scanError}</p>}
         {registration === 'pending' && (
           <p role="status">承認待ち。Macに表示された端末名と接続元を確認して承認してください。</p>
         )}

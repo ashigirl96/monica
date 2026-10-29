@@ -33,7 +33,7 @@ final class WorkbenchController: UIViewController, WKNavigationDelegate {
         decisionHandler(navigationAction.targetFrame?.isMainFrame == true && navigationAction.request.url == entry ? .allow : .cancel)
     }
 
-    func scan() async throws -> String {
+    func scan() async throws -> String? {
         guard !scanning else { throw RemoteFailure.unavailable }
         scanning = true
         defer { scanning = false }
@@ -57,10 +57,10 @@ final class WorkbenchController: UIViewController, WKNavigationDelegate {
 final class QRScanner: UIViewController, @preconcurrency AVCaptureMetadataOutputObjectsDelegate, UIAdaptivePresentationControllerDelegate {
     private let session = AVCaptureSession()
     private let captureQueue = DispatchQueue(label: "app.monica.qr-capture")
-    private var completion: ((Result<String, Error>) -> Void)?
+    private var completion: ((Result<String?, Error>) -> Void)?
     private var preview: AVCaptureVideoPreviewLayer?
 
-    init(completion: @escaping (Result<String, Error>) -> Void) { self.completion = completion; super.init(nibName: nil, bundle: nil) }
+    init(completion: @escaping (Result<String?, Error>) -> Void) { self.completion = completion; super.init(nibName: nil, bundle: nil) }
     required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
 
     override func viewDidLoad() {
@@ -88,14 +88,14 @@ final class QRScanner: UIViewController, @preconcurrency AVCaptureMetadataOutput
         } catch { finish(.failure(error)) }
     }
     override func viewDidLayoutSubviews() { super.viewDidLayoutSubviews(); preview?.frame = view.bounds }
-    @objc private func cancel() { finish(.failure(RemoteFailure.unavailable)) }
+    @objc private func cancel() { finish(.success(nil)) }
     func presentationControllerDidDismiss(_ presentationController: UIPresentationController) { cancel() }
     func metadataOutput(_ output: AVCaptureMetadataOutput, didOutput metadataObjects: [AVMetadataObject], from connection: AVCaptureConnection) {
         guard let value = (metadataObjects.first as? AVMetadataMachineReadableCodeObject)?.stringValue else { return }
         guard value.utf8.count <= 8192 else { finish(.failure(RemoteFailure.identityChanged)); return }
         finish(.success(value))
     }
-    private func finish(_ result: Result<String, Error>) {
+    private func finish(_ result: Result<String?, Error>) {
         guard let completion else { return }
         self.completion = nil
         let session = session

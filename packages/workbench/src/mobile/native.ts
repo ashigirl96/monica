@@ -69,8 +69,43 @@ export const nativeTransport: RemoteTransport = {
   },
 }
 
-const RegistrationSchema = z.enum(['approved', 'pending', 'rejected', 'expired', 'unregistered'])
-export type RegistrationState = z.infer<typeof RegistrationSchema>
+const ScanSchema = z.discriminatedUnion('state', [
+  z.object({ state: z.literal('cancelled') }),
+  z.object({ state: z.literal('candidate'), expiresAt: z.number().finite().nonnegative() }),
+])
+
+export async function scanRegistration(): Promise<'cancelled' | 'expired' | 'ready'> {
+  const result = ScanSchema.parse(await nativeCall('scan'))
+  if (result.state === 'cancelled') return 'cancelled'
+  if (result.expiresAt <= Date.now()) return 'expired'
+  if (result.expiresAt > Date.now() + 305_000) throw new RemoteError('incompatible')
+  return 'ready'
+}
+
+const PendingSchema = z.object({
+  state: z.literal('pending'),
+  expiresAt: z.number().finite().nonnegative(),
+})
+const RegistrationMetadataSchema = z.object({
+  id: z.string(),
+  lifecycle: z.enum(['pending', 'approved', 'unknown']),
+  pendingUntil: z.number().finite().nonnegative(),
+})
+const RegistrationSchema = z.discriminatedUnion('state', [
+  z.object({ state: z.literal('unregistered') }),
+  RegistrationMetadataSchema.extend({ state: z.literal('approved'), version: z.literal(1) }),
+  RegistrationMetadataSchema.extend(PendingSchema.shape),
+  RegistrationMetadataSchema.extend({
+    state: z.literal('rejected'),
+    expiresAt: z.number().finite().nonnegative(),
+  }),
+  RegistrationMetadataSchema.extend({ state: z.literal('unauthorized') }),
+])
+export type RegistrationState = 'approved' | 'pending' | 'rejected' | 'expired' | 'unregistered'
+
+export async function registerCandidate(): Promise<void> {
+  PendingSchema.parse(await nativeCall('register'))
+}
 
 export function observeRegistration(
   receive: (state: RegistrationState) => void,
@@ -83,9 +118,16 @@ export function observeRegistration(
     try {
       const result = RegistrationSchema.parse(await nativeCall('registration'))
       if (!active) return
-      receive(result)
+      if (result.state === 'approved' && result.lifecycle !== 'approved') {
+        await nativeCall('registration-approved', result.id)
+        if (!active) return
+      }
+      if (result.state === 'unauthorized') {
+        if (result.lifecycle === 'pending' && result.pendingUntil <= Date.now()) receive('expired')
+        else throw new RemoteError('approval-required')
+      } else receive(result.state)
       attempt = 0
-      if (result === 'pending')
+      if (result.state === 'pending')
         timer = setTimeout(() => {
           void check()
         }, 2000)

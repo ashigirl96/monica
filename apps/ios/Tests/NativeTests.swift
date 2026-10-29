@@ -76,6 +76,12 @@ final class NativeTests: XCTestCase {
         XCTAssertEqual(attributes[kSecAttrAccessible as String] as? String, kSecAttrAccessibleWhenUnlockedThisDeviceOnly as String)
         XCTAssertEqual(attributes[kSecAttrSynchronizable as String] as? Bool, false)
         XCTAssertNotEqual(try CredentialStore.secret(), try CredentialStore.secret())
+        var legacy = try JSONSerialization.jsonObject(with: JSONEncoder().encode(saved)) as! [String: Any]
+        legacy.removeValue(forKey: "lifecycle")
+        let oldRecord = try JSONDecoder().decode(Registration.self, from: JSONSerialization.data(withJSONObject: legacy))
+        XCTAssertNil(oldRecord.lifecycle)
+        try store.save(oldRecord)
+        XCTAssertNil(try store.load()?.lifecycle)
     }
 
     func testQRValidatesWireVersionHostFingerprintAndInvitationExpiry() throws {
@@ -90,7 +96,8 @@ final class NativeTests: XCTestCase {
             return try JSONDecoder().decode(Invitation.self, from: data).registration(credential: "test")
         }
         XCTAssertEqual(try parse(valid).endpoint, fixture.endpoint)
-        for replacement in [["version": 2], ["fingerprint": "00"], ["expiresAt": 0],
+        XCTAssertEqual(try parse(valid.merging(["expiresAt": 0]) { _, new in new }).pendingUntil, Date(timeIntervalSince1970: 0))
+        for replacement in [["version": 2], ["fingerprint": "00"], ["expiresAt": -1],
                             ["endpoint": "http://\(syntheticAddress):19443"], ["endpoint": "https://example.com:19443"],
                             ["endpoint": "https://\(syntheticAddress):19443/?token=secret"]] as [[String: Any]] {
             XCTAssertThrowsError(try parse(valid.merging(replacement) { _, new in new }))
@@ -149,6 +156,162 @@ final class NativeTests: XCTestCase {
             try await Task.sleep(for: .milliseconds(10))
         }
         XCTAssertTrue(cancelled)
+    }
+
+    @MainActor
+    func testApprovedRegistrationSurvivesElapsedPendingDeadlineRelaunchAndRevocationWhilePendingExpires() async throws {
+        let fixtures = try fixtures()
+        let store = CredentialStore()
+        let fixture = fixtures["lifecycle"]!
+        try store.save(Registration(endpoint: fixture.endpoint, certificate: fixture.certificate,
+                                    credential: fixture.credential, pendingUntil: Date(timeIntervalSince1970: 0)))
+        defer { try? store.remove() }
+        let scene = try XCTUnwrap(UIApplication.shared.connectedScenes.first as? UIWindowScene)
+        let window = try XCTUnwrap(scene.windows.first(where: { $0.isKeyWindow }))
+        (window.rootViewController as? WorkbenchController)?.bridge.suspend()
+        func launch() async throws -> WorkbenchController {
+            let controller = WorkbenchController()
+            controller.loadViewIfNeeded()
+            window.rootViewController = controller
+            for _ in 0..<100 {
+                if let count = try? await controller.webview!.evaluateJavaScript("document.querySelectorAll('article').length") as? Int, count == 12 { break }
+                try await Task.sleep(for: .milliseconds(50))
+            }
+            let count = try await controller.webview!.evaluateJavaScript("document.querySelectorAll('article').length") as? Int
+            XCTAssertEqual(count, 12)
+            return controller
+        }
+        let first = try await launch()
+        XCTAssertEqual(try store.load()?.lifecycle, .approved)
+        first.bridge.suspend()
+        let relaunched = try await launch()
+        defer { relaunched.bridge.suspend() }
+        let control = RemoteHTTP(registration(fixtures["lifecycle-control"]!))
+        defer { control.close() }
+        _ = try await control.read(.terminalSessions)
+        let webview = relaunched.webview!
+        _ = try await webview.evaluateJavaScript("""
+            window.registrationChecks = 0;
+            const handler = window.webkit.messageHandlers.monica;
+            const original = handler.postMessage.bind(handler);
+            handler.postMessage = async message => {
+                const reply = await original(message);
+                if (message.operation === 'registration') window.registrationChecks++;
+                return reply;
+            };
+            document.querySelectorAll('button')[1].click();
+            null;
+            """)
+        for _ in 0..<100 {
+            if let checks = try? await webview.evaluateJavaScript("window.registrationChecks") as? Int, checks > 0 { break }
+            try await Task.sleep(for: .milliseconds(20))
+        }
+        let checks = try await webview.evaluateJavaScript("window.registrationChecks") as? Int
+        XCTAssertEqual(checks, 1)
+        _ = try await webview.callAsyncJavaScript("await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))", arguments: [:], in: nil, contentWorld: .page)
+        let expired = try await webview.evaluateJavaScript("document.body.textContent.includes('登録の期限が切れました')") as? Bool
+        XCTAssertEqual(expired, false, "Approved credentials must not expire with their old pending deadline")
+        let status = try await webview.evaluateJavaScript("document.querySelector('header [role=status]').textContent") as? String
+        XCTAssertTrue(status?.contains("承認が必要") == true)
+        let count = try await webview.evaluateJavaScript("document.querySelectorAll('article').length") as? Int
+        XCTAssertEqual(count, 0)
+        relaunched.bridge.suspend()
+        let revokedRelaunch = WorkbenchController()
+        revokedRelaunch.loadViewIfNeeded()
+        window.rootViewController = revokedRelaunch
+        defer { revokedRelaunch.bridge.suspend() }
+        for _ in 0..<100 {
+            if let text = try? await revokedRelaunch.webview!.evaluateJavaScript("document.querySelector('header [role=status]')?.textContent") as? String, text.contains("承認が必要") { break }
+            try await Task.sleep(for: .milliseconds(20))
+        }
+        let revokedExpired = try await revokedRelaunch.webview!.evaluateJavaScript("document.body.textContent.includes('登録の期限が切れました')") as? Bool
+        XCTAssertEqual(revokedExpired, false)
+        let revokedStatus = try await revokedRelaunch.webview!.evaluateJavaScript("document.querySelector('header [role=status]').textContent") as? String
+        XCTAssertTrue(revokedStatus?.contains("承認が必要") == true)
+        revokedRelaunch.bridge.suspend()
+        let pending = fixtures["pending"]!
+        try store.save(Registration(endpoint: pending.endpoint, certificate: pending.certificate,
+                                    credential: pending.credential, pendingUntil: Date(timeIntervalSince1970: 0)))
+        let awaiting = WorkbenchController()
+        awaiting.loadViewIfNeeded()
+        window.rootViewController = awaiting
+        defer { awaiting.bridge.suspend() }
+        for _ in 0..<100 {
+            if let expired = try? await awaiting.webview!.evaluateJavaScript("document.body.textContent.includes('登録の期限が切れました')") as? Bool, expired == true { break }
+            try await Task.sleep(for: .milliseconds(20))
+        }
+        let pendingExpired = try await awaiting.webview!.evaluateJavaScript("document.body.textContent.includes('登録の期限が切れました')") as? Bool
+        XCTAssertEqual(pendingExpired, true)
+    }
+
+    @MainActor
+    func testQRCancellationIsNotAConnectionFailure() {
+        var cancelled = false
+        let scanner = QRScanner { result in
+            switch result {
+            case .success(let captured):
+                XCTAssertNil(captured)
+                cancelled = true
+            case .failure(let error): XCTFail("Cancellation failed: \(error)")
+            }
+        }
+        scanner.perform(NSSelectorFromString("cancel"))
+        XCTAssertTrue(cancelled)
+    }
+
+    @MainActor
+    func testCancelledOrInvalidQRKeepsTheAvailableWorkbenchAndOneSubscription() async throws {
+        let store = CredentialStore()
+        let saved = registration(try fixtures()["large"]!)
+        try store.save(saved)
+        defer { try? store.remove() }
+        let controller = WorkbenchController()
+        controller.loadViewIfNeeded()
+        let scene = try XCTUnwrap(UIApplication.shared.connectedScenes.first as? UIWindowScene)
+        let window = try XCTUnwrap(scene.windows.first(where: { $0.isKeyWindow }))
+        (window.rootViewController as? WorkbenchController)?.bridge.suspend()
+        window.rootViewController = controller
+        defer { controller.bridge.suspend() }
+        let webview = controller.webview!
+        for _ in 0..<100 {
+            if let count = try? await webview.evaluateJavaScript("document.querySelectorAll('article').length") as? Int, count == 12 { break }
+            try await Task.sleep(for: .milliseconds(50))
+        }
+        _ = try await webview.callAsyncJavaScript("document.querySelector('article button').click(); await new Promise(resolve => requestAnimationFrame(resolve))", arguments: [:], in: nil, contentWorld: .page)
+        let before = try await webview.evaluateJavaScript("document.querySelector('[aria-label=Runspace一覧]').innerHTML") as? String
+        XCTAssertNotNil(before)
+        _ = try await webview.evaluateJavaScript("""
+            window.scanReply = {state:'unavailable'};
+            window.subscribeCount = 0;
+            window.unsubscribeCount = 0;
+            const handler = window.webkit.messageHandlers.monica;
+            const original = handler.postMessage.bind(handler);
+            handler.postMessage = message => {
+                if (message.operation === 'scan') return Promise.resolve(window.scanReply);
+                if (message.operation === 'subscribe') window.subscribeCount++;
+                if (message.operation === 'unsubscribe') window.unsubscribeCount++;
+                return original(message);
+            };
+            null;
+            """)
+        for reply in ["{state:'unavailable'}", "{state:'identity-changed'}", "{state:'incompatible'}", "{state:'ok',value:{state:'candidate',expiresAt:0}}", "{state:'ok',value:{state:'cancelled'}}"] {
+            _ = try await webview.callAsyncJavaScript("""
+                window.scanReply = \(reply);
+                document.querySelector('button').click();
+                await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+                """, arguments: [:], in: nil, contentWorld: .page)
+            let after = try await webview.evaluateJavaScript("document.querySelector('[aria-label=Runspace一覧]')?.innerHTML") as? String
+            XCTAssertEqual(after, before, reply)
+            let status = try await webview.evaluateJavaScript("document.querySelector('header [role=status]').textContent") as? String
+            XCTAssertEqual(status, "利用可能", reply)
+            let alerts = try await webview.evaluateJavaScript("document.querySelectorAll('[role=alert]').length") as? Int
+            XCTAssertEqual(alerts, reply.contains("cancelled") ? 0 : 1)
+        }
+        let subscriptions = try await webview.evaluateJavaScript("window.subscribeCount") as? Int
+        let unsubscriptions = try await webview.evaluateJavaScript("window.unsubscribeCount") as? Int
+        XCTAssertEqual(subscriptions, 0)
+        XCTAssertEqual(unsubscriptions, 0)
+        XCTAssertEqual(try store.load()?.credential, saved.credential)
     }
 
     @MainActor

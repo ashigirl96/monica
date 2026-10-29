@@ -7,6 +7,7 @@ final class NativeBridge: NSObject, WKScriptMessageHandlerWithReply {
     weak var controller: WorkbenchController?
     private let store = CredentialStore()
     private var client: RemoteHTTP?
+    private var candidate: (invitation: Invitation, registration: Registration)?
     private var requests: [String: Task<Void, Never>] = [:]
     private var subscription: (id: String, task: Task<Void, Never>?, socket: URLSessionWebSocketTask)?
     private var active = true
@@ -29,6 +30,8 @@ final class NativeBridge: NSObject, WKScriptMessageHandlerWithReply {
             do {
                 let value = try await perform(operation, id: body["id"])
                 replyHandler(["state": "ok", "value": value], nil)
+            } catch is DecodingError {
+                replyHandler(["state": "incompatible"], nil)
             } catch {
                 replyHandler(["state": (error as? RemoteFailure)?.state ?? "unavailable"], nil)
             }
@@ -38,6 +41,7 @@ final class NativeBridge: NSObject, WKScriptMessageHandlerWithReply {
 
     func suspend() {
         active = false
+        candidate = nil
         generation += 1
         for task in requests.values { task.cancel() }
         requests.removeAll()
@@ -66,37 +70,54 @@ final class NativeBridge: NSObject, WKScriptMessageHandlerWithReply {
         switch operation {
         case "scan":
             guard let controller else { throw RemoteFailure.unavailable }
-            let captured = try await controller.scan()
+            candidate = nil
+            guard let captured = try await controller.scan() else { return ["state": "cancelled"] }
             guard active else { throw RemoteFailure.unavailable }
             let invitation = try JSONDecoder().decode(Invitation.self, from: Data(captured.utf8))
-            if invitation.expiresAt <= Date().timeIntervalSince1970 * 1000 { return "expired" }
             let registration = try invitation.registration(credential: CredentialStore.secret())
+            candidate = (invitation, registration)
+            return ["state": "candidate", "expiresAt": invitation.expiresAt]
+        case "register":
+            guard let candidate else { throw RemoteFailure.unavailable }
+            self.candidate = nil
+            let (invitation, registration) = candidate
+            try store.save(registration)
             unsubscribe()
             client?.close()
             client = nil
             generation += 1
-            try store.save(registration)
             let client = try connection()
+            let current = generation
             let response = try await client.register(invitation: invitation.invitation, name: UIDevice.current.name)
-            let parsed = try JSONSerialization.jsonObject(with: response) as? [String: Any]
-            guard parsed?["state"] as? String == "pending" else { throw RemoteFailure.incompatible }
-            return "pending"
+            guard current == generation, active else { throw RemoteFailure.unavailable }
+            let parsed = try JSONDecoder().decode(RegistrationResponse.self, from: response)
+            if let expiresAt = parsed.expiresAt {
+                guard expiresAt.isFinite, expiresAt >= 0 else { throw RemoteFailure.incompatible }
+                var saved = registration
+                saved.pendingUntil = Date(timeIntervalSince1970: expiresAt / 1000)
+                try store.save(saved)
+            }
+            return parsed.value()
         case "registration":
-            guard let registration = try store.load() else { return "unregistered" }
+            guard let registration = try store.load() else { return ["state": "unregistered"] }
+            let current = generation
+            var result: [String: Any]
             do {
                 let data = try await connection().status()
-                guard let result = try JSONSerialization.jsonObject(with: data) as? [String: Any],
-                      let state = result["state"] as? String else { throw RemoteFailure.incompatible }
-                if state == "approved" {
-                    guard result["version"] as? Int == 1 else { throw RemoteFailure.incompatible }
-                    return state
-                }
-                guard ["pending", "rejected"].contains(state) else { throw RemoteFailure.incompatible }
-                return state
+                result = try JSONDecoder().decode(RegistrationResponse.self, from: data).value()
             } catch let error as RemoteFailure where error.state == "approval-required" {
-                if Date() >= registration.pendingUntil { return "expired" }
-                throw error
+                result = ["state": "unauthorized"]
             }
+            guard current == generation, active else { throw RemoteFailure.unavailable }
+            result["id"] = String(current)
+            result["lifecycle"] = registration.lifecycle?.rawValue ?? "unknown"
+            result["pendingUntil"] = registration.pendingUntil.timeIntervalSince1970 * 1000
+            return result
+        case "registration-approved":
+            guard id == String(generation), var registration = try store.load() else { throw RemoteFailure.unavailable }
+            registration.lifecycle = .approved
+            try store.save(registration)
+            return NSNull()
         case "subscribe":
             guard let id, UUID(uuidString: id) != nil else { throw RemoteFailure.unavailable }
             unsubscribe()
