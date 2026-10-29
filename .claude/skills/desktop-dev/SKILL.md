@@ -148,18 +148,27 @@ dev の desktop は `MONICA_HOME` ごとに identifier と vite の port が分�
 2. Mac の Tailscale address と専用 TLS port（既定 19443）を入力して有効化する。「TLS 接続を受付中」と接続先、identity の SHA-256、有効期限が出たら bind できている。「Remote を開始できません」なら address、port の競合、`<home>/remote` の所有者と権限を確認する。local の Tab はそのまま操作できることを確かめる。
 3. tailnet 管理者に、指定 iPhone から指定 Mac のこの port だけを許す grants と、重なる広い許可を確認してもらう。試験のために policy を書き換えない。Serve、Funnel、ルーター公開は使わない。
 4. **5 分間の招待 QR を作成** を押す。QR を自分の端末だけに読み取らせる。QR、招待、端末 secret を screenshot、URL、ログへ保存しない。申請の端末名と TCP source を Tailscale の iPhone と照合して **承認** または **拒否** を押す。申請は同時に 1 件で、招待も申請も 5 分で失効する。
-5. 登録済み端末の **失効** を押す。接続確認の WSS が閉じ、同じ資格の新規 HTTPS 接続確認が拒否されることを確かめる。**無効化** でも接続が閉じる。これは Tab を閉じる操作ではない。iPhone の一覧購読も閉じ、利用可能な一覧が消えることを確認する。一覧と選んだ既存 Terminal Session の出力を閲覧できる。入力は許可しない。解除 ACK が届かなければ「拒否済み・解除待ち」であり、完了と扱わない。
+5. 登録済み端末の **失効** を押す。接続確認の WSS が閉じ、同じ資格の新規 HTTPS 接続確認が拒否されることを確かめる。**無効化** でも接続が閉じる。これは Tab を閉じる操作ではない。iPhone の一覧購読も閉じ、利用可能な一覧が消えることを確認する。一覧と選んだ既存 Terminal Session の出力を閲覧できる。入力は同じ Mac renderer が利用可能な間だけ許可する。解除 ACK が届かなければ「拒否済み・解除待ち」であり、完了と扱わない。
 6. identity の期限切れや Mac の address 変更時は **Identity の更新と再登録** から全端末を失効して identity を破棄する。有効化すると新しい identity になる。新しい QR で明示的に再登録する。port 変更時も grants と端末の登録先を更新する。証明書検証を無効化して繋ぎ直さない。
 7. iPhone で Mac と別の Tab を選び、Mac の選択と未読が変わらず、空一覧から Runspace が自動作成されないことを確かめる。Mac で Tab を開く・閉じると iPhone の一覧が変わる。iOS 導入は `.claude/skills/ios-dev/SKILL.md` に従う。
 8. 同じ home で Backend を起こし直す。登録済み端末と identity は残り、未消費の招待と未承認申請は消える。desktop の入力が続くことも確かめる。最後に remote を無効化してから、下の手順で自分の desktop と home を片付ける。
 
 ### 端末の閲覧と表示解除
 
-1. Mac で継続出力する作業を開き、iPhone で同じ Tab を選ぶ。保持された末尾の後に live 出力が出ることと、履歴・TUI 復元の制限表示を確認する。Mac の選択、focus、未読は変わらない。iPhone のキーや terminal query から Write は出ない。
+1. Mac で継続出力する作業を開き、iPhone で同じ Tab を選ぶ。保持された末尾の後に live 出力が出ることと、履歴・TUI 復元の制限表示を確認する。Mac の選択、focus、未読は変わらない。iPhone の xterm 自動応答から Write は出ない。基本入力欄から送った文字と改行だけが同じ PTY に届く。
 2. Mac の窓を resize する。iPhone は Mac が適用した rows/cols に追従する。iPhone の回転と表示領域の変更では PTY サイズが変わらない。Shell は通知への登録後に attach し、resize 通知の送信成功ではなく非同期 List の read-back を確認する。
 3. iPhone の「一覧へ戻る · 表示解除」、別 Tab の選択、背景移行を順に試す。専用 ptyd 接続だけが減り、Mac の出力と入力、PTY の running とサイズが残ることを確認する。表示解除は Close Tab ではない。`lsof -U -a -p <Shell の pid>` で専用接続の増減を比べ、共有 desktop 接続まで消えていないことを見る。
 4. 閲覧中に Backend を終了し、Shell が専用接続を片付けても desktop の入力が続くことを確認する。端末の自動再接続は行わない。復帰後は一覧から選び直す。失効・無効化は先に認可を拒否し、Shell の socket shutdown と reader 終了の ACK が確認できたときだけ完了になる。
 5. 自動境界試験は `bun test packages/workbench/src/remote-access.test.ts` と `cargo test -p monica-ptyd --test daemon`。前者は既存 fake ptyd と実 Rust relay、隔離 TLS/WSS、実 Ledger を使う。後者は実 ptyd の EOF と desktop 継続を見る。実機・desktop 画面の確認をこれだけで済ませない。
+
+### hidden Tab の入力と Mac renderer
+
+1. 隔離 HOME・ZDOTDIR・MONICA_HOME を指定して起こす。既存 tool cache が必要なら CARGO_HOME・RUSTUP_HOME だけを別途明示する。Mac で一度も選択していない Tab を iPhone から選ぶ。既存の `window.__monicaTerminals.get(tabId)` が非表示 DOM へ open され、同じ instance のまま ready になることを確かめる。Mac の選択、focus、未読、PTY grid は変わらず、WebGL の取得と fit は前面 Tab だけに残る。
+2. 基本入力欄の「送信（改行）」で短い command を送る。両画面の同じ Terminal Session に結果が出ることを確認する。「受理」は中継の受理であり command の成功ではない。表示解除後も Mac の renderer と入力は残る。正常な local 接続の Attach を増やさない。
+3. hidden open 前に出した DA・DSR・OSC 10/11・kitty query は replay から再回答されない。open 後の新しい query は Mac から一度だけ応答される。過去の未回答 query を待つ TUI が回復する保証はない。
+4. renderer を reload・破棄した旧世代、Terminal Session の置換前の ready では入力できないことを確認する。heartbeat は2秒。6秒の不応答または未解析出力の滞留で remote だけを入力不可にする。desktop 自身の入力・自動応答にこの判定を流用しない。
+5. 失効と入力を競合させる。Backend は認可・Tab/session 検証から private socket への送信まで await を挟まず受理し、失効は新しい受理を先に拒否する。失効前に受理した入力は失効開始後に届き得る。解除完了は専用接続と reader の終了 ACK 後だけ。ACK を失えば送達不明・解除待ちを維持し、再送しない。
+6. `bun test packages/workbench/src/remote-access.test.ts packages/workbench/src/ui/terminal-connections.test.ts` と `cargo test -p monica-ptyd --test remote` は世代、失効、入力 ACK 喪失、細かい echo burst、Exit/Reap を見る。出力 queue は隣接 Output を最大8個の45KiB chunkへまとめ、満杯なら remote だけを切る。実 Mac WKWebView の focus・非表示 open と query 応答は実行中の隔離 desktop でも確認する。
 
 Shell は Backend の起動ごとに同 UID 専用の 0700 directory と 0600 Unix socket、起動ごとの secret を用意する。socket path と secret は Backend の環境だけへ渡し、PTY へは継承しない。資格を調べるために process の全環境をログへ出さない。
 

@@ -1,5 +1,6 @@
 import { listen, type UnlistenFn } from '@tauri-apps/api/event'
 
+import type { RendererGeneration } from '../remote-terminal.ts'
 import { shell } from './shell.ts'
 
 export type AttachResult = { replay: string; rows: number; cols: number }
@@ -32,11 +33,11 @@ export function terminalResize(sessionId: string, rows: number, cols: number): P
 
 export function onTerminalOutput(
   sessionId: string,
-  cb: (data: string, progress: { generation: RendererGeneration; sequence: number } | null) => void,
+  cb: (data: string, progress: RendererProgress | null) => void,
 ): Promise<UnlistenFn> {
   return listen<{
     data: string
-    progress: { generation: RendererGeneration; sequence: number } | null
+    progress: RendererProgress | null
   }>(`terminal:output:${sessionId}`, (event) => cb(event.payload.data, event.payload.progress))
 }
 
@@ -47,7 +48,8 @@ export function onTerminalExit(
   return listen<number | null>(`terminal:exit:${sessionId}`, (event) => cb(event.payload))
 }
 
-export type RendererGeneration = { renderer: number; connection: number }
+export type { RendererGeneration } from '../remote-terminal.ts'
+export type RendererProgress = { generation: RendererGeneration; sequence: number }
 export function registerRenderer(sessionId: string): Promise<RendererGeneration> {
   return shell('terminal_renderer_register', { sessionId })
 }

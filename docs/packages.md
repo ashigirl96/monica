@@ -45,7 +45,7 @@ entry は層ではなく、import してよい実行環境で切る（ADR-0009�
 | `@monica/<d>/contract` | oRPC の contract、zod schema、型 | どこでも | apps/desktop と apps/web と apps/extension（型だけ）、apps/cli、apps/backend、自分と他 package の server と ui と cli |
 | `@monica/<d>/server` | router、`create<D>Ledger()`（chat は `createChatAgent()`）、migrations の re-export | Bun | apps/backend、他 package の server、テスト |
 | `@monica/<d>/ui` | React の component と atom | browser | apps/desktop、apps/web、apps/extension、他 package の ui |
-| `@monica/workbench/mobile` | RemoteWorkbench の一覧・端末閲覧と iOS 用 React。desktop 初期化を含まない | browser（同梱 WKWebView） | apps/ios |
+| `@monica/workbench/mobile` | RemoteWorkbench の一覧・端末閲覧・基本入力と iOS 用 React。desktop 初期化を含まない | browser（同梱 WKWebView） | apps/ios |
 | `@monica/<d>/cli` | 出力の整形関数、補完の候補を返す関数、手で書く command | Bun | apps/cli |
 | `@monica/<d>/body` | Note の本文の JSON を読む関数と、本文と markdown の変換 | どこでも | 自分の contract と server と ui |
 | `@monica/chat/native-host` | React と CSS を引かずに使えるよう、ui の index と分ける | browser（Chrome Extension） | `@monica/chat/ui`、apps/extension の service worker |

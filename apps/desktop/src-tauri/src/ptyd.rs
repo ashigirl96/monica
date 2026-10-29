@@ -92,6 +92,7 @@ fn handle_event(app: &AppHandle, event: ClientEvent) {
             session_id,
             exit_code,
         } => {
+            app.state::<PtydHandle>().renderers.exited(&session_id);
             if let Err(e) = app.emit(&format!("terminal:exit:{session_id}"), &exit_code) {
                 eprintln!("[monica-desktop] failed to emit terminal exit {session_id}: {e}");
             }

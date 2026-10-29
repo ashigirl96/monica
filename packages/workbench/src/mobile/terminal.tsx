@@ -81,12 +81,7 @@ export function TerminalOutput({
       <p role="status" aria-live="polite">
         {labels[state]}
       </p>
-      <p>
-        保持された末尾だけを表示します。完全な履歴やTUI画面の復元は保証しません。サイズはMacが決めます。過去の未回答queryを待つTUIは接続だけでは回復しない場合があります。
-      </p>
-      <p>
-        入力はMacと共有され、同時操作で混ざります。受理はコマンドの実行成功を意味しません。失効しても配送済みの入力は取り消せません。
-      </p>
+      <p>入力はMacと共有され、同時操作で混ざります。</p>
       <form
         onSubmit={async (event) => {
           event.preventDefault()
@@ -130,6 +125,12 @@ export function TerminalOutput({
       <div className="terminal-viewport">
         <div ref={container} />
       </div>
+      <p>
+        保持された末尾だけを表示します。完全な履歴やTUI画面の復元は保証しません。サイズはMacが決めます。過去の未回答queryを待つTUIは接続だけでは回復しない場合があります。
+      </p>
+      <p>
+        受理はコマンドの実行成功を意味しません。失効前に受理した入力は失効開始後に届く場合があり、取り消せません。
+      </p>
     </section>
   )
 }

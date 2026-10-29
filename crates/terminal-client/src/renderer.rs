@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
@@ -7,7 +7,7 @@ use serde::Serialize;
 use crate::lock;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, serde::Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct RendererGeneration {
     pub renderer: u64,
     pub connection: u64,
@@ -39,7 +39,7 @@ struct Renderer {
     heartbeat: Option<Instant>,
     output: u64,
     parsed: u64,
-    pending_since: Option<Instant>,
+    pending: VecDeque<(u64, Instant)>,
 }
 
 impl Renderers {
@@ -67,7 +67,7 @@ impl Renderers {
                 heartbeat: None,
                 output: 0,
                 parsed: 0,
-                pending_since: None,
+                pending: VecDeque::new(),
             },
         );
         generation
@@ -90,11 +90,20 @@ impl Renderers {
         }
     }
 
+    pub fn exited(&self, session: &str) {
+        lock(&self.state).sessions.remove(session);
+    }
+
     pub fn output(&self, session: &str, now: Instant) -> Option<RendererOutput> {
         let mut state = lock(&self.state);
         let renderer = state.sessions.get_mut(session)?;
         renderer.output += 1;
-        renderer.pending_since.get_or_insert(now);
+        if renderer.pending.len() == 1024 {
+            // Keep the oldest timestamp when coalescing progress; overload fails closed.
+            renderer.pending.back_mut().unwrap().0 = renderer.output;
+        } else {
+            renderer.pending.push_back((renderer.output, now));
+        }
         Some(RendererOutput {
             generation: renderer.generation,
             sequence: renderer.output,
@@ -120,8 +129,12 @@ impl Renderers {
         }
         renderer.heartbeat = Some(now);
         renderer.parsed = sequence;
-        if renderer.output == sequence {
-            renderer.pending_since = None;
+        while renderer
+            .pending
+            .front()
+            .is_some_and(|&(output, _)| output <= sequence)
+        {
+            renderer.pending.pop_front();
         }
     }
 
@@ -159,8 +172,9 @@ fn healthy(renderer: &Renderer, now: Instant) -> bool {
         .heartbeat
         .is_some_and(|last| now.saturating_duration_since(last) < Duration::from_secs(6))
         && renderer
-            .pending_since
-            .is_none_or(|since| now.saturating_duration_since(since) < Duration::from_secs(6))
+            .pending
+            .front()
+            .is_none_or(|&(_, since)| now.saturating_duration_since(since) < Duration::from_secs(6))
 }
 
 #[cfg(test)]
@@ -193,5 +207,27 @@ mod tests {
         assert!(!renderers.ready("session", replacement, now));
         renderers.parsed("session", replacement, 0, now);
         assert!(!renderers.ready("session", replacement, now));
+    }
+    #[test]
+    fn parsing_progress_ages_only_unparsed_output_and_exit_cannot_be_revived() {
+        let renderers = Renderers::default();
+        let now = Instant::now();
+        let generation = renderers.register("session");
+        renderers.parsed("session", generation, 0, now);
+        renderers.output("session", now);
+        renderers.output("session", now + Duration::from_secs(5));
+        renderers.parsed("session", generation, 1, now + Duration::from_secs(5));
+        assert!(renderers.ready("session", generation, now + Duration::from_secs(6)));
+        assert!(!renderers.ready("session", generation, now + Duration::from_secs(11)));
+        for _ in 0..2000 {
+            renderers.output("session", now);
+        }
+        renderers.parsed("session", generation, 1000, now + Duration::from_secs(5));
+        assert!(!renderers.ready("session", generation, now + Duration::from_secs(6)));
+        renderers.parsed("session", generation, 2002, now + Duration::from_secs(6));
+        assert!(renderers.ready("session", generation, now + Duration::from_secs(6)));
+        renderers.exited("session");
+        renderers.parsed("session", generation, 2, now);
+        assert!(!renderers.ready("session", generation, now));
     }
 }

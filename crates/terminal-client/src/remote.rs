@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::fs::{self, DirBuilder, File};
 use std::io::{BufRead, BufReader, Read};
 use std::net::Shutdown;
@@ -263,14 +263,39 @@ fn serve(
     }
     stream.set_read_timeout(None)?;
     let generation = sizes.subscribe(&open.session);
-    let (output_tx, output) = mpsc::sync_channel(8);
+    let queued = Arc::new(Mutex::new(VecDeque::<Output>::new()));
+    let producer = queued.clone();
+    let (output_tx, output) = mpsc::sync_channel(1);
     let abort_stream = stream.try_clone()?;
     let session = open.session.clone();
     let client = Arc::new(PtydClient::connect(ptyd, move |event| {
         let send = |value| {
-            if output_tx.try_send(value).is_err() {
-                let _ = abort_stream.shutdown(Shutdown::Both);
+            let mut queue = lock(&producer);
+            match value {
+                Output::Data(bytes) => {
+                    let mut rest = bytes.as_slice();
+                    if let Some(Output::Data(tail)) = queue.back_mut() {
+                        let count = rest.len().min(CHUNK - tail.len());
+                        tail.extend_from_slice(&rest[..count]);
+                        rest = &rest[count..];
+                    }
+                    for chunk in rest.chunks(CHUNK) {
+                        if queue.len() == 8 {
+                            let _ = abort_stream.shutdown(Shutdown::Both);
+                            return;
+                        }
+                        queue.push_back(Output::Data(chunk.to_vec()));
+                    }
+                }
+                value => {
+                    if queue.len() == 8 {
+                        let _ = abort_stream.shutdown(Shutdown::Both);
+                        return;
+                    }
+                    queue.push_back(value);
+                }
             }
+            let _ = output_tx.try_send(());
         };
         match event {
             ClientEvent::Output { session_id, data } if session_id == session => {
@@ -456,17 +481,19 @@ fn serve(
             if let Some(value) = size()? {
                 send(value)?;
             }
-            match output.recv_timeout(Duration::from_millis(20)) {
-                Ok(Output::Data(bytes)) => {
+            let next = lock(&queued).pop_front();
+            match next {
+                Some(Output::Data(bytes)) => {
                     send(json!({"type":"output", "data":BASE64_STANDARD.encode(bytes)}))?
                 }
-                Ok(Output::Exit(code)) => {
+                Some(Output::Exit(code)) => {
                     send(json!({"type":"exit", "exitCode":code}))?;
                     break;
                 }
-                Ok(Output::Lost) => bail!("daemon disconnected"),
-                Err(mpsc::RecvTimeoutError::Timeout) => {}
-                Err(_) => break,
+                Some(Output::Lost) => bail!("daemon disconnected"),
+                None => {
+                    let _ = output.recv_timeout(Duration::from_millis(20));
+                }
             }
         }
         Ok(())

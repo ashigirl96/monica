@@ -19,6 +19,7 @@ import {
   rendererParsed,
   removeRenderer,
   type RendererGeneration,
+  type RendererProgress,
 } from './terminal.ts'
 
 // The mounted renderer owns one connection per Tab.
@@ -57,6 +58,7 @@ if (import.meta.env.DEV) {
 }
 
 export function setTabTerminal(tabId: string, term: Terminal) {
+  if (tabTerminals.has(tabId) && tabTerminals.get(tabId) !== term) releaseTabConnection(tabId)
   tabTerminals.set(tabId, term)
 }
 
@@ -153,29 +155,27 @@ async function runConnect(
     conn.sessionId = sessionId
 
     const term = getTabTerminal(tabId)
-    conn.generation = await registerRenderer(sessionId)
-    if (tabConnections.get(tabId) !== conn || getTabTerminal(tabId) !== term) {
-      if (conn.generation) void removeRenderer(sessionId, conn.generation)
-      return
-    }
     let live = false
-    const pending: { data: string; sequence: number }[] = []
+    const pending: {
+      data: string
+      progress: RendererProgress | null
+    }[] = []
     const parsed = (sequence: number) => {
       if (tabConnections.get(tabId) !== conn || getTabTerminal(tabId) !== term) return
       conn.parsed = sequence
       heartbeatRenderer(tabId)
     }
-    const write = (data: string, sequence: number) =>
-      term?.write(fromBase64(data), () => parsed(sequence))
-    // Await before reading conn.unlisteners: a release while subscribing replaces the array.
-    const unlistenOutput = await onTerminalOutput(sessionId, (data, progress) => {
+    const write = (data: string, progress: RendererProgress | null) => {
       const sequence =
         progress?.generation.renderer === conn.generation?.renderer &&
         progress?.generation.connection === conn.generation?.connection
           ? (progress?.sequence ?? 0)
           : 0
-      if (live) write(data, sequence)
-      else pending.push({ data, sequence })
+      term?.write(fromBase64(data), () => parsed(sequence))
+    }
+    const unlistenOutput = await onTerminalOutput(sessionId, (data, progress) => {
+      if (live) write(data, progress)
+      else pending.push({ data, progress })
     })
     conn.unlisteners.push(unlistenOutput)
     const unlistenExit = await onTerminalExit(sessionId, onExit)
@@ -188,6 +188,11 @@ async function runConnect(
       return
     }
 
+    conn.generation = await registerRenderer(sessionId)
+    if (tabConnections.get(tabId) !== conn || getTabTerminal(tabId) !== term) {
+      if (conn.generation) void removeRenderer(sessionId, conn.generation)
+      return
+    }
     const attach = await terminalAttach(sessionId)
     if (tabConnections.get(tabId) !== conn) {
       dropListeners(conn)
@@ -214,7 +219,7 @@ async function runConnect(
       }
       if (!attach.replay) conn.ready = true
       live = true
-      for (const { data, sequence } of pending) write(data, sequence)
+      for (const { data, progress } of pending) write(data, progress)
       heartbeatRenderer(tabId)
       pending.length = 0
     } else {

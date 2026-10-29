@@ -430,3 +430,130 @@ fn attach_replay_limits_and_exited_session_rejection_match_the_protocol() {
     viewer.close().unwrap();
     desktop.close().unwrap();
 }
+
+#[test]
+fn small_echo_bursts_keep_remote_input_and_both_views_on_the_existing_pty() {
+    let daemon = Daemon::start("input-burst");
+    let (desktop, events) = daemon.desktop();
+    let shell = daemon.home.join("input-child");
+    fs::write(&shell, b"#!/bin/sh\nstty -echo\nprintf 'ready\\n'\nread value\nprintf 'first\\n'\nwhile [ ! -e \"$HOME/burst\" ]; do /bin/sleep 0.01; done\ni=0; while [ $i -lt 5000 ]; do printf x; i=$((i+1)); done\nprintf '\\nresult:%s\\n' \"$value\"\nwhile [ ! -e \"$HOME/finish\" ]; do /bin/sleep 0.01; done\n").unwrap();
+    fs::set_permissions(&shell, fs::Permissions::from_mode(0o700)).unwrap();
+    desktop
+        .request(RequestOp::Create(CreateParams {
+            session_id: "shared".into(),
+            cwd: daemon.home.to_string_lossy().into_owned(),
+            shell: Some(shell.to_string_lossy().into_owned()),
+            rows: 31,
+            cols: 97,
+            env: Some(
+                ["HOME", "ZDOTDIR", "MONICA_HOME"]
+                    .into_iter()
+                    .map(|key| (key.into(), daemon.home.to_string_lossy().into_owned()))
+                    .collect(),
+            ),
+        }))
+        .unwrap();
+    desktop
+        .request(RequestOp::Attach {
+            session_id: "shared".into(),
+            replay_bytes: None,
+        })
+        .unwrap();
+    let renderers = Arc::new(monica_terminal_client::renderer::Renderers::default());
+    let generation = renderers.register("shared");
+    renderers.parsed("shared", generation, 0, Instant::now());
+    let relay = RemoteServer::start(
+        daemon.home.join("ptyd.sock"),
+        Arc::default(),
+        renderers.clone(),
+    )
+    .unwrap();
+    let mut phone = UnixStream::connect(&relay.path).unwrap();
+    phone.set_read_timeout(Some(WAIT)).unwrap();
+    let mut reader = BufReader::new(phone.try_clone().unwrap());
+    send(
+        &mut phone,
+        &json!({"secret":relay.secret(),"session":"shared"}),
+    );
+    loop {
+        let frame = read(&mut reader);
+        send(
+            &mut phone,
+            &json!({"type":"ack","sequence":frame["sequence"]}),
+        );
+        if frame["type"] == "replay_end" {
+            break;
+        }
+    }
+    send(
+        &mut phone,
+        &json!({"type":"input","id":1,"generation":generation,"data":BASE64_STANDARD.encode(b"same-input\n")}),
+    );
+    let mut remote_bytes = Vec::new();
+    let mut held = None;
+    let mut accepted = false;
+    while held.is_none() || !accepted {
+        let frame = read(&mut reader);
+        if frame["type"] == "input_result" {
+            assert_eq!(frame["result"], "accepted");
+            accepted = true;
+        } else {
+            assert_eq!(frame["type"], "output");
+            remote_bytes.extend(
+                BASE64_STANDARD
+                    .decode(frame["data"].as_str().unwrap())
+                    .unwrap(),
+            );
+            if String::from_utf8_lossy(&remote_bytes).contains("first") {
+                held = Some(frame["sequence"].clone());
+            } else {
+                send(
+                    &mut phone,
+                    &json!({"type":"ack","sequence":frame["sequence"]}),
+                );
+            }
+        }
+    }
+    fs::write(daemon.home.join("burst"), b"").unwrap();
+    let mut desktop_bytes = Vec::new();
+    while !String::from_utf8_lossy(&desktop_bytes).contains("result:same-input") {
+        if let ClientEvent::Output { data, .. } = events.recv_timeout(WAIT).unwrap() {
+            desktop_bytes.extend(BASE64_STANDARD.decode(data).unwrap());
+        }
+    }
+    send(&mut phone, &json!({"type":"ack","sequence":held.unwrap()}));
+    while !String::from_utf8_lossy(&remote_bytes).contains("result:same-input") {
+        let frame = read(&mut reader);
+        assert_eq!(
+            frame["type"], "output",
+            "small bursts must not exhaust a byte-bounded queue"
+        );
+        remote_bytes.extend(
+            BASE64_STANDARD
+                .decode(frame["data"].as_str().unwrap())
+                .unwrap(),
+        );
+        send(
+            &mut phone,
+            &json!({"type":"ack","sequence":frame["sequence"]}),
+        );
+    }
+    assert_eq!(
+        remote_bytes.iter().filter(|&&byte| byte == b'x').count(),
+        5000
+    );
+    assert_eq!(
+        desktop_bytes.iter().filter(|&&byte| byte == b'x').count(),
+        5000
+    );
+    send(&mut phone, &json!({"type":"close"}));
+    assert_eq!(read(&mut reader)["type"], "closed");
+    match desktop.request(RequestOp::List).unwrap() {
+        ResponseBody::Sessions { sessions } => {
+            assert!(sessions[0].running);
+            assert_eq!((sessions[0].rows, sessions[0].cols), (31, 97));
+        }
+        other => panic!("unexpected list {other:?}"),
+    }
+    desktop.close().unwrap();
+}

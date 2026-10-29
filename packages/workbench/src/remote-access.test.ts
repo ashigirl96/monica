@@ -12,6 +12,7 @@ import {
   type TerminalStream,
   type RemoteState,
 } from './mobile/remote-workbench.ts'
+import { TerminalFrameSchema } from './remote-terminal.ts'
 import { remoteDevice } from './schema.ts'
 import { cleanUp, onCleanup, setup } from './testing.ts'
 
@@ -757,7 +758,7 @@ test('RemoteWorkbench.openTerminal orders pre-response and replay-time live outp
         parsing.resolve()
         await replay.promise
       }
-      if (text === 'during-replay') live.resolve()
+      if (text.includes('during-replay')) live.resolve()
     },
     state() {},
   })
@@ -769,7 +770,7 @@ test('RemoteWorkbench.openTerminal orders pre-response and replay-time live outp
   expect(rendered).toEqual(['retained-tail'])
   replay.resolve()
   await live.promise
-  expect(rendered).toEqual(['retained-tail', 'before-response', 'during-replay'])
+  expect(rendered.join('')).toBe('retained-tailbefore-responseduring-replay')
   expect(sizes).toEqual([[31, 97]])
   expect(await view.close()).toBe(true)
   expect(f.ptyd.receivedAll((op) => op.op === 'attach')).toHaveLength(1)
@@ -1058,13 +1059,18 @@ test('RemoteWorkbench.input reaches the existing session once through authentica
     session_id: f.target.terminalSessionId,
     data: Buffer.from(bytes).toString('base64'),
   })
+  expect(await view.input(new TextEncoder().encode('second\r'))).toBe('accepted')
+  await f.ptyd.receivedAtLeast(2, (op) => op.op === 'write')
+  expect(
+    f.ptyd.receivedAll((op) => op.op === 'write').map((op) => (op.op === 'write' ? op.data : null)),
+  ).toEqual([Buffer.from(bytes).toString('base64'), btoa('second\r')])
   await f.rendererControl('stall')
   await unavailable.promise
   expect(await view.input(new TextEncoder().encode('after'))).toBe('not-sent')
   expect(await view.close()).toBe(true)
   await f.client.runspace.create({ cwd: '/input-barrier', rows: 24, cols: 80 })
   await f.ptyd.receivedAtLeast(2, (op) => op.op === 'create')
-  expect(f.ptyd.receivedAll((op) => op.op === 'write')).toHaveLength(1)
+  expect(f.ptyd.receivedAll((op) => op.op === 'write')).toHaveLength(2)
 })
 
 test('a lost input acceptance ACK is uncertain and never resent through the real authenticated relay', async () => {
@@ -1115,4 +1121,40 @@ test('a lost input acceptance ACK is uncertain and never resent through the real
   expect(await view.input(new TextEncoder().encode('offline'))).toBe('not-sent')
   await f.ptyd.received((op) => op.op === 'write')
   expect(f.ptyd.receivedAll((op) => op.op === 'write')).toHaveLength(1)
+})
+
+test('the Shell rejects replaced renderer generations and revocation precedes every later input admission', async () => {
+  const f = await terminalFixture()
+  const stream = await f.terminal()
+  const first = await f.rendererControl('ready')
+  await stream.prepare()
+  async function frameOf(type: string) {
+    for (;;) {
+      const frame = TerminalFrameSchema.parse(await stream.next())
+      if ('sequence' in frame) await stream.ack(frame.sequence)
+      if (frame.type === type) return frame
+    }
+  }
+  await frameOf('renderer')
+  const replacement = await f.rendererControl('ready')
+  await frameOf('renderer')
+  await stream.input({ type: 'input', id: 1, generation: first.generation, data: btoa('stale') })
+  expect(await frameOf('input_result')).toMatchObject({ result: 'not-sent' })
+  await stream.input({
+    type: 'input',
+    id: 2,
+    generation: replacement.generation,
+    data: btoa('admitted-before-revoke'),
+  })
+  expect(await frameOf('input_result')).toMatchObject({ result: 'accepted' })
+  await f.ptyd.received((op) => op.op === 'write')
+  expect(await f.client.remote.revoke({ id: f.id })).toMatchObject({ state: 'detached' })
+  await stream
+    .input({ type: 'input', id: 3, generation: replacement.generation, data: btoa('after-revoke') })
+    .catch(() => {})
+  await f.client.runspace.create({ cwd: '/revoke-input-barrier', rows: 24, cols: 80 })
+  await f.ptyd.receivedAtLeast(2, (op) => op.op === 'create')
+  expect(f.ptyd.receivedAll((op) => op.op === 'write')).toEqual([
+    { op: 'write', session_id: f.target.terminalSessionId, data: btoa('admitted-before-revoke') },
+  ])
 })

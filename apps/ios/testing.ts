@@ -363,6 +363,38 @@ fixtures['terminal-control'] = {
   certificate: good.der,
   credential,
 }
+const inputControl = Bun.serve({
+  hostname: '127.0.0.1',
+  port: 0,
+  tls: good,
+  async fetch(request) {
+    if (request.headers.get('authorization') !== `Bearer ${credential}`)
+      return new Response('Unauthorized', { status: 401 })
+    const path = new URL(request.url).pathname
+    if (path.endsWith('terminalSession/list') || path.endsWith('agentSession/list')) {
+      await shellProcess.stdin.write(
+        `${JSON.stringify({ rendererControl: path.endsWith('terminalSession/list') ? 'ready' : 'stall', session: terminalTab.terminalSessionId })}\n`,
+      )
+      const reader = shellProcess.stdout.getReader()
+      await reader.read()
+      reader.releaseLock()
+      ptyd.output(
+        terminalTab.terminalSessionId,
+        'shared-input-result\r\n\x1b[c\x1b[6n\x1b]10;?\x07\x1b[?u',
+      )
+    }
+    return response({
+      writes: ptyd.receivedAll((op) => op.op === 'write'),
+      connections: ptyd.connections,
+    })
+  },
+})
+servers.push(inputControl)
+fixtures['input-control'] = {
+  endpoint: `https://127.0.0.1:${inputControl.port}`,
+  certificate: good.der,
+  credential,
+}
 writeFileSync(join(import.meta.dir, 'Tests/Fixtures/fixtures.json'), JSON.stringify(fixtures))
 process.stdout.write('Native HTTPS/WSS fixtures ready\n')
 async function stop() {
