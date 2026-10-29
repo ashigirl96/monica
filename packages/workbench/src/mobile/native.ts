@@ -5,6 +5,7 @@ import { RemoteError, type RemoteTransport } from './remote-workbench.ts'
 const FailureSchema = z.enum([
   'unavailable',
   'approval-required',
+  'revoked',
   'identity-changed',
   'incompatible',
 ])
@@ -148,6 +149,7 @@ export function observeRegistration(
   let timer: ReturnType<typeof setTimeout> | undefined
   let attempt = 0
   const check = async () => {
+    if (!active) return
     try {
       const result = RegistrationSchema.parse(await nativeCall('registration'))
       if (!active) return
@@ -157,7 +159,8 @@ export function observeRegistration(
       }
       if (result.state === 'unauthorized') {
         if (result.lifecycle === 'pending' && result.pendingUntil <= Date.now()) receive('expired')
-        else throw new RemoteError('approval-required')
+        else
+          throw new RemoteError(result.lifecycle === 'approved' ? 'revoked' : 'approval-required')
       } else receive(result.state)
       attempt = 0
       if (result.state === 'pending')
@@ -173,7 +176,7 @@ export function observeRegistration(
           () => {
             void check()
           },
-          Math.min(10000, 500 * 2 ** attempt++ * (1 + Math.random() * 0.2)),
+          Math.min(10000 / 1.2, 500 * 2 ** Math.min(attempt++, 5)) * (1 + Math.random() * 0.2),
         )
     }
   }
@@ -181,5 +184,27 @@ export function observeRegistration(
   return () => {
     active = false
     clearTimeout(timer)
+  }
+}
+
+export function observeForeground(receive: (foreground: boolean) => void): () => void {
+  let active = true
+  let notified = false
+  const listener = (event: Event) => {
+    if (!(event instanceof CustomEvent) || typeof event.detail !== 'boolean') return
+    notified = true
+    receive(event.detail)
+  }
+  window.addEventListener('monica-foreground', listener)
+  void nativeCall('foreground')
+    .then((value) => {
+      if (active && !notified) receive(z.boolean().parse(value))
+    })
+    .catch(() => {
+      if (active && !notified) receive(false)
+    })
+  return () => {
+    active = false
+    window.removeEventListener('monica-foreground', listener)
   }
 }

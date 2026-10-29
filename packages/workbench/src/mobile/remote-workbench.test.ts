@@ -1,7 +1,12 @@
 import { expect, spyOn, test } from 'bun:test'
 
 import type { TerminalInput } from '../remote-terminal.ts'
-import { RemoteWorkbench, type RemoteState, type RemoteTransport } from './remote-workbench.ts'
+import {
+  RemoteWorkbench,
+  RemoteError,
+  type RemoteState,
+  type RemoteTransport,
+} from './remote-workbench.ts'
 
 const empty = { runspaces: [] }
 const flush = async () => {
@@ -91,6 +96,39 @@ test('an incompatible snapshot clears availability and aborts the installed subs
   stop()
 })
 
+async function terminalRead(procedure: string) {
+  if (procedure === 'layout/get')
+    return {
+      runspaces: [
+        {
+          id: 'runspace',
+          cwd: '/test',
+          sortOrder: 0,
+          owned: false,
+          tabs: [
+            { id: 'tab', cwd: '/test', sortOrder: 0, pinned: false, terminalSessionId: 'session' },
+          ],
+        },
+      ],
+    }
+  if (procedure === 'terminalSession/list')
+    return [
+      {
+        id: 'session',
+        tabId: 'tab',
+        cwd: '/test',
+        shell: '/bin/sh',
+        status: 'running',
+        pid: 1,
+        exitCode: null,
+        error: null,
+        createdAt: new Date(),
+        endedAt: null,
+      },
+    ]
+  return []
+}
+
 test('openTerminal waits for replay parsing before draw ACK and close releases only that view', async () => {
   const parsed = Promise.withResolvers<void>()
   const frames = [
@@ -104,9 +142,7 @@ test('openTerminal waits for replay parsing before draw ACK and close releases o
   const written: string[] = []
   let closes = 0
   const remote = new RemoteWorkbench({
-    async read() {
-      return []
-    },
+    read: terminalRead,
     async subscribe() {},
     async terminal() {
       return {
@@ -154,9 +190,7 @@ test('closing a view while its transport opens releases the late stream without 
   let closes = 0
   const remote = new RemoteWorkbench({
     terminal: () => opened.promise,
-    async read() {
-      return []
-    },
+    read: terminalRead,
     async subscribe() {},
   })
   const view = remote.openTerminal(
@@ -171,6 +205,7 @@ test('closing a view while its transport opens releases the late stream without 
       state() {},
     },
   )
+  await flush()
   const closed = view.close()
   opened.resolve({
     async prepare() {},
@@ -210,9 +245,7 @@ test('a late parse callback after close cannot acknowledge output or reopen its 
         },
       }
     },
-    async read() {
-      return []
-    },
+    read: terminalRead,
     async subscribe() {},
   })
   const view = remote.openTerminal(
@@ -245,9 +278,7 @@ test('input is not queued before ready, is bounded in decoded bytes, and a lost 
     } else frames.push(frame)
   }
   const remote = new RemoteWorkbench({
-    async read() {
-      return []
-    },
+    read: terminalRead,
     async subscribe() {},
     async terminal() {
       return {
@@ -297,9 +328,7 @@ function inputFixture(input: (command: TerminalInput) => Promise<void>) {
   let receive: ((frame: unknown) => void) | undefined
   const ready: boolean[] = []
   const view = new RemoteWorkbench({
-    async read() {
-      return []
-    },
+    read: terminalRead,
     async subscribe() {},
     async terminal() {
       return {
@@ -425,3 +454,318 @@ test('a late send rejection and expired timer cannot finish a newer input ID', a
     timer.mockRestore()
   }
 })
+
+test('foreground discards old subscription ACKs, snapshots and renderer callbacks before a fresh attachment', async () => {
+  const subscriptions: {
+    signal: AbortSignal
+    ack: ReturnType<typeof Promise.withResolvers<void>>
+  }[] = []
+  const reads: ReturnType<typeof Promise.withResolvers<unknown>>[] = []
+  const streams: {
+    frames: unknown[]
+    next: ReturnType<typeof Promise.withResolvers<unknown>>
+    closes: number
+  }[] = []
+  const output: string[] = []
+  const states: string[] = []
+  const readiness: boolean[] = []
+  const remote = new RemoteWorkbench({
+    subscribe(_changed, signal) {
+      const ack = Promise.withResolvers<void>()
+      subscriptions.push({ signal, ack })
+      return ack.promise
+    },
+    async read(path) {
+      if (path !== 'layout/get') return terminalRead(path)
+      const result = Promise.withResolvers<unknown>()
+      reads.push(result)
+      return result.promise
+    },
+    async terminal() {
+      const stream = {
+        frames: [{ version: 1, type: 'replay_end', sequence: 1 }],
+        next: Promise.withResolvers<unknown>(),
+        closes: 0,
+      }
+      streams.push(stream)
+      return {
+        async prepare() {},
+        async input() {},
+        async ack() {},
+        async next() {
+          return stream.frames.shift() ?? stream.next.promise
+        },
+        async close() {
+          stream.closes++
+          return true
+        },
+      }
+    },
+  })
+  const stop = remote.observe(() => {})
+  const view = remote.openTerminal(
+    { tabId: 'tab', terminalSessionId: 'session' },
+    {
+      async write(bytes) {
+        output.push(new TextDecoder().decode(bytes))
+      },
+      size() {},
+      inputReady(value) {
+        readiness.push(value)
+      },
+      state(value) {
+        states.push(value)
+      },
+    },
+  )
+  expect(subscriptions).toHaveLength(1)
+  remote.setForeground(false)
+  remote.setForeground(true)
+  subscriptions[0]!.ack.resolve()
+  await flush()
+  expect(reads).toHaveLength(0)
+  subscriptions[1]!.ack.resolve()
+  await flush()
+  remote.setForeground(false)
+  remote.setForeground(true)
+  reads[0]!.resolve(await terminalRead('layout/get'))
+  await flush()
+  expect(streams).toHaveLength(0)
+  subscriptions[2]!.ack.resolve()
+  await flush()
+  reads[1]!.resolve(await terminalRead('layout/get'))
+  await flush()
+  expect(streams).toHaveLength(1)
+  remote.setForeground(false)
+  expect(streams[0]!.closes).toBe(1)
+  remote.setForeground(true)
+  subscriptions[3]!.ack.resolve()
+  await flush()
+  reads[2]!.resolve(await terminalRead('layout/get'))
+  await flush()
+  streams[0]!.next.resolve({
+    version: 1,
+    type: 'renderer',
+    generation: { renderer: 9, connection: 9 },
+  })
+  await flush()
+  expect(readiness.at(-1)).toBe(false)
+  expect(output).toEqual([])
+  expect(states.at(-1)).toBe('viewing')
+  expect(streams).toHaveLength(2)
+  await view.close()
+  stop()
+  expect(subscriptions.every(({ signal }) => signal.aborted)).toBe(true)
+  expect(streams.map(({ closes }) => closes)).toEqual([1, 1])
+})
+
+test('only transient failures retry with bounded backoff and foreground cannot resume a revoked identity or incompatible connection', async () => {
+  const callbacks: (() => void)[] = []
+  const delays: number[] = []
+  const timer = spyOn(globalThis, 'setTimeout').mockImplementation(((
+    callback: () => void,
+    delay: number,
+  ) => {
+    callbacks.push(callback)
+    delays.push(delay)
+    return callbacks.length as unknown as ReturnType<typeof setTimeout>
+  }) as typeof setTimeout)
+  const random = spyOn(Math, 'random').mockReturnValue(0.5)
+  try {
+    for (const state of [
+      'unavailable',
+      'revoked',
+      'approval-required',
+      'identity-changed',
+      'incompatible',
+    ] as const) {
+      let attempts = 0
+      const before = callbacks.length
+      const remote = new RemoteWorkbench({
+        async terminal() {
+          throw new Error('never attach')
+        },
+        read: terminalRead,
+        async subscribe() {
+          attempts++
+          throw new RemoteError(state)
+        },
+      })
+      const stop = remote.observe(() => {})
+      await flush()
+      if (state === 'unavailable') {
+        for (let i = 0; i < 7; i++) {
+          callbacks.at(-1)!()
+          await flush()
+        }
+        expect(attempts).toBe(8)
+        expect(delays.slice(0, 5)).toEqual([550, 1100, 2200, 4400, 8800])
+        expect(delays.slice(5).every((delay) => delay >= 8333 && delay < 10000)).toBe(true)
+        remote.setForeground(false)
+        const count = attempts
+        callbacks.at(-1)!()
+        await flush()
+        expect(attempts).toBe(count)
+      } else {
+        expect(callbacks).toHaveLength(before)
+        remote.setForeground(false)
+        remote.setForeground(true)
+        await flush()
+        expect(attempts).toBe(1)
+      }
+      stop()
+    }
+  } finally {
+    timer.mockRestore()
+    random.mockRestore()
+  }
+})
+
+test.each(['removed', 'replaced', 'lost', 'failed', 'exited'] as const)(
+  'foreground reports %s without opening a replacement or restarting the old Terminal Session',
+  async (reason) => {
+    let opened = 0
+    let resumed = false
+    const states: string[] = []
+    const remote = new RemoteWorkbench({
+      async subscribe() {},
+      async read(path) {
+        const value = await terminalRead(path)
+        if (!resumed) return value
+        if (path === 'layout/get' && 'runspaces' in value) {
+          if (reason === 'removed') return empty
+          if (reason === 'replaced') value.runspaces[0]!.tabs[0]!.terminalSessionId = 'replacement'
+        }
+        if (
+          path === 'terminalSession/list' &&
+          Array.isArray(value) &&
+          ['lost', 'failed', 'exited'].includes(reason)
+        ) {
+          value[0]!.status = reason
+        }
+        return value
+      },
+      async terminal() {
+        opened++
+        return {
+          async prepare() {},
+          async input() {},
+          async ack() {},
+          async close() {
+            return true
+          },
+          next: () => new Promise(() => {}),
+        }
+      },
+    })
+    const view = remote.openTerminal(
+      { tabId: 'tab', terminalSessionId: 'session' },
+      {
+        async write() {},
+        size() {},
+        state(state) {
+          states.push(state)
+        },
+      },
+    )
+    await flush()
+    expect(opened).toBe(1)
+    remote.setForeground(false)
+    resumed = true
+    remote.setForeground(true)
+    await flush()
+    expect(states.at(-1)).toBe(reason)
+    expect(await view.input(new TextEncoder().encode('not-to-old-or-new'))).toBe('not-sent')
+    remote.setForeground(false)
+    remote.setForeground(true)
+    await flush()
+    expect(states.at(-1)).toBe(reason)
+    expect(opened).toBe(1)
+    await view.close()
+  },
+)
+
+test.each(['closed', 'unavailable'] as const)(
+  'terminal %s distinguishes stopped views from transient recovery and requires selection to reopen a stopped view',
+  async (cause) => {
+    const callbacks: (() => void)[] = []
+    const timer = spyOn(globalThis, 'setTimeout').mockImplementation(((callback: () => void) => {
+      callbacks.push(callback)
+      return callbacks.length as unknown as ReturnType<typeof setTimeout>
+    }) as typeof setTimeout)
+    const streams: ReturnType<typeof Promise.withResolvers<unknown>>[] = []
+    const states: string[] = []
+    const signals: AbortSignal[] = []
+    const targets: unknown[] = []
+    let changed: (() => void) | undefined
+    let closes = 0
+    const remote = new RemoteWorkbench({
+      read: terminalRead,
+      async subscribe(change, signal) {
+        changed = change
+        signals.push(signal)
+      },
+      async terminal(target) {
+        targets.push(target)
+        const next = Promise.withResolvers<unknown>()
+        streams.push(next)
+        const frames: unknown[] = [{ version: 1, type: 'replay_end', sequence: 1 }]
+        return {
+          async prepare() {},
+          async input() {
+            throw new Error('stopped or recovering input must not be sent')
+          },
+          async ack() {},
+          async next() {
+            return frames.shift() ?? next.promise
+          },
+          async close() {
+            closes++
+            return true
+          },
+        }
+      },
+    })
+    const target = { tabId: 'tab', terminalSessionId: 'session' }
+    const display = {
+      async write() {},
+      size() {},
+      state: (state: string) => states.push(state),
+    }
+    const stop = remote.observe(() => {})
+    let view = remote.openTerminal(target, display)
+    try {
+      await flush()
+      expect(states.at(-1)).toBe('viewing')
+      if (cause === 'closed') streams[0]!.resolve({ version: 1, type: 'closed' })
+      else streams[0]!.reject(new RemoteError('unavailable'))
+      await flush()
+      expect(states.at(-1)).toBe(cause)
+      expect(await view.input(new Uint8Array([65]))).toBe('not-sent')
+      if (cause === 'closed') {
+        expect(callbacks).toHaveLength(0)
+        expect(signals[0]!.aborted).toBe(false)
+        changed?.()
+        await flush()
+        remote.setForeground(false)
+        remote.setForeground(true)
+        await flush()
+        expect(states.at(-1)).toBe('closed')
+        expect(streams).toHaveLength(1)
+        expect(closes).toBe(1)
+        view = remote.openTerminal(target, display)
+      } else {
+        expect(callbacks).toHaveLength(1)
+        expect(signals[0]!.aborted).toBe(true)
+        callbacks[0]!()
+      }
+      await flush()
+      expect(states.at(-1)).toBe('viewing')
+      expect(targets).toEqual([target, target])
+    } finally {
+      await view.close()
+      stop()
+      timer.mockRestore()
+    }
+  },
+)

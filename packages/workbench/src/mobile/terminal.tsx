@@ -27,20 +27,29 @@ export function TerminalOutput({
   const [result, setResult] = useState('')
   const [state, setState] = useState<Parameters<TerminalDisplay['state']>[0]>('waiting')
   useEffect(() => {
-    if (!container.current) return
+    const element = container.current
+    if (!element) return
     let current = true
-    const term = new Terminal({
-      disableStdin: true,
-      screenReaderMode: true,
-      scrollback: 5000,
-      fontSize: 14,
-      allowProposedApi: true,
-    })
-    term.parser.registerOscHandler(52, () => true)
-    term.parser.registerOscHandler(1337, () => true)
-    term.attachCustomKeyEventHandler(() => false)
-    term.open(container.current)
+    const createTerminal = () => {
+      const term = new Terminal({
+        disableStdin: true,
+        screenReaderMode: true,
+        scrollback: 5000,
+        fontSize: 14,
+        allowProposedApi: true,
+      })
+      term.parser.registerOscHandler(52, () => true)
+      term.parser.registerOscHandler(1337, () => true)
+      term.attachCustomKeyEventHandler(() => false)
+      term.open(element)
+      return term
+    }
+    let term = createTerminal()
     const view = remote.openTerminal(target, {
+      reset: () => {
+        term.dispose()
+        term = createTerminal()
+      },
       write: (bytes) =>
         new Promise((resolve) =>
           term.write(bytes, () => {
@@ -70,8 +79,14 @@ export function TerminalOutput({
     exited: 'Terminal Sessionは終了しました',
     closed: '表示接続を解除しました。Macの作業は継続します。',
     'detach-pending': '表示は停止しました。解除確認待ち。',
-    unavailable: '切断しました。自動再接続は行いません。',
-    'approval-required': '登録が失効しました。',
+    unavailable: '切断しました。MacとTailscaleを確認中です。入力は再送しません。',
+    background: '背景では表示接続を停止しています。',
+    removed: 'Tabは削除されました。',
+    replaced: 'Terminal Sessionが置き換わりました。一覧から選び直してください。',
+    lost: 'Terminal Sessionを失いました。Macで確認してください。',
+    failed: 'Terminal Sessionを起動できませんでした。Macで確認してください。',
+    revoked: '登録が失効しました。Macで確認して再登録してください。',
+    'approval-required': '承認が必要です。Macで登録を確認してください。',
     'identity-changed': 'Macのidentityを確認してください。',
     incompatible: 'アプリを更新してください。',
   }
