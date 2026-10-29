@@ -202,9 +202,11 @@ export function startFakePtyd(home: string) {
     if (op.op === 'attach' && id !== undefined) {
       const session = sessions.find((item) => item.session_id === op.session_id)
       if (!session) return send(socket, { type: 'err', id, error: 'no such session' })
-      const replay = (transcripts.get(op.session_id) ?? Buffer.alloc(0))
-        .subarray(-(op.replay_bytes ?? 262144))
-        .toString('base64')
+      if (!session.running)
+        return send(socket, { type: 'err', id, error: `session ${op.session_id} has exited` })
+      const tail = transcripts.get(op.session_id) ?? Buffer.alloc(0)
+      const replay =
+        op.replay_bytes === 0 ? '' : tail.subarray(-(op.replay_bytes ?? 262144)).toString('base64')
       socket.data.attached.add(op.session_id)
       const response: ServerMessage = {
         type: 'ok',
