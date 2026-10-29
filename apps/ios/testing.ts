@@ -399,6 +399,37 @@ fixtures['input-control'] = {
   certificate: good.der,
   credential,
 }
+let normalOutput = 0
+const touchControl = Bun.serve({
+  hostname: '127.0.0.1',
+  port: 0,
+  tls: good,
+  fetch(request) {
+    if (request.headers.get('authorization') !== `Bearer ${credential}`)
+      return new Response('Unauthorized', { status: 401 })
+    const path = new URL(request.url).pathname
+    if (path.endsWith('terminalSession/list'))
+      ptyd.output(
+        terminalTab.terminalSessionId,
+        Array.from(
+          { length: 100 },
+          (_, index) => `phone-scroll-${index} ${'wide-'.repeat(30)}\r\n`,
+        ).join('') + `phone-normal-end-${++normalOutput}`,
+      )
+    if (path.endsWith('agentSession/list'))
+      ptyd.output(terminalTab.terminalSessionId, '\x1b[?1049h\x1b[?1003h\x1b[?1006hphone-tui-mouse')
+    return response({
+      sessions: ptyd.sessions,
+      resizes: ptyd.receivedAll((op) => op.op === 'resize').length,
+    })
+  },
+})
+servers.push(touchControl)
+fixtures['touch-control'] = {
+  endpoint: `https://127.0.0.1:${touchControl.port}`,
+  certificate: good.der,
+  credential,
+}
 writeFileSync(join(import.meta.dir, 'Tests/Fixtures/fixtures.json'), JSON.stringify(fixtures))
 process.stdout.write('Native HTTPS/WSS fixtures ready\n')
 async function stop() {

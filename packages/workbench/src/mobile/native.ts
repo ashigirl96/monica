@@ -183,3 +183,11 @@ export function observeRegistration(
     clearTimeout(timer)
   }
 }
+
+export async function readClipboardText(): Promise<string> {
+  return z.string().parse(await nativeCall('clipboard-read'))
+}
+
+export async function writeClipboardText(text: string): Promise<void> {
+  await nativeCall('clipboard-write', undefined, { text })
+}

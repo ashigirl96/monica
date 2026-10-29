@@ -132,7 +132,14 @@ export function MobileWorkbench() {
           <p role="alert">登録の期限が切れました。Macで新しい招待を作ってください。</p>
         )}
       </section>
-      {target && <TerminalOutput remote={remote} target={target} back={() => setTarget(null)} />}
+      {target && (
+        <TerminalOutput
+          key={`${target.tabId}:${target.terminalSessionId}`}
+          remote={remote}
+          target={target}
+          back={() => setTarget(null)}
+        />
+      )}
       {state.state === 'available' && (
         <section aria-label="Runspace一覧">
           {state.layout.runspaces.length === 0 && (

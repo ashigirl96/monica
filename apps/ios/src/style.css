@@ -62,16 +62,6 @@ button:disabled {
   }
 }
 
-.terminal-viewport {
-  overflow: auto;
-  max-height: 65vh;
-  background: #000;
-}
-.terminal-viewport > div {
-  width: max-content;
-  min-width: 100%;
-}
-
 input {
   display: block;
   box-sizing: border-box;
@@ -82,4 +72,128 @@ input {
   color: CanvasText;
   background: Canvas;
   border: 1px solid GrayText;
+}
+
+main:has(.terminal-workspace) > :not(.terminal-workspace) {
+  display: none;
+}
+.terminal-workspace {
+  position: fixed;
+  inset-inline: 0;
+  top: var(--terminal-top, 0px);
+  height: var(--terminal-height, 100dvh);
+  box-sizing: border-box;
+  margin: 0;
+  padding: env(safe-area-inset-top) max(0.5rem, env(safe-area-inset-right))
+    max(0.25rem, env(safe-area-inset-bottom)) max(0.5rem, env(safe-area-inset-left));
+  display: flex;
+  flex-direction: column;
+  color: CanvasText;
+  background: Canvas;
+  overflow: auto;
+}
+.terminal-navigation,
+.terminal-keys,
+.terminal-send-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.25rem;
+}
+.terminal-navigation {
+  flex-shrink: 0;
+  flex-wrap: nowrap;
+  overflow-x: auto;
+}
+.terminal-navigation button {
+  flex-shrink: 0;
+}
+.terminal-workspace button {
+  margin: 0;
+  padding: 0.4em 0.6em;
+}
+.terminal-navigation button:first-child {
+  margin-inline-end: auto;
+}
+.terminal-state {
+  margin: 0.25rem 0;
+}
+.terminal-viewport {
+  overflow: auto;
+  background: #000;
+  flex: 1 1 0;
+  min-height: 1em;
+  max-height: none;
+  overscroll-behavior: contain;
+  touch-action: pan-x pan-y pinch-zoom;
+}
+.terminal-viewport > div {
+  width: max-content;
+  min-width: 0;
+  height: 100%;
+}
+.terminal-controls {
+  flex: 0 1 auto;
+  min-height: min(65%, 11rem);
+  max-height: 65%;
+  overflow: auto;
+  padding-block-start: 0.25rem;
+  background: Canvas;
+  overscroll-behavior: contain;
+}
+.terminal-keys {
+  flex-wrap: nowrap;
+  overflow-x: auto;
+  margin-bottom: 0.25rem;
+}
+.terminal-keys button {
+  flex-shrink: 0;
+  min-width: 44px;
+}
+.terminal-send-actions {
+  margin-block: 0.25rem;
+}
+.terminal-delivery {
+  margin: 0.25rem 0;
+  font-size: 0.9em;
+}
+.terminal-workspace textarea {
+  display: block;
+  box-sizing: border-box;
+  width: 100%;
+  min-height: 4rem;
+  padding: 0.5em;
+  font: inherit;
+  color: CanvasText;
+  background: Canvas;
+  border: 1px solid GrayText;
+  border-radius: 0;
+  -webkit-user-select: text;
+  user-select: text;
+}
+.terminal-viewport textarea {
+  height: 100%;
+  font-family: ui-monospace, monospace;
+  color: #fff;
+  background: #000;
+}
+.terminal-selection {
+  flex-shrink: 0;
+}
+.terminal-paste {
+  padding-block: 0.5rem;
+  border-block: 1px solid GrayText;
+}
+.terminal-paste textarea {
+  max-height: 8rem;
+}
+.terminal-workspace summary {
+  min-height: 44px;
+  align-content: center;
+}
+@media (prefers-contrast: more) {
+  .terminal-workspace input,
+  .terminal-workspace textarea {
+    border-color: CanvasText;
+  }
 }

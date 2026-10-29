@@ -390,6 +390,8 @@ final class NativeTests: XCTestCase {
             XCTFail("Never observed: \(expression); state \(String(describing: state))")
         }
         try await until("document.querySelectorAll('article').length === 12")
+        let clipboard = UIPasteboard.general.items
+        defer { UIPasteboard.general.items = clipboard }
         UIPasteboard.general.string = "explicit-user-copy"
         _ = try await webview.evaluateJavaScript("document.querySelector('article button').click()")
         try await until("document.body.textContent.includes('閲覧中')")
@@ -509,6 +511,281 @@ final class NativeTests: XCTestCase {
         attachment.name = "Shared input accepted then disabled by Mac parse stall"
         attachment.lifetime = .keepAlways
         add(attachment)
+    }
+
+    @MainActor
+    func testZZPhoneComposerSyntheticCompositionKeysTextClipboardAndFixedGrid() async throws {
+        let all = try fixtures()
+        let store = CredentialStore()
+        try store.save(registration(all["large"]!))
+        let clipboard = UIPasteboard.general.items
+        defer { try? store.remove(); UIPasteboard.general.items = clipboard }
+        let control = RemoteHTTP(registration(all["input-control"]!))
+        defer { control.close() }
+        let controller = WorkbenchController()
+        controller.loadViewIfNeeded()
+        let scene = try XCTUnwrap(UIApplication.shared.connectedScenes.first as? UIWindowScene)
+        let window = try XCTUnwrap(scene.windows.first(where: { $0.isKeyWindow }))
+        (window.rootViewController as? WorkbenchController)?.bridge.suspend()
+        window.rootViewController = controller
+        defer { controller.bridge.suspend() }
+        let webview = controller.webview!
+        func until(_ expression: String) async throws {
+            for _ in 0..<100 {
+                if let result = try? await webview.evaluateJavaScript(expression) as? Bool, result { return }
+                try await Task.sleep(for: .milliseconds(50))
+            }
+            XCTFail("Never observed: \(expression)")
+        }
+        func js(_ source: String) async throws {
+            _ = try await webview.callAsyncJavaScript(source + "; await new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)))", arguments: [:], in: nil, contentWorld: .page)
+        }
+        func writes() async throws -> [String] {
+            let object = try JSONSerialization.jsonObject(with: await control.read(.layout)) as! [String: Any]
+            return (object["writes"] as! [[String: Any]]).map { $0["data"] as! String }
+        }
+        try await until("document.querySelectorAll('article').length === 12")
+        _ = try await control.read(.terminalSessions)
+        try await js("document.querySelector('article button').click()")
+        try await until("document.querySelector('form button')?.disabled === false")
+        let baseline = try await writes().count
+        // These are synthetic composition events, not a Japanese OS keyboard acceptance test.
+        try await js("""
+            window.field = document.querySelector('form input');
+            window.setDraft = text => { Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').set.call(field,text); field.dispatchEvent(new Event('input',{bubbles:true})) };
+            field.dispatchEvent(new CompositionEvent('compositionstart',{bubbles:true}));
+            setDraft('にほん');
+            field.dispatchEvent(new KeyboardEvent('keydown',{key:'Enter',keyCode:229,isComposing:true,bubbles:true,cancelable:true}));
+            document.querySelector('form').dispatchEvent(new Event('submit',{bubbles:true,cancelable:true}));
+            """)
+        let compositionWrites = try await writes().count
+        XCTAssertEqual(compositionWrites, baseline)
+        try await js("""
+            setDraft('日本😀');
+            field.dispatchEvent(new CompositionEvent('compositionend',{data:'日本😀',bubbles:true}));
+            field.dispatchEvent(new InputEvent('input',{data:'日本😀',inputType:'insertCompositionText',bubbles:true}));
+            """)
+        let committedWrites = try await writes().count
+        XCTAssertEqual(committedWrites, baseline)
+        try await js("""
+            field.dispatchEvent(new CompositionEvent('compositionstart',{bubbles:true}));
+            setDraft('取消前');
+            setDraft('');
+            field.dispatchEvent(new CompositionEvent('compositionend',{data:'',bubbles:true}));
+            setDraft('日本😀x');
+            field.dispatchEvent(new InputEvent('beforeinput',{inputType:'deleteContentBackward',bubbles:true}));
+            setDraft('日本😀');
+            """)
+        let cancelledWrites = try await writes().count
+        XCTAssertEqual(cancelledWrites, baseline, "Composition cancellation and draft deletion stay local")
+        try await js("""
+            const handler = window.webkit.messageHandlers.monica;
+            const original = handler.postMessage.bind(handler);
+            window.holdPhoneInput = true;
+            handler.postMessage = message => {
+                if (message.operation === 'terminal-input' && window.holdPhoneInput) {
+                    window.holdPhoneInput = false;
+                    return new Promise(resolve => { window.releasePhoneInput = () => original(message).then(resolve) });
+                }
+                return original(message);
+            };
+            document.querySelector('form button').click();
+            """)
+        let pendingFeedback = try await webview.evaluateJavaScript("document.body.textContent.includes('送信中（受理確認前）') && document.querySelector('[aria-label=\"Esc\"]').disabled") as? Bool
+        XCTAssertEqual(pendingFeedback, true)
+        let heldWrites = try await writes().count
+        XCTAssertEqual(heldWrites, baseline, "Immediate feedback is not an acceptance ACK")
+        try await js("releasePhoneInput()")
+        try await until("document.body.textContent.includes('Macの中継が受理しました')")
+        var sent = try await writes()
+        XCTAssertEqual(sent.count, baseline + 1)
+        XCTAssertEqual(sent.last, Data("日本😀\r".utf8).base64EncodedString())
+        for (name, bytes) in [("Esc", "\u{1b}"), ("Tab", "\t"), ("上矢印", "\u{1b}[A"), ("左矢印", "\u{1b}[D"), ("下矢印", "\u{1b}[B"), ("右矢印", "\u{1b}[C"), ("削除", "\u{7f}")] {
+            try await js("document.querySelector('[aria-label=\"\(name)\"]').click()")
+            try await until("document.querySelector('[aria-label=\"Esc\"]').disabled === false")
+            sent = try await writes()
+            XCTAssertEqual(sent.last, Data(bytes.utf8).base64EncodedString(), name)
+        }
+        try await js("document.querySelector('[aria-label=\"Ctrl\"]').click(); setDraft('c'); document.querySelector('[data-send-text]').click()")
+        try await until("document.querySelector('[aria-label=\"Esc\"]').disabled === false")
+        sent = try await writes()
+        XCTAssertEqual(sent.last, Data([3]).base64EncodedString())
+        try await js("document.querySelector('[aria-label=\"Ctrl\"]').click(); setDraft('d'); document.querySelector('form button').click()")
+        try await until("document.querySelector('[aria-label=\"Esc\"]').disabled === false")
+        sent = try await writes()
+        XCTAssertEqual(sent.last, Data([4]).base64EncodedString(), "Ctrl never appends an accidental Enter")
+        UIPasteboard.general.url = URL(fileURLWithPath: "/not-a-terminal-file")
+        try await js("document.querySelector('[data-paste]').click()")
+        try await until("document.body.textContent.includes('貼り付けるテキストがありません')")
+        let fileWrites = try await writes().count
+        XCTAssertEqual(fileWrites, sent.count)
+        UIPasteboard.general.image = UIGraphicsImageRenderer(size: CGSize(width: 1, height: 1)).image { context in
+            UIColor.black.setFill()
+            context.fill(CGRect(x: 0, y: 0, width: 1, height: 1))
+        }
+        try await js("document.querySelector('[data-paste]').click()")
+        let imageWrites = try await writes().count
+        XCTAssertEqual(imageWrites, sent.count)
+        let imagePreview = try await webview.evaluateJavaScript("document.querySelector('[data-confirm-paste]') === null") as? Bool
+        XCTAssertEqual(imagePreview, true, "Image paste never becomes terminal text")
+        UIPasteboard.general.string = "貼り付け😀\ntext"
+        try await js("document.querySelector('[data-paste]').click()")
+        try await until("document.querySelector('[data-confirm-paste]') !== null")
+        let readWrites = try await writes().count
+        XCTAssertEqual(readWrites, sent.count, "Reading clipboard must not send it")
+        try await js("document.querySelector('[data-confirm-paste]').click()")
+        try await until("document.querySelector('[aria-label=\"Esc\"]').disabled === false")
+        sent = try await writes()
+        XCTAssertEqual(sent.last, Data("貼り付け😀\ntext".utf8).base64EncodedString())
+        UIPasteboard.general.string = String(repeating: "あ", count: 87382)
+        try await js("document.querySelector('[data-paste]').click()")
+        try await until("document.body.textContent.includes('256KiB')")
+        let oversizedWrites = try await writes().count
+        XCTAssertEqual(oversizedWrites, sent.count)
+        let touchControl = RemoteHTTP(registration(all["touch-control"]!))
+        defer { touchControl.close() }
+        _ = try await touchControl.read(.terminalSessions)
+        try await until("document.querySelector('.xterm-accessibility-tree').textContent.includes('phone-normal-end-1')")
+        let tailVisible = try await webview.evaluateJavaScript("""
+            (() => {
+                const row = [...document.querySelectorAll('.xterm-rows > div')].find(element => element.textContent.includes('phone-normal-end'));
+                if (!row) return false;
+                const line = row.getBoundingClientRect();
+                const viewport = document.querySelector('.terminal-viewport').getBoundingClientRect();
+                return line.top >= viewport.top && line.bottom <= viewport.bottom + 1;
+            })()
+            """) as? Bool
+        XCTAssertEqual(tailVisible, true, "Normal output follows its tail until the user pans away")
+        try await js("""
+            window.outputViewport = document.querySelector('.terminal-viewport');
+            outputViewport.scrollLeft = 90;
+            outputViewport.scrollTop = 1;
+            """)
+        let readingPosition = try await webview.evaluateJavaScript("outputViewport.scrollTop") as? Double
+        _ = try await touchControl.read(.terminalSessions)
+        try await until("document.querySelector('.xterm-accessibility-tree').textContent.includes('phone-normal-end-2')")
+        let afterOutputPosition = try await webview.evaluateJavaScript("outputViewport.scrollTop") as? Double
+        XCTAssertEqual(readingPosition, afterOutputPosition, "New output must not steal the user's reading position")
+        try await js("""
+            const terminal = document.querySelector('.xterm');
+            terminal.dispatchEvent(new WheelEvent('wheel',{deltaY:-200,bubbles:true,cancelable:true}));
+            terminal.dispatchEvent(new MouseEvent('mousedown',{clientX:30,clientY:200,bubbles:true,cancelable:true}));
+            terminal.dispatchEvent(new MouseEvent('mouseup',{clientX:30,clientY:200,bubbles:true,cancelable:true}));
+            """)
+        let panned = try await webview.evaluateJavaScript("outputViewport.scrollLeft > 0 && outputViewport.scrollTop > 0") as? Bool
+        XCTAssertEqual(panned, true, "The Mac grid must remain pannable on the phone")
+        _ = try await touchControl.read(.agentSessions)
+        try await until("document.querySelector('.xterm-accessibility-tree').textContent.includes('phone-tui-mouse')")
+        try await js("""
+            const terminal = document.querySelector('.xterm');
+            terminal.dispatchEvent(new WheelEvent('wheel',{deltaY:200,bubbles:true,cancelable:true}));
+            terminal.dispatchEvent(new MouseEvent('mousedown',{clientX:40,clientY:200,bubbles:true,cancelable:true}));
+            terminal.dispatchEvent(new MouseEvent('mousemove',{clientX:80,clientY:250,bubbles:true,cancelable:true,buttons:1}));
+            terminal.dispatchEvent(new MouseEvent('mouseup',{clientX:80,clientY:250,bubbles:true,cancelable:true}));
+            document.querySelector('[aria-label="Esc"]').click();
+            """)
+        try await until("document.querySelector('[aria-label=\"Esc\"]').disabled === false")
+        let gestureWrites = try await writes()
+        XCTAssertEqual(gestureWrites.count, sent.count + 1, "Normal/TUI viewing gestures must not generate terminal mouse or key bytes")
+        XCTAssertEqual(gestureWrites.last, Data([27]).base64EncodedString())
+        sent = gestureWrites
+        try await js("document.querySelector('[data-select-output]').click()")
+        try await until("document.querySelector('[data-output-text]') !== null")
+        try await js("const output = document.querySelector('[data-output-text]'); output.setSelectionRange(0,8); document.querySelector('[data-copy-output]').click()")
+        try await until("document.body.textContent.includes('コピーしました')")
+        XCTAssertEqual(UIPasteboard.general.string?.count, 8)
+        try await js("document.querySelector('[data-select-output]').click(); document.querySelector('[data-zoom-in]').click()")
+        let beforeViewport = try JSONSerialization.jsonObject(with: await touchControl.read(.layout)) as! [String: Any]
+        let gridBefore = try await webview.evaluateJavaScript("document.querySelector('.xterm-accessibility-tree').children.length") as? Int
+        controller.view.frame.size = CGSize(width: 740, height: 360)
+        controller.view.layoutIfNeeded()
+        try await js("window.dispatchEvent(new Event('resize'))")
+        let gridAfter = try await webview.evaluateJavaScript("document.querySelector('.xterm-accessibility-tree').children.length") as? Int
+        XCTAssertEqual(gridBefore, gridAfter)
+        let afterViewport = try JSONSerialization.jsonObject(with: await touchControl.read(.layout)) as! [String: Any]
+        XCTAssertEqual(afterViewport["resizes"] as? Int, beforeViewport["resizes"] as? Int, "Viewing operations never resize the PTY")
+        let controlsVisible = try await webview.evaluateJavaScript("""
+            [...document.querySelectorAll('.terminal-state, .terminal-keys, #terminal-draft, form button')].every(element => {
+                const rect = element.getBoundingClientRect();
+                return rect.top >= 0 && rect.bottom <= window.innerHeight;
+            })
+            """) as? Bool
+        if UIFont.preferredFont(forTextStyle: .body).pointSize <= 17 {
+            XCTAssertEqual(controlsVisible, true, "Connection status, keys and draft must fit a compact-height viewport")
+        }
+        let reachableControls = try await webview.callAsyncJavaScript("""
+            for (const element of document.querySelectorAll('.terminal-state, .terminal-keys, #terminal-draft, form button')) {
+                element.scrollIntoView({block:'nearest'});
+                await new Promise(resolve => requestAnimationFrame(resolve));
+                const rect = element.getBoundingClientRect();
+                if (rect.bottom < 0 || rect.top >= window.innerHeight) return false;
+            }
+            return true;
+            """, arguments: [:], in: nil, contentWorld: .page) as? Bool
+        XCTAssertEqual(reachableControls, true, "Larger text must keep every control reachable by scrolling")
+        let image = try await webview.takeSnapshot(configuration: nil)
+        let attachment = XCTAttachment(image: image)
+        attachment.name = "Phone input controls with fixed grid after viewport change"
+        attachment.lifetime = .keepAlways
+        add(attachment)
+        try await js("setDraft('must-not-carry-to-another-terminal'); document.querySelectorAll('article button')[1].click()")
+        let newDraft = try await webview.evaluateJavaScript("document.querySelector('#terminal-draft').value") as? String
+        XCTAssertEqual(newDraft, "", "Draft and paste state belong to exactly one Terminal Session")
+        try await js("document.querySelector('article button').click()")
+        try await until("document.querySelector('form button')?.disabled === false")
+        _ = try await control.read(.agentSessions)
+        try await until("document.querySelector('[aria-label=\"Esc\"]').disabled === true")
+        try await js("document.querySelector('[aria-label=\"Esc\"]').click(); document.querySelector('[data-paste]').click()")
+        let stoppedWrites = try await writes().count
+        XCTAssertEqual(stoppedWrites, sent.count)
+    }
+
+    @MainActor
+    func testZZZSimulatorSoftwareKeyboardKeepsWKWebViewAboveItWithoutPTYResize() async throws {
+        let all = try fixtures()
+        let store = CredentialStore()
+        try store.save(registration(all["large"]!))
+        defer { try? store.remove() }
+        let control = RemoteHTTP(registration(all["input-control"]!))
+        let audit = RemoteHTTP(registration(all["touch-control"]!))
+        defer { control.close(); audit.close() }
+        let controller = WorkbenchController()
+        controller.loadViewIfNeeded()
+        let scene = try XCTUnwrap(UIApplication.shared.connectedScenes.first as? UIWindowScene)
+        let window = try XCTUnwrap(scene.windows.first(where: { $0.isKeyWindow }))
+        (window.rootViewController as? WorkbenchController)?.bridge.suspend()
+        window.rootViewController = controller
+        defer { controller.bridge.suspend() }
+        let webview = controller.webview!
+        for _ in 0..<100 {
+            if let count = try? await webview.evaluateJavaScript("document.querySelectorAll('article').length") as? Int, count == 12 { break }
+            try await Task.sleep(for: .milliseconds(50))
+        }
+        _ = try await control.read(.terminalSessions)
+        _ = try await webview.evaluateJavaScript("document.querySelector('article button').click()")
+        for _ in 0..<100 {
+            if let ready = try? await webview.evaluateJavaScript("document.querySelector('form button')?.disabled === false") as? Bool, ready { break }
+            try await Task.sleep(for: .milliseconds(50))
+        }
+        let before = try JSONSerialization.jsonObject(with: await audit.read(.layout)) as! [String: Any]
+        let shown = expectation(forNotification: UIResponder.keyboardDidShowNotification, object: nil)
+        _ = try await webview.evaluateJavaScript("document.querySelector('#terminal-draft').focus()")
+        await fulfillment(of: [shown], timeout: 3)
+        controller.view.layoutIfNeeded()
+        let keyboardTop = controller.view.keyboardLayoutGuide.layoutFrame.minY
+        XCTAssertLessThan(keyboardTop, controller.view.bounds.height - 100, "A real Simulator software keyboard must be shown, not a synthetic viewport event")
+        XCTAssertLessThanOrEqual(webview.frame.maxY, keyboardTop + 0.5)
+        let image = try await webview.takeSnapshot(configuration: nil)
+        let attachment = XCTAttachment(image: image)
+        attachment.name = "Actual WKWebView above the Simulator software keyboard"
+        attachment.lifetime = .keepAlways
+        add(attachment)
+        let hidden = expectation(forNotification: UIResponder.keyboardDidHideNotification, object: nil)
+        _ = try await webview.evaluateJavaScript("document.querySelector('#terminal-draft').blur()")
+        await fulfillment(of: [hidden], timeout: 3)
+        let after = try JSONSerialization.jsonObject(with: await audit.read(.layout)) as! [String: Any]
+        XCTAssertEqual(before["resizes"] as? Int, after["resizes"] as? Int)
+        XCTAssertGreaterThan(webview.frame.maxY, keyboardTop)
     }
 
 }

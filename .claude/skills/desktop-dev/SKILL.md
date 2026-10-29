@@ -164,11 +164,13 @@ dev の desktop は `MONICA_HOME` ごとに identifier と vite の port が分�
 ### hidden Tab の入力と Mac renderer
 
 1. 隔離 HOME・ZDOTDIR・MONICA_HOME を指定して起こす。既存 tool cache が必要なら CARGO_HOME・RUSTUP_HOME だけを別途明示する。Mac で一度も選択していない Tab を iPhone から選ぶ。既存の `window.__monicaTerminals.get(tabId)` が非表示 DOM へ open され、同じ instance のまま ready になることを確かめる。Mac の選択、focus、未読、PTY grid は変わらず、WebGL の取得と fit は前面 Tab だけに残る。
-2. 基本入力欄の「送信（改行）」で短い command を送る。両画面の同じ Terminal Session に結果が出ることを確認する。「受理」は中継の受理であり command の成功ではない。表示解除後も Mac の renderer と入力は残る。正常な local 接続の Attach を増やさない。
+2. 共有入力欄の「送信（改行）」で短い command を送る。両画面の同じ Terminal Session に結果が出ることを確認する。「受理」は中継の受理であり command の成功ではない。表示解除後も Mac の renderer と入力は残る。正常な local 接続の Attach を増やさない。
 3. hidden open 前に出した DA・DSR・OSC 10/11・kitty query は replay から再回答されない。open 後の新しい query は Mac から一度だけ応答される。過去の未回答 query を待つ TUI が回復する保証はない。
 4. renderer を reload・破棄した旧世代、Terminal Session の置換前の ready では入力できないことを確認する。heartbeat は2秒。6秒の不応答または未解析出力の滞留で remote だけを入力不可にする。desktop 自身の入力・自動応答にこの判定を流用しない。
 5. 失効と入力を競合させる。Backend は認可・Tab/session 検証から private socket への送信まで await を挟まず受理し、失効は新しい受理を先に拒否する。失効前に受理した入力は失効開始後に届き得る。解除完了は専用接続と reader の終了 ACK 後だけ。ACK を失えば送達不明・解除待ちを維持し、再送しない。
 6. `bun test packages/workbench/src/remote-access.test.ts packages/workbench/src/ui/terminal-connections.test.ts` と `cargo test -p monica-ptyd --test remote` は世代、失効、入力 ACK 喪失、細かい echo burst、Exit/Reap を見る。出力 queue は隣接 Output を最大8個の45KiB chunkへまとめ、満杯なら remote だけを切る。実 Mac WKWebView の focus・非表示 open と query 応答は実行中の隔離 desktop でも確認する。
+
+iPhone の IME・補助キー・text paste・長押し選択・コピー・TUIスクロール・倍率・accessibility の確認は `.claude/skills/ios-dev/SKILL.md` に従う。desktop の file paste や clipboard と混同せず、phone の回転と keyboard 開閉で Mac の grid と focus が変わらないことを見る。
 
 Shell は Backend の起動ごとに同 UID 専用の 0700 directory と 0600 Unix socket、起動ごとの secret を用意する。socket path と secret は Backend の環境だけへ渡し、PTY へは継承しない。資格を調べるために process の全環境をログへ出さない。
 
