@@ -76,7 +76,22 @@ async function listening() {
           res.on('data', (data) => {
             text += data
           })
-          res.on('end', () => resolve({ status: res.statusCode!, body: text }))
+          res.on('end', () => {
+            if (res.headers['content-type'] === 'application/x-ndjson') {
+              const frames = text
+                .trimEnd()
+                .split('\n')
+                .map((line) => JSON.parse(line))
+              expect(frames.at(-1)).toEqual({ version: 1, type: 'end', count: frames.length - 1 })
+              const parts = frames.slice(0, -1).map((frame, index) => {
+                expect(frame.index).toBe(index)
+                expect(Buffer.byteLength(JSON.stringify(frame))).toBeLessThanOrEqual(65536)
+                return Buffer.from(frame.data, 'base64')
+              })
+              text = Buffer.concat(parts).toString('utf8')
+            }
+            resolve({ status: res.statusCode!, body: text })
+          })
         },
       )
       req.on('error', reject)
@@ -542,10 +557,67 @@ test('RemoteWorkbench.observe reads the real empty Ledger without creating a Run
       state.layout.runspaces.some((item) => item.id === created.runspaceId) &&
       state.terminalSessions.some((item) => item.status === 'running'),
   )
+  for (const hook_event_name of ['SessionStart', 'UserPromptSubmit', 'PermissionRequest']) {
+    await f.client.agentSession.recordHook({
+      terminalSessionId: created.tab.terminalSessionId,
+      payload: {
+        session_id: 'remote-agent',
+        hook_event_name,
+        cwd: '/work',
+        tool_name: 'Bash',
+        source: 'startup',
+      },
+    })
+  }
+  await until(
+    (state) =>
+      state.state === 'available' &&
+      state.agentSessions.some((item) => item.sessionId === 'remote-agent' && item.unread),
+  )
+  expect(
+    (await f.client.agentSession.list()).find((item) => item.sessionId === 'remote-agent')?.unread,
+  ).toBe(true)
   stop()
   const checkpoint = await f.client.tab.open({ runspaceId: created.runspaceId, rows: 24, cols: 80 })
   await f.ptyd.received(
     (op) => op.op === 'create' && op.session_id === checkpoint.terminalSessionId,
   )
   expect(f.ptyd.receivedAll((op) => ['terminate', 'reap', 'shutdown'].includes(op.op))).toEqual([])
+})
+
+test('RemoteWorkbench.observe receives a complete UTF-8 Layout larger than one remote frame from the real Ledger', async () => {
+  const f = await listening()
+  const { credential } = await f.approved()
+  for (let i = 0; i < 12; i++)
+    await f.client.runspace.create({
+      cwd: `/large-${i}-` + 'あ😀'.repeat(1000),
+      rows: 24,
+      cols: 80,
+    })
+  const expected = await f.client.layout.get()
+  expect(Buffer.byteLength(JSON.stringify(expected))).toBeGreaterThan(65536)
+  const result = Promise.withResolvers<RemoteState>()
+  const remote = new RemoteWorkbench({
+    async subscribe(changed, signal) {
+      const ws = await f.websocket(credential, '/workbench/changes')
+      signal.addEventListener('abort', () => ws.socket.destroy(), { once: true })
+      ws.socket.on('data', (data) => {
+        if (data.toString().includes('"type":"changed"')) changed()
+      })
+      await ws.greeting
+    },
+    async read(path) {
+      const response = await f.request(`/workbench/${path}`, credential, undefined, undefined, {
+        'x-monica-wire-version': '1',
+      })
+      expect(response.status).toBe(200)
+      return JSON.parse(response.body)
+    },
+  })
+  const stop = remote.observe((state) => {
+    if (state.state === 'available') result.resolve(state)
+  })
+  onCleanup(stop)
+  expect(await result.promise).toMatchObject({ state: 'available', layout: expected })
+  expect(await f.client.layout.get()).toEqual(expected)
 })

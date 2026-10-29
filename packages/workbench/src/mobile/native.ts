@@ -35,7 +35,16 @@ export async function nativeCall(operation: string, id?: string): Promise<unknow
 export const nativeTransport: RemoteTransport = {
   async read(procedure, signal) {
     signal.throwIfAborted()
-    return nativeCall(procedure)
+    const id = crypto.randomUUID()
+    const cancel = () => {
+      void nativeCall('cancel', id).catch(() => {})
+    }
+    signal.addEventListener('abort', cancel, { once: true })
+    try {
+      return await nativeCall(procedure, id)
+    } finally {
+      signal.removeEventListener('abort', cancel)
+    }
   },
   async subscribe(changed, signal, failed) {
     signal.throwIfAborted()

@@ -12,7 +12,7 @@ cleanup() {
 }
 trap cleanup EXIT
 bun run --cwd apps/ios build
-bun apps/ios/scripts/native-fixtures.ts > "$log_dir/fixtures.log" 2>&1 &
+bun apps/ios/testing.ts > "$log_dir/fixtures.log" 2>&1 &
 fixture=$!
 for ((i=0; i<100; i++)); do
   if grep -q 'fixtures ready' "$log_dir/fixtures.log"; then break; fi

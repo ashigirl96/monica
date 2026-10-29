@@ -103,7 +103,8 @@ final class RemoteHTTP: NSObject, URLSessionDelegate, URLSessionTaskDelegate, @u
 
     func close() { session.invalidateAndCancel() }
 
-    private func request(_ path: String, post: Bool = false) -> URLRequest {
+    private func request(_ path: String, post: Bool = false) throws -> URLRequest {
+        guard Trust.accepts(certificate: registration.certificate, host: registration.host) else { throw RemoteFailure.identityChanged }
         var request = URLRequest(url: registration.endpoint.appendingPathComponent(path))
         request.httpMethod = post ? "POST" : "GET"
         request.setValue("Bearer \(registration.credential)", forHTTPHeaderField: "Authorization")
@@ -113,18 +114,61 @@ final class RemoteHTTP: NSObject, URLSessionDelegate, URLSessionTaskDelegate, @u
     }
 
     func read(_ procedure: ReadProcedure) async throws -> Data {
-        try await perform(request("workbench/\(procedure.rawValue)"))
+        do { return try await snapshot(procedure) }
+        catch let error as URLError { throw classify(error) }
+    }
+
+    private func snapshot(_ procedure: ReadProcedure) async throws -> Data {
+        let (bytes, response) = try await session.bytes(for: request("workbench/\(procedure.rawValue)"), delegate: self)
+        defer { bytes.task.cancel() }
+        try validate(response)
+        guard response.mimeType == "application/x-ndjson" else { throw RemoteFailure.incompatible }
+        return try await withTaskCancellationHandler {
+            var line = Data()
+            var snapshot = Data()
+            var index = 0
+            var ended = false
+            for try await byte in bytes {
+                try Task.checkCancellation()
+                guard !ended, line.count < 65_536 else { throw RemoteFailure.incompatible }
+                if byte != 10 { line.append(byte); continue }
+                guard let frame = try JSONSerialization.jsonObject(with: line) as? [String: Any],
+                      frame["version"] as? Int == 1, let type = frame["type"] as? String else { throw RemoteFailure.incompatible }
+                if type == "data" {
+                    guard Set(frame.keys) == ["version", "type", "index", "data"], frame["index"] as? Int == index,
+                          let encoded = frame["data"] as? String, let part = Data(base64Encoded: encoded),
+                          !part.isEmpty, part.count <= 45 * 1024, snapshot.count + part.count <= 64 * 1024 * 1024
+                    else { throw RemoteFailure.incompatible }
+                    snapshot.append(part)
+                    index += 1
+                } else if type == "end" {
+                    guard Set(frame.keys) == ["version", "type", "count"], frame["count"] as? Int == index else { throw RemoteFailure.incompatible }
+                    ended = true
+                } else { throw RemoteFailure.incompatible }
+                line.removeAll(keepingCapacity: true)
+            }
+            guard ended, line.isEmpty else { throw RemoteFailure.incompatible }
+            return snapshot
+        } onCancel: { bytes.task.cancel() }
+    }
+
+    private func validate(_ response: URLResponse) throws {
+        guard let response = response as? HTTPURLResponse else { throw RemoteFailure.unavailable }
+        if response.statusCode == 401 { throw RemoteFailure.approvalRequired }
+        if response.statusCode == 426 || response.statusCode == 400 { throw RemoteFailure.incompatible }
+        if (300...399).contains(response.statusCode) { throw RemoteFailure.identityChanged }
+        guard (200...299).contains(response.statusCode) else { throw RemoteFailure.unavailable }
     }
 
     func register(invitation: String, name: String) async throws -> Data {
-        var request = request("registration/request", post: true)
+        var request = try request("registration/request", post: true)
         request.setValue(invitation, forHTTPHeaderField: "x-monica-invitation")
         request.httpBody = try JSONSerialization.data(withJSONObject: ["version": 1, "name": String(name.prefix(80))])
         return try await perform(request)
     }
 
     func status() async throws -> Data {
-        var request = request("registration/status", post: true)
+        var request = try request("registration/status", post: true)
         request.httpBody = Data("{}".utf8)
         return try await perform(request)
     }
@@ -132,22 +176,21 @@ final class RemoteHTTP: NSObject, URLSessionDelegate, URLSessionTaskDelegate, @u
     private func perform(_ request: URLRequest) async throws -> Data {
         do {
             let (data, response) = try await session.data(for: request)
-            guard let response = response as? HTTPURLResponse else { throw RemoteFailure.unavailable }
-            if response.statusCode == 401 { throw RemoteFailure.approvalRequired }
-            if response.statusCode == 426 || response.statusCode == 400 { throw RemoteFailure.incompatible }
-            if (300...399).contains(response.statusCode) { throw RemoteFailure.identityChanged }
-            guard (200...299).contains(response.statusCode), data.count <= 65_536 else { throw RemoteFailure.unavailable }
+            try validate(response)
+            guard data.count <= 65_536 else { throw RemoteFailure.unavailable }
             return data
-        } catch let error as URLError {
-            if trustLock.withLock({ trustRejected }) || [-1200, -1201, -1202, -1203, -1204, -1205, -1206].contains(error.errorCode) {
-                throw RemoteFailure.identityChanged
-            }
-            throw RemoteFailure.unavailable
-        }
+        } catch let error as URLError { throw classify(error) }
     }
 
-    func changes() -> URLSessionWebSocketTask {
-        var request = request("workbench/changes")
+    private func classify(_ error: URLError) -> RemoteFailure {
+        if trustLock.withLock({ trustRejected }) || [-1200, -1201, -1202, -1203, -1204, -1205, -1206].contains(error.errorCode) {
+            return .identityChanged
+        }
+        return .unavailable
+    }
+
+    func changes() throws -> URLSessionWebSocketTask {
+        var request = try request("workbench/changes")
         var components = URLComponents(url: request.url!, resolvingAgainstBaseURL: false)!
         components.scheme = "wss"
         request.url = components.url!
@@ -157,8 +200,18 @@ final class RemoteHTTP: NSObject, URLSessionDelegate, URLSessionTaskDelegate, @u
         return task
     }
 
+    func urlSession(_ session: URLSession, task: URLSessionTask, didReceive challenge: URLAuthenticationChallenge,
+                    completionHandler: @escaping (URLSession.AuthChallengeDisposition, URLCredential?) -> Void) {
+        authenticate(challenge, completionHandler: completionHandler)
+    }
+
     func urlSession(_ session: URLSession, didReceive challenge: URLAuthenticationChallenge,
                     completionHandler: @escaping (URLSession.AuthChallengeDisposition, URLCredential?) -> Void) {
+        authenticate(challenge, completionHandler: completionHandler)
+    }
+
+    private func authenticate(_ challenge: URLAuthenticationChallenge,
+                              completionHandler: @escaping (URLSession.AuthChallengeDisposition, URLCredential?) -> Void) {
         guard challenge.protectionSpace.authenticationMethod == NSURLAuthenticationMethodServerTrust,
               challenge.protectionSpace.host == registration.host,
               let trust = challenge.protectionSpace.serverTrust,

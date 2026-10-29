@@ -21,6 +21,7 @@ import {
   writeProtected,
   type RemoteIdentity,
 } from './remote-identity.ts'
+import { remoteSnapshot } from './remote-snapshot.ts'
 import { remoteDevice } from './schema.ts'
 
 const LIFETIME = 5 * 60_000
@@ -210,7 +211,7 @@ export function createRemoteAccess({
       if (read) {
         const result = await unary(url.pathname.slice(1).split('/'), async () => read())
         if (!authorized(request, sourceAddress)) return deny()
-        return json(result as object)
+        return remoteSnapshot(result)
       }
       if (
         url.pathname === '/workbench/changes' &&

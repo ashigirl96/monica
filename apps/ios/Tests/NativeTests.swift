@@ -25,7 +25,7 @@ final class NativeTests: XCTestCase {
         defer { client.close() }
         let data = try await client.read(.layout)
         XCTAssertEqual(String(data: data, encoding: .utf8), "{\"runspaces\":[]}")
-        let socket = client.changes()
+        let socket = try client.changes()
         defer { socket.cancel(with: .normalClosure, reason: nil) }
         let message = try await socket.receive()
         guard case .string(let text) = message else { return XCTFail("Expected subscribe ACK") }
@@ -45,9 +45,12 @@ final class NativeTests: XCTestCase {
             let client = RemoteHTTP(registration(fixture))
             do { _ = try await client.read(.layout); XCTFail("Accepted \(name)") }
             catch let error as RemoteFailure { XCTAssertEqual(error.state, "identity-changed", name) }
-            let socket = client.changes()
-            do { _ = try await socket.receive(); XCTFail("WSS accepted \(name)") } catch { }
-            socket.cancel(with: .goingAway, reason: nil)
+            do {
+                let socket = try client.changes()
+                defer { socket.cancel(with: .goingAway, reason: nil) }
+                _ = try await socket.receive()
+                XCTFail("WSS accepted \(name)")
+            } catch { }
             client.close()
         }
         let client = RemoteHTTP(registration(f["audit"]!))
@@ -98,7 +101,7 @@ final class NativeTests: XCTestCase {
         let f = try fixtures()["revoked"]!
         let client = RemoteHTTP(registration(f))
         defer { client.close() }
-        let socket = client.changes()
+        let socket = try client.changes()
         _ = try await socket.receive()
         _ = try await client.read(.terminalSessions)
         do { _ = try await socket.receive(); XCTFail("Revoked socket stayed open") } catch { }
@@ -107,19 +110,75 @@ final class NativeTests: XCTestCase {
         socket.cancel(with: .goingAway, reason: nil)
     }
 
+    func testLargeRealLedgerSnapshotPreservesUTF8AcrossFramesAndRejectsIncompleteOrOversizedTransfers() async throws {
+        let f = try fixtures()
+        let client = RemoteHTTP(registration(f["large"]!))
+        defer { client.close() }
+        let data = try await client.read(.layout)
+        XCTAssertGreaterThan(data.count, 65_536)
+        let object = try XCTUnwrap(try JSONSerialization.jsonObject(with: data) as? [String: Any])
+        let runspaces = try XCTUnwrap(object["runspaces"] as? [[String: Any]])
+        XCTAssertEqual(runspaces.count, 12)
+        XCTAssertEqual(runspaces.last?["cwd"] as? String, "/simulator-11-" + String(repeating: "あ😀", count: 1000))
+        for name in ["truncated", "oversized"] {
+            let broken = RemoteHTTP(registration(f[name]!))
+            defer { broken.close() }
+            do { _ = try await broken.read(.layout); XCTFail("Accepted \(name) transfer") }
+            catch let error as RemoteFailure { XCTAssertEqual(error.state, "incompatible") }
+        }
+    }
+
+    func testCancellingSnapshotReleasesTheActualHTTPBody() async throws {
+        let f = try fixtures()
+        let client = RemoteHTTP(registration(f["cancel"]!))
+        let audit = RemoteHTTP(registration(f["audit"]!))
+        defer { client.close(); audit.close() }
+        let task = Task { try await client.read(.layout) }
+        func counts() async throws -> [String: Int] {
+            try JSONSerialization.jsonObject(with: await audit.read(.layout)) as! [String: Int]
+        }
+        for _ in 0..<20 {
+            if try await counts()["cancel-started"] == 1 { break }
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        task.cancel()
+        do { _ = try await task.value; XCTFail("Cancelled transfer completed") } catch { }
+        var cancelled = false
+        for _ in 0..<20 {
+            if try await counts()["cancelled"] == 1 { cancelled = true; break }
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        XCTAssertTrue(cancelled)
+    }
+
     @MainActor
     func testBundledReactRunsInWKWebViewAndBridgeRejectsUntrustedOperationsAndFrames() async throws {
+        let store = CredentialStore()
+        try store.save(registration(try fixtures()["large"]!))
+        defer { try? store.remove() }
         let controller = WorkbenchController()
         controller.loadViewIfNeeded()
         let scene = try XCTUnwrap(UIApplication.shared.connectedScenes.first as? UIWindowScene)
-        let window = UIWindow(windowScene: scene)
+        let window = try XCTUnwrap(scene.windows.first(where: { $0.isKeyWindow }))
+        (window.rootViewController as? WorkbenchController)?.bridge.suspend()
         window.rootViewController = controller
-        window.makeKeyAndVisible()
-        defer { window.isHidden = true }
-        try await Task.sleep(for: .seconds(2))
+        defer { controller.bridge.suspend() }
         let webview = controller.webview!
+        for _ in 0..<100 {
+            if let count = try? await webview.evaluateJavaScript("document.querySelectorAll('article').length") as? Int, count == 12 { break }
+            try await Task.sleep(for: .milliseconds(50))
+        }
         let title = try await webview.evaluateJavaScript("document.querySelector('h1')?.textContent") as? String
         XCTAssertEqual(title, "Workbench")
+        let listCount = try await webview.evaluateJavaScript("document.querySelectorAll('article').length") as? Int
+        XCTAssertEqual(listCount, 12)
+        let firstButtonHeight = try await webview.evaluateJavaScript("document.querySelector('button').getBoundingClientRect().height") as? Double
+        XCTAssertGreaterThanOrEqual(firstButtonHeight ?? 0, 44)
+        let image = UIGraphicsImageRenderer(bounds: controller.view.bounds).image { _ in controller.view.drawHierarchy(in: controller.view.bounds, afterScreenUpdates: true) }
+        let attachment = XCTAttachment(image: image)
+        attachment.name = "Bundled Workbench with actual Ledger snapshot"
+        attachment.lifetime = .keepAlways
+        add(attachment)
         let unknown = try await webview.callAsyncJavaScript("return (await window.webkit.messageHandlers.monica.postMessage({operation:'https://example.com'})).state", arguments: [:], in: nil, contentWorld: .page) as? String
         XCTAssertEqual(unknown, "unavailable")
         XCTAssertFalse(controller.bridge.permits(mainFrame: false, url: controller.entry))

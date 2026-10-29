@@ -56,6 +56,7 @@ final class WorkbenchController: UIViewController, WKNavigationDelegate {
 @MainActor
 final class QRScanner: UIViewController, @preconcurrency AVCaptureMetadataOutputObjectsDelegate, UIAdaptivePresentationControllerDelegate {
     private let session = AVCaptureSession()
+    private let captureQueue = DispatchQueue(label: "app.monica.qr-capture")
     private var completion: ((Result<String, Error>) -> Void)?
     private var preview: AVCaptureVideoPreviewLayer?
 
@@ -83,7 +84,7 @@ final class QRScanner: UIViewController, @preconcurrency AVCaptureMetadataOutput
             view.layer.addSublayer(preview)
             self.preview = preview
             let session = session
-            DispatchQueue.global(qos: .userInitiated).async { session.startRunning() }
+            captureQueue.async { session.startRunning() }
         } catch { finish(.failure(error)) }
     }
     override func viewDidLayoutSubviews() { super.viewDidLayoutSubviews(); preview?.frame = view.bounds }
@@ -98,7 +99,7 @@ final class QRScanner: UIViewController, @preconcurrency AVCaptureMetadataOutput
         guard let completion else { return }
         self.completion = nil
         let session = session
-        DispatchQueue.global(qos: .userInitiated).async { session.stopRunning() }
+        captureQueue.async { session.stopRunning() }
         completion(result)
     }
 }

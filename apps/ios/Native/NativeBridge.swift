@@ -7,6 +7,7 @@ final class NativeBridge: NSObject, WKScriptMessageHandlerWithReply {
     weak var controller: WorkbenchController?
     private let store = CredentialStore()
     private var client: RemoteHTTP?
+    private var requests: [String: Task<Void, Never>] = [:]
     private var subscription: (id: String, task: Task<Void, Never>?, socket: URLSessionWebSocketTask)?
     private var active = true
     private var generation = 0
@@ -22,7 +23,9 @@ final class NativeBridge: NSObject, WKScriptMessageHandlerWithReply {
               let body = message.body as? [String: String], Set(body.keys).isSubset(of: ["operation", "id"]),
               let operation = body["operation"], active
         else { replyHandler(["state": "unavailable"], nil); return }
-        Task {
+        let readId = ReadProcedure(rawValue: operation) == nil ? nil : body["id"]
+        let task = Task {
+            defer { if let readId { requests.removeValue(forKey: readId) } }
             do {
                 let value = try await perform(operation, id: body["id"])
                 replyHandler(["state": "ok", "value": value], nil)
@@ -30,11 +33,14 @@ final class NativeBridge: NSObject, WKScriptMessageHandlerWithReply {
                 replyHandler(["state": (error as? RemoteFailure)?.state ?? "unavailable"], nil)
             }
         }
+        if let readId { requests[readId] = task }
     }
 
     func suspend() {
         active = false
         generation += 1
+        for task in requests.values { task.cancel() }
+        requests.removeAll()
         if let subscription { emit(id: subscription.id, state: "unavailable") }
         unsubscribe()
         client?.close()
@@ -54,6 +60,7 @@ final class NativeBridge: NSObject, WKScriptMessageHandlerWithReply {
 
     private func perform(_ operation: String, id: String?) async throws -> Any {
         if let procedure = ReadProcedure(rawValue: operation) {
+            guard let id, UUID(uuidString: id) != nil else { throw RemoteFailure.unavailable }
             return try JSONSerialization.jsonObject(with: await connection().read(procedure))
         }
         switch operation {
@@ -94,7 +101,7 @@ final class NativeBridge: NSObject, WKScriptMessageHandlerWithReply {
             guard let id, UUID(uuidString: id) != nil else { throw RemoteFailure.unavailable }
             unsubscribe()
             let client = try connection()
-            let socket = client.changes()
+            let socket = try client.changes()
             generation += 1
             let current = generation
             subscription = (id, nil, socket)
@@ -130,6 +137,9 @@ final class NativeBridge: NSObject, WKScriptMessageHandlerWithReply {
                 }
             }
             subscription = (id, task, socket)
+            return NSNull()
+        case "cancel":
+            if let id { requests[id]?.cancel() }
             return NSNull()
         case "unsubscribe":
             if let id { unsubscribe(id: id) }

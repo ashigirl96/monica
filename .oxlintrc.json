@@ -123,6 +123,7 @@
     },
     {
       "files": ["packages/workbench/src/mobile/**", "apps/ios/**"],
+      "excludeFiles": ["apps/ios/testing.ts"],
       "rules": {
         "no-restricted-imports": [
           "error",

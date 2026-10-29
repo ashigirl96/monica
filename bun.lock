@@ -108,8 +108,10 @@
         "react-dom": "catalog:",
       },
       "devDependencies": {
+        "@orpc/server": "catalog:",
         "@types/react": "catalog:",
         "@types/react-dom": "catalog:",
+        "drizzle-orm": "catalog:",
         "vite": "catalog:",
       },
     },

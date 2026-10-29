@@ -14,6 +14,7 @@ export default defineConfig({
   ],
   build: {
     target: 'safari26',
+    cssCodeSplit: false,
     modulePreload: false,
     rolldownOptions: { output: { format: 'iife' } },
   },

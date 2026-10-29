@@ -1,12 +1,23 @@
+import { Database } from 'bun:sqlite'
+import { spyOn } from 'bun:test'
 import { randomBytes, X509Certificate } from 'node:crypto'
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import https from 'node:https'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+
+import { createWorkbenchLedger, router, migrations } from '@monica/workbench/server'
+import { startFakePtyd } from '@monica/workbench/testing'
+import { createRouterClient } from '@orpc/server'
+import { drizzle } from 'drizzle-orm/bun-sqlite'
+import { migrate } from 'drizzle-orm/bun-sqlite/migrator'
 
 const home = mkdtempSync(join(tmpdir(), 'monica-455-tls-'))
 const servers: ReturnType<typeof Bun.serve>[] = []
 const credential = `monica-remote-v1.${randomBytes(32).toString('hex')}`
 const audit: Record<string, number> = {
+  'cancel-started': 0,
+  cancelled: 0,
   'wrong-identity': 0,
   expired: 0,
   hostname: 0,
@@ -38,7 +49,7 @@ function identity(name: string, host = '127.0.0.1', expired = false) {
       '-addext',
       'extendedKeyUsage=serverAuth',
       '-addext',
-      `subjectAltName=IP:${host}`,
+      `subjectAltName=IP:${host}${name === 'good' ? `,IP:${[100, 64, 0, 1].join('.')}` : ''}`,
       '-keyout',
       key,
       '-out',
@@ -103,6 +114,25 @@ const hostname = identity('hostname', syntheticAddress)
 let revoked = false
 const sockets = new Set<{ close(code: number): void }>()
 const fixtures: Record<string, { endpoint: string; certificate: string; credential: string }> = {}
+function frame(value: unknown, end = true) {
+  const bytes = Buffer.from(JSON.stringify(value))
+  const lines: string[] = []
+  for (let offset = 0, index = 0; offset < bytes.length; offset += 45 * 1024, index++) {
+    lines.push(
+      JSON.stringify({
+        version: 1,
+        type: 'data',
+        index,
+        data: bytes.subarray(offset, offset + 45 * 1024).toString('base64'),
+      }),
+    )
+  }
+  if (end) lines.push(JSON.stringify({ version: 1, type: 'end', count: lines.length }))
+  return lines.join('\n') + '\n'
+}
+function response(value: unknown) {
+  return new Response(frame(value), { headers: { 'content-type': 'application/x-ndjson' } })
+}
 function serve(name: string, tls: typeof good, pinned = tls, redirect?: string) {
   const server = Bun.serve({
     hostname: '127.0.0.1',
@@ -121,8 +151,30 @@ function serve(name: string, tls: typeof good, pinned = tls, redirect?: string) 
       if (request.headers.get('upgrade') === 'websocket') {
         if (listener.upgrade(request, { data: {} })) return undefined
       }
-      if (name === 'audit') return Response.json(audit)
-      return Response.json({ runspaces: [] })
+      if (name === 'audit') return response(audit)
+      if (name === 'truncated')
+        return new Response(frame({ runspaces: [] }, false), {
+          headers: { 'content-type': 'application/x-ndjson' },
+        })
+      if (name === 'oversized')
+        return new Response('x'.repeat(65537) + '\n', {
+          headers: { 'content-type': 'application/x-ndjson' },
+        })
+      if (name === 'cancel') {
+        audit['cancel-started'] = 1
+        return new Response(
+          new ReadableStream({
+            start(controller) {
+              controller.enqueue(Buffer.from(frame({ runspaces: [] }, false)))
+            },
+            cancel() {
+              audit.cancelled = 1
+            },
+          }),
+          { headers: { 'content-type': 'application/x-ndjson' } },
+        )
+      }
+      return response({ runspaces: [] })
     },
     websocket: {
       open(socket) {
@@ -147,15 +199,90 @@ serve('hostname', hostname)
 const redirectTarget = serve('redirect-target', good)
 serve('redirect', good, good, redirectTarget)
 serve('audit', good)
+serve('truncated', good)
+serve('oversized', good)
+serve('cancel', good)
 serve('revoked', good)
 fixtures.qr = {
   endpoint: `https://${syntheticAddress}:19443`,
   certificate: hostname.der,
   credential,
 }
-writeFileSync(join(import.meta.dir, '../Tests/fixtures.json'), JSON.stringify(fixtures))
+const sqlite = new Database(':memory:')
+sqlite.run('PRAGMA foreign_keys = ON')
+const db = drizzle(sqlite)
+migrate(db, { migrationsFolder: migrations.folder, migrationsTable: migrations.table })
+const ptydHome = mkdtempSync(join(tmpdir(), 'm455-'))
+const ptyd = startFakePtyd(ptydHome)
+const ledger = createWorkbenchLedger({
+  db,
+  home: ptydHome,
+  ptydPath: join(ptydHome, 'no-ptyd'),
+  notify: () => {},
+  nameAgentSession: () => null,
+  unread: () => {},
+})
+const client = createRouterClient(router, { context: { db, workbenchLedger: ledger } })
+const remoteDirectory = join(ptydHome, 'remote')
+mkdirSync(remoteDirectory, { mode: 0o700 })
+writeFileSync(
+  join(remoteDirectory, 'identity.json'),
+  JSON.stringify({ key: good.key, cert: good.cert }),
+  { mode: 0o600 },
+)
+const free = Bun.serve({ hostname: '127.0.0.1', port: 0, fetch: () => new Response() })
+const port = free.port!
+await free.stop(true)
+const originalServe = Bun.serve
+const bind = spyOn(Bun, 'serve').mockImplementation((options) =>
+  originalServe(Object.assign(options, { hostname: '127.0.0.1' })),
+)
+try {
+  await client.remote.enable({ address: syntheticAddress, port })
+} finally {
+  bind.mockRestore()
+}
+const invitation = JSON.parse((await client.remote.invite()).payload).invitation as string
+const registration = await new Promise<string>((resolve, reject) => {
+  const request = https.request(
+    {
+      hostname: '127.0.0.1',
+      port,
+      path: '/registration/request',
+      method: 'POST',
+      ca: good.cert,
+      headers: {
+        authorization: `Bearer ${credential}`,
+        'x-monica-invitation': invitation,
+        'content-type': 'application/json',
+      },
+    },
+    (res) => {
+      let text = ''
+      res.on('data', (data) => {
+        text += data
+      })
+      res.on('end', () => resolve(text))
+    },
+  )
+  request.on('error', reject)
+  request.end(JSON.stringify({ version: 1, name: 'Simulator' }))
+})
+await client.remote.approve({ id: JSON.parse(registration).id })
+for (let i = 0; i < 12; i++)
+  await client.runspace.create({
+    cwd: `/simulator-${i}-` + 'あ😀'.repeat(1000),
+    rows: 24,
+    cols: 80,
+  })
+fixtures.large = { endpoint: `https://127.0.0.1:${port}`, certificate: good.der, credential }
+writeFileSync(join(import.meta.dir, 'Tests/fixtures.json'), JSON.stringify(fixtures))
 process.stdout.write('Native HTTPS/WSS fixtures ready\n')
 function stop() {
+  ledger.stop()
+  ptyd.stop()
+  sqlite.close()
+  rmSync(ptydHome, { recursive: true, force: true })
   for (const server of servers) void server.stop(true)
   rmSync(home, { recursive: true, force: true })
   process.exit()
