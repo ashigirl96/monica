@@ -680,26 +680,50 @@ final class NativeTests: XCTestCase {
         _ = try await webview.evaluateJavaScript("""
             window.combinedRAF = window.requestAnimationFrame;
             window.combinedFrames = [];
-            window.requestAnimationFrame = callback => { combinedFrames.push(callback); return 0 };
+            window.combinedWriteFrames = 0;
+            window.combinedCaptureDraw = false;
+            window.requestAnimationFrame = callback => {
+                if (combinedCaptureDraw) {
+                    combinedFrames.push(callback);
+                    return 0;
+                }
+                const source = callback.toString();
+                if (source.includes('scrollTop') && source.includes('clientHeight')) {
+                    combinedWriteFrames++;
+                    return combinedRAF(timestamp => {
+                        combinedCaptureDraw = true;
+                        callback(timestamp);
+                        combinedCaptureDraw = false;
+                    });
+                }
+                return combinedRAF(callback);
+            };
             null;
             """)
-        _ = try await control.read(.terminalSessions)
-        try await until("combinedFrames.length > 0")
+        let pendingDrawOutput = try JSONSerialization.jsonObject(with: await touchControl.read(.terminalSessions)) as! [String: Any]
+        let pendingDrawMarker = "phone-normal-end-\(pendingDrawOutput["normalOutput"] as! Int)"
+        try await until("combinedWriteFrames === 1 && combinedFrames.length === 1 && combinedFrames[0].toString().includes('scrollTop') && document.querySelector('.xterm-accessibility-tree').textContent.includes('\(pendingDrawMarker)')")
         controller.bridge.suspend()
         try await until("document.body.textContent.includes('背景では表示接続を停止')")
         _ = try await webview.evaluateJavaScript("window.requestAnimationFrame = combinedRAF; window.combinedOldScreen = document.querySelector('.xterm-screen'); null")
         controller.bridge.resume()
         try await until("document.querySelector('.xterm-screen') !== combinedOldScreen && document.querySelector('form button')?.disabled === false")
+        try await until("document.querySelector('.xterm-accessibility-tree').lastElementChild.textContent.includes('\(pendingDrawMarker)')")
+        try await js("document.querySelector('.terminal-viewport').style.flex = '0 0 120px'")
+        let differentFollowTarget = try await webview.evaluateJavaScript("document.querySelector('.xterm').clientHeight - document.querySelector('.terminal-viewport').clientHeight > 0") as? Bool
+        XCTAssertEqual(differentFollowTarget, true, "The fresh renderer's cursor is on its last row and its follow target must differ from zero")
         try await js("""
             const viewport = document.querySelector('.terminal-viewport');
+            window.followTargetBeforeOldFrame = document.querySelector('.xterm').clientHeight - viewport.clientHeight;
             viewport.scrollTop = 0;
             window.positionBeforeOldFrame = viewport.scrollTop;
             window.requestAnimationFrame = callback => { callback(); return 0 };
             for (const callback of combinedFrames) callback();
             window.requestAnimationFrame = combinedRAF;
             """)
-        let oldCallbackIsolated = try await webview.evaluateJavaScript("document.querySelector('.terminal-viewport').scrollTop === positionBeforeOldFrame && document.querySelectorAll('.xterm').length === 1") as? Bool
-        XCTAssertEqual(oldCallbackIsolated, true, "Old draw completion cannot move the fresh renderer's reading position")
+        let oldCallbackIsolated = try await webview.evaluateJavaScript("combinedWriteFrames === 1 && combinedFrames.length === 1 && followTargetBeforeOldFrame > positionBeforeOldFrame && positionBeforeOldFrame === 0 && document.querySelector('.terminal-viewport').scrollTop === positionBeforeOldFrame && document.querySelectorAll('.xterm').length === 1") as? Bool
+        XCTAssertEqual(oldCallbackIsolated, true, "The exact old write draw completion cannot move the fresh renderer to its different nonzero follow target")
+        try await js("document.querySelector('.terminal-viewport').style.flex = ''")
         let recoveredAudit = try JSONSerialization.jsonObject(with: await touchControl.read(.layout)) as! [String: Any]
         XCTAssertEqual((recoveredAudit["writes"] as! [[String: Any]]).count, baseline, "Restart, replay, foreground and old callbacks never replay input, after a later actual Create")
         XCTAssertEqual(recoveredAudit["resizes"] as? Int, beforeViewing["resizes"] as? Int)
