@@ -19,7 +19,16 @@ final class WorkbenchController: UIViewController, WKNavigationDelegate {
         webview.navigationDelegate = self
         webview.scrollView.contentInsetAdjustmentBehavior = .never
         self.webview = webview
-        view = webview
+        view = UIView()
+        view.backgroundColor = .systemBackground
+        webview.translatesAutoresizingMaskIntoConstraints = false
+        view.addSubview(webview)
+        NSLayoutConstraint.activate([
+            webview.topAnchor.constraint(equalTo: view.topAnchor),
+            webview.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+            webview.trailingAnchor.constraint(equalTo: view.trailingAnchor),
+            webview.bottomAnchor.constraint(equalTo: view.keyboardLayoutGuide.topAnchor),
+        ])
         webview.loadFileURL(entry, allowingReadAccessTo: entry.deletingLastPathComponent())
         NotificationCenter.default.addObserver(self, selector: #selector(suspend), name: UIApplication.willResignActiveNotification, object: nil)
         NotificationCenter.default.addObserver(self, selector: #selector(resume), name: UIApplication.didBecomeActiveNotification, object: nil)

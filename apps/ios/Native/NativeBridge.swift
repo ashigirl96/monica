@@ -1,5 +1,6 @@
 import UIKit
 import WebKit
+import UniformTypeIdentifiers
 
 @MainActor
 final class NativeBridge: NSObject, WKScriptMessageHandlerWithReply {
@@ -22,9 +23,9 @@ final class NativeBridge: NSObject, WKScriptMessageHandlerWithReply {
                                replyHandler: @escaping (Any?, String?) -> Void) {
         guard permits(mainFrame: message.frameInfo.isMainFrame, url: message.frameInfo.request.url),
               message.webView === controller?.webview,
-              let body = message.body as? [String: String], Set(body.keys).isSubset(of: ["operation", "id", "tabId", "terminalSessionId", "sequence", "data", "renderer", "connection"]),
+              let body = message.body as? [String: String], Set(body.keys).isSubset(of: ["operation", "id", "tabId", "terminalSessionId", "sequence", "data", "renderer", "connection", "text"]),
               let operation = body["operation"], (active || operation == "foreground"),
-              Set(body.keys).isSubset(of: operation == "terminal-open" ? ["operation", "id", "tabId", "terminalSessionId"] : operation == "terminal-input" ? ["operation", "id", "data", "sequence", "renderer", "connection"] : operation == "terminal-ack" ? ["operation", "id", "sequence"] : ["operation", "id"])
+              Set(body.keys).isSubset(of: operation == "terminal-open" ? ["operation", "id", "tabId", "terminalSessionId"] : operation == "terminal-input" ? ["operation", "id", "data", "sequence", "renderer", "connection"] : operation == "terminal-ack" ? ["operation", "id", "sequence"] : operation == "clipboard-write" ? ["operation", "text"] : ["operation", "id"])
         else { replyHandler(["state": "unavailable"], nil); return }
         let readId = ReadProcedure(rawValue: operation) == nil ? nil : body["id"]
         let task = Task {
@@ -80,6 +81,18 @@ final class NativeBridge: NSObject, WKScriptMessageHandlerWithReply {
             return try JSONSerialization.jsonObject(with: await connection().read(procedure))
         }
         switch operation {
+        case "clipboard-read":
+            let pasteboard = UIPasteboard.general
+            let textTypes = [UTType.utf8PlainText.identifier, UTType.utf16PlainText.identifier,
+                             UTType.utf16ExternalPlainText.identifier, UTType.plainText.identifier]
+            guard !pasteboard.types.contains(UTType.fileURL.identifier),
+                  !(pasteboard.hasURLs && pasteboard.url?.isFileURL == true),
+                  pasteboard.types.contains(where: { textTypes.contains($0) }) else { return "" }
+            return pasteboard.string ?? ""
+        case "clipboard-write":
+            guard let text = fields["text"], text.utf8.count <= 1_048_576 else { throw RemoteFailure.unavailable }
+            UIPasteboard.general.setItems([[UTType.utf8PlainText.identifier: text]], options: [.localOnly: true])
+            return NSNull()
         case "foreground": return active
         case "terminal-open":
             guard let id, UUID(uuidString: id) != nil,

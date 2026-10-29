@@ -1504,6 +1504,93 @@ test('input admitted before revocation may arrive during detach, but no later in
   expect(f.ptyd.connections).toBe(1)
 })
 
+test('RemoteWorkbench.paste preflights UTF-8 and sends a full 256KiB byte-exact ordered paste through the authenticated relay', async () => {
+  const f = await terminalFixture()
+  const ready = Promise.withResolvers<void>()
+  const view = f.remote.openTerminal(f.target, {
+    async write() {},
+    size() {},
+    state() {},
+    inputReady(value) {
+      if (value) ready.resolve()
+    },
+  })
+  await f.rendererControl('ready')
+  await ready.promise
+  expect(await view.paste('あ'.repeat(87382))).toEqual({
+    result: 'not-sent',
+    acceptedBytes: 0,
+    totalBytes: 262146,
+  })
+  const text = 'x'.repeat(65535) + '😀' + 'あ'.repeat(65535)
+  expect(await view.paste(text)).toEqual({
+    result: 'accepted',
+    acceptedBytes: 262144,
+    totalBytes: 262144,
+  })
+  await f.ptyd.receivedAtLeast(4, (op) => op.op === 'write')
+  const chunks = f.ptyd
+    .receivedAll((op) => op.op === 'write')
+    .map((op) => Buffer.from(op.op === 'write' ? op.data : '', 'base64'))
+  expect(chunks.map((chunk) => chunk.length)).toEqual([65536, 65536, 65536, 65536])
+  expect(Buffer.concat(chunks).equals(Buffer.from(text))).toBe(true)
+  expect(await view.close()).toBe(true)
+  await f.client.runspace.create({ cwd: '/paste-barrier', rows: 24, cols: 80 })
+  await f.ptyd.receivedAtLeast(2, (op) => op.op === 'create')
+  expect(f.ptyd.receivedAll((op) => op.op === 'write')).toHaveLength(4)
+})
+
+test('a paste with a lost second ACK stops all remaining chunks without retry through the real authenticated relay', async () => {
+  const f = await terminalFixture()
+  const ready = Promise.withResolvers<void>()
+  const lost = Promise.withResolvers<void>()
+  const remote = new RemoteWorkbench({
+    ...f.transport,
+    async terminal() {
+      const stream = await f.terminal()
+      return {
+        ...stream,
+        async next() {
+          for (;;) {
+            const frame = await stream.next()
+            if (
+              typeof frame === 'object' &&
+              frame &&
+              'type' in frame &&
+              frame.type === 'input_result' &&
+              'id' in frame &&
+              frame.id === 2
+            ) {
+              lost.resolve()
+              continue
+            }
+            return frame
+          }
+        },
+      }
+    },
+  })
+  const view = remote.openTerminal(f.target, {
+    async write() {},
+    size() {},
+    state() {},
+    inputReady(value) {
+      if (value) ready.resolve()
+    },
+  })
+  await f.rendererControl('ready')
+  await ready.promise
+  const paste = view.paste('あ'.repeat(87381))
+  await lost.promise
+  expect(await view.close()).toBe(true)
+  expect(await paste).toEqual({ result: 'uncertain', acceptedBytes: 65536, totalBytes: 262143 })
+  expect((await view.paste('offline')).result).toBe('not-sent')
+  await f.ptyd.receivedAtLeast(2, (op) => op.op === 'write')
+  await f.client.runspace.create({ cwd: '/partial-paste-barrier', rows: 24, cols: 80 })
+  await f.ptyd.receivedAtLeast(2, (op) => op.op === 'create')
+  expect(f.ptyd.receivedAll((op) => op.op === 'write')).toHaveLength(2)
+})
+
 test('a slow draw ACK closes only the terminal without retrying a healthy Backend until explicit selection', async () => {
   const f = await terminalFixture()
   let opens = 0
@@ -1591,3 +1678,118 @@ test('a slow draw ACK closes only the terminal without retrying a healthy Backen
     timer.mockRestore()
   }
 })
+
+test.each(['between-chunks', 'before-second-write', 'pending-second-ACK'] as const)(
+  'an interrupted paste at %s stays bound to its old attachment across foreground recovery and explicit reselection',
+  async (interruption) => {
+    const f = await terminalFixture()
+    const interrupted = Promise.withResolvers<void>()
+    const lateACK = Promise.withResolvers<void>()
+    let opens = 0
+    let sends = 0
+    let remote: RemoteWorkbench
+    const recovered = Promise.withResolvers<void>()
+    const firstReady = Promise.withResolvers<void>()
+    const selectedReady = Promise.withResolvers<void>()
+    const readiness: boolean[] = []
+    remote = new RemoteWorkbench({
+      ...f.transport,
+      async terminal(target) {
+        const ordinal = ++opens
+        const stream = await f.terminal(target)
+        return {
+          ...stream,
+          async input(command) {
+            sends++
+            if (ordinal === 1 && command.id === 2 && interruption === 'before-second-write') {
+              remote.setForeground(false)
+              interrupted.resolve()
+              return
+            }
+            await stream.input(command)
+          },
+          next() {
+            const delivered = Promise.withResolvers<unknown>()
+            void stream.next().then(async (frame) => {
+              const inputResult =
+                ordinal === 1 &&
+                typeof frame === 'object' &&
+                frame &&
+                'type' in frame &&
+                frame.type === 'input_result' &&
+                'id' in frame
+              if (inputResult && frame.id === 2 && interruption === 'pending-second-ACK') {
+                remote.setForeground(false)
+                interrupted.resolve()
+                await lateACK.promise
+              }
+              delivered.resolve(frame)
+              if (inputResult && frame.id === 1 && interruption === 'between-chunks') {
+                // Deliver the ACK before suspension, but suspend before the paste continuation.
+                queueMicrotask(() => {
+                  remote.setForeground(false)
+                  interrupted.resolve()
+                })
+              }
+            }, delivered.reject)
+            return delivered.promise
+          },
+        }
+      },
+    })
+    const display = {
+      async write() {},
+      size() {},
+      state(state: string) {
+        if (opens === 2 && state === 'viewing') recovered.resolve()
+      },
+      inputReady(value: boolean) {
+        readiness.push(value)
+        if (value && opens === 1) firstReady.resolve()
+        if (value && opens === 3) selectedReady.resolve()
+      },
+    }
+    let view = remote.openTerminal(f.target, display)
+    onCleanup(() => {
+      lateACK.resolve()
+      void view.close()
+    })
+    await f.rendererControl('ready')
+    await firstReady.promise
+    const paste = view.paste('p'.repeat(196609))
+    await interrupted.promise
+    expect(await paste).toEqual({ result: 'uncertain', acceptedBytes: 65536, totalBytes: 196609 })
+    remote.setForeground(true)
+    await recovered.promise
+    expect(readiness.at(-1)).toBe(false)
+    lateACK.resolve()
+    expect(await view.input(new Uint8Array([13]))).toBe('not-sent')
+    expect((await view.paste('never-replay')).result).toBe('not-sent')
+    view = remote.openTerminal(f.target, display)
+    await selectedReady.promise
+    expect(await view.input(new TextEncoder().encode('explicit-new-input'))).toBe('accepted')
+    const barrier = await f.client.runspace.create({
+      cwd: '/combined-paste-barrier',
+      rows: 24,
+      cols: 80,
+    })
+    await f.ptyd.received(
+      (op) => op.op === 'create' && op.session_id === barrier.tab.terminalSessionId,
+    )
+    const writes = f.ptyd.receivedAll((op) => op.op === 'write')
+    expect(
+      writes.map((op) => (op.op === 'write' ? Buffer.from(op.data, 'base64').toString() : '')),
+    ).toEqual([
+      'p'.repeat(65536),
+      ...(interruption === 'pending-second-ACK' ? ['p'.repeat(65536)] : []),
+      'explicit-new-input',
+    ])
+    expect(sends).toBe(interruption === 'between-chunks' ? 2 : 3)
+    expect(f.ptyd.receivedAll((op) => op.op === 'attach')).toHaveLength(3)
+    expect(
+      f.ptyd.receivedAll((op) => ['resize', 'terminate', 'reap', 'shutdown'].includes(op.op)),
+    ).toEqual([])
+    expect(await view.close()).toBe(true)
+    expect(f.ptyd.connections).toBe(1)
+  },
+)

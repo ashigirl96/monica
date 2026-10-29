@@ -65,7 +65,9 @@ export type TerminalDisplay = {
       | RemoteUnavailable,
   ): void
 }
+export type PasteResult = { result: InputResult; acceptedBytes: number; totalBytes: number }
 export type TerminalView = {
+  paste(text: string): Promise<PasteResult>
   input(bytes: Uint8Array): Promise<InputResult>
   close(): Promise<boolean>
 }
@@ -133,7 +135,7 @@ export class RemoteWorkbench {
 
   openTerminal(target: TerminalTarget, display: TerminalDisplay): TerminalView {
     const previous = this.view
-    let attachment: TerminalView | undefined
+    let attachment: Omit<TerminalView, 'paste'> | undefined
     let released = previous?.close() ?? Promise.resolve(true)
     let generation = 0
     let active = true
@@ -232,15 +234,54 @@ export class RemoteWorkbench {
         })
       })()
     })
+    let pasting = false
     const view: TerminalView = {
       input: async (bytes) => {
-        if (!active || uncertain || ended || !attachment) return 'not-sent'
+        if (!active || pasting || uncertain || ended || !attachment) return 'not-sent'
         const result = await attachment.input(bytes)
         if (result === 'uncertain') {
           uncertain = true
           if (active) display.inputReady?.(false)
         }
         return result
+      },
+      paste: async (text) => {
+        const bytes = new TextEncoder().encode(text)
+        const totalBytes = bytes.length
+        let acceptedBytes = 0
+        const connection = attachment
+        const current = generation
+        if (
+          !active ||
+          uncertain ||
+          ended ||
+          !connection ||
+          pasting ||
+          !totalBytes ||
+          totalBytes > 262144
+        )
+          return { result: 'not-sent', acceptedBytes, totalBytes }
+        pasting = true
+        try {
+          for (let offset = 0; offset < totalBytes; offset += 65536) {
+            const chunk = bytes.subarray(offset, offset + 65536)
+            const result =
+              current === generation && active && !ended
+                ? await connection.input(chunk)
+                : 'not-sent'
+            if (result !== 'accepted') {
+              if (acceptedBytes > 0 || result === 'uncertain') {
+                uncertain = true
+                display.inputReady?.(false)
+              }
+              return { result: acceptedBytes > 0 ? 'uncertain' : result, acceptedBytes, totalBytes }
+            }
+            acceptedBytes += chunk.length
+          }
+          return { result: 'accepted', acceptedBytes, totalBytes }
+        } finally {
+          pasting = false
+        }
       },
       close: () => {
         if (!active) return released
@@ -258,7 +299,10 @@ export class RemoteWorkbench {
     return view
   }
 
-  private attachTerminal(target: TerminalTarget, display: TerminalDisplay): TerminalView {
+  private attachTerminal(
+    target: TerminalTarget,
+    display: TerminalDisplay,
+  ): Omit<TerminalView, 'paste'> {
     let active = true
     let stream: TerminalStream | undefined
     let closing: Promise<boolean> | undefined
@@ -277,34 +321,35 @@ export class RemoteWorkbench {
         display.inputReady?.(false)
       }
     }
-    const view: TerminalView = {
-      input: async (bytes) => {
-        if (
-          !active ||
-          !stream ||
-          !replayed ||
-          !renderer ||
-          uncertain ||
-          pending ||
-          bytes.length > 65536 ||
-          bytes.length === 0
-        )
-          return 'not-sent'
-        const result = Promise.withResolvers<InputResult>()
-        const id = ++inputId
-        pending = { id, resolve: result.resolve }
-        const timer = setTimeout(() => finishInput('uncertain', id), 6000)
-        try {
-          let data = ''
-          for (const byte of bytes) data += String.fromCharCode(byte)
-          void stream
-            .input({ type: 'input', id, data: btoa(data), generation: renderer })
-            .catch(() => finishInput('uncertain', id))
-        } catch {
-          finishInput('uncertain', id)
-        }
-        return result.promise.finally(() => clearTimeout(timer))
-      },
+    const input = async (bytes: Uint8Array): Promise<InputResult> => {
+      if (
+        !active ||
+        !stream ||
+        !replayed ||
+        !renderer ||
+        uncertain ||
+        pending ||
+        bytes.length > 65536 ||
+        bytes.length === 0
+      )
+        return 'not-sent'
+      const result = Promise.withResolvers<InputResult>()
+      const id = ++inputId
+      pending = { id, resolve: result.resolve }
+      const timer = setTimeout(() => finishInput('uncertain', id), 6000)
+      try {
+        let data = ''
+        for (const byte of bytes) data += String.fromCharCode(byte)
+        void stream
+          .input({ type: 'input', id, data: btoa(data), generation: renderer })
+          .catch(() => finishInput('uncertain', id))
+      } catch {
+        finishInput('uncertain', id)
+      }
+      return result.promise.finally(() => clearTimeout(timer))
+    }
+    const view = {
+      input,
       close: () => {
         if (closing) return closing
         active = false

@@ -1,6 +1,6 @@
 ---
 name: ios-dev
-description: iPhone app の build・Simulator 試験・Xcode 実機署名・QR 登録・端末閲覧・基本入力・表示解除・失効を行うときに使う。Mac の app の入れ替えとは区別する。
+description: iPhone app の build・Simulator 試験・Xcode 実機署名・QR 登録・端末閲覧・IME・補助キー・text paste・選択とコピー・表示解除・失効を行うときに使う。Mac の app の入れ替えとは区別する。
 ---
 
 ## 自動検証
@@ -14,7 +14,7 @@ description: iPhone app の build・Simulator 試験・Xcode 実機署名・QR �
 
 1. React を build して `apps/ios/Monica.xcodeproj` を Xcode で開く。scheme は `Monica`。Signing & Capabilities で自分の Personal Team と一意な Bundle Identifier を選ぶ。repo の共有設定に自分の Team ID を保存しない。
 2. iPhone を Mac と接続して信頼し、設定の Privacy & Security から Developer Mode を有効にする。Xcode の destination にその iPhone を選び Run する。無料 Personal Team の provisioning は通常 7 日で期限切れになるので、期限後は同じ Team・Bundle Identifier で再署名して入れ直す。TestFlight と有料 Developer Program は不要。
-3. この app は登録、既存 Workbench 一覧、選んだ Terminal Session の出力閲覧を提供する。同じ Mac renderer が利用可能な間だけ基本入力を送れる。Tab を作る・閉じる操作はない。背景・回線断からは同じ Tab と Terminal Session を確認して表示接続を作り直す。
+3. この app は登録、既存 Workbench 一覧、選んだ Terminal Session の出力閲覧を提供する。同じ Mac renderer が利用可能な間だけ共有入力と補助キーを送れる。Tab を作る・閉じる操作はない。背景・回線断からは同じ Tab と Terminal Session を確認して表示接続を作り直す。
 
 ## Mac と登録
 
@@ -33,12 +33,16 @@ description: iPhone app の build・Simulator 試験・Xcode 実機署名・QR �
 3. 「一覧へ戻る · 表示解除」と別 Tab の選択を試す。表示の接続だけを閉じ、Mac の shell は続く。背景移行・lock・切断でも同じ。同じ対象なら foreground で末尾を新しく replay する。置換された Terminal Session へは繋がず、一覧から明示的に選び直す。Tab 削除、Terminal Session の lost・終了、登録失効を別々に確認する。未確認の解除は完了と扱わず、Mac の「拒否済み・解除待ち」も確認する。
 4. 自動 native 試験の `testPhoneXtermShowsReplayAndLiveWithoutRepliesClipboardOrResizeAndBackDetaches` は実 WKWebView の replay/live、DA/DSR/OSC/kitty 応答拒否、OSC 52、固定 grid、Tab 切替、戻る、native suspend、描画 ACK 停止時の専用接続解除を見る。`Native.xcresult` の xterm screenshot で文字が実際に描画されていることも確認する。CSP は xterm が生成する inline style を許すが、外部 script、navigation、frame、network と任意 bridge operation は拒否したまま。
 
-## 基本入力と送達状態
+## キーボード・text paste・選択を確認する
 
-1. Mac と共有する入力であり、同時操作は混ざる。Mac renderer待ちの間は入力欄と送信が無効であることを確認する。利用可能になったら短い文字を入力して「送信（改行）」を押し、Mac と iPhone の同じ Terminal Session に結果が出ることを見る。押下直後は送信中を表示する。入力中の次の送信は受け付けず、offline queue は持たない。
-2. 「受理」は中継が受け取ったという意味で、実行成功とは扱わない。未送信は renderer・接続状態と decode後64KiBの上限を確認する。送達不明では自動再送せず、出力で二重実行を避ける。送達不明の view は入力を止め、背景復帰や新しい replay でも送達不明を消さず入力停止を維持する。出力で確認してから、必要なら一覧から明示的に選び直す。失効前に受理した入力は失効開始後に届く場合があり、取り消せない。
-3. Mac の renderer停止・reload・Terminal Session置換で入力が止まることを見る。6秒の検知までに受理した入力は取消できない。iPhone が自動応答担当になることはない。完全な IME、paste分割、補助キー、touch操作の完成確認は後続の実機試験と分ける。
-4. native の `testZBasicSharedInputIsAcceptedOnceAndMacParseStallDisablesIt` は実 Simulator のフォーム、限定 bridge、WSS、実 relay、fake ptyd の byte一致と入力拒否を確認する。`testPhoneXtermShowsReplayAndLiveWithoutRepliesClipboardOrResizeAndBackDetaches` も残し、live/replay query、clipboard、size、背景・表示解除を確認する。前者の fixture ready は本物の Mac renderer の代わりではない。Mac の非表示 open と応答は desktop-dev の実行で別途確認する。
+1. 入力は Mac と共有される。隔離した Terminal Session で入力欄に日本語を変換し、確定、取消、削除、絵文字を試す。下書き中は送らず、「文字だけ送信」か「送信（改行）」で一度だけ送る。IME の確定 Enter では送信しないことを実キーボードで確認する。Mac renderer待ちでは入力欄と補助キーと paste が無効になる。
+2. Ctrl を選び、`c` の1文字を入力して送る。Ctrl は改行を付けず送る。Esc、Tab、矢印、削除、Enter は下書きと別に直接送る。矢印は現在の xterm の DECCKM に従い、通常は CSI、application cursor mode では SS3 を送る。TUI の開始・終了後に上下左右を確かめる。押下色と「送信中（受理確認前）」を確認し、ACK 前の反応を受理と扱わない。「受理」は中継の受理だけを意味する。送達不明は出力を確認し、同じコマンドを自動で再送しない。背景復帰や新しい replay でも入力停止を維持する。出力で確認してから、必要なら一覧から明示的に選び直す。
+3. 自分の試験用 clipboard にテキストを置き、「貼り付け…」から全量と改行を確認して送る。clipboard の読取りだけでは送らず、取消も試す。UTF-8 256KiB超過では全量を拒否し、上限内は64KiB以下の chunk を順送する。途中の未送信・送達不明で残りが止まり、受理済み byte数が出ることを確認する。fileと画像は送れない。実機の貼り付け許可を拒否した場合も試す。ユーザーの clipboard を試験で上書きせず、自分の Simulator では元の内容を退避して戻す。
+4. 「選択・コピー」で表示時点の buffer を text-only に切り替える。長押しで範囲を選び、OS のコピーか「選択範囲をコピー」を使う。未選択なら全体をコピーする。表示へ戻ると live 出力へ戻る。OSC 52 と file 操作は許さず、コピーは利用者の操作だけで行う。
+5. 通常 buffer の末尾が見えることを確認し、履歴を縦に動かしている間は新しい出力で表示位置を奪われないことを見る。横移動と A＋・A−を試す。TUI でも表示の縦横移動を試す。端末表示だけは独自の1本指 pan が履歴と固定 grid の縦横移動を扱い、慣性はない。移動中の方向変更、上下左右の端、touchcancel、2本目の指での中断を確かめる。選択用 textarea・入力欄・操作領域は OS の gesture を使う。実指での追従・操作感は #460 で受け入れ判断し、Simulator の TouchEvent 成功で代用しない。phone の gesture を TUI の mouse入力や矢印へ送らない。TUI 自体を動かすときだけ補助キーを使う。回転、keyboard の開閉、Dynamic Type の変更では PTY の rows/cols が変わらず、Mac の resizeだけに追従することを確認する。
+6. safe area と keyboard の上に接続状態、補助キー、入力、送達状態が見えることを確認する。大きい文字や狭い landscape では操作領域をスクロールして各操作へ到達する。VoiceOver で Ctrl、Esc、Tab、上下左右、削除、Enter、拡大、縮小、入力、出力選択の名前を読む。Dynamic Type、Reduce Motion、Reduce Transparency、Increase Contrast、light/dark を変え、読みやすさと即時 feedback を確認する。UI は不透明な system色と静的な押下色を使い、通信を animation 待ちにしない。
+7. Mac の renderer停止・reload・Terminal Session置換で入力が止まることを確認する。6秒の検知までの受理は取消できない。途中で切れた paste は接続復帰でも再送しない。native の `testZZPhoneComposerSyntheticCompositionKeysTextClipboardAndFixedGrid` は実 Ledger listener 再起動と背景復帰後の fresh xterm 上で、下書き・composition・明示 paste preview の対象維持、古い描画 callback の隔離、synthetic composition、正確な補助キー byte、明示 clipboard、file URL拒否、実 xterm 上の TouchEvent による normal履歴とnormal/TUI縦横pan、後続の実 Create 到達後の Write/Resize不在、zoom前の基準数と固定grid、compact viewportを見る。synthetic eventと選択範囲APIは実IME・実タッチ・OSの長押しmenu・貼り付け許可の代わりではない。
+8. `testZZZSimulatorSoftwareKeyboardKeepsWKWebViewAboveItWithoutPTYResize` は実 Simulator の software keyboard の表示・非表示通知、WKWebView の keyboard layout guide と PTY resize 不在を見る。実際の IME key入力ではなく focus による OS keyboard の確認である。既存 `testZBasicSharedInputIsAcceptedOnceAndMacParseStallDisablesIt` と read-only xterm 試験も残す。fixture の renderer ready は本物の Mac renderer を代替しない。Mac の hidden open と query応答は desktop-dev で別途確認する。自動byte境界は `remote-workbench.test.ts` と実認可relayの `remote-access.test.ts` で見る。実際に使った Simulator の `simctl ui <id> content_size`、`increase_contrast`、`appearance` の値と screenshot を記録する。
 
 ## 復帰と Backend 再起動
 

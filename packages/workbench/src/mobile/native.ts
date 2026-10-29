@@ -187,6 +187,14 @@ export function observeRegistration(
   }
 }
 
+export async function readClipboardText(): Promise<string> {
+  return z.string().parse(await nativeCall('clipboard-read'))
+}
+
+export async function writeClipboardText(text: string): Promise<void> {
+  await nativeCall('clipboard-write', undefined, { text })
+}
+
 export function observeForeground(receive: (foreground: boolean) => void): () => void {
   let active = true
   let notified = false
