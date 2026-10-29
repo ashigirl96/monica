@@ -874,6 +874,7 @@ test('the stdin-pipe Backend persists approved devices but discards invitations 
           method: body ? 'POST' : 'GET',
           headers: {
             authorization: `Bearer ${credential}`,
+            'x-monica-wire-version': '1',
             ...(invitation && { 'x-monica-invitation': invitation }),
             'content-type': 'application/json',
           },
@@ -910,6 +911,15 @@ test('the stdin-pipe Backend persists approved devices but discards invitations 
     (await viaToken({ port: backend.port, token: credential }, 'workbench/layout/get')).status,
   ).toBe(401)
   expect((await remote('/rpc/workbench/layout/get', credential)).status).toBe(404)
+  expect((await remote('/workbench/layout/get', credential)).status).toBe(200)
+  expect(await usages(backend)).toContainEqual(
+    expect.objectContaining({
+      feature: 'workbench.layout.get',
+      caller: 'webview',
+      ok: 1,
+      failed: 0,
+    }),
+  )
   const second = await invite(backend)
   const pendingCredential = `monica-remote-v1.${'b'.repeat(64)}`
   expect(

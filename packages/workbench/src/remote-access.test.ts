@@ -110,14 +110,15 @@ async function listening() {
     await fixture.client.remote.approve({ id })
     return { credential, id }
   }
-  async function websocket(credential: string) {
+  async function websocket(credential: string, path = '/check') {
     return new Promise<{ socket: Duplex; closed: Promise<void>; greeting: Promise<Buffer> }>(
       (resolve, reject) => {
         const req = https.request({
           ...options,
-          path: '/check',
+          path,
           headers: {
             authorization: `Bearer ${credential}`,
+            'x-monica-wire-version': '1',
             connection: 'Upgrade',
             upgrade: 'websocket',
             'sec-websocket-version': '13',
@@ -433,4 +434,64 @@ test('disable still closes authenticated WSS when persisting the disabled settin
     await Promise.race([active.closed.then(() => 'closed'), Bun.sleep(200).then(() => 'open')]),
   ).toBe('closed')
   await expect(f.request('/check', approved.credential)).rejects.toThrow()
+})
+
+test('authenticated remote reads share existing lists without writes, require wire compatibility and refuse extra procedures', async () => {
+  const f = await listening()
+  const { credential } = await f.approved()
+  const headers = { 'x-monica-wire-version': '1' }
+  expect(
+    (await f.request('/workbench/layout/get', secret(), undefined, undefined, headers)).status,
+  ).toBe(401)
+  expect((await f.request('/workbench/layout/get', credential)).status).toBe(426)
+  const empty = await f.request('/workbench/layout/get', credential, undefined, undefined, headers)
+  expect(empty.status).toBe(200)
+  expect(JSON.parse(empty.body)).toEqual({ runspaces: [] })
+  const opened = await f.client.runspace.create({ rows: 24, cols: 80 })
+  await f.settled(opened.tab.terminalSessionId)
+  for (const [path, expected] of [
+    ['layout/get', await f.client.layout.get()],
+    ['terminalSession/list', await f.client.terminalSession.list()],
+    ['agentSession/list', await f.client.agentSession.list()],
+  ] as const) {
+    const response = await f.request(
+      `/workbench/${path}`,
+      credential,
+      undefined,
+      undefined,
+      headers,
+    )
+    expect(response.status).toBe(200)
+    expect(JSON.parse(response.body)).toEqual(JSON.parse(JSON.stringify(expected)))
+  }
+  for (const path of ['runspace/create', 'tab/close', 'agentSession/markSeen', 'remote/invite']) {
+    expect(
+      (await f.request(`/workbench/${path}`, credential, undefined, undefined, headers)).status,
+    ).toBe(404)
+  }
+  expect(await f.client.layout.get()).toEqual(await f.client.layout.get())
+})
+
+test('the remote change socket acknowledges an installed subscription, sees later changes and closes on revocation', async () => {
+  const f = await listening()
+  const { credential, id } = await f.approved()
+  const ws = await f.websocket(credential, '/workbench/changes')
+  expect((await ws.greeting).toString()).toContain('"type":"subscribed"')
+  const changed = new Promise<Buffer>((resolve) => ws.socket.once('data', resolve))
+  await f.client.runspace.create({ rows: 24, cols: 80 })
+  expect((await changed).toString()).toContain('"type":"changed"')
+  await f.client.remote.revoke({ id })
+  await Promise.race([
+    ws.closed,
+    Bun.sleep(200).then(() => {
+      throw new Error('socket not closed')
+    }),
+  ])
+  expect(
+    (
+      await f.request('/workbench/layout/get', credential, undefined, undefined, {
+        'x-monica-wire-version': '1',
+      })
+    ).status,
+  ).toBe(401)
 })

@@ -1,17 +1,15 @@
 import { homedir } from 'node:os'
 
 import { implement } from '@orpc/server'
-import { eq, getTableColumns, inArray, isNotNull, or } from 'drizzle-orm'
 
 import { listAgentSessions } from './agent-session.ts'
 import { idOrCaller } from './caller.ts'
 import { contract } from './contract.ts'
 import { openInEditor, resolveEditorPaths } from './editor.ts'
 import { asTab, readLayout } from './layout.ts'
+import { listTerminalSessions } from './reads.ts'
 import { repoOf } from './repo.ts'
-import { tab, terminalSession } from './schema.ts'
 import { showRunspace, showTab } from './tab-show.ts'
-import { LIVE } from './terminal-session-status.ts'
 import {
   agentSessionsOf,
   layoutWritesOf,
@@ -55,15 +53,7 @@ export const router = os.router({
     ),
   },
   terminalSession: {
-    list: os.terminalSession.list.handler(({ context }) =>
-      context.db
-        .select({ ...getTableColumns(terminalSession), tabId: tab.id })
-        .from(terminalSession)
-        .leftJoin(tab, eq(tab.terminalSessionId, terminalSession.id))
-        .where(or(inArray(terminalSession.status, LIVE), isNotNull(tab.id)))
-        .orderBy(terminalSession.createdAt)
-        .all(),
-    ),
+    list: os.terminalSession.list.handler(({ context }) => listTerminalSessions(context.db)),
   },
   layout: {
     get: os.layout.get.handler(({ context }) => readLayout(context.db)),
