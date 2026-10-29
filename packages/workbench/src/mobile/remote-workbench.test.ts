@@ -145,3 +145,83 @@ test('openTerminal waits for replay parsing before draw ACK and close releases o
   expect(await view.close()).toBe(true)
   expect(closes).toBe(1)
 })
+
+test('closing a view while its transport opens releases the late stream without parsing or acknowledging it', async () => {
+  const opened = Promise.withResolvers<import('./remote-workbench.ts').TerminalStream>()
+  let closes = 0
+  const remote = new RemoteWorkbench({
+    terminal: () => opened.promise,
+    async read() {
+      return []
+    },
+    async subscribe() {},
+  })
+  const view = remote.openTerminal(
+    { tabId: 'tab', terminalSessionId: 'session' },
+    {
+      async write() {
+        throw new Error('closed view rendered')
+      },
+      size() {
+        throw new Error('closed view resized')
+      },
+      state() {},
+    },
+  )
+  const closed = view.close()
+  opened.resolve({
+    async next() {
+      throw new Error('closed view read')
+    },
+    async ack() {
+      throw new Error('closed view acknowledged')
+    },
+    async close() {
+      closes++
+      return true
+    },
+  })
+  expect(await closed).toBe(true)
+  expect(closes).toBe(1)
+})
+
+test('a late parse callback after close cannot acknowledge output or reopen its view', async () => {
+  const parsing = Promise.withResolvers<void>()
+  const release = Promise.withResolvers<void>()
+  const acknowledgements: number[] = []
+  const remote = new RemoteWorkbench({
+    async terminal() {
+      return {
+        async next() {
+          return { version: 1, type: 'output', sequence: 1, data: btoa('tail') }
+        },
+        async ack(sequence) {
+          acknowledgements.push(sequence)
+        },
+        async close() {
+          return true
+        },
+      }
+    },
+    async read() {
+      return []
+    },
+    async subscribe() {},
+  })
+  const view = remote.openTerminal(
+    { tabId: 'tab', terminalSessionId: 'session' },
+    {
+      async write() {
+        parsing.resolve()
+        await release.promise
+      },
+      size() {},
+      state() {},
+    },
+  )
+  await parsing.promise
+  expect(await view.close()).toBe(true)
+  release.resolve()
+  await flush()
+  expect(acknowledgements).toEqual([])
+})

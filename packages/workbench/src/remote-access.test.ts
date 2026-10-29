@@ -987,3 +987,28 @@ test('missing draw acknowledgements time out and remote disable releases the She
   expect(f.ptyd.connections).toBe(1)
   expect(f.ptyd.sessions[0]).toMatchObject({ running: true, rows: 31, cols: 97 })
 })
+
+test('successful local resize notification is not treated as applied until asynchronous List reads the new grid', async () => {
+  const f = await terminalFixture()
+  const applyResize = f.ptyd.holdNext('resize')
+  await f.relay.stdin.write(
+    `${JSON.stringify({ op: 'resize', session_id: f.target.terminalSessionId, rows: 45, cols: 123 })}\n`,
+  )
+  await f.ptyd.received((op) => op.op === 'resize')
+  const sizes: number[][] = []
+  const sized = Promise.withResolvers<void>()
+  const view = f.remote.openTerminal(f.target, {
+    async write() {},
+    state() {},
+    size(rows, cols) {
+      sizes.push([rows, cols])
+      sized.resolve()
+    },
+  })
+  await f.ptyd.receivedAtLeast(3, (op) => op.op === 'list')
+  expect(sizes).toEqual([])
+  applyResize()
+  await sized.promise
+  expect(sizes).toEqual([[45, 123]])
+  expect(await view.close()).toBe(true)
+})

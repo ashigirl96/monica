@@ -88,7 +88,7 @@ export class RemoteWorkbench {
     this.view = view
     display.state('waiting')
     opened = (async () => {
-      if (previous && !(await previous.close())) throw new RemoteError('unavailable')
+      if (previous) await previous.close()
       if (!active) return undefined
       return this.transport.terminal(target)
     })()

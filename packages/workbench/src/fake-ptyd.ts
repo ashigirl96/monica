@@ -190,7 +190,13 @@ export function startFakePtyd(home: string) {
     }
     if (op.op === 'resize') {
       const session = sessions.find((item) => item.session_id === op.session_id)
-      if (session) Object.assign(session, { rows: op.rows, cols: op.cols })
+      const apply = () => {
+        if (session) Object.assign(session, { rows: op.rows, cols: op.cols })
+      }
+      const hold = holds.get('resize')
+      holds.delete('resize')
+      if (hold) void hold.then(apply)
+      else apply()
     }
     if (op.op === 'detach') socket.data.attached.delete(op.session_id)
     if (op.op === 'attach' && id !== undefined) {

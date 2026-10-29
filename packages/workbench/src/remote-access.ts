@@ -392,7 +392,7 @@ export function createRemoteAccess({
                 (frame) => {
                   if (socket.data.abort.signal.aborted) return
                   if (
-                    socket.send(JSON.stringify(frame)) < 0 ||
+                    socket.send(JSON.stringify(frame)) <= 0 ||
                     socket.getBufferedAmount() > 1_048_576
                   ) {
                     void detach(attachment)

@@ -405,7 +405,14 @@ final class NativeTests: XCTestCase {
         try await until("document.querySelector('.xterm-accessibility-tree')?.textContent.includes('live-phone-output') === true")
         _ = try await control.read(.agentSessions)
         try await until("document.querySelector('.xterm-accessibility-tree')?.children.length === 31")
+        _ = try await webview.evaluateJavaScript("document.querySelectorAll('article button')[1].click()")
+        try await until("document.body.textContent.includes('閲覧中')")
+        _ = try await webview.evaluateJavaScript("document.querySelector('article button').click()")
+        try await until("document.querySelector('.xterm-accessibility-tree')?.textContent.includes('live-phone-output') === true && document.body.textContent.includes('閲覧中')")
+        try await until("document.querySelector('.xterm-accessibility-tree')?.children.length === 31")
         _ = try await webview.callAsyncJavaScript("await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))", arguments: [:], in: nil, contentWorld: .page)
+        let foreground = try await webview.evaluateJavaScript("getComputedStyle(document.querySelector('.xterm-rows')).color") as? String
+        XCTAssertEqual(foreground, "rgb(255, 255, 255)", "The bundled CSP must allow xterm's generated renderer styles, not black text on black")
         let image = try await webview.takeSnapshot(configuration: nil)
         let attachment = XCTAttachment(image: image)
         attachment.name = "Read-only phone xterm at the applied Mac grid"
@@ -426,6 +433,33 @@ final class NativeTests: XCTestCase {
         XCTAssertTrue(sessions.allSatisfy { $0["running"] as? Bool == true })
         XCTAssertEqual(sessions.first?["rows"] as? Int, 31)
         XCTAssertEqual(sessions.first?["cols"] as? Int, 97)
+        _ = try await webview.evaluateJavaScript("document.querySelector('article button').click()")
+        try await until("document.body.textContent.includes('閲覧中')")
+        controller.bridge.suspend()
+        try await until("document.querySelector('.xterm') === null")
+        for _ in 0..<100 {
+            after = try JSONSerialization.jsonObject(with: await control.read(.layout)) as! [String: Any]
+            if after["connections"] as? Int == 1 { break }
+            try await Task.sleep(for: .milliseconds(20))
+        }
+        XCTAssertEqual(after["connections"] as? Int, 1)
+        controller.bridge.resume()
+        try await until("document.querySelectorAll('article').length === 12")
+        let stillClosed = try await webview.evaluateJavaScript("document.querySelector('.xterm') === null") as? Bool
+        XCTAssertEqual(stillClosed, true)
+        _ = try await webview.evaluateJavaScript("document.querySelector('article button').click()")
+        try await until("document.body.textContent.includes('閲覧中')")
+        _ = try await webview.evaluateJavaScript("window.savedAnimationFrame = window.requestAnimationFrame; window.heldFrames = []; window.requestAnimationFrame = callback => { window.heldFrames.push(callback); return 0 }; void 0")
+        _ = try await control.read(.terminalSessions)
+        for _ in 0..<400 {
+            after = try JSONSerialization.jsonObject(with: await control.read(.layout)) as! [String: Any]
+            if after["connections"] as? Int == 1 { break }
+            try await Task.sleep(for: .milliseconds(20))
+        }
+        XCTAssertEqual(after["connections"] as? Int, 1, "A stopped phone draw must release only its dedicated attachment")
+        XCTAssertEqual(after["writes"] as? Int, 0)
+        XCTAssertEqual(after["lifecycle"] as? Int, 0)
+        _ = try await webview.evaluateJavaScript("window.requestAnimationFrame = window.savedAnimationFrame; for (const callback of window.heldFrames) requestAnimationFrame(callback); void 0")
     }
 
 }

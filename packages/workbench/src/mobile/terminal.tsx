@@ -18,6 +18,7 @@ export function TerminalOutput({
   const [state, setState] = useState<Parameters<TerminalDisplay['state']>[0]>('waiting')
   useEffect(() => {
     if (!container.current) return
+    let current = true
     const term = new Terminal({
       disableStdin: true,
       screenReaderMode: true,
@@ -30,11 +31,20 @@ export function TerminalOutput({
     term.attachCustomKeyEventHandler(() => false)
     term.open(container.current)
     const view = remote.openTerminal(target, {
-      write: (bytes) => new Promise((resolve) => term.write(bytes, resolve)),
+      write: (bytes) =>
+        new Promise((resolve) =>
+          term.write(bytes, () => {
+            // xterm's write callback ends parsing, not painting.
+            requestAnimationFrame(() => requestAnimationFrame(() => resolve()))
+          }),
+        ),
       size: (rows, cols) => term.resize(cols, rows),
-      state: setState,
+      state: (next) => {
+        if (current) setState(next)
+      },
     })
     return () => {
+      current = false
       void view.close()
       term.dispose()
     }
