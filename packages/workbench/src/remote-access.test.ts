@@ -1158,3 +1158,78 @@ test('the Shell rejects replaced renderer generations and revocation precedes ev
     { op: 'write', session_id: f.target.terminalSessionId, data: btoa('admitted-before-revoke') },
   ])
 })
+
+test('input admitted before revocation may arrive during detach, but no later input reaches the Shell before or after cleanup ACK', async () => {
+  const f = await terminalFixture()
+  const realPath = f.shell.path
+  const proxyPath = join(f.home, 'input-admission.sock')
+  const admitted = Promise.withResolvers<void>()
+  const peers = new Set<ReturnType<typeof connect>>()
+  let release: (() => void) | undefined
+  let inputs = 0
+  const proxy = createServer((backend) => {
+    const shell = connect(realPath)
+    peers.add(shell)
+    peers.add(backend)
+    shell.pipe(backend)
+    let buffered = ''
+    const held: string[] = []
+    let paused = false
+    release = () => {
+      paused = false
+      for (const line of held.splice(0)) shell.write(`${line}\n`)
+    }
+    backend.on('data', (data) => {
+      buffered += data.toString()
+      for (;;) {
+        const newline = buffered.indexOf('\n')
+        if (newline < 0) break
+        const line = buffered.slice(0, newline)
+        buffered = buffered.slice(newline + 1)
+        if (JSON.parse(line).type === 'input') {
+          inputs++
+          paused = true
+          admitted.resolve()
+        }
+        if (paused) held.push(line)
+        else shell.write(`${line}\n`)
+      }
+    })
+    shell.on('error', () => backend.destroy())
+    backend.on('error', () => shell.destroy())
+  })
+  onCleanup(() => {
+    for (const peer of peers) peer.destroy()
+    proxy.close()
+  })
+  await new Promise<void>((resolve) => proxy.listen(proxyPath, resolve))
+  chmodSync(proxyPath, 0o600)
+  f.shell.path = proxyPath
+  const stream = await f.terminal()
+  const ready = await f.rendererControl('ready')
+  await stream.prepare()
+  for (;;) {
+    const frame = TerminalFrameSchema.parse(await stream.next())
+    if ('sequence' in frame) await stream.ack(frame.sequence)
+    if (frame.type === 'renderer' && frame.generation) break
+  }
+  await stream.input({ type: 'input', id: 1, generation: ready.generation, data: btoa('before') })
+  await admitted.promise
+  const revoking = f.client.remote.revoke({ id: f.id })
+  expect((await f.request('/check', f.credential)).status).toBe(401)
+  await stream
+    .input({ type: 'input', id: 2, generation: ready.generation, data: btoa('during') })
+    .catch(() => {})
+  release!()
+  expect(await revoking).toEqual({ state: 'detached' })
+  await stream
+    .input({ type: 'input', id: 3, generation: ready.generation, data: btoa('after') })
+    .catch(() => {})
+  await f.client.runspace.create({ cwd: '/admission-barrier', rows: 24, cols: 80 })
+  await f.ptyd.receivedAtLeast(2, (op) => op.op === 'create')
+  expect(inputs).toBe(1)
+  expect(f.ptyd.receivedAll((op) => op.op === 'write')).toEqual([
+    { op: 'write', session_id: f.target.terminalSessionId, data: btoa('before') },
+  ])
+  expect(f.ptyd.connections).toBe(1)
+})
