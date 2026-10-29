@@ -16,12 +16,9 @@ import { remoteDevice } from './schema.ts'
 import { cleanUp, onCleanup, setup } from './testing.ts'
 
 setDefaultTimeout(30_000)
-const shellProcesses: ReturnType<typeof Bun.spawn>[] = []
+const stopShells: (() => Promise<void>)[] = []
 afterEach(async () => {
-  for (const child of shellProcesses.splice(0)) {
-    child.kill()
-    await child.exited
-  }
+  for (const stop of stopShells.splice(0)) await stop()
   setSystemTime()
   cleanUp()
 })
@@ -655,7 +652,10 @@ async function terminalFixture() {
     stdout: 'pipe',
     stderr: 'inherit',
   })
-  shellProcesses.push(relay)
+  stopShells.push(async () => {
+    await relay.stdin.end()
+    await relay.exited
+  })
   const reader = relay.stdout.getReader()
   const first = await reader.read()
   Object.assign(shell, JSON.parse(new TextDecoder().decode(first.value)))
