@@ -93,7 +93,7 @@ final class NativeBridge: NSObject, WKScriptMessageHandlerWithReply {
             terminal = opened
             do { try await opened.open(tab: tab, session: session) }
             catch { _ = await opened.close(); throw error }
-            guard active, terminal === opened else { _ = await opened.close(); throw RemoteFailure.unavailable }
+            guard active, current == generation, terminal === opened else { _ = await opened.close(); throw RemoteFailure.unavailable }
             return NSNull()
         case "terminal-prepare":
             guard let terminal, terminal.id == id else { throw RemoteFailure.unavailable }

@@ -508,6 +508,55 @@ final class NativeTests: XCTestCase {
     }
 
     @MainActor
+    func testRemoteViewRecoversAfterRealLedgerListenerRestartWithoutReplayingInput() async throws {
+        let all = try fixtures()
+        let store = CredentialStore()
+        try store.save(registration(all["large"]!))
+        defer { try? store.remove() }
+        let control = RemoteHTTP(registration(all["reconnect-control"]!))
+        defer { control.close() }
+        let controller = WorkbenchController()
+        controller.loadViewIfNeeded()
+        let scene = try XCTUnwrap(UIApplication.shared.connectedScenes.first as? UIWindowScene)
+        let window = try XCTUnwrap(scene.windows.first(where: { $0.isKeyWindow }))
+        (window.rootViewController as? WorkbenchController)?.bridge.suspend()
+        window.rootViewController = controller
+        defer { controller.bridge.suspend() }
+        let webview = controller.webview!
+        func until(_ expression: String) async throws {
+            for _ in 0..<200 {
+                if let value = try? await webview.evaluateJavaScript(expression) as? Bool, value { return }
+                try await Task.sleep(for: .milliseconds(50))
+            }
+            XCTFail("Never observed: \(expression)")
+        }
+        try await until("document.querySelectorAll('article').length === 12")
+        _ = try await webview.evaluateJavaScript("""
+            window.restartOpens = [];
+            const restartHandler = window.webkit.messageHandlers.monica;
+            const restartOriginal = restartHandler.postMessage.bind(restartHandler);
+            restartHandler.postMessage = message => {
+                if (message.operation === 'terminal-open') window.restartOpens.push({tabId:message.tabId,terminalSessionId:message.terminalSessionId});
+                return restartOriginal(message);
+            };
+            document.querySelector('article button').click();
+            null;
+            """)
+        try await until("document.body.textContent.includes('閲覧中')")
+        let before = try JSONSerialization.jsonObject(with: await control.read(.layout)) as! [String: Any]
+        _ = try await control.read(.terminalSessions)
+        try await until("window.restartOpens.length === 2 && document.body.textContent.includes('閲覧中')")
+        try await until("document.querySelector('.xterm-accessibility-tree')?.textContent.includes('retained-phone-tail') === true")
+        let after = try JSONSerialization.jsonObject(with: await control.read(.layout)) as! [String: Any]
+        XCTAssertEqual(after["connections"] as? Int, 2)
+        XCTAssertEqual(after["creates"] as? Int, before["creates"] as? Int)
+        XCTAssertEqual(after["writes"] as? Int, before["writes"] as? Int)
+        XCTAssertEqual(after["lifecycle"] as? Int, before["lifecycle"] as? Int)
+        let opens = try await webview.evaluateJavaScript("window.restartOpens") as! [[String: String]]
+        XCTAssertEqual(opens, Array(repeating: try XCTUnwrap(after["target"] as? [String: String]), count: 2))
+    }
+
+    @MainActor
     func testZBasicSharedInputIsAcceptedOnceAndMacParseStallDisablesIt() async throws {
         let all = try fixtures()
         let store = CredentialStore()

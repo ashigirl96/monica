@@ -45,7 +45,7 @@ description: iPhone app の build・Simulator 試験・Xcode 実機署名・QR �
 1. 同じ Tab を開いたまま背景・foreground を3回繰り返す。背景で専用接続が消え、復帰後は1本だけ増えること、同じ Terminal Session・最新の Mac grid・最新一覧へ戻ることを見る。入力の再送や offline queue はない。古い描画完了・ready が戻っても新しい表示の入力を許可しない。
 2. 背景中に Mac で Tab を削除、または pinned Tab の Terminal Session を置換する。削除と置換を区別して表示し、置換後は選び直すまで入力不可であることを確認する。未終了の表示を閉じても Close Tab は送らない。
 3. desktop-dev の隔離 Backend 再起動手順を使う。Mac の入力・自動応答・PTY process は継続し、iPhone だけが利用不可から復帰することを確認する。desktop 終了後は利用不可のままで、iPhone から Backend を起動しない。
-4. `remote-workbench.test.ts` と `remote-access.test.ts` は購読 ACK・snapshot・古い callback・retry timer の競合、実 Ledger と Shell relay の再接続を確認する。native の既存 `testPhoneXtermShowsReplayAndLiveWithoutRepliesClipboardOrResizeAndBackDetaches` は3回の suspend/resume、同じ対象への fresh open と接続数を確認する。実 lock・回線切替・sleep は #460 へ実施状況を残す。
+4. `remote-workbench.test.ts` と `remote-access.test.ts` は購読 ACK・snapshot・古い callback・retry timer の競合、実 Ledger と Shell relay の再接続を確認する。native の既存 `testPhoneXtermShowsReplayAndLiveWithoutRepliesClipboardOrResizeAndBackDetaches` は3回の suspend/resume、同じ対象への fresh open と接続数を確認する。`testRemoteViewRecoversAfterRealLedgerListenerRestartWithoutReplayingInput` は実 Ledger と TLS listener を起こし直し、同じ対象への復帰と Create・Write・終了操作の増分なしを確認する。Mac の実 process 再起動とは別の試験である。実 lock・回線切替・sleep は #460 へ実施状況を残す。
 
 ## 記録と片付け
 
