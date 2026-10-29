@@ -12,7 +12,12 @@ import { repoOf } from './repo.ts'
 import { tab, terminalSession } from './schema.ts'
 import { showRunspace, showTab } from './tab-show.ts'
 import { LIVE } from './terminal-session-status.ts'
-import { agentSessionsOf, layoutWritesOf, type WorkbenchContext } from './workbench.ts'
+import {
+  agentSessionsOf,
+  layoutWritesOf,
+  remoteAccessOf,
+  type WorkbenchContext,
+} from './workbench.ts'
 
 export { migrations } from '../migrations/index.ts'
 export { inheritableEnv } from './ptyd.ts'
@@ -23,6 +28,32 @@ export { createWorkbenchLedger, type WorkbenchLedger } from './workbench.ts'
 const os = implement(contract).$context<WorkbenchContext>()
 
 export const router = os.router({
+  remote: {
+    status: os.remote.status.handler(({ context }) =>
+      remoteAccessOf(context.workbenchLedger).status(),
+    ),
+    enable: os.remote.enable.handler(({ context, input }) =>
+      remoteAccessOf(context.workbenchLedger).enable(input),
+    ),
+    disable: os.remote.disable.handler(({ context }) =>
+      remoteAccessOf(context.workbenchLedger).disable(),
+    ),
+    invite: os.remote.invite.handler(({ context }) =>
+      remoteAccessOf(context.workbenchLedger).invite(),
+    ),
+    approve: os.remote.approve.handler(({ context, input }) =>
+      remoteAccessOf(context.workbenchLedger).approve(input.id),
+    ),
+    reject: os.remote.reject.handler(({ context, input }) =>
+      remoteAccessOf(context.workbenchLedger).reject(input.id),
+    ),
+    revoke: os.remote.revoke.handler(({ context, input }) =>
+      remoteAccessOf(context.workbenchLedger).revoke(input.id),
+    ),
+    renewIdentity: os.remote.renewIdentity.handler(({ context }) =>
+      remoteAccessOf(context.workbenchLedger).renewIdentity(),
+    ),
+  },
   terminalSession: {
     list: os.terminalSession.list.handler(({ context }) =>
       context.db

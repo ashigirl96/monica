@@ -26,6 +26,7 @@
     "drizzle-orm": "catalog:",
     "drizzle-zod": "catalog:",
     "jotai": "catalog:",
+    "qrcode-generator": "catalog:",
     "react": "catalog:",
     "zod": "catalog:"
   },
