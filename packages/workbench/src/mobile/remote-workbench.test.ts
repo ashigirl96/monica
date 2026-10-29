@@ -684,3 +684,88 @@ test.each(['removed', 'replaced', 'lost', 'failed', 'exited'] as const)(
     await view.close()
   },
 )
+
+test.each(['closed', 'unavailable'] as const)(
+  'terminal %s distinguishes stopped views from transient recovery and requires selection to reopen a stopped view',
+  async (cause) => {
+    const callbacks: (() => void)[] = []
+    const timer = spyOn(globalThis, 'setTimeout').mockImplementation(((callback: () => void) => {
+      callbacks.push(callback)
+      return callbacks.length as unknown as ReturnType<typeof setTimeout>
+    }) as typeof setTimeout)
+    const streams: ReturnType<typeof Promise.withResolvers<unknown>>[] = []
+    const states: string[] = []
+    const signals: AbortSignal[] = []
+    const targets: unknown[] = []
+    let changed: (() => void) | undefined
+    let closes = 0
+    const remote = new RemoteWorkbench({
+      read: terminalRead,
+      async subscribe(change, signal) {
+        changed = change
+        signals.push(signal)
+      },
+      async terminal(target) {
+        targets.push(target)
+        const next = Promise.withResolvers<unknown>()
+        streams.push(next)
+        const frames: unknown[] = [{ version: 1, type: 'replay_end', sequence: 1 }]
+        return {
+          async prepare() {},
+          async input() {
+            throw new Error('stopped or recovering input must not be sent')
+          },
+          async ack() {},
+          async next() {
+            return frames.shift() ?? next.promise
+          },
+          async close() {
+            closes++
+            return true
+          },
+        }
+      },
+    })
+    const target = { tabId: 'tab', terminalSessionId: 'session' }
+    const display = {
+      async write() {},
+      size() {},
+      state: (state: string) => states.push(state),
+    }
+    const stop = remote.observe(() => {})
+    let view = remote.openTerminal(target, display)
+    try {
+      await flush()
+      expect(states.at(-1)).toBe('viewing')
+      if (cause === 'closed') streams[0]!.resolve({ version: 1, type: 'closed' })
+      else streams[0]!.reject(new RemoteError('unavailable'))
+      await flush()
+      expect(states.at(-1)).toBe(cause)
+      expect(await view.input(new Uint8Array([65]))).toBe('not-sent')
+      if (cause === 'closed') {
+        expect(callbacks).toHaveLength(0)
+        expect(signals[0]!.aborted).toBe(false)
+        changed?.()
+        await flush()
+        remote.setForeground(false)
+        remote.setForeground(true)
+        await flush()
+        expect(states.at(-1)).toBe('closed')
+        expect(streams).toHaveLength(1)
+        expect(closes).toBe(1)
+        view = remote.openTerminal(target, display)
+      } else {
+        expect(callbacks).toHaveLength(1)
+        expect(signals[0]!.aborted).toBe(true)
+        callbacks[0]!()
+      }
+      await flush()
+      expect(states.at(-1)).toBe('viewing')
+      expect(targets).toEqual([target, target])
+    } finally {
+      await view.close()
+      stop()
+      timer.mockRestore()
+    }
+  },
+)

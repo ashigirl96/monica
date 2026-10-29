@@ -137,7 +137,7 @@ export class RemoteWorkbench {
     let released = previous?.close() ?? Promise.resolve(true)
     let generation = 0
     let active = true
-    let ended: 'removed' | 'replaced' | 'lost' | 'failed' | 'exited' | undefined
+    let ended: 'removed' | 'replaced' | 'lost' | 'failed' | 'exited' | 'closed' | undefined
     let uncertain = false
     const release = () => {
       generation++
@@ -214,7 +214,11 @@ export class RemoteWorkbench {
               if (state === 'exited') display.state(ended)
               return
             }
-            if (state === 'unavailable' || state === 'closed') {
+            if (state === 'closed') {
+              ended = 'closed'
+              void release()
+              display.state('closed')
+            } else if (state === 'unavailable') {
               this.failConnection?.(new RemoteError('unavailable'))
             } else if (
               state === 'identity-changed' ||

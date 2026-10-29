@@ -1503,3 +1503,91 @@ test('input admitted before revocation may arrive during detach, but no later in
   ])
   expect(f.ptyd.connections).toBe(1)
 })
+
+test('a slow draw ACK closes only the terminal without retrying a healthy Backend until explicit selection', async () => {
+  const f = await terminalFixture()
+  let opens = 0
+  let skipped = false
+  const states: string[] = []
+  const closed = Promise.withResolvers<void>()
+  const selected = Promise.withResolvers<void>()
+  const retries: (() => void)[] = []
+  const originalTimeout = globalThis.setTimeout
+  const timer = spyOn(globalThis, 'setTimeout').mockImplementation(((
+    callback: () => void,
+    delay: number,
+    ...args: unknown[]
+  ) => {
+    if (delay >= 500 && delay <= 600) {
+      retries.push(callback)
+      return originalTimeout(() => {}, 60000)
+    }
+    return originalTimeout(callback, delay, ...args)
+  }) as typeof setTimeout)
+  const remote = new RemoteWorkbench({
+    ...f.transport,
+    async terminal(target) {
+      const ordinal = ++opens
+      const stream = await f.terminal(target)
+      return {
+        ...stream,
+        async ack(sequence) {
+          if (ordinal === 1 && !skipped) {
+            skipped = true
+            return
+          }
+          await stream.ack(sequence)
+        },
+      }
+    },
+  })
+  const display = {
+    async write() {},
+    size() {},
+    state(state: string) {
+      states.push(state)
+      if (state === 'closed' || state === 'unavailable') closed.resolve()
+      if (opens === 2 && state === 'viewing') selected.resolve()
+    },
+  }
+  const stop = remote.observe(() => {})
+  let view = remote.openTerminal(f.target, display)
+  onCleanup(() => {
+    void view.close()
+    stop()
+    timer.mockRestore()
+  })
+  try {
+    await closed.promise
+    expect(states.at(-1)).toBe('closed')
+    expect(retries).toHaveLength(0)
+    expect(opens).toBe(1)
+    expect((await f.client.remote.status()).state).toBe('listening')
+    expect(await view.input(new TextEncoder().encode('not-sent'))).toBe('not-sent')
+    remote.setForeground(false)
+    remote.setForeground(true)
+    const barrier = await f.client.runspace.create({
+      cwd: '/slow-draw-barrier',
+      rows: 24,
+      cols: 80,
+    })
+    await f.ptyd.received(
+      (op) => op.op === 'create' && op.session_id === barrier.tab.terminalSessionId,
+    )
+    expect(f.ptyd.receivedAll((op) => op.op === 'attach')).toHaveLength(1)
+    expect(f.ptyd.connections).toBe(1)
+    view = remote.openTerminal(f.target, display)
+    await selected.promise
+    expect(opens).toBe(2)
+    expect(f.ptyd.receivedAll((op) => op.op === 'attach')).toHaveLength(2)
+    expect(
+      f.ptyd.receivedAll((op) => ['write', 'terminate', 'reap', 'shutdown'].includes(op.op)),
+    ).toEqual([])
+    expect(await view.close()).toBe(true)
+    expect(f.ptyd.connections).toBe(1)
+  } finally {
+    await view.close()
+    stop()
+    timer.mockRestore()
+  }
+})
