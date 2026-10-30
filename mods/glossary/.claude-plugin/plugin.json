@@ -1,0 +1,6 @@
+{
+  "name": "glossary",
+  "version": "0.1.0",
+  "description": "Shows the terms you ask about in a side pane: Japanese, English, nuance and what they mean in this codebase",
+  "types": "./types/index.d.ts"
+}
