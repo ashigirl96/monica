@@ -26,6 +26,14 @@ Xcode と Developer Mode を使い、Personal Team で署名した app の導入
 | 途中 paste | 148859 bytes の実機 paste で Backend を Send 前に停止した。180秒 watchdog が再開した後、実 raw PTY は先頭 65536 bytes を一度だけ受信し、残り 83323 bytes は届かなかった。Backend 再起動後も先頭分だけで、phone は確認済み 0 bytes、送達不明と入力無効を維持した。raw receiver は正常に停止した。最初の chunk の ACK 成功後に次の ACK を失う試験ではない。 | `460-paste-received.json`、`460-paste-restart.json`、`460-phone-paste-recovered.png` |
 | Mac app 再起動 | 同一 source の Mac app を終了・再起動した。完全な Layout JSON、2つの Session ID、実 shell PID と ptyd PID が維持され、phone は再登録なしで新しい marker と ready を表示した。旧版から新版への更新や OS 再起動ではない。 | `460-desktop-restart-result.json`、`460-phone-desktop-restarted.png`、`signing/progress.md` |
 
+## Mac の headless 更新 component 試験
+
+隔離 Mac で、旧 `21f7bd4` と現行 `24f31c8` の実行時 checkout がともに tracked-clean であることを確認した。旧 Backend が作った実 daemon と shell、Terminal Session ID は現行 Backend への移行後も維持された。Layout は完全一致し、非空の `runspace`・`tab`・`terminal_session` 各1行の全値も前後で一致した。
+
+現行製品の Rust `PtydClient` は旧 daemon に hello、replay なしの fresh attach、write を行い、旧 shell で設定した非 export 変数を使う barrier の実 output を受信して detach・close した。入力文に完全な marker は含まれず、echo だけでは成功しない。旧・現行 Backend、daemon、shell の4 process の不在を確認した後に probe は成功を記録した。
+
+証跡は `460-upgrade-proof-v3-result.md`、`460-upgrade-proof-v3-review.md`、`probe.log`、`source-manifest.log`、`cleanup.log`。これは Mac の headless component 試験であり、実 iPhone、実 Shell app、private relay、GUI renderer を通る試験ではない。3 table の fixture 以外のデータや全 daemon spawn 試行は観測していない。
+
 ## 所有者が外した条件と残余リスク
 
 所有者は個人用 Tailnet と Tailnet Lock を使い、既存の広い grants を変更しないことを承認した。指定 iPhone から指定 port だけに限定するネットワーク側の条件は今回の受け入れ対象外であり、ネットワーク側の許可外端末拒否は確認済みではない。Tailnet Lock が有効であることはローカルで観測したが、Lock は ACL や grants の代替ではない。他の参加済み端末が接続口に到達できるリスクが残る。
@@ -41,7 +49,7 @@ HTTPS、TLS pin、端末登録、資格、TCP source address 照合、失効に�
 - 背景復帰と lock・回線切替をまたぐ送達不明や途中 paste の非再送。
 - 未登録、失効資格、異なる接続元の app 側拒否の未観測条件を実 listener で確認すること。特に有効な資格と異なる TCP source の組み合わせ、失効解除 ACK 不達、identity 変更と期限切れは未確認。無資格・誤資格の8要求の 401 は上記のとおり観測済み。
 - 遅い phone、renderer 停止中の入力拒否の実操作、Mac sleep と復帰。利用者が sleep 指示後に `SLEEP_OK` を報告したが、電源ログ 41063 行に Sleep/Wake event はなく、kernel の sleep/wake 時刻もゼロだった。実 OS sleep は未確認。
-- 旧版から新版への更新時の既存データと稼働 PTY の維持、および remote 導入時に daemon を置換しないこと。同一 build の Mac app 再起動時の Layout・Session・PID の維持は上記で観測済みだが、更新の試験ではない。
+- 更新時のデータと稼働 PTY の維持、remote 導入時の daemon 非置換は、上記の headless component と3 table の fixture に限って観測した。実 Shell app、private relay、GUI renderer を通る更新経路や他のデータは未確認。同一 build の Mac app 再起動時の Layout・Session・PID の維持も上記で観測済みだが、更新の試験ではない。
 - 試験終了後の所有する試験 process、専用 Simulator、資格、隔離 home の安全な片付け。現在は試験が継続中であり、最終片付けは未確認。
 
 今回の証跡は最小化時の応答元を追加 spy で同定していない。また、上の Backend 停止試行は受理後の ACK 消失や、最初の paste chunk の ACK 成功後に次の ACK を失う場合を示さない。これらの注入や spy は追加の観測方法であり、その方法自体を実機受け入れの追加条件にはしない。
