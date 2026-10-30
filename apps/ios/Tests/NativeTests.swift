@@ -18,6 +18,20 @@ final class NativeTests: XCTestCase {
                      credential: fixture.credential, pendingUntil: Date().addingTimeInterval(300))
     }
 
+    func testAppTransportSecurityLimitsCustomPinnedTrustToTailscaleIPRanges() throws {
+        let ats = try XCTUnwrap(Bundle.main.object(forInfoDictionaryKey: "NSAppTransportSecurity") as? [String: Any])
+        let pinnedTrustException: [String: Any] = [
+            "NSExceptionAllowsInsecureHTTPLoads": true,
+            "NSExceptionMinimumTLSVersion": "TLSv1.2",
+            "NSExceptionRequiresForwardSecrecy": true,
+        ]
+        let expected: [String: Any] = ["NSExceptionDomains": [
+            "100.64.0.0/10": pinnedTrustException,
+            "fd7a:115c:a1e0::/48": pinnedTrustException,
+        ]]
+        XCTAssertEqual(ats as NSDictionary, expected as NSDictionary)
+    }
+
     func testURLSessionValidHTTPSAndWSSAndWrongCredential() async throws {
         let f = try fixtures()["valid"]!
         XCTAssertTrue(Trust.accepts(certificate: f.certificate, host: "127.0.0.1"))

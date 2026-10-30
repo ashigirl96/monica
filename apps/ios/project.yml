@@ -16,6 +16,19 @@ targets:
       - Native
       - path: dist
         type: folder
+    info:
+      path: Native/Info.plist
+      properties:
+        NSAppTransportSecurity:
+          NSExceptionDomains:
+            100.64.0.0/10:
+              NSExceptionAllowsInsecureHTTPLoads: true
+              NSExceptionMinimumTLSVersion: TLSv1.2
+              NSExceptionRequiresForwardSecrecy: true
+            'fd7a:115c:a1e0::/48':
+              NSExceptionAllowsInsecureHTTPLoads: true
+              NSExceptionMinimumTLSVersion: TLSv1.2
+              NSExceptionRequiresForwardSecrecy: true
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: app.monica.iphone

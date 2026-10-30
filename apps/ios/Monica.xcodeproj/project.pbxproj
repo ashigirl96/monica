@@ -36,6 +36,7 @@
 		76066118292D13A6162BC746 /* Fixtures */ = {isa = PBXFileReference; lastKnownFileType = folder; name = Fixtures; path = Tests/Fixtures; sourceTree = SOURCE_ROOT; };
 		A04E39F5901EDA6EE6B857A6 /* NativeBridge.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NativeBridge.swift; sourceTree = "<group>"; };
 		CDB2503FBFBACDFF9FEB3790 /* TerminalConnection.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TerminalConnection.swift; sourceTree = "<group>"; };
+		D273679B3217BC0807E0BB7F /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
 		ED41674AB006938F4FDEA395 /* NativeTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NativeTests.swift; sourceTree = "<group>"; };
 		F188370FE424687406218368 /* RemoteHTTP.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RemoteHTTP.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
@@ -73,6 +74,7 @@
 			isa = PBXGroup;
 			children = (
 				1F6591116DD21DD0CCA32CAB /* CredentialStore.swift */,
+				D273679B3217BC0807E0BB7F /* Info.plist */,
 				A04E39F5901EDA6EE6B857A6 /* NativeBridge.swift */,
 				F188370FE424687406218368 /* RemoteHTTP.swift */,
 				CDB2503FBFBACDFF9FEB3790 /* TerminalConnection.swift */,
@@ -235,6 +237,7 @@
 				CODE_SIGN_IDENTITY = "iPhone Developer";
 				CURRENT_PROJECT_VERSION = 1;
 				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = Native/Info.plist;
 				INFOPLIST_KEY_CFBundleDisplayName = monica;
 				INFOPLIST_KEY_NSCameraUsageDescription = "Macの登録QRを読み取ります。";
 				INFOPLIST_KEY_NSLocalNetworkUsageDescription = "登録したMacへTailscale経由で接続します。";
@@ -259,6 +262,7 @@
 				CODE_SIGN_IDENTITY = "iPhone Developer";
 				CURRENT_PROJECT_VERSION = 1;
 				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = Native/Info.plist;
 				INFOPLIST_KEY_CFBundleDisplayName = monica;
 				INFOPLIST_KEY_NSCameraUsageDescription = "Macの登録QRを読み取ります。";
 				INFOPLIST_KEY_NSLocalNetworkUsageDescription = "登録したMacへTailscale経由で接続します。";
