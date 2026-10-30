@@ -26,6 +26,14 @@ description: iPhone app の build・Simulator 試験・Xcode 実機署名・QR �
 6. Mac で端末を失効し、iPhone の一覧購読が閉じて失効と表示されることを確認する。無効化でも接続が閉じる。identity の変更・期限切れでは証明書検証を緩めず、Mac の identity 更新後に新しい QR で明示的に再登録する。port・source address が変わったときも grants と登録を更新する。
 7. 背景・lock では native が通信を閉じ、共通コードも attachment と購読を捨てる。foreground は認証付き購読の ACK、一覧の取り直し、同じ Tab と Terminal Session の確認、新しい attach の順に復帰する。network と一時的 Backend 不在だけを0.5〜10秒の jitter 付き backoff で retry する。失効・identity 変更・非互換では foreground へ戻っても自動 retry しない。Mac で原因を確認し、必要なら「再接続」か再登録を使う。実回線切替と実 lock の結果は Simulator と分ける。
 
+## 登録時の TLS エラー
+
+app の起動・導入に失敗する署名期限と、起動後の HTTPS 接続失敗は分けて調べる。QR の証明書検証と URLSession delegate の trust 検証が通っても、ATS が接続を拒むことがある。`NSURLErrorDomain -1200`・下位 SSL `-9802` で Backend に登録要求が届かない場合は、build 済み app の Info.plist の `NSAppTransportSecurity` を確認する。Team・署名や tailnet grants の変更では直さない。
+
+`project.yml` は `100.64.0.0/10` と `fd7a:115c:a1e0::/48` だけに `NSExceptionAllowsInsecureHTTPLoads=true`、最低 TLS 1.2、forward secrecy 必須を設定する。[Apple の NSExceptionDomains](https://developer.apple.com/documentation/bundleresources/information-property-list/nsapptransportsecurity/nsexceptiondomains) は iOS 17 以降の IP/CIDR 指定を認めている。[同 key の説明](https://developer.apple.com/documentation/bundleresources/information-property-list/nsexceptionallowsinsecurehttploads) にある HTTPS の独自 trust 用の例外として使う。ATS 自体はこの範囲の HTTP 制限も緩めるが、製品では native が HTTP の登録 URL を拒否する。native の HTTPS・tailnet URL 制限、exact DER pin、SAN・有効期限検証、TLS 1.2 以上、redirect 拒否は残す。`NSAllowsArbitraryLoads`、`NSAllowsLocalNetworking`、WebContent の一括例外は足さない。native の `testAppTransportSecurityLimitsCustomPinnedTrustToTailscaleIPRanges` は実 app bundle の辞書を照合するが、loopback の TLS 試験だけでは実回線の ATS 成功を証明できない。
+
+#460 では iPhone 13・iOS 27.0.1 の署名済み app が trust 検証成功後に上記 TLS エラーとなった。別の診断 copy にこの 2 範囲の ATS 設定だけを加えた非 loopback の比較試験で HTTP 401・承認待ちへ進むことを確認した。これは ATS 阻害の解消の記録であり、製品 build の実機再確認や IME・gesture・lock・回線切替を含む end-to-end 受け入れ完了ではない。自動試験、診断 copy、最終製品の実機結果を区別して記録する。
+
 ## 端末の閲覧と表示解除
 
 1. 一覧から Tab を選ぶ。保持された末尾と live 出力が読め、Mac の選択・focus・未読が変わらないことを確認する。画面の renderer待ち・共有入力と履歴・TUI 復元の制限を読む。xterm は Mac の固定 grid を表示し、横方向は表示領域をスクロールする。
