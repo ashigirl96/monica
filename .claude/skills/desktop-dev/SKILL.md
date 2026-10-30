@@ -157,14 +157,14 @@ dev の desktop は `MONICA_HOME` ごとに identifier と vite の port が分�
 
 1. Mac で継続出力する作業を開き、iPhone で同じ Tab を選ぶ。保持された末尾の後に live 出力が出ることと、履歴・TUI 復元の制限表示を確認する。Mac の選択、focus、未読は変わらない。iPhone の xterm 自動応答から Write は出ない。基本入力欄から送った文字と改行だけが同じ PTY に届く。
 2. Mac の窓を resize する。iPhone は Mac が適用した rows/cols に追従する。iPhone の回転と表示領域の変更では PTY サイズが変わらない。Shell は通知への登録後に attach し、resize 通知の送信成功ではなく非同期 List の read-back を確認する。
-3. iPhone の「一覧へ戻る · 表示解除」、別 Tab の選択、背景移行を順に試す。専用 ptyd 接続だけが減り、Mac の出力と入力、PTY の running とサイズが残ることを確認する。表示解除は Close Tab ではない。`lsof -U -a -p <Shell の pid>` で専用接続の増減を比べ、共有 desktop 接続まで消えていないことを見る。
+3. iPhone の左上の「一覧」（表示を解除して戻る）、別 Tab の選択、背景移行を順に試す。専用 ptyd 接続だけが減り、Mac の出力と入力、PTY の running とサイズが残ることを確認する。表示解除は Close Tab ではない。`lsof -U -a -p <Shell の pid>` で専用接続の増減を比べ、共有 desktop 接続まで消えていないことを見る。
 4. 閲覧中に Backend を終了し、Shell が専用接続を片付けても desktop の入力が続くことを確認する。iPhone は購読 ACK 後に一覧を取り直し、同じ Tab と Terminal Session の場合だけ新しい専用接続へ復帰する。置換後は一覧から選び直す。既存 desktop の attach 失敗を lost として自動再接続しない規則は変えない。失効・無効化は先に認可を拒否し、Shell の socket shutdown と reader 終了の ACK が確認できたときだけ完了になる。
 5. 自動境界試験は `bun test packages/workbench/src/remote-access.test.ts` と `cargo test -p monica-ptyd --test daemon`。前者は既存 fake ptyd と実 Rust relay、隔離 TLS/WSS、実 Ledger を使う。後者は実 ptyd の EOF と desktop 継続を見る。実機・desktop 画面の確認をこれだけで済ませない。
 
 ### hidden Tab の入力と Mac renderer
 
 1. 隔離 HOME・ZDOTDIR・MONICA_HOME を指定して起こす。既存 tool cache が必要なら CARGO_HOME・RUSTUP_HOME だけを別途明示する。Mac で一度も選択していない Tab を iPhone から選ぶ。既存の `window.__monicaTerminals.get(tabId)` が非表示 DOM へ open され、同じ instance のまま ready になることを確かめる。Mac の選択、focus、未読、PTY grid は変わらず、WebGL の取得と fit は前面 Tab だけに残る。
-2. 共有入力欄の「送信（改行）」で短い command を送る。両画面の同じ Terminal Session に結果が出ることを確認する。「受理」は中継の受理であり command の成功ではない。表示解除後も Mac の renderer と入力は残る。正常な local 接続の Attach を増やさない。
+2. 共有入力欄の送信ボタン（改行付き）で短い command を送る。両画面の同じ Terminal Session に結果が出ることを確認する。「受理」は中継の受理であり command の成功ではない。表示解除後も Mac の renderer と入力は残る。正常な local 接続の Attach を増やさない。
 3. hidden open 前に出した DA・DSR・OSC 10/11・kitty query は replay から再回答されない。open 後の新しい query は Mac から一度だけ応答される。過去の未回答 query を待つ TUI が回復する保証はない。
 4. renderer を reload・破棄した旧世代、Terminal Session の置換前の ready では入力できないことを確認する。heartbeat は2秒。6秒の不応答または未解析出力の滞留で remote だけを入力不可にする。desktop 自身の入力・自動応答にこの判定を流用しない。
 5. 失効と入力を競合させる。Backend は認可・Tab/session 検証から private socket への送信まで await を挟まず受理し、失効は新しい受理を先に拒否する。失効前に受理した入力は失効開始後に届き得る。解除完了は専用接続と reader の終了 ACK 後だけ。ACK を失えば送達不明・解除待ちを維持し、再送しない。

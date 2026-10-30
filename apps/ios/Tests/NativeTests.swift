@@ -219,7 +219,7 @@ final class NativeTests: XCTestCase {
                 if (message.operation === 'registration') window.registrationChecks++;
                 return reply;
             };
-            document.querySelectorAll('button')[1].click();
+            document.querySelector('[aria-label=再接続]').click();
             null;
             """)
         for _ in 0..<100 {
@@ -332,13 +332,13 @@ final class NativeTests: XCTestCase {
         for reply in ["{state:'unavailable'}", "{state:'identity-changed'}", "{state:'incompatible'}", "{state:'ok',value:{state:'candidate',expiresAt:0}}", "{state:'ok',value:{state:'cancelled'}}"] {
             _ = try await webview.callAsyncJavaScript("""
                 window.scanReply = \(reply);
-                document.querySelector('button').click();
+                document.querySelector('.registration-footer button').click();
                 await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
                 """, arguments: [:], in: nil, contentWorld: .page)
             let after = try await webview.evaluateJavaScript("document.querySelector('[aria-label=Runspace一覧]')?.innerHTML") as? String
             XCTAssertEqual(after, before, reply)
             let status = try await webview.evaluateJavaScript("document.querySelector('header [role=status]').textContent") as? String
-            XCTAssertEqual(status, "利用可能", reply)
+            XCTAssertEqual(status, "接続済み", reply)
             let alerts = try await webview.evaluateJavaScript("document.querySelectorAll('[role=alert]').length") as? Int
             XCTAssertEqual(alerts, reply.contains("cancelled") ? 0 : 1)
         }
@@ -598,20 +598,20 @@ final class NativeTests: XCTestCase {
         try await until("document.querySelectorAll('article').length === 12")
         _ = try await webview.evaluateJavaScript("document.querySelector('article button').click()")
         try await until("document.body.textContent.includes('閲覧中')")
-        let disabled = try await webview.evaluateJavaScript("document.querySelector('form button').disabled") as? Bool
+        let disabled = try await webview.evaluateJavaScript("document.querySelector('form [type=submit]').disabled") as? Bool
         XCTAssertEqual(disabled, true)
         _ = try await control.read(.terminalSessions)
-        try await until("document.querySelector('form button')?.disabled === false")
+        try await until("document.querySelector('form [type=submit]')?.disabled === false")
         _ = try await webview.evaluateJavaScript("const field = document.querySelector('form input'); Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').set.call(field,'phone-basic-input'); field.dispatchEvent(new Event('input',{bubbles:true})); void 0")
-        _ = try await webview.evaluateJavaScript("document.querySelector('form button').click()")
-        try await until("document.body.textContent.includes('Macの中継が受理しました')")
+        _ = try await webview.evaluateJavaScript("document.querySelector('form [type=submit]').click()")
+        try await until("document.querySelector('#terminal-draft').value === '' && document.querySelector('[aria-label=\"Esc\"]').disabled === false")
         let accepted = try JSONSerialization.jsonObject(with: await control.read(.layout)) as! [String: Any]
         let writes = try XCTUnwrap(accepted["writes"] as? [[String: Any]])
         XCTAssertEqual(writes.count, 1)
         XCTAssertEqual(writes.first?["data"] as? String, Data("phone-basic-input\r".utf8).base64EncodedString())
         try await until("document.querySelector('.xterm-accessibility-tree')?.textContent.includes('shared-input-result') === true")
         _ = try await control.read(.agentSessions)
-        try await until("document.querySelector('form button')?.disabled === true")
+        try await until("document.querySelector('form [type=submit]')?.disabled === true")
         let stopped = try JSONSerialization.jsonObject(with: await control.read(.layout)) as! [String: Any]
         XCTAssertEqual((stopped["writes"] as? [[String: Any]])?.count, 1, "Phone replay and live queries must never become input")
         let image = try await webview.takeSnapshot(configuration: nil)
@@ -665,7 +665,7 @@ final class NativeTests: XCTestCase {
         _ = try await macControl.read(.agentSessions)
         _ = try await control.read(.terminalSessions)
         try await js("document.querySelector('article button').click()")
-        try await until("document.querySelector('form button')?.disabled === false")
+        try await until("document.querySelector('form [type=submit]')?.disabled === false")
         try await until("document.querySelector('.xterm-accessibility-tree')?.children.length === 31")
         let beforeViewing = try JSONSerialization.jsonObject(with: await touchControl.read(.layout)) as! [String: Any]
         let baseline = (beforeViewing["writes"] as! [[String: Any]]).count
@@ -683,13 +683,13 @@ final class NativeTests: XCTestCase {
         _ = try await reconnectControl.read(.terminalSessions)
         try await until("document.querySelector('.xterm-screen') !== combinedOldScreen && document.querySelector('.terminal-state').textContent.includes('閲覧中')")
         _ = try await control.read(.terminalSessions)
-        try await until("document.querySelector('.terminal-state').textContent.includes('Macと共有入力')")
-        let preservedTargetState = try await webview.evaluateJavaScript("document.querySelector('form input').value === '下書き😀' && document.querySelector('form button').disabled && document.querySelector('.terminal-paste textarea').value === 'reconnect-preview😀' && getComputedStyle(document.querySelector('.xterm-rows')).fontSize === '16px' && document.querySelectorAll('.xterm').length === 1") as? Bool
+        try await until("document.querySelector('.terminal-state').textContent.includes('入力可')")
+        let preservedTargetState = try await webview.evaluateJavaScript("document.querySelector('form input').value === '下書き😀' && document.querySelector('form [type=submit]').disabled && document.querySelector('.terminal-paste textarea').value === 'reconnect-preview😀' && document.querySelectorAll('.xterm').length === 1") as? Bool
         XCTAssertEqual(preservedTargetState, true, "Fresh replay preserves the selected target's draft, composition and explicit preview, not an old renderer")
         XCTAssertEqual(UIPasteboard.general.string, "reconnect-preview😀", "Fresh renderer replay must reinstall the OSC clipboard rejection")
         try await js("""
             document.querySelector('form input').dispatchEvent(new CompositionEvent('compositionend',{bubbles:true}));
-            document.querySelector('.terminal-paste button:last-of-type').click();
+            document.querySelector('.terminal-paste .actions button:first-of-type').click();
             """)
         _ = try await webview.evaluateJavaScript("""
             window.combinedRAF = window.requestAnimationFrame;
@@ -721,7 +721,7 @@ final class NativeTests: XCTestCase {
         try await until("document.body.textContent.includes('背景では表示接続を停止')")
         _ = try await webview.evaluateJavaScript("window.requestAnimationFrame = combinedRAF; window.combinedOldScreen = document.querySelector('.xterm-screen'); null")
         controller.bridge.resume()
-        try await until("document.querySelector('.xterm-screen') !== combinedOldScreen && document.querySelector('form button')?.disabled === false")
+        try await until("document.querySelector('.xterm-screen') !== combinedOldScreen && document.querySelector('form [type=submit]')?.disabled === false")
         try await until("document.querySelector('.xterm-accessibility-tree').lastElementChild.textContent.includes('\(pendingDrawMarker)')")
         try await js("document.querySelector('.terminal-viewport').style.flex = '0 0 120px'")
         let differentFollowTarget = try await webview.evaluateJavaScript("document.querySelector('.xterm').clientHeight - document.querySelector('.terminal-viewport').clientHeight > 0") as? Bool
@@ -781,14 +781,14 @@ final class NativeTests: XCTestCase {
                 }
                 return original(message);
             };
-            document.querySelector('form button').click();
+            document.querySelector('form [type=submit]').click();
             """)
-        let pendingFeedback = try await webview.evaluateJavaScript("document.body.textContent.includes('送信中（受理確認前）') && document.querySelector('[aria-label=\"Esc\"]').disabled") as? Bool
+        let pendingFeedback = try await webview.evaluateJavaScript("document.querySelector('[aria-label=\"Esc\"]').disabled") as? Bool
         XCTAssertEqual(pendingFeedback, true)
         let heldWrites = try await writes().count
         XCTAssertEqual(heldWrites, baseline, "Immediate feedback is not an acceptance ACK")
         try await js("releasePhoneInput()")
-        try await until("document.body.textContent.includes('Macの中継が受理しました')")
+        try await until("document.querySelector('#terminal-draft').value === '' && document.querySelector('[aria-label=\"Esc\"]').disabled === false")
         var sent = try await writes(atLeast: baseline + 1)
         XCTAssertEqual(sent.count, baseline + 1)
         XCTAssertEqual(sent.last, Data("日本😀\r".utf8).base64EncodedString())
@@ -804,7 +804,7 @@ final class NativeTests: XCTestCase {
         try await until("document.querySelector('[aria-label=\"Esc\"]').disabled === false")
         sent = try await writes(atLeast: sent.count + 1)
         XCTAssertEqual(sent.last, Data([3]).base64EncodedString())
-        try await js("document.querySelector('[aria-label=\"Ctrl\"]').click(); setDraft('d'); document.querySelector('form button').click()")
+        try await js("document.querySelector('[aria-label=\"Ctrl\"]').click(); setDraft('d'); document.querySelector('form [type=submit]').click()")
         try await until("document.querySelector('[aria-label=\"Esc\"]').disabled === false")
         sent = try await writes(atLeast: sent.count + 1)
         XCTAssertEqual(sent.last, Data([4]).base64EncodedString(), "Ctrl never appends an accidental Enter")
@@ -985,7 +985,7 @@ final class NativeTests: XCTestCase {
         XCTAssertEqual(afterViewport["resizes"] as? Int, beforeViewing["resizes"] as? Int, "Normal/TUI gestures, selection and zoom leave the Mac grid unchanged after a later actual Create")
         XCTAssertEqual((afterViewport["writes"] as? [[String: Any]])?.count, sent.count)
         let controlsVisible = try await webview.evaluateJavaScript("""
-            [...document.querySelectorAll('.terminal-state, .terminal-keys, #terminal-draft, form button')].every(element => {
+            [...document.querySelectorAll('.terminal-state, .terminal-keys, #terminal-draft, form [type=submit]')].every(element => {
                 const rect = element.getBoundingClientRect();
                 return rect.top >= 0 && rect.bottom <= window.innerHeight;
             })
@@ -994,7 +994,7 @@ final class NativeTests: XCTestCase {
             XCTAssertEqual(controlsVisible, true, "Connection status, keys and draft must fit a compact-height viewport")
         }
         let reachableControls = try await webview.callAsyncJavaScript("""
-            for (const element of document.querySelectorAll('.terminal-state, .terminal-keys, #terminal-draft, form button')) {
+            for (const element of document.querySelectorAll('.terminal-state, .terminal-keys, #terminal-draft, form [type=submit]')) {
                 element.scrollIntoView({block:'nearest'});
                 await new Promise(resolve => requestAnimationFrame(resolve));
                 const rect = element.getBoundingClientRect();
@@ -1015,7 +1015,7 @@ final class NativeTests: XCTestCase {
         let disposedPan = try await webview.evaluateJavaScript("outputViewport.scrollLeft === disposedPosition[0] && outputViewport.scrollTop === disposedPosition[1]") as? Bool
         XCTAssertEqual(disposedPan, true, "The disposed renderer must release its reading listeners")
         try await js("document.querySelector('article button').click()")
-        try await until("document.querySelector('form button')?.disabled === false")
+        try await until("document.querySelector('form [type=submit]')?.disabled === false")
         _ = try await control.read(.agentSessions)
         try await until("document.querySelector('[aria-label=\"Esc\"]').disabled === true")
         try await js("document.querySelector('[aria-label=\"Esc\"]').click(); document.querySelector('[data-paste]').click()")
@@ -1047,7 +1047,7 @@ final class NativeTests: XCTestCase {
         _ = try await control.read(.terminalSessions)
         _ = try await webview.evaluateJavaScript("document.querySelector('article button').click()")
         for _ in 0..<100 {
-            if let ready = try? await webview.evaluateJavaScript("document.querySelector('form button')?.disabled === false") as? Bool, ready { break }
+            if let ready = try? await webview.evaluateJavaScript("document.querySelector('form [type=submit]')?.disabled === false") as? Bool, ready { break }
             try await Task.sleep(for: .milliseconds(50))
         }
         let before = try JSONSerialization.jsonObject(with: await audit.read(.layout)) as! [String: Any]
