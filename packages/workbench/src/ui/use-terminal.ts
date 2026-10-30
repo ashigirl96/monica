@@ -85,6 +85,8 @@ export function useTerminal(
       allowTransparency: false,
       allowProposedApi: true,
       scrollback: 5000,
+      // FitAddon は表示するスクロールバーの幅を列から引くが、xterm 6 のスクロールバーは本文に重なるので、その幅が右の余白として残る。
+      scrollbar: { showScrollbar: false },
       // ghostty の default_word_boundaries に揃えた語境界集合。
       wordSeparator: ' \t\'"│`|:;,()[]{}<>$',
       // マウスレポート中の TUI でも修飾キーでローカル選択を許可する (mac は Option)。
