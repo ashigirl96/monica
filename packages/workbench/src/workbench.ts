@@ -7,6 +7,7 @@ import type { WorkbenchChange } from './contract.ts'
 import type { Db, Tx } from './db.ts'
 import { createLayoutWrites, type LayoutWrites } from './layout.ts'
 import { openDaemon, type ProcessInfo, type PtydClient } from './ptyd.ts'
+import { createRemoteAccess, type RemoteAccess } from './remote-access.ts'
 import { writeTabFiles } from './tab-env.ts'
 import { createTerminalSessions, type Size } from './terminal-session.ts'
 import { followUnread, type Unread } from './unread.ts'
@@ -29,6 +30,7 @@ export type WorkbenchLedger = {
 }
 
 type Internals = {
+  remoteAccess: RemoteAccess
   layoutWrites: LayoutWrites
   agentSessions: AgentSessions
   /** null のとき、ptyd に届かず一覧を取れなかった。 */
@@ -52,16 +54,35 @@ export function agentSessionsOf(workbenchLedger: WorkbenchLedger): AgentSessions
   return internals(workbenchLedger).agentSessions
 }
 
+export function remoteAccessOf(workbenchLedger: WorkbenchLedger): RemoteAccess {
+  return internals(workbenchLedger).remoteAccess
+}
+
 export function processesOf(workbenchLedger: WorkbenchLedger): Internals['processes'] {
   return internals(workbenchLedger).processes
 }
 
 export function createWorkbenchLedger(
-  deps: NotificationDeps & { db: Db; home: string; ptydPath: string; unread: Unread },
+  deps: NotificationDeps & {
+    db: Db
+    home: string
+    ptydPath: string
+    unread: Unread
+    shell?: import('./remote-shell.ts').ShellEndpoint
+    remoteUnary?: (path: string[], next: () => Promise<unknown>) => Promise<unknown>
+  },
 ): WorkbenchLedger {
   const { db, home, ptydPath, notify, nameAgentSession, unread } = deps
   const events = new EventPublisher<{ change: WorkbenchChange }>()
   const publish = (change: WorkbenchChange) => events.publish('change', change)
+  const remoteAccess = createRemoteAccess({
+    db,
+    home,
+    events,
+    unary: deps.remoteUnary,
+    shell: deps.shell,
+    changed: () => publish({ type: 'remote' }),
+  })
 
   let stopFollowingUnread: (() => void) | null = null
   let client: PtydClient | null = null
@@ -165,6 +186,7 @@ export function createWorkbenchLedger(
   const workbenchLedger: WorkbenchLedger = {
     events,
     async start() {
+      remoteAccess.start()
       try {
         writeTabFiles(home)
       } catch (error) {
@@ -175,6 +197,7 @@ export function createWorkbenchLedger(
     },
     stop() {
       stopping = true
+      remoteAccess.stop()
       stopFollowingUnread?.()
       client?.close()
     },
@@ -191,6 +214,6 @@ export function createWorkbenchLedger(
     const outcome = await client?.processes(terminalSessionId)
     return outcome?.kind === 'done' ? outcome.value : null
   }
-  internalsOf.set(workbenchLedger, { layoutWrites, agentSessions, processes })
+  internalsOf.set(workbenchLedger, { layoutWrites, agentSessions, processes, remoteAccess })
   return workbenchLedger
 }

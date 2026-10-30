@@ -15,7 +15,12 @@ import {
 export { writeFakeExecutable } from './fake-executable.ts'
 
 type Frame = RequestOp & { id?: number }
-type Connection = { decoder: TextDecoder; buffered: string }
+type Connection = {
+  decoder: TextDecoder
+  buffered: string
+  attached: Set<string>
+  outbox: Buffer[]
+}
 type Waiter = { match: (op: RequestOp) => boolean; resolve: (op: RequestOp) => void }
 
 // ptyd の socket の path は macOS で 104 byte を超えると bind できないので、home は短くする。
@@ -39,6 +44,7 @@ export async function untilSettled<T extends { id: string; status: string }>(
 
 export function startFakePtyd(home: string) {
   const sessions: SessionInfo[] = []
+  const transcripts = new Map<string, Buffer>()
   const received: RequestOp[] = []
   const waiters: Waiter[] = []
   const holds = new Map<RequestOp['op'], Promise<void>>()
@@ -69,6 +75,16 @@ export function startFakePtyd(home: string) {
 
   const fake = {
     sessions,
+    output(sessionId: string, bytes: string | Uint8Array) {
+      const data = Buffer.from(bytes)
+      transcripts.set(
+        sessionId,
+        Buffer.concat([transcripts.get(sessionId) ?? Buffer.alloc(0), data]).subarray(-262144),
+      )
+      for (const socket of sockets)
+        if (socket.data.attached.has(sessionId))
+          send(socket, { type: 'output', session_id: sessionId, data: data.toString('base64') })
+    },
     processes: new Map<string, ProcessInfo[]>(),
     beforeList: (): ServerMessage[] => [],
     dropNextList: false,
@@ -125,7 +141,21 @@ export function startFakePtyd(home: string) {
   }
 
   function send(socket: Socket<Connection>, message: ServerMessage) {
-    socket.write(`${JSON.stringify(message)}\n`)
+    socket.data.outbox.push(Buffer.from(`${JSON.stringify(message)}\n`))
+    flush(socket)
+  }
+
+  function flush(socket: Socket<Connection>) {
+    while (socket.data.outbox.length) {
+      const bytes = socket.data.outbox[0]!
+      const written = socket.write(bytes)
+      if (written <= 0) return
+      if (written < bytes.length) {
+        socket.data.outbox[0] = bytes.subarray(written)
+        return
+      }
+      socket.data.outbox.shift()
+    }
   }
 
   // 間を空けて書くと、client は最初の多 byte 文字の途中で切れた 2 つの chunk として受け取る。
@@ -158,14 +188,49 @@ export function startFakePtyd(home: string) {
       const index = sessions.findIndex((s) => s.session_id === op.session_id)
       if (index >= 0) sessions.splice(index, 1)
     }
+    if (op.op === 'resize') {
+      const session = sessions.find((item) => item.session_id === op.session_id)
+      const apply = () => {
+        if (session) Object.assign(session, { rows: op.rows, cols: op.cols })
+      }
+      const hold = holds.get('resize')
+      holds.delete('resize')
+      if (hold) void hold.then(apply)
+      else apply()
+    }
+    if (op.op === 'detach') socket.data.attached.delete(op.session_id)
+    if (op.op === 'attach' && id !== undefined) {
+      const session = sessions.find((item) => item.session_id === op.session_id)
+      if (!session) return send(socket, { type: 'err', id, error: 'no such session' })
+      if (!session.running)
+        return send(socket, { type: 'err', id, error: `session ${op.session_id} has exited` })
+      const tail = transcripts.get(op.session_id) ?? Buffer.alloc(0)
+      const replay =
+        op.replay_bytes === 0 ? '' : tail.subarray(-(op.replay_bytes ?? 262144)).toString('base64')
+      socket.data.attached.add(op.session_id)
+      const response: ServerMessage = {
+        type: 'ok',
+        id,
+        body: 'attached',
+        replay,
+        rows: session.rows,
+        cols: session.cols,
+      }
+      const hold = holds.get('attach')
+      holds.delete('attach')
+      if (hold) void hold.then(() => send(socket, response))
+      else send(socket, response)
+      return
+    }
     if (id === undefined) return
     const hold = holds.get(op.op)
     if (!hold) return reply(socket, id, op)
     holds.delete(op.op)
-    void hold.then(() => reply(socket, id, op))
+    const snapshot = sessions.map((session) => ({ ...session }))
+    void hold.then(() => reply(socket, id, op, snapshot))
   }
 
-  function reply(socket: Socket<Connection>, id: number, op: RequestOp) {
+  function reply(socket: Socket<Connection>, id: number, op: RequestOp, listed = sessions) {
     switch (op.op) {
       case 'hello':
         return send(socket, { type: 'ok', id, body: 'hello', version: PROTOCOL_VERSION })
@@ -176,9 +241,14 @@ export function startFakePtyd(home: string) {
         }
         for (const message of fake.beforeList()) send(socket, message)
         if (fake.splitListMidCharacter) {
-          return sendSplitMidCharacter(socket, { type: 'ok', id, body: 'sessions', sessions })
+          return sendSplitMidCharacter(socket, {
+            type: 'ok',
+            id,
+            body: 'sessions',
+            sessions: listed,
+          })
         }
-        return send(socket, { type: 'ok', id, body: 'sessions', sessions })
+        return send(socket, { type: 'ok', id, body: 'sessions', sessions: listed })
       case 'create': {
         for (const message of fake.beforeCreated(op)) send(socket, message)
         if (fake.createError) return send(socket, { type: 'err', id, error: fake.createError })
@@ -212,7 +282,7 @@ export function startFakePtyd(home: string) {
     unix: join(home, 'ptyd.sock'),
     socket: {
       open(socket) {
-        socket.data = { decoder: new TextDecoder(), buffered: '' }
+        socket.data = { decoder: new TextDecoder(), buffered: '', attached: new Set(), outbox: [] }
         sockets.add(socket)
       },
       data(socket, chunk) {
@@ -225,6 +295,7 @@ export function startFakePtyd(home: string) {
           newline = socket.data.buffered.indexOf('\n')
         }
       },
+      drain: flush,
       close(socket) {
         sockets.delete(socket)
       },

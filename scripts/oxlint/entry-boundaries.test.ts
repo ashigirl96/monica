@@ -11,7 +11,13 @@ const repo = join(import.meta.dir, '../..')
 // cli・ui・body は Backend の外でも動くので DB に触れず、schema はどこでも import されるので決まったものしか import しない。
 function forbiddenImports(domain: string): Record<string, string[]> {
   const db = ['bun:sqlite', 'drizzle-orm', `@monica/${domain}/schema`, `@monica/${domain}/server`]
-  return { cli: db, ui: db, body: db, schema: ['bun:sqlite', 'zod', `@monica/${domain}/server`] }
+  return {
+    cli: db,
+    ui: db,
+    mobile: [...db, 'node:fs', '@tauri-apps/api/core', '@monica/workbench/ui', '@monica/desktop'],
+    body: db,
+    schema: ['bun:sqlite', 'zod', `@monica/${domain}/server`],
+  }
 }
 
 type Probe = { path: string; specifiers: string[] }
@@ -29,7 +35,7 @@ function probes(): Probe[] {
       const path = join(root, target)
       found.push({ path, specifiers })
       // directory の entry は、中の file も同じ境界に入る。
-      if (path.endsWith('/index.ts')) {
+      if (/\/index\.tsx?$/.test(path)) {
         found.push({ path: join(dirname(path), 'inner.ts'), specifiers })
       }
     }

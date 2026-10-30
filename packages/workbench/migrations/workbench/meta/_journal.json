@@ -43,6 +43,13 @@
       "when": 1791366605097,
       "tag": "0005_sparkling_norman_osborn",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "6",
+      "when": 1793278026412,
+      "tag": "0006_abnormal_champions",
+      "breakpoints": true
     }
   ]
 }

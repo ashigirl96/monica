@@ -2,7 +2,7 @@ import { eventIterator, oc } from '@orpc/contract'
 import { createSchemaFactory } from 'drizzle-zod'
 import { z } from 'zod'
 
-import { agentSession, runspace, tab, terminalSession } from './schema.ts'
+import { agentSession, remoteDevice, runspace, tab, terminalSession } from './schema.ts'
 
 const meta = oc.$meta<{ description?: string; cli?: boolean }>({})
 const { createSelectSchema } = createSchemaFactory({ coerce: { date: true } })
@@ -56,6 +56,7 @@ export const WorkbenchChangeSchema = z.discriminatedUnion('type', [
   z.object({ type: z.literal('terminalSession'), id: z.string() }),
   z.object({ type: z.literal('agentSession'), sessionId: z.string() }),
   z.object({ type: z.literal('reconciled') }),
+  z.object({ type: z.literal('remote') }),
   // 空になったかは閉じた transaction でしか決まらず、読み直しでは分からないので id を載せる。
   z.object({ type: z.literal('runspaceEmptied'), runspaceId: z.string() }),
 ])
@@ -95,7 +96,75 @@ const callerOr = (what: string) => ({
 const size = { rows: z.number().int().positive(), cols: z.number().int().positive() }
 const index = z.number().int().nonnegative()
 
+export const RemoteSettingsSchema = z.object({
+  address: z.union([
+    z.ipv4().refine((value) => {
+      const parts = value.split('.').map(Number)
+      return parts[0] === 100 && parts[1] !== undefined && parts[1] >= 64 && parts[1] <= 127
+    }, 'Use the Mac Tailscale address'),
+    z
+      .ipv6()
+      .refine(
+        (value) => value.toLowerCase().startsWith('fd7a:115c:a1e0:'),
+        'Use the Mac Tailscale address',
+      ),
+  ]),
+  port: z.number().int().min(1024).max(65535).default(19443),
+})
+
+export const RemoteStatusSchema = z.object({
+  state: z.enum(['disabled', 'listening', 'unavailable']),
+  settings: RemoteSettingsSchema.nullable(),
+  identity: z
+    .object({ certificate: z.string(), fingerprint: z.string(), expiresAt: z.string() })
+    .nullable(),
+  error: z.string().nullable(),
+  invitationExpiresAt: z.number().nullable(),
+  pending: z
+    .object({ id: z.string(), name: z.string(), sourceAddress: z.string(), expiresAt: z.number() })
+    .nullable(),
+  detachPending: z.boolean(),
+  devices: z.array(
+    createSelectSchema(remoteDevice)
+      .omit({ secretHash: true })
+      .extend({ detachPending: z.boolean() }),
+  ),
+})
+
 export const contract = {
+  remote: {
+    status: meta
+      .meta({ description: 'Read local remote access settings and registration requests' })
+      .output(RemoteStatusSchema),
+    enable: meta
+      .meta({ description: 'Enable TLS remote access on the Mac Tailscale address' })
+      .input(RemoteSettingsSchema)
+      .output(z.void()),
+    disable: meta
+      .meta({ description: 'Disable remote access and close its connections' })
+      .output(z.object({ state: z.enum(['detached', 'detach-pending']) })),
+    invite: meta
+      .meta({ description: 'Create a five minute single-use registration QR' })
+      .output(z.object({ payload: z.string(), qr: z.string(), expiresAt: z.number() })),
+    approve: meta
+      .meta({ description: 'Approve the displayed source-bound device request' })
+      .input(z.object({ id: z.string() }))
+      .output(z.void()),
+    reject: meta
+      .meta({ description: 'Reject the displayed device request' })
+      .input(z.object({ id: z.string() }))
+      .output(z.void()),
+    revoke: meta
+      .meta({ description: 'Revoke a device and close its remote connections' })
+      .input(z.object({ id: z.string() }))
+      .output(z.object({ state: z.enum(['detached', 'detach-pending']) })),
+    renewIdentity: meta
+      .meta({
+        description:
+          'Disable remote access, revoke all devices and remove the TLS identity for explicit re-registration',
+      })
+      .output(z.void()),
+  },
   terminalSession: {
     list: meta
       .meta({ description: 'List Terminal Sessions that are live or shown in a Tab', cli: true })

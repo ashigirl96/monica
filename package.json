@@ -52,6 +52,7 @@
       "prosemirror-model": "^1.25.12",
       "prosemirror-state": "^1.4.4",
       "prosemirror-view": "^1.42.6",
+      "qrcode-generator": "^2.0.4",
       "react": "^19.3.0",
       "react-dom": "^19.3.0",
       "react-markdown": "^10.1.0",
@@ -77,10 +78,11 @@
     "install-app": "bun scripts/install-app.ts",
     "generate": "bun run --filter './packages/*' generate",
     "check": "bun run check:ts && bun run check:rust",
-    "check:ts": "oxlint --no-error-on-unmatched-pattern --report-unused-disable-directives-severity=error && oxfmt --check && tsc --noEmit && bun scripts/test.ts &&bun run --cwd apps/desktop build && bun run --cwd apps/web build && bun run --cwd apps/extension build",
+    "check:ts": "oxlint --no-error-on-unmatched-pattern --report-unused-disable-directives-severity=error && oxfmt --check && tsc --noEmit && bun scripts/test.ts &&bun run --cwd apps/desktop build && bun run --cwd apps/web build && bun run --cwd apps/extension build && bun run --cwd apps/ios build",
     "check:rust": "cargo fmt --all --check && cargo clippy --workspace --all-targets -- -D warnings && cargo test --workspace",
     "check:brief": "bun scripts/check-brief.ts",
-    "test:timings": "bun scripts/test.ts --update-timings"
+    "test:timings": "bun scripts/test.ts --update-timings",
+    "check:ios": "bun run --cwd apps/ios native"
   },
   "devDependencies": {
     "@types/bun": "^1.4.3",
