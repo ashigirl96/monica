@@ -4,7 +4,8 @@ import type { EditorView, NodeView } from 'prosemirror-view'
 
 import { containerById } from './context.ts'
 import { foldedSiblingIndexes, isCollapsedContainer } from './folding.ts'
-import { BookmarkView, el, LinkMentionView } from './node-views.ts'
+import { MERMAID_LANGUAGE } from './mermaid.ts'
+import { BookmarkView, drawMermaid, el, LinkMentionView } from './node-views.ts'
 import type { ResolveNoteMention } from './node-views.ts'
 import { nodes, schema } from './schema.ts'
 
@@ -31,7 +32,8 @@ export type SyncedBlockOptions = {
 // 2. ネストした syncedBlock はプレースホルダにする（解決を 1 段で止め、自己参照・
 //    循環でも無限再帰・fetch 連鎖を起こさない）。
 // 3. todo / toggle は checkbox・トグル三角と .jb-*-text を静的に組む（非対話・読み取り専用）。
-// 4. linkMention / bookmark は NodeView と同じリッチ DOM で描く。両 View は node だけで
+// 4. 言語が mermaid の codeBlock は CodeBlockView と同じ図を描く。読み取り専用なので文は描けないときだけ出す。
+// 5. linkMention / bookmark は NodeView と同じリッチ DOM で描く。両 View は node だけで
 //    DOM を組む純粋ビルダー。noteMention は chip を出し、表示名は SyncedBlockView が解決する。
 const mirrorSerializer = new DOMSerializer(
   {
@@ -74,6 +76,20 @@ const mirrorSerializer = new DOMSerializer(
       ['button', { class: 'jb-toggle-btn', contenteditable: 'false', tabindex: '-1' }],
       ['div', { class: 'jb-toggle-text' }, 0],
     ],
+    codeBlock: (node) => {
+      if (node.attrs.language !== MERMAID_LANGUAGE) return schema.nodes.codeBlock.spec.toDOM!(node)
+      const frame = el('div', 'jb-code jb-code-mermaid')
+      frame.dataset.blockContent = 'codeBlock'
+      frame.dataset.language = MERMAID_LANGUAGE
+      const pre = el('pre', 'jb-code-pre')
+      const code = document.createElement('code')
+      pre.append(code)
+      const diagram = el('div', 'jb-mermaid')
+      frame.append(pre, diagram)
+      // ミラーは doc が変わるたびに丸ごと組み直すので、古い描画は外れた要素に書くだけで害は無い。
+      drawMermaid(diagram, node.textContent, () => true)
+      return { dom: frame, contentDOM: code }
+    },
     syncedBlock: () => ['div', { class: 'jb-synced-nested' }, 'Nested synced block'],
     linkMention: (node) => new LinkMentionView(node).dom,
     bookmark: (node) => new BookmarkView(node).dom,

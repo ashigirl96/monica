@@ -18,6 +18,7 @@
     "@orpc/contract": "catalog:",
     "@orpc/server": "catalog:",
     "@tanstack/react-query": "catalog:",
+    "beautiful-mermaid": "catalog:",
     "drizzle-orm": "catalog:",
     "drizzle-zod": "catalog:",
     "entities": "catalog:",
