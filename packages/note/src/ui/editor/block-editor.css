@@ -548,6 +548,39 @@
   overflow-x: visible;
 }
 
+/* 図を描き終えるまでと描けないときは、打った文を隠さない */
+.jb-code-mermaid:not(.jb-code-active):has(.jb-mermaid > svg) .jb-code-pre {
+  display: none;
+}
+
+.jb-mermaid {
+  padding: 16px;
+  cursor: pointer;
+}
+
+.jb-mermaid:empty {
+  display: none;
+}
+
+.jb-code-active .jb-mermaid,
+.jb-mermaid:has(.jb-mermaid-error) {
+  border-top: 1px solid var(--jb-border);
+}
+
+.jb-mermaid svg {
+  max-width: 100%;
+  height: auto;
+  margin-inline: auto;
+}
+
+.jb-mermaid-error {
+  color: var(--jb-code-red);
+  font-size: 12px;
+  line-height: 1.6;
+  text-align: left;
+  white-space: pre-wrap;
+}
+
 /* ---- divider ---- */
 
 .jb-divider {

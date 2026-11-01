@@ -1,9 +1,11 @@
 import type { Node as PMNode } from 'prosemirror-model'
+import { TextSelection } from 'prosemirror-state'
 import type { EditorView, NodeView, ViewMutationRecord } from 'prosemirror-view'
 
 import { foldTransaction } from './commands.ts'
 import { isCollapsedContainer, isFoldableContent, isFoldedContent } from './folding.ts'
 import { imageUploadKey, requestImageRetry } from './image-upload.ts'
+import { MERMAID_LANGUAGE, renderMermaid } from './mermaid.ts'
 import { nodes, noteHref } from './schema.ts'
 
 type GetPos = () => number | undefined
@@ -251,7 +253,21 @@ const CODE_LANGUAGES = [
   'css',
   'shell',
   'markdown',
+  MERMAID_LANGUAGE,
 ]
+
+export function drawMermaid(
+  diagram: HTMLElement,
+  source: string,
+  stillWanted: () => boolean,
+): void {
+  void renderMermaid(source).then((result) => {
+    if (!stillWanted()) return
+    if ('svg' in result) diagram.innerHTML = result.svg
+    else
+      diagram.replaceChildren(el('div', 'jb-mermaid-error', (e) => (e.textContent = result.error)))
+  })
+}
 
 export class CodeBlockView implements NodeView {
   private node: PMNode
@@ -260,9 +276,16 @@ export class CodeBlockView implements NodeView {
   private toolbar: HTMLElement
   private select: HTMLSelectElement
   private wrapButton: HTMLButtonElement
+  private diagram: HTMLElement | null = null
+  private drawnSource: string | null = null
+  private destroyed = false
+  private view: EditorView
+  private getPos: GetPos
 
   constructor(node: PMNode, view: EditorView, getPos: GetPos) {
     this.node = node
+    this.view = view
+    this.getPos = getPos
     this.dom = el('div', 'jb-code')
     this.select = el('select', 'jb-code-language')
     for (const lang of CODE_LANGUAGES) {
@@ -313,6 +336,42 @@ export class CodeBlockView implements NodeView {
     const wrap = node.attrs.wrap === true
     this.dom.classList.toggle('jb-code-wrap', wrap)
     this.wrapButton.classList.toggle('jb-code-btn-active', wrap)
+    this.syncDiagram(node)
+  }
+
+  private syncDiagram(node: PMNode): void {
+    const isMermaid = node.attrs.language === MERMAID_LANGUAGE
+    this.dom.classList.toggle('jb-code-mermaid', isMermaid)
+    if (!isMermaid) {
+      this.diagram?.remove()
+      this.diagram = null
+      this.drawnSource = null
+      return
+    }
+    if (!this.diagram) this.diagram = this.createDiagram()
+    const source = node.textContent
+    if (source === this.drawnSource) return
+    this.drawnSource = source
+    const diagram = this.diagram
+    drawMermaid(
+      diagram,
+      source,
+      () => !this.destroyed && this.diagram === diagram && this.drawnSource === source,
+    )
+  }
+
+  private createDiagram(): HTMLElement {
+    const diagram = el('div', 'jb-mermaid', (d) => (d.contentEditable = 'false'))
+    diagram.addEventListener('mousedown', (e) => {
+      e.preventDefault()
+      const pos = this.getPos()
+      if (pos === undefined) return
+      const { state } = this.view
+      this.view.dispatch(state.tr.setSelection(TextSelection.create(state.doc, pos + 1)))
+      this.view.focus()
+    })
+    this.dom.append(diagram)
+    return diagram
   }
 
   update(node: PMNode): boolean {
@@ -322,11 +381,16 @@ export class CodeBlockView implements NodeView {
   }
 
   stopEvent(event: Event): boolean {
-    return event.target instanceof Node && this.toolbar.contains(event.target)
+    if (!(event.target instanceof Node)) return false
+    return this.toolbar.contains(event.target) || !!this.diagram?.contains(event.target)
   }
 
   ignoreMutation(mutation: ViewMutationRecord): boolean {
     return !(mutation.target instanceof Node && this.contentDOM.contains(mutation.target))
+  }
+
+  destroy(): void {
+    this.destroyed = true
   }
 }
 
