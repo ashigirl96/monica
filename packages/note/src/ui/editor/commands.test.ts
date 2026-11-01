@@ -16,6 +16,7 @@ import {
   duplicateRange,
   exitCallout,
   codeExitPos,
+  enterDiagram,
   enterInlineCode,
   exitDocEnd,
   exitDocStart,
@@ -1127,6 +1128,26 @@ describe('exitDocEnd', () => {
       { type: 'paragraph', text: '' },
     ])
     assertInvariants(result.state.doc)
+  })
+})
+
+describe('enterDiagram', () => {
+  const diagram = nodes.codeBlock.create({ language: 'mermaid' }, schema.text('graph TD'))
+  const doc = docOf(block('A', para('ab')), block('B', diagram), block('C', para('cd')))
+
+  test('↓ puts the cursor at the start of the diagram block below', () => {
+    const result = run(stateWithCursor(doc, 'A', 'end'), enterDiagram(1))!
+    expect(result.state.selection.head).toBe(contentPos(doc, 'B', 'start'))
+  })
+
+  test('↑ puts the cursor at the end of the diagram block above', () => {
+    const result = run(stateWithCursor(doc, 'C', 'start'), enterDiagram(-1))!
+    expect(result.state.selection.head).toBe(contentPos(doc, 'B', 'end'))
+  })
+
+  test('leaves a plain code block below to the usual move', () => {
+    const plain = docOf(block('A', para('ab')), block('B', code('x')))
+    expect(run(stateWithCursor(plain, 'A', 'end'), enterDiagram(1))).toBeNull()
   })
 })
 

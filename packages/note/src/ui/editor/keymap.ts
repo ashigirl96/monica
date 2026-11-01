@@ -16,6 +16,7 @@ import {
   exitCallout,
   exitCodeBlock,
   enterInlineCode,
+  enterDiagram,
   exitDocEnd,
   exitDocStart,
   exitInlineCode,
@@ -64,11 +65,12 @@ export function editorKeymap(): Plugin[] {
       // 空行のみ行ごと削除。非空行は false でネイティブの前方 1 文字削除に落とす
       'Ctrl-d': deleteEmptyBlock,
       // ↓と同義だが、最下 block から先へ進めないときだけ末尾に空行を確保する
-      'Ctrl-n': exitDocEnd,
+      'Ctrl-n': chainCommands(enterDiagram(1), exitDocEnd),
+      ArrowDown: enterDiagram(1),
       // ↑と同義だが、最上 block から先へ進めないときだけ先頭に空行を確保する。
       // onExitUp 付き editor（essays 等）は手前の keymap がタイトルへの脱出を優先する
-      'Ctrl-p': chainCommands(exitDocStart, moveUpFromBlockStart),
-      ArrowUp: moveUpFromBlockStart,
+      'Ctrl-p': chainCommands(enterDiagram(-1), exitDocStart, moveUpFromBlockStart),
+      ArrowUp: chainCommands(enterDiagram(-1), moveUpFromBlockStart),
       // heading / callout / toggle の折りたたみ。macOS の ⌥. は "≥" を生むが、
       // prosemirror-keymap が keyCode から base key を解決するのでこの binding で届く
       'Alt-.': toggleCollapse,

@@ -22,6 +22,7 @@ import {
   setFolded,
   type FoldTarget,
 } from './folding.ts'
+import { MERMAID_LANGUAGE } from './mermaid.ts'
 import {
   createContainer,
   emptyParagraphContainer,
@@ -716,6 +717,31 @@ export const exitDocEnd: Command = (state, dispatch, view) => {
   clearBlockSelection(tr)
   dispatch?.(tr.scrollIntoView())
   return true
+}
+
+// 図のブロックは外では文を CSS で隠すので、native の上下移動は飛ばしてしまう。
+export function enterDiagram(dir: 1 | -1): Command {
+  return (state, dispatch, view) => {
+    const sel = state.selection
+    if (!sel.empty || !(sel instanceof TextSelection)) return false
+    if (hasAdjacentTableRow(sel.$from, dir)) return false
+    if (view && !view.endOfTextblock(dir === 1 ? 'down' : 'up')) return false
+    const id = getBlockContext(sel.$from)?.containerNode.attrs.id as string | null | undefined
+    if (!id) return false
+    const visible = visibleContainers(state.doc)
+    const idx = visible.findIndex((v) => v.id === id)
+    const next = idx === -1 ? undefined : visible[idx + dir]
+    const content = next?.node.child(0)
+    if (!next || content?.type !== nodes.codeBlock || content.attrs.language !== MERMAID_LANGUAGE) {
+      return false
+    }
+    const start = next.pos + 2
+    const tr = state.tr.setSelection(
+      TextSelection.create(state.doc, dir === 1 ? start : start + content.content.size),
+    )
+    dispatch?.(tr.scrollIntoView())
+    return true
+  }
 }
 
 export const exitCodeBlock: Command = (state, dispatch) => {
