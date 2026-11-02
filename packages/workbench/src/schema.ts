@@ -1,6 +1,14 @@
 import { sql } from 'drizzle-orm'
 import { check, index, integer, sqliteTable, text, uniqueIndex } from 'drizzle-orm/sqlite-core'
 
+export const remoteDevice = sqliteTable('remote_device', {
+  id: text('id').primaryKey(),
+  name: text('name').notNull(),
+  secretHash: text('secret_hash').notNull(),
+  sourceAddress: text('source_address').notNull(),
+  revokedAt: integer('revoked_at', { mode: 'timestamp_ms' }),
+})
+
 export const terminalSession = sqliteTable('terminal_session', {
   id: text('id').primaryKey(),
   cwd: text('cwd').notNull(),

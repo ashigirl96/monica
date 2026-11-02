@@ -11,7 +11,7 @@ monica/
 ├── Cargo.toml          Rust の workspace（crates/* と apps/desktop/src-tauri）
 ├── .claude-plugin/     plugin.json・marketplace.json（ADR-0006）
 ├── scripts/
-├── apps/               @monica/<dir>。backend・cli（bin は monica）・desktop（src/ が webview、src-tauri/ が Shell）・extension・web
+├── apps/               @monica/<dir>。backend・cli（bin は monica）・desktop（src/ が webview、src-tauri/ が Shell）・extension・web・ios（同梱 React と Swift の OS 連携）
 ├── packages/           @monica/<dir>。domain の workbench・task・job・note・chat・usage と、domain を持たない ui
 ├── mods/               @monica/mod-<dir>。Claude Code の mod（hooks module を持つ plugin）が 1 folder に 1 つ
 └── crates/             Rust の crate。crate 名は monica-<dir>
@@ -45,11 +45,16 @@ entry は層ではなく、import してよい実行環境で切る（ADR-0009�
 | `@monica/<d>/contract` | oRPC の contract、zod schema、型 | どこでも | apps/desktop と apps/web と apps/extension（型だけ）、apps/cli、apps/backend、自分と他 package の server と ui と cli |
 | `@monica/<d>/server` | router、`create<D>Ledger()`（chat は `createChatAgent()`）、migrations の re-export | Bun | apps/backend、他 package の server、テスト |
 | `@monica/<d>/ui` | React の component と atom | browser | apps/desktop、apps/web、apps/extension、他 package の ui |
+| `@monica/workbench/mobile` | RemoteWorkbench の一覧・端末閲覧・入力・text paste と iOS 用 React。desktop 初期化を含まない | browser（同梱 WKWebView） | apps/ios |
 | `@monica/<d>/cli` | 出力の整形関数、補完の候補を返す関数、手で書く command | Bun | apps/cli |
 | `@monica/<d>/body` | Note の本文の JSON を読む関数と、本文と markdown の変換 | どこでも | 自分の contract と server と ui |
 | `@monica/chat/native-host` | React と CSS を引かずに使えるよう、ui の index と分ける | browser（Chrome Extension） | `@monica/chat/ui`、apps/extension の service worker |
 | `@monica/<d>/testing` | 他の package のテストに出す fake | Bun | 他 package のテストと `testing.ts` |
 | `@monica/chat/html-worker`・`@monica/chat/pdf-worker` | HTML と PDF を本文にする Bun の Worker の module | Bun の Worker | apps/backend の Worker の entrypoint だけ |
+
+`apps/ios/Native` は WKWebView、keyboard layout、OS の text clipboard、URLSession、QR カメラ、Keychain と TLS trust を扱う。DB と Ledger は持たず、業務判断と再接続は Workbench の `mobile` entry に置く。Swift は AppKit や別 app の実装を import しない。React は `apps/ios/dist` として同梱し、外部 HTML・script は読み込まない。
+
+`mobile` entry は `ui` と同じ DB・server 禁止に加え、desktop の `ui`、Tauri、Node の OS module、別 app を import しない。`apps/ios/testing.ts` は native 試験用の組み立てで、実 SQLite・Workbench Ledger・fake ptyd と隔離 TLS listener を使う。native fixture は `crates/terminal-client/examples/remote-fixture.rs` で製品と同じ Shell byte relay を起こす。製品の bundle には含めない。`project.yml` を変更したら XcodeGen で `Monica.xcodeproj` を再生成して同じ差分に含める。
 
 ## 依存の向き
 

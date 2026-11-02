@@ -1,3 +1,5 @@
+use tauri::Emitter;
+
 mod announcement;
 mod backend;
 mod cli_link;
@@ -62,10 +64,24 @@ pub fn run() {
             clipboard::clipboard_write_image,
             notification::take_notification_click,
             terminal::terminal_attach,
+            terminal::terminal_renderer_register,
+            terminal::terminal_renderer_parsed,
+            terminal::terminal_renderer_remove,
             terminal::terminal_write,
             terminal::terminal_resize,
         ])
+        .on_page_load(|webview, payload| {
+            if matches!(payload.event(), tauri::webview::PageLoadEvent::Started) {
+                webview.state::<ptyd::PtydHandle>().renderers.disconnect();
+            }
+        })
         .setup(move |app| {
+            let handle = app.handle().clone();
+            app.state::<ptyd::PtydHandle>()
+                .renderers
+                .on_request(move |session| {
+                    let _ = handle.emit("terminal:prepare", session);
+                });
             #[cfg(debug_assertions)]
             app.add_capability(include_str!("../capabilities-debug/mcp-bridge.json"))?;
             cli_link::link(&home);

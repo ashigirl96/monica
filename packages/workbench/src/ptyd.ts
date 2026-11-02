@@ -36,6 +36,9 @@ export type RequestOp =
       cols: number
       env: [string, string][] | null
     }
+  | { op: 'attach'; session_id: string; replay_bytes?: number | null }
+  | { op: 'detach'; session_id: string }
+  | { op: 'resize'; session_id: string; rows: number; cols: number }
   | { op: 'write'; session_id: string; data: string }
   | { op: 'terminate'; session_id: string }
   | { op: 'list' }
@@ -44,6 +47,7 @@ export type RequestOp =
   | { op: 'shutdown' }
 
 export type ResponseBody =
+  | { body: 'attached'; replay: string; rows: number; cols: number }
   | { body: 'empty' }
   | { body: 'hello'; version: number }
   | { body: 'created'; pid: number | null }

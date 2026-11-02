@@ -17,12 +17,16 @@ const CONNECT_RETRY_INTERVAL: Duration = Duration::from_millis(50);
 
 pub struct PtydHandle {
     client: Mutex<Option<Arc<PtydClient>>>,
+    pub renderers: Arc<monica_terminal_client::renderer::Renderers>,
+    pub sizes: Arc<monica_terminal_client::remote::Sizes>,
 }
 
 impl PtydHandle {
     pub fn new() -> Self {
         Self {
             client: Mutex::new(None),
+            sizes: Arc::default(),
+            renderers: Arc::default(),
         }
     }
 
@@ -34,6 +38,7 @@ impl PtydHandle {
 
     fn mark_disconnected(&self) {
         *self.guard() = None;
+        self.renderers.disconnect();
     }
 
     pub fn ensure_connected(&self, app: &AppHandle) -> Result<Arc<PtydClient>> {
@@ -73,13 +78,21 @@ fn try_connect(app: &AppHandle, socket: &Path) -> Result<Arc<PtydClient>> {
 fn handle_event(app: &AppHandle, event: ClientEvent) {
     match event {
         ClientEvent::Output { session_id, data } => {
-            let _ = app.emit(&format!("terminal:output:{session_id}"), &data);
+            let progress = app
+                .state::<PtydHandle>()
+                .renderers
+                .output(&session_id, Instant::now());
+            let _ = app.emit(
+                &format!("terminal:output:{session_id}"),
+                serde_json::json!({"data":data,"progress":progress}),
+            );
         }
         // 行の記録は Backend が自分の接続で受けた Exit で行うので、ここでは pane に知らせるだけ。
         ClientEvent::Exit {
             session_id,
             exit_code,
         } => {
+            app.state::<PtydHandle>().renderers.exited(&session_id);
             if let Err(e) = app.emit(&format!("terminal:exit:{session_id}"), &exit_code) {
                 eprintln!("[monica-desktop] failed to emit terminal exit {session_id}: {e}");
             }

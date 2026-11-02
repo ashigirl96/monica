@@ -18,6 +18,7 @@ await mock.module('@tauri-apps/api/core', () => ({
   ...tauriCore,
   invoke: async (command: string, args: Record<string, unknown>) => {
     shellCalls.push({ command, args })
+    if (command === 'terminal_renderer_register') return { renderer: 1, connection: 1 }
     return command === 'terminal_attach' ? attach(args.sessionId as string) : undefined
   },
 }))
@@ -40,6 +41,8 @@ const { encoder, toBase64 } = await import('./base64.ts')
 const { reloadAtom, workbenchClientAtom } = await import('./store.ts')
 const {
   connectTab,
+  clearTabTerminal,
+  heartbeatRenderer,
   getTabConnection,
   releaseTabConnection,
   releaseTabsLeavingLayout,
@@ -60,10 +63,19 @@ afterEach(() => {
 })
 
 // xterm は DOM が要るので、書き込みを記録して replay の parse の終わりを手で知らせる object で代える。
-function fakeTerminal(tabId: string) {
+function fakeTerminal(tabId: string, visible = false) {
   const written: string[] = []
   const parsed: (() => void)[] = []
+  const grids: number[][] = []
   const term = {
+    rows: 24,
+    cols: 80,
+    element: { getClientRects: () => (visible ? [{}] : []) },
+    resize(cols: number, rows: number) {
+      this.rows = rows
+      this.cols = cols
+      grids.push([rows, cols])
+    },
     write(data: Uint8Array, callback?: () => void) {
       written.push(decoder.decode(data))
       if (callback) parsed.push(callback)
@@ -71,7 +83,15 @@ function fakeTerminal(tabId: string) {
   }
   setTabTerminal(tabId, term as unknown as Terminal)
   onCleanup(() => releaseTabConnection(tabId))
-  return { written, parsed }
+  return {
+    written,
+    parsed,
+    grids,
+    term: term as unknown as Terminal,
+    setVisible: (value: boolean) => {
+      visible = value
+    },
+  }
 }
 
 function b64(text: string) {
@@ -119,7 +139,10 @@ test('output that arrives before the replay is written after it, and replies dur
 
   connectTab(store, { tabId: 'tab-1', sessionId: 'ts-1', onExit: () => {} })
   await untilTrue(() => commands().includes('terminal_attach'))
-  emit('terminal:output:ts-1', b64('live'))
+  emit('terminal:output:ts-1', {
+    data: b64('live'),
+    progress: { generation: { renderer: 1, connection: 1 }, sequence: 1 },
+  })
   attached.resolve({ replay: b64('replay'), ...size })
   await untilStatus(store, 'ts-1', 'running')
 
@@ -177,4 +200,73 @@ test('a Tab that leaves the layout without the webview closing it releases its c
 
   expect(getTabConnection(tab.id)).toBeUndefined()
   expect([...listeners.keys()]).toEqual([])
+})
+
+test('hidden preparation preserves the attached grid and waits for replay parsing without reattaching a healthy renderer', async () => {
+  const store = createStore()
+  const { term, parsed, grids } = fakeTerminal('hidden')
+  attach = async () => ({ replay: b64('retained'), rows: 31, cols: 97 })
+  const tab = { tabId: 'hidden', sessionId: 'hidden-session', onExit() {} }
+  connectTab(store, tab)
+  await untilTrue(() => getTabConnection('hidden')?.state === 'attached')
+  heartbeatRenderer('hidden')
+  expect(commands()).not.toContain('terminal_renderer_parsed')
+  expect(grids).toEqual([[31, 97]])
+  expect(commands()).not.toContain('terminal_resize')
+  parsed[0]!()
+  await untilTrue(() => commands().includes('terminal_renderer_parsed'))
+  connectTab(store, tab)
+  expect(commands().filter((command) => command === 'terminal_attach')).toHaveLength(1)
+  clearTabTerminal('hidden', term)
+  const sent = shellCalls.filter((call) => call.command === 'terminal_renderer_parsed').length
+  parsed[0]!()
+  heartbeatRenderer('hidden')
+  expect(shellCalls.filter((call) => call.command === 'terminal_renderer_parsed')).toHaveLength(
+    sent,
+  )
+  expect(commands()).toContain('terminal_renderer_remove')
+})
+
+test('hidden Attach completing after activation preserves the current fitted grid and resizes without reattaching', async () => {
+  const store = createStore()
+  const { term, grids, setVisible } = fakeTerminal('activation-race')
+  const attached = Promise.withResolvers<AttachResult>()
+  attach = () => attached.promise
+  connectTab(store, { tabId: 'activation-race', sessionId: 'ts-race', onExit() {} })
+  await untilTrue(() => commands().includes('terminal_attach'))
+  setVisible(true)
+  term.resize(120, 40)
+  expect(connectTab(store, { tabId: 'activation-race', sessionId: 'ts-race', onExit() {} })).toBe(
+    false,
+  )
+  const connecting = getTabConnection('activation-race')!.inFlight
+  attached.resolve({ replay: '', rows: 31, cols: 97 })
+  await connecting
+  expect([term.rows, term.cols]).toEqual([40, 120])
+  expect(grids).toEqual([[40, 120]])
+  expect(shellCalls.filter(({ command }) => command === 'terminal_resize')).toEqual([
+    { command: 'terminal_resize', args: { sessionId: 'ts-race', rows: 40, cols: 120 } },
+  ])
+  expect(commands().filter((command) => command === 'terminal_attach')).toHaveLength(1)
+})
+
+test('visible Attach completing after deactivation restores the PTY grid without resizing or reattaching', async () => {
+  const store = createStore()
+  const { term, grids, setVisible } = fakeTerminal('deactivation-race', true)
+  term.resize(120, 40)
+  const attached = Promise.withResolvers<AttachResult>()
+  attach = () => attached.promise
+  connectTab(store, { tabId: 'deactivation-race', sessionId: 'ts-race', onExit() {} })
+  await untilTrue(() => commands().includes('terminal_attach'))
+  setVisible(false)
+  const connecting = getTabConnection('deactivation-race')!.inFlight
+  attached.resolve({ replay: '', rows: 31, cols: 97 })
+  await connecting
+  expect([term.rows, term.cols]).toEqual([31, 97])
+  expect(grids).toEqual([
+    [40, 120],
+    [31, 97],
+  ])
+  expect(commands()).not.toContain('terminal_resize')
+  expect(commands().filter((command) => command === 'terminal_attach')).toHaveLength(1)
 })

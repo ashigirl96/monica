@@ -30,6 +30,7 @@ review で差分に当てる規則。どれも判断が要るもので、理由�
 - 呼び手の transaction を受け取る関数は、その transaction の中で合図を出す。rollback しても購読側が読み直すだけで害は無い（ADR-0009）。
 - CLI と webview で動くコードは、cli entry が import する内側のファイルも含めて DB に触らず、procedure を呼ぶ（ADR-0003）。
 - Shell（`apps/desktop/src-tauri`）に置くのは、Tauri プロセスにしか無いもの（窓と webview の event、app の名義、AppKit）に触る処理と、端末の byte だけ。fs と process の spawn で済む処理は Backend の procedure にする（ADR-0001）。
+- iOS の native 実装（`apps/ios/Native`）も OS 操作だけを持ち、DB と業務判断は持たない。通信資格、QR の秘密、TLS trust と Keychain は native に閉じ、同梱 main frame にだけ限定 operation を渡す。接続の取り直しと一覧の世代管理は Workbench の共通コードに置く。
 - Backend で動くコードの `Bun.spawn` には、ふつうは `env: process.env` を渡す。Bench の setup のように、Backend だけの env（`MONICA_*`、Claude Code の env）を子に渡さないときは、workbench の `inheritableEnv()` を渡す。lint の `monica/spawn-env` は `env` の key があるかしか見ないため。
 - Backend が起こして待つ子 process は、打ち切ったとき・Backend が SIGTERM で止まったとき（`exit` を登録する前の起動の途中も含む）のどちらでも、子孫ごと居なくなるようにする（`apps/backend/src/login-shell-path.ts` の `detached` と group の kill）。子孫は出力を握って待ちを終わらせず、`detached` の子には Backend の死が届かないため。
 - Backend の終了（`apps/backend/src/main.ts` の `exit`）は、口と ChatAgent を止めてから `process.exit` まで await を挟まない。await の間に token の口が新しい質問を受けると、止めた後に claude を起こすため。
@@ -82,6 +83,7 @@ review で差分に当てる規則。どれも判断が要るもので、理由�
 - テストが起こした process（Backend、偽の claude、偽の ptyd）は、居なくなるのを待ってから home を消す。走査の途中で他の process が子を消すと、Bun の `rmSync({ recursive: true, force: true })` は例外を出さずに止まり、home が TMPDIR に残るため。
 - 一時 directory は `finally` で消さず、hook（`afterAll` など）で消す。timeout で打ち切られた test は `finally` を飛ばすため。
 - hook は test file に書く。共有の module は片付けの関数を出し、呼び手の test file に登録させる（`scripts/oxlint/lint-probes.ts` の `cleanUpLintProbes`）。bun test は同じ process の test file どうしで module を使い回し、module の top level で登録した hook は最初に import した file にしか付かないため。
+- iOS の TS CI は `RemoteWorkbench.observe`・`openTerminal` と実 SQLite・Ledger・fake ptyd、実 Rust Shell relay の結合と境界 lint を見る。端末 lifecycle の実 PTY は Rust 試験で補う。native CI は実 URLSession の HTTPS/WSS・限定 trust・redirect・Keychain と、Simulator の実 WKWebView に同梱 React・xterm を載せる試験を見る。parse ACK だけで描画成功にせず、生成 style の適用と実 screenshot も確認する。Simulator 用の ad-hoc signature は Keychain 試験に必要だが、Apple account、証明書、provisioning profile は不要。実機署名・カメラ・実回線の試験とは区別して報告する。
 - bun test に DOM の環境（happy-dom など）を入れない。
 - GFM に合わせる markdown の読み（表のセルの区切り、backslash の escape）は、同じ入力を `gh api markdown -f mode=gfm -f text='…'` に通し、cmark-gfm の描画と比べて決める。cmark-gfm の文法（`ext_scanners.re`）を読むだけだと、re2c の最長一致を見落として読み違えるため。
 - 相手が body を読みやめられたこと（stream の cancel）を確かめるテストは、cancel が 200ms のうちに届くことを見る。Bun は読みやめたまま捨てた body も GC で 1 秒ほど後に cancel するので、長く待つと cancel を呼ばない実装も通るため。

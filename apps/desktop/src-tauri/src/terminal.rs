@@ -68,11 +68,43 @@ pub async fn terminal_resize(
 ) -> CmdResult<()> {
     off_main(move || {
         let client = app.state::<PtydHandle>().ensure_connected(&app)?;
-        client.notify(RequestOp::Resize {
-            session_id,
-            rows,
-            cols,
-        })
+        app.state::<PtydHandle>()
+            .sizes
+            .resize(&client, session_id, rows, cols)
     })
     .await
+}
+
+#[tauri::command]
+pub fn terminal_renderer_register(
+    app: AppHandle,
+    session_id: String,
+) -> monica_terminal_client::renderer::RendererGeneration {
+    app.state::<PtydHandle>().renderers.register(&session_id)
+}
+
+#[tauri::command]
+pub fn terminal_renderer_parsed(
+    app: AppHandle,
+    session_id: String,
+    generation: monica_terminal_client::renderer::RendererGeneration,
+    sequence: u64,
+) {
+    app.state::<PtydHandle>().renderers.parsed(
+        &session_id,
+        generation,
+        sequence,
+        std::time::Instant::now(),
+    );
+}
+
+#[tauri::command]
+pub fn terminal_renderer_remove(
+    app: AppHandle,
+    session_id: String,
+    generation: monica_terminal_client::renderer::RendererGeneration,
+) {
+    app.state::<PtydHandle>()
+        .renderers
+        .remove(&session_id, generation);
 }

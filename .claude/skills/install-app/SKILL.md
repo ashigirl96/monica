@@ -3,6 +3,8 @@ name: install-app
 description: 手元の source を release の Monica として build し、`/Applications` に入れ直して起動する。install-app・入れ直し・再起動を頼まれたときに使う。
 ---
 
+これは Mac の release を入れ替える手順。iPhone への導入、Simulator、Developer Mode と署名は `.claude/skills/ios-dev/SKILL.md` を読む。iOS の build だけを頼まれたときは Mac の app を入れ替えない。
+
 release の Monica はユーザーが毎日使う app で、この skill を呼んだこと自体が入れ替えの了承になる。
 
 1. `bun run install-app` を Bash の `run_in_background` で走らせ、出力は scratchpad の file に向ける。script が build → Monica の終了 → 入れ替え → 起動 → Backend の `/health` 待ちまでを行う（`scripts/install-app.ts`）。終了から起動までの間、Monica の Tab で会話を読んでいるユーザーには返事が見えないので、終わるまで質問を挟まない。

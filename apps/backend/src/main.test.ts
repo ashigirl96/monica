@@ -1,5 +1,5 @@
 import { afterEach, expect, setDefaultTimeout, test } from 'bun:test'
-import { existsSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 
 import { type contract as chatContract, MAX_ASK_BODY_BYTES } from '@monica/chat/contract'
@@ -792,4 +792,182 @@ test('the endpoint line on stdout carries the port and the full token, and not t
 
   expect(backend.announced).toEqual({ type: 'endpoint', port: backend.port, token: backend.token })
   expect(endpointFile(backend.home).token).toBe(backend.token)
+})
+
+// Synthetic test address; the successful TLS subprocess fixture binds isolated loopback.
+const syntheticTailnetAddress = [100, 64, 0, 1].join('.')
+const remoteBindEnv = (home: string) => ({
+  MONICA_TEST_REMOTE_BIND_LOG: join(home, 'remote-bind.jsonl'),
+})
+
+test('remote access is disabled by default, and failed Tailscale bind leaves the local token and Extension scopes intact', async () => {
+  const backend = await startBackend(freePort())
+  const status = await viaToken(backend, 'workbench/remote/status')
+  expect((await status.json()).json.state).toBe('disabled')
+  const { extensionToken } = endpointFile(backend.home)
+  for (const path of [
+    'status',
+    'enable',
+    'invite',
+    'approve',
+    'revoke',
+    'disable',
+    'renewIdentity',
+  ]) {
+    expect(
+      (await viaToken({ port: backend.port, token: extensionToken }, `workbench/remote/${path}`))
+        .status,
+    ).toBe(401)
+  }
+  await viaToken(backend, 'workbench/remote/enable', {
+    address: syntheticTailnetAddress,
+    port: freePort(),
+  })
+  expect((await (await viaToken(backend, 'workbench/remote/status')).json()).json.state).toBe(
+    'unavailable',
+  )
+  expect((await viaToken(backend, 'workbench/layout/get')).status).toBe(200)
+  const startupFailure = await startBackend(freePort(), (home) => {
+    const directory = join(home, 'remote')
+    mkdirSync(directory, { mode: 0o700 })
+    writeFileSync(
+      join(directory, 'settings.json'),
+      JSON.stringify({ address: syntheticTailnetAddress, port: freePort() }),
+      { mode: 0o600 },
+    )
+    return {}
+  })
+  expect(
+    (await (await viaToken(startupFailure, 'workbench/remote/status')).json()).json.state,
+  ).toBe('unavailable')
+  expect((await viaToken(startupFailure, 'workbench/layout/get')).status).toBe(200)
+  expect(
+    (await viaToken({ port: backend.port, token: extensionToken }, 'chat/ask', INVALID_QUESTION))
+      .status,
+  ).toBe(400)
+})
+
+test('the stdin-pipe Backend persists approved devices but discards invitations and pending requests across restart, closing remote TLS on exit', async () => {
+  const remotePort = freePort()
+  const preload = join(import.meta.dir, 'remote-loopback.preload.ts')
+  const backend = await startBackend(freePort(), remoteBindEnv, { preload })
+  await viaToken(backend, 'workbench/runspace/create', { rows: 24, cols: 80 })
+  const layoutBefore = (await (await viaToken(backend, 'workbench/layout/get')).json()).json
+  await viaToken(backend, 'workbench/remote/enable', {
+    address: syntheticTailnetAddress,
+    port: remotePort,
+  })
+  const { request } = await import('node:https')
+  const { checkServerIdentity } = await import('node:tls')
+  const identity = JSON.parse(
+    readFileSync(join(backend.home, 'remote', 'identity.json'), 'utf8'),
+  ) as { cert: string }
+  const remote = (path: string, credential: string, invitation?: string, body?: object) =>
+    new Promise<{ status: number; body: string }>((resolve, reject) => {
+      const req = request(
+        {
+          hostname: '127.0.0.1',
+          port: remotePort,
+          ca: identity.cert,
+          checkServerIdentity: (_host, cert) => checkServerIdentity(syntheticTailnetAddress, cert),
+          path,
+          method: body ? 'POST' : 'GET',
+          headers: {
+            authorization: `Bearer ${credential}`,
+            'x-monica-wire-version': '1',
+            ...(invitation && { 'x-monica-invitation': invitation }),
+            'content-type': 'application/json',
+          },
+        },
+        (res) => {
+          let text = ''
+          res.setEncoding('utf8')
+          res.on('data', (chunk) => {
+            text += chunk
+          })
+          res.on('end', () => resolve({ status: res.statusCode!, body: text }))
+        },
+      )
+      req.on('error', reject)
+      req.end(body && JSON.stringify(body))
+    })
+  const invite = async (b: Backend) =>
+    JSON.parse((await (await viaToken(b, 'workbench/remote/invite')).json()).json.payload) as {
+      invitation: string
+    }
+  const credential = `monica-remote-v1.${'a'.repeat(64)}`
+  const first = await invite(backend)
+  const registered = await remote('/registration/request', credential, first.invitation, {
+    version: 1,
+    name: 'iPhone',
+  })
+  expect(registered.status).toBe(202)
+  const id = (JSON.parse(registered.body) as { id: string }).id
+  await viaToken(backend, 'workbench/remote/approve', { id })
+  expect((await remote('/check', credential)).status).toBe(200)
+  for (const token of [backend.token, endpointFile(backend.home).extensionToken])
+    expect((await remote('/check', token)).status).toBe(401)
+  expect(
+    (await viaToken({ port: backend.port, token: credential }, 'workbench/layout/get')).status,
+  ).toBe(401)
+  expect((await remote('/rpc/workbench/layout/get', credential)).status).toBe(404)
+  expect((await remote('/workbench/layout/get', credential)).status).toBe(200)
+  expect(await usages(backend)).toContainEqual(
+    expect.objectContaining({
+      feature: 'workbench.layout.get',
+      caller: 'webview',
+      ok: 1,
+      failed: 0,
+    }),
+  )
+  const second = await invite(backend)
+  const pendingCredential = `monica-remote-v1.${'b'.repeat(64)}`
+  expect(
+    (
+      await remote('/registration/request', pendingCredential, second.invitation, {
+        version: 1,
+        name: 'Pending iPhone',
+      })
+    ).status,
+  ).toBe(202)
+  const fingerprint = (await (await viaToken(backend, 'workbench/remote/status')).json()).json
+    .identity.fingerprint
+  void backend.subprocess.stdin.end()
+  expect(await backend.subprocess.exited).toBe(0)
+  await expect(remote('/check', credential)).rejects.toThrow()
+  const restarted = await startBackend(freePort(), remoteBindEnv, { sharing: backend, preload })
+  expect((await remote('/registration/status', pendingCredential, undefined, {})).status).toBe(401)
+  expect(
+    (
+      await remote('/registration/request', pendingCredential, second.invitation, {
+        version: 1,
+        name: 'Old invite',
+      })
+    ).status,
+  ).toBe(401)
+  expect((await remote('/check', credential)).status).toBe(200)
+  const status = (await (await viaToken(restarted, 'workbench/remote/status')).json()).json
+  expect(status).toMatchObject({ state: 'listening', pending: null, identity: { fingerprint } })
+  expect(status.devices).toHaveLength(1)
+  expect((await (await viaToken(restarted, 'workbench/layout/get')).json()).json).toEqual(
+    layoutBefore,
+  )
+  expect(
+    readFileSync(join(backend.home, 'remote-bind.jsonl'), 'utf8')
+      .trim()
+      .split('\n')
+      .map((line) => JSON.parse(line)),
+  ).toEqual([
+    { address: syntheticTailnetAddress, port: remotePort },
+    { address: syntheticTailnetAddress, port: remotePort },
+  ])
+  await viaToken(restarted, 'workbench/remote/revoke', { id })
+  expect((await remote('/check', credential)).status).toBe(401)
+  restarted.subprocess.kill('SIGTERM')
+  expect(await restarted.subprocess.exited).toBe(0)
+  for (const process of [backend, restarted]) {
+    const lines = await process.stderr
+    expect(lines).not.toContain(credential)
+    expect(lines).not.toContain(first.invitation)
+  }
 })

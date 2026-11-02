@@ -7,6 +7,7 @@ import { WorkbenchHeader } from './header.tsx'
 import { followKeys } from './keys.ts'
 import { followMetaHold } from './meta-hold.ts'
 import { followNotificationClicks } from './notification-click.ts'
+import { RemoteManagement } from './remote-management.tsx'
 import { ResizeHandle } from './resize-handle.tsx'
 import { TileHeading, WorkbenchSidebar } from './sidebar.tsx'
 import {
@@ -123,6 +124,7 @@ export function Workbench({
         >
           <WorkbenchHeader />
           <TabContextMenu tabMenuItems={tabMenuItems} />
+          <RemoteManagement client={client} />
         </div>
         <div className="relative min-h-0 flex-1 p-2 pt-0" style={{ zoom: uiZoom }}>
           <div className="content-panel h-full overflow-hidden">

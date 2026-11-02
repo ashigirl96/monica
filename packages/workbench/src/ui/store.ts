@@ -131,7 +131,7 @@ export async function followWorkbenchChanges(
   for await (const change of changes) {
     // 読み直して Tab の無い Bench を出す前に渡し、slot が close の間の中身を決められるようにする。
     if (change.type === 'runspaceEmptied') store.get(lastTabClosedAtom)?.(change.runspaceId)
-    if (change.type !== 'agentSession') void reload()
+    if (change.type !== 'agentSession' && change.type !== 'remote') void reload()
     void reloadAgentSessions()
   }
 }
