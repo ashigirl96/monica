@@ -1,6 +1,8 @@
 import { Database } from 'bun:sqlite'
-import { afterEach, expect, mock, setSystemTime, spyOn, test } from 'bun:test'
+import { afterEach, expect, setSystemTime, test } from 'bun:test'
+import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 
 import { createRouterClient } from '@orpc/server'
 import { drizzle } from 'drizzle-orm/bun-sqlite'
@@ -8,22 +10,31 @@ import { migrate } from 'drizzle-orm/bun-sqlite/migrator'
 
 import { createNoteLedger, type Ghq, migrations, router } from './server.ts'
 
+const roots: string[] = []
+
 afterEach(() => {
   setSystemTime()
-  mock.restore()
+  for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true })
 })
 
-const noCheckouts: Ghq = { list: () => Promise.resolve([]) }
+const failingGhq: Ghq = { root: () => Promise.reject(new Error('no ghq root')) }
 
-function setup(ghq = noCheckouts) {
+function setup(ghq = failingGhq) {
   const db = drizzle(new Database(':memory:'))
   migrate(db, { migrationsFolder: migrations.folder, migrationsTable: migrations.table })
   const noteLedger = createNoteLedger({ db, home: tmpdir(), ghq })
   return createRouterClient(router, { context: { db, noteLedger } })
 }
 
+function ghqRootWith(...dirs: string[]): Ghq {
+  const root = mkdtempSync(join(tmpdir(), 'monica-ghq-'))
+  roots.push(root)
+  for (const dir of dirs) mkdirSync(join(root, dir), { recursive: true })
+  return { root: () => Promise.resolve(root) }
+}
+
 function checkouts(...paths: string[]): Ghq {
-  return { list: () => Promise.resolve(paths) }
+  return ghqRootWith(...paths.map((path) => `${path}/.git`))
 }
 
 const doc = (text: string) => ({
@@ -155,35 +166,34 @@ test('a deleted Note neither puts its Repo among the Repos with a Note nor moves
   expect(await client.repo.candidates()).toEqual(['other/repo', 'live/repo', 'checked/out'])
 })
 
-test('when ghq fails, the Repos are those with a Note', async () => {
-  const client = setup({ list: () => Promise.reject(new Error('ghq: command not found')) })
-  await client.repoNote.create({ repo: 'owner/repo' })
+test('a checkout is any directory at github.com/<owner>/<repo> with a .git, linked or not, whether or not it has a commit', async () => {
+  const ghq = ghqRootWith(
+    'github.com/plain/dir',
+    'github.com/deep/repo/nested/.git',
+    'github.com/acme/linked',
+    'github.com/acme/other/.git',
+    'github.com/not_an/owner/.git',
+    'elsewhere/.git',
+  )
+  const root = await ghq.root()
+  Bun.spawnSync(['git', 'init', join(root, 'github.com', 'acme', 'fresh')])
+  writeFileSync(join(root, 'github.com', 'acme', 'linked', '.git'), 'gitdir: /elsewhere\n')
+  symlinkSync(join(root, 'elsewhere'), join(root, 'github.com', 'acme', 'symlinked'))
+  const client = setup(ghq)
 
-  expect(await client.repo.candidates()).toEqual(['owner/repo'])
+  expect(await client.repo.candidates()).toEqual([
+    'acme/fresh',
+    'acme/linked',
+    'acme/other',
+    'acme/symlinked',
+  ])
 })
 
-test('ghq is cut off after 5 seconds without waiting for it to end, and the Repos are those with a Note', async () => {
-  const realSetTimeout = globalThis.setTimeout
-  let fireTimeout: (() => void) | undefined
-  spyOn(globalThis, 'setTimeout').mockImplementation(((callback: () => void, ms?: number) => {
-    if (ms !== 5000) return realSetTimeout(callback, ms)
-    fireTimeout = callback
-    return realSetTimeout(() => {}, 0)
-  }) as typeof setTimeout)
-  const listing = Promise.withResolvers<AbortSignal>()
-  // ghq の子が stdout を握って残ると、ghq を止めても list は終わらない。
-  const client = setup({
-    list: (signal) => {
-      listing.resolve(signal)
-      return new Promise(() => {})
-    },
-  })
-  await client.repoNote.create({ repo: 'owner/repo' })
+test('when ghq fails or its root has no github.com, the Repos are those with a Note', async () => {
+  for (const ghq of [failingGhq, ghqRootWith('gitlab.com/other/host/.git')]) {
+    const client = setup(ghq)
+    await client.repoNote.create({ repo: 'owner/repo' })
 
-  const candidates = client.repo.candidates()
-  const signal = await listing.promise
-  fireTimeout!()
-
-  expect(await candidates).toEqual(['owner/repo'])
-  expect(signal.aborted).toBe(true)
+    expect(await client.repo.candidates()).toEqual(['owner/repo'])
+  }
 })

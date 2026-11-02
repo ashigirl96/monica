@@ -132,8 +132,7 @@ export function git(cwd: string, ...args: string[]) {
 }
 
 // CI には git の user が無いので、commit に author を渡す。
-function initRepo(root: string, dir: string) {
-  git(root, 'init', '--initial-branch=main', dir)
+export function commitEmpty(dir: string) {
   git(
     dir,
     '-c',
@@ -145,6 +144,11 @@ function initRepo(root: string, dir: string) {
     '-m',
     'init',
   )
+}
+
+function initRepo(root: string, dir: string) {
+  git(root, 'init', '--initial-branch=main', dir)
+  commitEmpty(dir)
 }
 
 // worktree は Bench と同じく ghq の外に置く。

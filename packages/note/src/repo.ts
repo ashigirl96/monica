@@ -1,3 +1,5 @@
+import { dirname, join } from 'node:path'
+
 import { and, asc, desc, eq, isNotNull, isNull, lt, max, or, sql } from 'drizzle-orm'
 
 import { RepoSchema, type RepoNotesCursor, type RepoNotesPage } from './contract.ts'
@@ -7,8 +9,6 @@ import { idNumber, isRepo, noteId } from './row.ts'
 import { note } from './schema.ts'
 
 const REPO_NOTES_PAGE_SIZE = 100
-const GHQ_TIMEOUT_MS = 5000
-const GITHUB_PREFIX = 'github.com/'
 
 // Note は書いた時点の綴りを持ち続けるので、改名した Repo と checkout を消した Repo の Note には、ghq の checkout からは辿り着けない。
 export async function repoCandidates(db: Db, ghq: Ghq): Promise<string[]> {
@@ -35,27 +35,24 @@ function notedRepos(db: Db): string[] {
     .map((row) => row.repo!)
 }
 
+// checkout の置き場は ghq のレイアウトで深さが決まるので、ghq root の下を深くたどらずにその深さだけを見る。
 async function checkouts(ghq: Ghq): Promise<string[]> {
-  const controller = new AbortController()
-  // AbortSignal.timeout の timer はテストから進められないので、setTimeout で張る。
-  const timer = setTimeout(
-    () => controller.abort(new Error(`ghq list timed out after ${GHQ_TIMEOUT_MS / 1000}s`)),
-    GHQ_TIMEOUT_MS,
-  )
-  // ghq を kill しても、ghq の子が stdout を握って残ると list は終わらないので、ghq の終わりを待たない。
-  const cutOff = new Promise<never>((_, reject) => {
-    controller.signal.addEventListener('abort', () => reject(controller.signal.reason))
-  })
   try {
-    const paths = await Promise.race([ghq.list(controller.signal), cutOff])
-    return paths
-      .filter((path) => path.startsWith(GITHUB_PREFIX))
-      .map((path) => path.slice(GITHUB_PREFIX.length))
+    const github = join(await ghq.root(), 'github.com')
+    const repos = await Array.fromAsync(
+      new Bun.Glob('*/*/.git').scan({
+        cwd: github,
+        onlyFiles: false,
+        dot: true,
+        followSymlinks: true,
+      }),
+    )
+    return repos
+      .map((path) => dirname(path))
       .filter((repo) => RepoSchema.safeParse(repo).success)
+      .toSorted()
   } catch {
     return []
-  } finally {
-    clearTimeout(timer)
   }
 }
 
