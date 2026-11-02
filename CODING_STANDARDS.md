@@ -75,7 +75,7 @@ review で差分に当てる規則。どれも判断が要るもので、理由�
 - oRPC の client の procedure を記録するか差し替えるときは、client を `new Proxy` で包み、`get` でその key だけを替えて呼び手に渡す。client は property を読むたびに新しい Proxy を返すので、`spyOn` では差し替えられないため（`packages/task/src/ui/bench-close.test.ts`）。
 - 受けた値を `toMatchObject` に渡した後で読み直さない。Bun の `toMatchObject` は、受けた object の中で matcher（`expect.stringContaining` など）に当たった値を、その matcher に置き換えるため（Bun 1.4.2）。後で読む値は、渡す前に取り出す。
 - 外のサービスの fake（GitHub、ghq、ptyd）は、本物が引数で変える振る舞い（GraphQL の `states` や `includeClosedPrs` など）も再現する。引数を見ない fake では、query から引数を落としてもテストが通る。
-- 打ち切りのテストは、signal に応えない fake（終わらない promise を返す）で確かめる。signal で reject する fake では、打ち切りが相手の終わりを待つ実装でも通る。本物の process は kill されても、子が stdout を握れば出力が読み終わらない（`packages/note/src/repo.ts` の ghq）。
+- 打ち切りのテストは、signal に応えない fake（終わらない promise を返す）で確かめる。signal で reject する fake では、打ち切りが相手の終わりを待つ実装でも通る。本物の process は kill されても、子が stdout を握れば出力が読み終わらない。
 - テストが exec する偽の実行 file は、repo に置いた 1 つの file を指す symlink にする。sh の script を走らせる偽物（偽の `gh`、偽の login shell）は `@monica/workbench/testing` の `writeFakeExecutable`、偽の claude は `@monica/chat/testing` の `writeFakeClaude` で置く。macOS は新しく書いた実行 file を初めて exec するたびに system で 1 列に並ぶ検査（1 回 0.1〜1 秒）を挟み、並列の worker どうしが待ち合って 5 秒の timeout を落とすため。
 - 本番のコードが書いて exec する file（Tab の claude の wrapper、checkout の `setup.sh`、git hook）を直に exec するのは、その振る舞いを見るテストだけにする。setup を見ないテストの Repo には `setup.sh` を置かず、準備中の Bench が要るだけのテストは ghq の取得を pending の Promise にして止める。同じ wrapper を何度も exec するテストどうしは、home を 1 つにして使い回す（`packages/workbench/src/tab-env.test.ts`）。
 - 遅いテストの timeout を、test ごとの第 3 引数で引き上げない。1 本ごとに process を起こす file は、file の先頭の `setDefaultTimeout` で引き上げる（`apps/backend/src/main.test.ts`）。

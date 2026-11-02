@@ -3,7 +3,7 @@ import { mkdirSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
 
-import { cleanUp, ghqCheckout, setup } from './testing.ts'
+import { cleanUp, commitEmpty, ghqCheckout, git, setup } from './testing.ts'
 
 afterEach(cleanUp)
 
@@ -32,6 +32,44 @@ test('a directory in a checkout in the ghq layout, or in a worktree of it elsewh
     repo: 'acme/app',
     path: 'src',
     branch: 'issue-1',
+  })
+})
+
+test('a checkout in the ghq layout without a commit, and a directory in it, are in that Repo before and after the first commit', async () => {
+  const { client } = setup()
+  const { root } = ghqCheckout('acme/app')
+  const checkout = join(root, 'ghq', 'github.com', 'acme', 'fresh')
+  git(root, 'init', '--initial-branch=main', checkout)
+  mkdirSync(join(checkout, 'src'))
+
+  expect(await client.repo.of({ cwd: checkout })).toEqual({
+    repo: 'acme/fresh',
+    path: 'fresh',
+    branch: null,
+  })
+  expect(await client.repo.of({ cwd: join(checkout, 'src') })).toEqual({
+    repo: 'acme/fresh',
+    path: 'src',
+    branch: null,
+  })
+  commitEmpty(checkout)
+  expect(await client.repo.of({ cwd: join(checkout, 'src') })).toEqual({
+    repo: 'acme/fresh',
+    path: 'src',
+    branch: null,
+  })
+})
+
+test('a detached worktree of a checkout in the ghq layout is in that Repo without a branch', async () => {
+  const { client } = setup()
+  const { root, checkout } = ghqCheckout('acme/app')
+  const detached = join(root, 'worktrees', 'acme', 'app', 'detached')
+  git(checkout, 'worktree', 'add', '--detach', detached)
+
+  expect(await client.repo.of({ cwd: detached })).toEqual({
+    repo: 'acme/app',
+    path: 'detached',
+    branch: null,
   })
 })
 
