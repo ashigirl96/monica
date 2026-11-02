@@ -316,13 +316,16 @@
   background: currentColor;
 }
 
+/* 2 桁以上はマーカー列（2px〜26px）に収まらないので、本文との間隔を保ったまま左へ伸ばす。
+   editor の word-break を継ぐと "10." が途中で折れるため nowrap にする */
 [data-block-content="numbered"]::before {
   content: attr(data-marker);
-  left: 2px;
+  right: calc(100% - 26px);
   top: var(--jb-block-pad-y);
-  width: 24px;
+  min-width: 24px;
   padding-right: 6px;
   text-align: center;
+  white-space: nowrap;
   line-height: var(--jb-line);
   font-variant-numeric: tabular-nums;
 }
