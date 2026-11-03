@@ -67,19 +67,48 @@ test('only the newest term is open; pressing a folded one opens it instead', asy
   await ui.unmount()
 })
 
+const RUN = '**Run**: Agent Session 1 回分'
 const cases = [
-  { command: 'glossary', asks: 'model.complete', model: 'haiku' },
-  { command: 'glossary-session', asks: 'model.fork', model: undefined },
+  {
+    when: 'GLOSSARY.md names the term',
+    command: 'glossary',
+    glossary: RUN,
+    asks: 'model.complete',
+    model: 'haiku',
+  },
+  {
+    when: 'there is no GLOSSARY.md',
+    command: 'glossary',
+    glossary: undefined,
+    asks: 'model.fork',
+    model: undefined,
+  },
+  {
+    when: 'GLOSSARY.md never names the term',
+    command: 'glossary',
+    glossary: '**Bench**: Task の作業場所',
+    asks: 'model.fork',
+    model: undefined,
+  },
+  {
+    when: 'GLOSSARY.md names the term',
+    command: 'glossary-session',
+    glossary: RUN,
+    asks: 'model.fork',
+    model: undefined,
+  },
 ] as const
 
 for (const c of cases) {
-  test(`/${c.command} asks ${c.asks} on the side and shows its answer in the pane`, async ($, on) => {
+  test(`/${c.command} asks ${c.asks} when ${c.when}, and shows its answer in the pane`, async ($, on) => {
     const clock = mock.clock(on)
     on('command.register', (_, e) => ({ value: { command: e.name } }))
     on('tool.register', () => ({ value: { tool: 'mcp__glossary__show_terms' } }))
     on('ui.open', () => ({ value: { isPlaced: true } }))
     on('session.start', (_, e) => ({ cwd: e.cwd }))
-    on('fs.read', () => ({ value: '**Run**: Agent Session 1 回分' }))
+    on('fs.read', () =>
+      c.glossary === undefined ? { deny: 'no such file' } : { value: c.glossary },
+    )
     const asked: { event: string; prompt: string; model?: string }[] = []
     const answer = (event: string) => (_: unknown, e: { prompt: string; model?: string }) => {
       asked.push({ event, prompt: e.prompt, model: e.model })
@@ -107,7 +136,8 @@ for (const c of cases) {
     await clock.advance(1)
 
     expect(asked.map((a) => [a.event, a.model])).toEqual([[c.asks, c.model]])
-    expect(asked[0]?.prompt).toContain('**Run**: Agent Session 1 回分')
+    expect(asked[0]?.prompt).toContain(c.glossary ?? '<glossary>\n\n</glossary>')
+    expect(asked[0]?.prompt.includes('このセッションの会話')).toBe(c.asks === 'model.fork')
     const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
     expect(await ui.find({ type: 'Text', text: /Agent Session 1 回分/ })).toBeDefined()
     expect(await ui.find({ type: 'Text', text: /調べています/ })).toBeUndefined()

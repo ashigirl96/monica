@@ -55,10 +55,12 @@ const parseTerm = (text: string): Term | undefined => {
   }
 }
 
-const lookUp = async ($: EngineInterface, term: string, withSession: boolean) => {
+const lookUp = async ($: EngineInterface, term: string, asked: boolean) => {
   await update($, pending, (list) => [...list, term])
   try {
     const glossary = await $.fs.read('GLOSSARY.md').catch(() => '')
+    // With no GLOSSARY.md, or one that never names the term, only the conversation can say what it means here.
+    const withSession = asked || !glossary.toLowerCase().includes(term.toLowerCase())
     const prompt = askPrompt(term, glossary, withSession)
     let reply: ModelForkResult = withSession
       ? await $.model.fork({ prompt })
@@ -98,7 +100,7 @@ export const register: Register = (on) => {
     await $.command.register({
       name: 'glossary',
       description:
-        '用語を GLOSSARY.md から軽く調べ、用語辞典の pane に出す（引数なしなら開くだけ）',
+        '用語を GLOSSARY.md から軽く調べ、用語辞典の pane に出す（GLOSSARY.md に無い語は会話から。引数なしなら開閉）',
     })
     await $.command.register({
       name: 'glossary-session',
