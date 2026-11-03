@@ -117,7 +117,11 @@ test('run opens a new Tab at the end of the Bench, starts its shell at 24x80 and
   await typedInto(fixture, output.terminalSessionId)
   expect(fixture.ptyd.sessionRequests()).toMatchObject([
     { op: 'create', session_id: output.terminalSessionId, cwd: fixture.cwd, rows: 24, cols: 80 },
-    { op: 'write', session_id: output.terminalSessionId, data: "claude '/tackle'\r" },
+    {
+      op: 'write',
+      session_id: output.terminalSessionId,
+      data: "claude --effort medium --model opus '/tackle'\r",
+    },
   ])
 })
 
@@ -127,7 +131,13 @@ test("a prompt with ' in it reaches claude as one argument, with nothing in it e
 
   const output = await fixture.client.run({ ref, prompt })
 
-  expect(await argvTypedInto(fixture, output.terminalSessionId)).toEqual([prompt])
+  expect(await argvTypedInto(fixture, output.terminalSessionId)).toEqual([
+    '--effort',
+    'medium',
+    '--model',
+    'opus',
+    prompt,
+  ])
 })
 
 test.each([
@@ -165,7 +175,7 @@ test('run of an untracked Issue tracks it, prepares its Bench and starts claude 
     { ref, title: 'Ship it', cwd: fixture.cwd },
   ])
   expect((await typedInto(fixture, output.terminalSessionId)).at(-1)).toMatchObject({
-    data: "claude '/tackle'\r",
+    data: "claude --effort medium --model opus '/tackle'\r",
   })
 })
 
@@ -208,7 +218,11 @@ test('run returns while ptyd cannot be reached, leaving its Tab starting; once p
   expect(await fixture.settled(output.terminalSessionId)).toMatchObject({ status: 'running' })
   expect(revived.sessionRequests()).toMatchObject([
     { op: 'create', session_id: output.terminalSessionId },
-    { op: 'write', session_id: output.terminalSessionId, data: "claude '/tackle'\r" },
+    {
+      op: 'write',
+      session_id: output.terminalSessionId,
+      data: "claude --effort medium --model opus '/tackle'\r",
+    },
   ])
 })
 
@@ -234,7 +248,7 @@ test("run resumes the claude of the last Run once it has ended, sending it no /t
   ])
   expect(await typedInto(fixture, second.terminalSessionId)).toMatchObject([
     { op: 'create', cwd: where, rows: 24, cols: 80 },
-    { op: 'write', data: "claude --resume 's-1'\r" },
+    { op: 'write', data: "claude --effort medium --model opus --resume 's-1'\r" },
   ])
   expect(runsOf(fixture)).toEqual([{ agentSessionId: 's-1' }])
   expect(await stateOf(fixture)).toMatchObject({ state: 'waiting', reason: 'idle' })
@@ -248,7 +262,7 @@ test('a resume passes the prompt given after the Agent Session', async () => {
 
   expect(output.resumed).toBe('s-1')
   expect((await typedInto(fixture, output.terminalSessionId)).at(-1)).toMatchObject({
-    data: "claude --resume 's-1' 'fix the review comments'\r",
+    data: "claude --effort medium --model opus --resume 's-1' 'fix the review comments'\r",
   })
 })
 
@@ -311,7 +325,7 @@ test("run starts a new claude when the Task's Runs all began before its Bench, a
 
   expect(output.resumed).toBeNull()
   expect((await typedInto(fixture, output.terminalSessionId)).at(-1)).toMatchObject({
-    data: "claude '/tackle'\r",
+    data: "claude --effort medium --model opus '/tackle'\r",
   })
 })
 
@@ -323,7 +337,7 @@ test('run starts a new claude rather than resume one that left no Agent Session 
 
   expect(output.resumed).toBeNull()
   expect((await typedInto(fixture, output.terminalSessionId)).at(-1)).toMatchObject({
-    data: "claude '/tackle'\r",
+    data: "claude --effort medium --model opus '/tackle'\r",
   })
 })
 
@@ -434,7 +448,7 @@ test('run --force starts a new Run of a Task whose Issue is closed', async () =>
   const output = await fixture.client.run({ ref, force: true })
 
   expect((await typedInto(fixture, output.terminalSessionId)).at(-1)).toMatchObject({
-    data: "claude '/tackle'\r",
+    data: "claude --effort medium --model opus '/tackle'\r",
   })
 })
 
@@ -481,7 +495,7 @@ test('run --force starts a new Run past the open Blockers', async () => {
   const output = await fixture.client.run({ ref, force: true })
 
   expect((await typedInto(fixture, output.terminalSessionId)).at(-1)).toMatchObject({
-    data: "claude '/tackle'\r",
+    data: "claude --effort medium --model opus '/tackle'\r",
   })
 })
 
@@ -523,7 +537,7 @@ test('when GitHub cannot be reached, run judges the gate on the copy and warns h
     ),
   ])
   expect((await typedInto(fixture, output.terminalSessionId)).at(-1)).toMatchObject({
-    data: "claude '/tackle'\r",
+    data: "claude --effort medium --model opus '/tackle'\r",
   })
 })
 
