@@ -119,15 +119,6 @@
         "vite": "catalog:",
       },
     },
-    "mods/glossary": {
-      "name": "@monica/mod-glossary",
-    },
-    "mods/mermaid-render": {
-      "name": "@monica/mod-mermaid-render",
-      "dependencies": {
-        "beautiful-mermaid": "catalog:",
-      },
-    },
     "packages/chat": {
       "name": "@monica/chat",
       "dependencies": {
@@ -455,10 +446,6 @@
     "@monica/extension": ["@monica/extension@workspace:apps/extension"],
 
     "@monica/job": ["@monica/job@workspace:packages/job"],
-
-    "@monica/mod-glossary": ["@monica/mod-glossary@workspace:mods/glossary"],
-
-    "@monica/mod-mermaid-render": ["@monica/mod-mermaid-render@workspace:mods/mermaid-render"],
 
     "@monica/note": ["@monica/note@workspace:packages/note"],
 
