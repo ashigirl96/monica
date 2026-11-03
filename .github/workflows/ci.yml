@@ -38,6 +38,19 @@ jobs:
           fetch-depth: 0
       - run: docker run --rm -v "$PWD:/repo" --workdir /repo zricethezav/gitleaks:v8.30.1 git --redact --no-banner
 
+  # 対象の file の一覧は verify-terminal-sessions の SKILL.md が持つので、paths で絞らず毎回流す。
+  tla:
+    name: tla
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+      - uses: jdx/mise-action@v5
+        with:
+          install: false
+          cache: false
+      - run: sh .claude/skills/verify-terminal-sessions/check.sh
+
   # job 単位の paths filter は GitHub Actions に無く、macOS の runner は待ちが長いので、変更の判定は ubuntu で行う。
   changes:
     name: changes
