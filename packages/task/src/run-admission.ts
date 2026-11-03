@@ -18,7 +18,14 @@ import type { GitHubIssue } from './github.ts'
 import { type FoundTask, TaskStateRefusal, taskIfTracked } from './open-task.ts'
 import { key, parsedOrNull, readIssue, readIssues } from './read-issues.ts'
 import { formatRef, type IssueRef, parseRef } from './ref.ts'
-import { type Launch, newRun, openRun, refuseUnsendable, resumeOf } from './run-claude.ts'
+import {
+  type Launch,
+  newRun,
+  openRun,
+  refuseUnforkable,
+  refuseUnsendable,
+  resumeOf,
+} from './run-claude.ts'
 import { liveRunsOf, runToResume } from './run.ts'
 import { issue } from './schema.ts'
 import type { SyncDeps } from './sync.ts'
@@ -27,11 +34,17 @@ type Deps = SyncDeps & BenchDeps
 
 type Via = 'cli' | 'button'
 
-type Rules = { via: Via; force: boolean }
+type Rules = { via: Via; force: boolean; fork?: string }
 
 type RunErrors = ORPCErrorConstructorMap<typeof runErrors>
 
-type CliRequest = { via: 'cli'; prompt?: string; force?: boolean; inPlace?: boolean }
+type CliRequest = {
+  via: 'cli'
+  prompt?: string
+  force?: boolean
+  inPlace?: boolean
+  fork?: string
+}
 
 type ButtonRequest = { via: 'button'; run: Pressable }
 
@@ -91,11 +104,12 @@ export function admitRun(
 async function admitFromCli(
   deps: Deps,
   ref: string,
-  { prompt, force = false, inPlace }: CliRequest,
+  { prompt, force = false, inPlace, fork }: CliRequest,
   errors: RunErrors,
 ): Promise<RunOutput> {
   refuseUnsendable(prompt)
-  const rules: Rules = { via: 'cli', force }
+  refuseUnforkable(deps.db, fork)
+  const rules: Rules = { via: 'cli', force, fork }
   try {
     const { found, tracked } = await findOrTrack(deps, parseRef(ref))
     if (found.bench) refuseInPlace(found.bench, inPlace, formatRef(found.issue))
@@ -196,7 +210,7 @@ async function launch(
     if (!isLaunchable(decided)) throw new Refused(decided)
     launching = decided
     typed = rules.via === 'button' ? decided.kind && promptOf(decided.kind, facts) : prompt
-    opening = await newRun(deps, starting.found, inPlace, starting.warnings)
+    opening = await newRun(deps, starting.found, inPlace, starting.warnings, rules.fork)
   }
   return openRun(deps, opening, { prompt: typed, tracked: admitted.tracked }, (tx, current) => {
     // GitHub と Bench の準備を待つ間に、この Task か spec の Run が起動しうる。
@@ -324,7 +338,8 @@ function fromLedger(
       forceHint: 'pass --force to run it anyway',
     })
   }
-  const resumable = found?.bench && runToResume(reader, found.issue.id, found.bench)
+  const resumable =
+    rules.fork === undefined && found?.bench && runToResume(reader, found.issue.id, found.bench)
   return resumable ? { type: 'resume', resumable } : undefined
 }
 

@@ -89,6 +89,10 @@ export const RunOutputSchema = z.object({
   tabId: z.string(),
   terminalSessionId: z.string(),
   resumed: z.string().nullable().describe('the Agent Session resumed, or null for a new claude'),
+  forked: z
+    .string()
+    .nullable()
+    .describe('the Agent Session forked into the new claude, or null when nothing was forked'),
 })
 
 export const runErrors = {
@@ -276,6 +280,12 @@ export const contract = {
           .boolean()
           .optional()
           .describe('start a new Run even when the Issue has open Blockers'),
+        fork: z
+          .string()
+          .optional()
+          .describe(
+            'fork this Agent Session into the new claude instead of starting a new conversation',
+          ),
       }),
     )
     .output(RunOutputSchema),

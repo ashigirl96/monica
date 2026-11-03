@@ -1,7 +1,9 @@
 import { existsSync } from 'node:fs'
 
-import type { Tx } from '@monica/workbench/server'
+import { agentSession } from '@monica/workbench/schema'
+import type { Db, Tx } from '@monica/workbench/server'
 import { ORPCError } from '@orpc/server'
+import { eq } from 'drizzle-orm'
 
 import { type Bench, type BenchDeps, prepareBench } from './bench.ts'
 import type { RunOutput } from './contract.ts'
@@ -16,6 +18,7 @@ export type Launch = {
   warnings: string[]
   tabCwd: string
   resumed: string | null
+  forked: string | null
 }
 
 /** Bench の新しい Tab で claude を打つ。`recheck` は Tab を開く transaction の中で呼び、throw すれば Tab を開かない。 */
@@ -47,6 +50,7 @@ export function openRun(
     warnings: launch.warnings,
     ...opened,
     resumed: launch.resumed,
+    forked: launch.forked,
   }
 }
 
@@ -63,6 +67,7 @@ export function resumeOf(
     warnings: [],
     tabCwd: existsSync(last.cwd) ? last.cwd : row.cwd,
     resumed: last.agentSessionId,
+    forked: null,
   }
 }
 
@@ -71,6 +76,7 @@ export async function newRun(
   synced: FoundTask,
   inPlace: boolean | undefined,
   warnings: string[],
+  fork: string | undefined,
 ): Promise<Launch> {
   const prepared = await prepareBench(deps, synced, inPlace)
   return {
@@ -81,6 +87,7 @@ export async function newRun(
     warnings: [...warnings, ...prepared.warnings],
     tabCwd: prepared.bench.cwd,
     resumed: null,
+    forked: fork ?? null,
   }
 }
 
@@ -99,15 +106,32 @@ export function refuseUnsendable(prompt: string | undefined) {
     throw unsendable('starts with -, which claude would read as an option')
 }
 
+// claude --resume は Agent Session Transcript から会話を読むので、それの無い Agent Session を fork した claude は Tab で落ちる。
+export function refuseUnforkable(reader: Pick<Db, 'select'>, fork: string | undefined) {
+  if (fork === undefined) return
+  const seen = reader
+    .select({ transcriptPath: agentSession.transcriptPath })
+    .from(agentSession)
+    .where(eq(agentSession.sessionId, fork))
+    .get()
+  if (!seen) throw new ORPCError('NOT_FOUND', { message: `no Agent Session ${fork} to fork` })
+  if (seen.transcriptPath === null || !existsSync(seen.transcriptPath)) {
+    throw new ORPCError('PRECONDITION_FAILED', {
+      message: `Agent Session ${fork} has no Agent Session Transcript to fork`,
+    })
+  }
+}
+
 function unsendable(reason: string) {
   return new ORPCError('BAD_REQUEST', { message: `the prompt ${reason}` })
 }
 
 // resume する claude は tackle の途中か後なので、既定の prompt を送ると branch を切るところからやり直す。
-function claudeCommand({ resumed }: Launch, prompt: string | undefined): string {
+function claudeCommand({ resumed, forked }: Launch, prompt: string | undefined): string {
+  const forkArgs = forked === null ? [] : ['--resume', quote(forked), '--fork-session']
   const words =
     resumed === null
-      ? [quote(prompt ?? DEFAULT_PROMPT)]
+      ? [...forkArgs, quote(prompt ?? DEFAULT_PROMPT)]
       : ['--resume', quote(resumed), ...(prompt === undefined ? [] : [quote(prompt)])]
   return ['claude', '--effort', 'medium', '--model', 'opus', ...words].join(' ')
 }

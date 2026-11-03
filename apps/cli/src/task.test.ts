@@ -1,5 +1,5 @@
 import { afterEach, expect, test } from 'bun:test'
-import { mkdirSync, mkdtempSync, rmSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
@@ -105,7 +105,7 @@ function inPlaceBench() {
     home: scratch,
     ghq: { root: () => Promise.resolve(scratch), get: () => Promise.resolve() },
   })
-  return { ...backend, checkout }
+  return { ...backend, checkout, home: scratch }
 }
 
 test('task run prints where the Bench is, that claude started, and that GitHub could not be reached', async () => {
@@ -160,6 +160,32 @@ test('task run exits 1 naming the open Blockers, and --force starts claude past 
   })
   expect(forced.code).toBe(0)
   expect(forced.stdout).toContain('started claude in a new Tab\n')
+})
+
+test('task run --fork prints that it forked claude from the Agent Session', async () => {
+  const { connect, checkout, home } = inPlaceBench()
+  const terminalSessionId = await openTabOutsideBench(connect())
+  const transcriptPath = join(home, 's-0.jsonl')
+  writeFileSync(transcriptPath, '{}\n')
+  await connect().workbench.agentSession.recordHook({
+    terminalSessionId,
+    payload: {
+      session_id: 's-0',
+      cwd: '/work',
+      hook_event_name: 'SessionStart',
+      transcript_path: transcriptPath,
+    },
+  })
+
+  const result = await monica(
+    ['task', 'run', 'acme/app#12', '--in-place', '--fork', 's-0'],
+    connect,
+  )
+
+  expect(result.code).toBe(0)
+  expect(result.stdout).toStartWith(
+    `opened the Bench of acme/app#12 at ${checkout}\nforked claude s-0 into a new Tab\n`,
+  )
 })
 
 test('task run exits 1 with the reason and the log path when the Bench cannot be prepared', async () => {

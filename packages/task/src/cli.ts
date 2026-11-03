@@ -53,11 +53,15 @@ export const formatters = {
     }
     return lines.join('\n')
   },
-  run({ ref, title, tracked, cwd, benchCreated, resumed, warnings }: RunOutput): string {
+  run({ ref, title, tracked, cwd, benchCreated, resumed, forked, warnings }: RunOutput): string {
     return [
       ...(tracked ? [`tracked ${ref} (${title})`] : []),
       benchCreated ? `opened the Bench of ${ref} at ${cwd}` : `the Bench of ${ref} is at ${cwd}`,
-      resumed ? `resumed claude ${resumed} in a new Tab` : 'started claude in a new Tab',
+      resumed
+        ? `resumed claude ${resumed} in a new Tab`
+        : forked
+          ? `forked claude ${forked} into a new Tab`
+          : 'started claude in a new Tab',
       ...warningLines(warnings),
     ].join('\n')
   },

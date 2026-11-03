@@ -6,6 +6,7 @@
 
 - `task-run`: Issue を Task にし、Bench を作り、Tab で claude を起こす。
 - `task-run-in-place`: worktree を作らず checkout のまま Bench にする。
+- `task-run-fork`: 指定した Agent Session の会話を fork した claude を Bench の新しい Tab で起こす。
 - `task-setup`: Bench の準備で `.monica/setup.sh` が走り、成功・失敗が分かる。
 - `task-show`: Task と Run を見る。
 - `task-close`: worktree・branch・Runspace を消す。
@@ -13,7 +14,7 @@
 
 ## How to get to it (user POV)
 
-- CLI の `monica task run <ref> [prompt]`・`task list`・`task show <ref>`・`task close <ref>`・`task reopen <ref>`。
+- CLI の `monica task run <ref> [prompt] [--fork <id>]`・`task list`・`task show <ref>`・`task close <ref>`・`task reopen <ref>`。
 - desktop の sidebar の Task のラベルと Bench の Tab。
 
 ## Driving it with headless の Backend と一時の ghq
@@ -27,6 +28,7 @@ Preconditions:
 - **checkout を作る.** `monica task run --in-place <ref>` を流す。exit 0 で、`monica-<name>-ghq` の下に clone ができ、`task list` に出る。
 - **一時の origin に向ける.** `surfaces/headless.md` の「Task の Bench を確かめる」の 3 の script で、`.monica/setup.sh` を持つ main を一時の origin に push し、checkout の `origin` を向け直す。`monica-<name>` の部分を自分の名前に置き換える。
 - **Bench を作る.** 別の Issue で `monica task run <ref>` を流す。`git -C <checkout> worktree list` に新しい worktree と branch `issue-<n>` が出る。`task show <ref>` に Run が出る。
+- **会話を fork する.** monica の Tab で起こした claude に 1 往復話してから、その Tab で `monica task run <ref> --fork "$CLAUDE_CODE_SESSION_ID"` を流す。出力に `forked claude <id> into a new Tab` が出て、Bench の新しい Tab の claude が元の会話を覚えており、`task show <ref>` に元と違う Agent Session の新しい Run が出る。
 - **準備の失敗を見る.** mode file に `fail` を書いてから run する。`task show` か `err.log` に setup の失敗が出る。
 - **片付ける.** `monica task close <ref>` を流す。worktree と branch が消え、`task list` から消える。
 - **証拠.** 各段の command と出力、`worktree list` と `git branch` を `$E/task-bench.transcript` に残す。
