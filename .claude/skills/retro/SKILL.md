@@ -7,7 +7,7 @@ description: "コーディングセッションの retrospective を行い、age
 
 ## 手順
 
-1. Skill tool で `mattpocock-skills:writing-for-agents` を呼び、書き方のガイドを読む。
+1. Skill tool で `dawkinsuke:writing-for-agents` を呼び、書き方のガイドを読む。
 
 2. 対象のセッションの一次資料を読む。このマシンのセッションログを探すこともある。セッションの指定が無ければ、現在のセッションを対象にする。
 
@@ -40,4 +40,4 @@ repo の次のファイルを使える。
 - `CLAUDE.md`/`AGENTS.md`: この repo で働くすべての agent の context window に入る。ごく控えめに、たいていは他のファイルへの **navigation pointer** だけに使う。
 - `CODING_STANDARDS.md`: 実装ではなくレビューのときに読まれる。1,000 行を超えたら、docs フォルダへの **navigation pointer** を足す。
 - Docs: 参照用のファイルとして使い、他のファイルから指す。新しく書く前に既存の docs を探す。
-- Skills: docs として使う（description が agent の context window に入るため）か、ユーザーが呼ぶコマンドとして使う。`mattpocock-skills:writing-for-agents` の助言に従う。
+- Skills: docs として使う（description が agent の context window に入るため）か、ユーザーが呼ぶコマンドとして使う。`dawkinsuke:writing-for-agents` の助言に従う。
