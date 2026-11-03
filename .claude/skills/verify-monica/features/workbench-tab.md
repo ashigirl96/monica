@@ -23,7 +23,7 @@ Preconditions:
 - `doctor.sh <name>` が `OK`。
 - 新しい home なので `monica workbench terminal-session list` は空。
 
-- **Runspace を開く.** RPC の `workbench.runspace.create` を `{ cwd: "$E" }` で呼ぶ（呼び方は `surfaces/headless.md` の「確かめる」の RPC）。応答の `tab.id` と `tab.terminalSessionId` を控える。`monica workbench terminal-session list --format json` にその id が出る。
+- **Runspace を開く.** RPC の `workbench.runspace.create` を `{ cwd: "$E", rows: 24, cols: 80 }` で呼ぶ。`rows` と `cols` は正の整数で必須で、無いと `BAD_REQUEST`（`Input validation failed`）で断られる（呼び方は `surfaces/headless.md` の「確かめる」の RPC）。応答の `tab.id` と `tab.terminalSessionId` を控える。`monica workbench terminal-session list --format json` にその id が出る。
 - **打ち込む.** ptyd の socket に `write` を送る（`surfaces/headless.md` の「Tab への打ち込みと画面」）。data は `echo verify-ok > tab-proof.txt; echo done\r` の base64。`$E/tab-proof.txt` に `verify-ok` が書かれる。
 - **画面を読む.** 同じ節の `attach` の `replay` を解いて読む。末尾に `done` の行がある。解いた文字を `$E/workbench-tab.screen.txt` に残す。
 - **process を見る.** `monica workbench tab show <tab-id>` を流す。shell の行の MARK が `shell` で、STAT が生きている。
