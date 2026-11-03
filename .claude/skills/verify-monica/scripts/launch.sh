@@ -30,6 +30,8 @@ mkdir -p "$home" "$evidence"
 # 同じ name で前に起こした回の [launch exited] を doctor.sh --wait が拾わないよう、log を空にしてから始める。
 : > "$evidence/err.log"
 : > "$evidence/out.jsonl"
+# 前の回の pid は別の process に使い回されていることがある。
+rm -f "$evidence/stdin.pid"
 trap 'echo "[launch exited]" >> "$evidence/err.log"' EXIT
 # 同じ name の home で前に動いた claude の記録を消さないよう、起動の前からある dir を控える。
 ls -d "$HOME"/.claude/projects/*monica-"$name"* > "$evidence/claude-projects.before" 2> /dev/null || true
@@ -57,6 +59,9 @@ sh -c 'echo $$ > "$0"; exec sleep 2147483647' "$evidence/stdin.pid" | {
     MONICA_HOME="$home" MONICA_PTYD_PATH="$ptyd" "$@" \
     "$entry" ${script:+"$script"} >> "$evidence/out.jsonl" 2>> "$evidence/err.log" || status=$?
   # 左の sleep は何も書かないので SIGPIPE を受けず、止めないと Backend が落ちても pipeline が終わらない。
+  # Backend がすぐ落ちると、左がまだ pid を書いていないことがある。
+  i=0
+  while [ ! -s "$evidence/stdin.pid" ] && [ $i -lt 50 ]; do sleep 0.1; i=$((i + 1)); done
   kill "$(cat "$evidence/stdin.pid" 2> /dev/null)" 2> /dev/null || true
   exit $status
 }

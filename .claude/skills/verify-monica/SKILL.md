@@ -78,9 +78,8 @@ exit code は 0 = 成功、1 = それ以外の失敗、2 = Backend 不在。CLI 
 ```
 
 - 起こしたときの stdin の sleep を pid file から止め（Backend は EOF で抜ける）、残った ptyd を `dev:kill` で止めて home を消す。名前で process を探して殺さない。
-- Task の Bench を確かめたときの `monica-<name>-ghq`・`monica-<name>-origin`・`monica-<name>-mode` と、Tab の claude が作った `~/.claude/projects` の dir も消す。どちらも、自分の instance のものだけを消す。
-  - `monica-<name>-ghq` などが別の instance の home（`monica.db` か `backend.json` がある）なら残す。
-  - `~/.claude/projects` の dir の名前は `/` と `-` を見分けず、別の instance の記録が同じ dir に混ざりうるので、中の記録の `cwd` がどれも自分の home か Bench の一時 directory の下にある dir だけを選ぶ。そのうち、`launch.sh` が起動の前に控えた一覧にあるもの（同じ名前の home で前に動いた claude の記録。`surfaces/desktop.md` は worktree の名前で home を固定する）は残す。
+- Task の Bench を確かめたときの `monica-<name>-ghq`・`monica-<name>-origin`・`monica-<name>-mode` も消す。それが別の instance の home（`monica.db` か `backend.json` がある）なら残す。
+- Tab の claude が作った `~/.claude/projects` の記録は消さない。取り戻せず、dir の名前は `/` と `-` を見分けないので持ち主も決まらない（`monica-s2/foo` と `monica-s2-foo` が同じ名前になる）。起動の後に名前の当たる dir ができていれば、`消さずに残した` の行で挙げる。
 - Backend が 10 秒で抜けなければ、home を消さずに `NG` で止める。
 - `OK 片付いた` の行で終わる。`NG` なら `bun run dev:list` で `monica-<name>` の行を見る。
 - 失敗した試行の後にも流す。止まらない Backend や port を残さない。

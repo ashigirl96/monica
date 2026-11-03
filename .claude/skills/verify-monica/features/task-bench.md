@@ -34,5 +34,5 @@ Preconditions:
 ## Gotchas
 
 - `cleanup.sh` は `monica-<name>-ghq`・`-origin`・`-mode` を消す。名前の付け方を変えると消し残る。
-- Tab で本物の claude が起きる。Agent Session Transcript が `~/.claude/projects` に残る。記録の `cwd` がどれも home か `monica-<name>-ghq` の下にあり、起動の後に増えた分を `cleanup.sh` が消す。
+- Tab で本物の claude が起きる。Agent Session Transcript が `~/.claude/projects` に残る。取り戻せないので `cleanup.sh` は消さず、起動の後にできた dir を挙げる。
 - GitHub に届かない環境では最初の run が落ちる。その時は `task-*` を確かめられなかったと報告し、`--in-place` 以外の入口を別の手で代えない。

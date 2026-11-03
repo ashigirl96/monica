@@ -27,50 +27,23 @@ fi
 is_home() { [ -e "$1/monica.db" ] || [ -e "$1/ptyd.pid" ] || [ -e "$1/backend.json" ]; }
 
 # Task の Bench の一時 directory。名前が monica-<name>-ghq の別の instance の home は残す。
-real_home=$(cd "$tmp" && pwd -P)/monica-$name
-set -- "$real_home"
 for x in ghq origin mode; do
   [ -e "$home-$x" ] || continue
   if is_home "$home-$x"; then
     echo "$home-$x は別の instance の home なので残した"
   else
-    set -- "$@" "$real_home-$x"
+    rm -rf "$home-$x" && echo "$home-$x を消した"
   fi
 done
 
-# claude の記録の dir の名前は / と - を見分けず、別の instance の記録が同じ dir に混ざりうるので、
-# 中の記録の cwd がどれもこの instance の下にある dir だけを選ぶ。
-owned() {
-  dir=$1
-  shift
-  cwds=$(grep -rhoE '"cwd":"[^"]*"' "$dir" 2> /dev/null | sort -u | sed 's/^"cwd":"//; s/"$//')
-  [ -n "$cwds" ] || return 1
-  printf '%s\n' "$cwds" | while IFS= read -r cwd; do
-    mine=no
-    for root; do
-      case $cwd in "$root" | "$root"/*) mine=yes ;; esac
-    done
-    [ $mine = yes ] || exit 1
-  done
-}
+# claude の記録は取り戻せず、dir の名前（/ と - を見分けない）からは持ち主も決まらないので、消さずに挙げる。
 before=$evidence/claude-projects.before
 if [ -f "$before" ]; then
   for d in "$HOME"/.claude/projects/*monica-"$name"*; do
-    [ -d "$d" ] || continue
-    owned "$d" "$@" || continue
-    if grep -qxF "$d" "$before"; then
-      echo "$d は起動の前からあったので残した"
-    else
-      rm -rf "$d" && echo "$d を消した"
-    fi
+    [ -d "$d" ] && ! grep -qxF "$d" "$before" && echo "起動の後に名前の当たる claude の記録の dir ができた（消さずに残した）: $d"
   done
   rm -f "$before"
-else
-  echo "$before が無いので、~/.claude/projects には触れなかった"
 fi
-
-shift
-for d; do rm -rf "$d" && echo "$d を消した"; done
 
 # Backend が抜けても ptyd と、同じ home の Brave は残る。
 if [ -d "$home" ]; then

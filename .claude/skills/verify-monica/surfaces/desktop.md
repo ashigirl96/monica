@@ -145,6 +145,6 @@ dev の desktop は `MONICA_HOME` ごとに identifier と vite の port が分�
 
 自分で起こした desktop は、`bun run dev:kill monica-<名前>` で desktop → Backend → ptyd の順に止め、home を消す。desktop が止まると background の job も終わる。
 
-Tab で claude を起こしたなら、claude が cwd ごとに作る `~/.claude/projects/<cwd の / と . を - にした名前>` と、clipboard の画像を保存した directory（Agent Session Transcript の `[Image: source: …]` にある `images/` の 2 つ上）も消す。
+Tab で claude を起こしても、claude が cwd ごとに作る `~/.claude/projects/<cwd の / と . を - にした名前>` と、clipboard の画像を保存した directory（Agent Session Transcript の `[Image: source: …]` にある `images/` の 2 つ上）は消さない。どちらも取り戻せず、dir の名前は `/` と `-` を見分けないので、同じ名前の home で前に動いた claude の記録と区別できない。作った path を報告に書く。
 
 片付いたのは、`bun run dev:list` に `monica-<名前>` の行が無いとき。
