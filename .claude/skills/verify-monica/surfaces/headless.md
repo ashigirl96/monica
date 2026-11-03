@@ -193,7 +193,7 @@ SKILL.md の「起こす」の `launch.sh` と `doctor.sh --wait` で起こす�
 ```
 
 - 起こしたときの stdin の sleep を pid file から止め、Backend を stdin の EOF で抜けさせる。残った ptyd を `dev:kill` で止め、home を消す。`pkill -f` は harness の zsh にも当たり、親ごと殺すので使わない。
-- Task の Bench の `monica-s2-ghq`・`monica-s2-origin`・`monica-s2-mode` と、Tab の claude が cwd ごとに作る `~/.claude/projects` の dir（cwd の `/` と `.` が `-` になった名前）のうち、中の記録の `cwd` がこの instance の下にあり、起動の後に増えたものも消す。`${TMPDIR%/}/verify-monica/s2/` の log は残す。
+- Task の Bench の `monica-s2-ghq`・`monica-s2-origin`・`monica-s2-mode` と、Tab の claude が cwd ごとに作る `~/.claude/projects` の dir（cwd の `/` と `.` が `-` になった名前）のうち、中の記録の `cwd` がどれもこの instance の下にあり、起動の後に増えたものも消す。`${TMPDIR%/}/verify-monica/s2/` の log は残す。
 - SIGTERM で止める振る舞いを確かめるときは、先に `kill -TERM $(jq .pid ${TMPDIR%/}/monica-s2/backend.json)` を送る。Backend は抜けるときに `backend.json` を消す。Backend が抜けると、`launch.sh` が stdin の sleep も止めて終わる。`backend.json` が消えたのを見てから cleanup.sh を流す。
 - ptyd は socket が消えたのを 2 秒おきの確認で見つけ、shell ごと終わる。script はそれも待つ。
 

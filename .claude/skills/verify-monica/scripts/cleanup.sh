@@ -38,15 +38,20 @@ for x in ghq origin mode; do
   fi
 done
 
-# claude の記録の dir の名前は / と - を見分けないので、中の cwd がこの instance の下かで見分ける。
+# claude の記録の dir の名前は / と - を見分けず、別の instance の記録が同じ dir に混ざりうるので、
+# 中の記録の cwd がどれもこの instance の下にある dir だけを選ぶ。
 owned() {
   dir=$1
   shift
-  for root; do
-    grep -rqsF "\"cwd\":\"$root/" "$dir" && return 0
-    grep -rqsF "\"cwd\":\"$root\"" "$dir" && return 0
+  cwds=$(grep -rhoE '"cwd":"[^"]*"' "$dir" 2> /dev/null | sort -u | sed 's/^"cwd":"//; s/"$//')
+  [ -n "$cwds" ] || return 1
+  printf '%s\n' "$cwds" | while IFS= read -r cwd; do
+    mine=no
+    for root; do
+      case $cwd in "$root" | "$root"/*) mine=yes ;; esac
+    done
+    [ $mine = yes ] || exit 1
   done
-  return 1
 }
 before=$evidence/claude-projects.before
 if [ -f "$before" ]; then
