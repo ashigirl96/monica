@@ -1,7 +1,4 @@
----
-name: desktop-dev
-description: "dev の desktop を起こし、tauri-mcp で画面を確かめる。受け入れ条件を画面で確かめるとき、一瞬だけ出る表示を捉えるとき、窓の枠（信号機・vibrancy）を撮るときに使う。"
----
+# dev の desktop の窓
 
 dev の desktop は `MONICA_HOME` ごとに identifier と vite の port が分かれ、ほかの home の desktop と並んで動く。同じ home での 2 つ目の起動は、single-instance が既存の窓を前に出して終わる。ユーザーや別の worktree の desktop も同じ machine で動いているので、自分の desktop は home の名前で見分ける。
 
@@ -108,8 +105,8 @@ dev の desktop は `MONICA_HOME` ごとに identifier と vite の port が分�
 
   - Tab の claude が受け取ったものは、Agent Session Transcript（`~/.claude/projects/<cwd の / と . を - にした名前>/<session id>.jsonl`）の `[Image: source: …]` で分かる。ファイルの中身ならその path、clipboard の画像なら claude の `images/<n>.png` になる。claude は prompt を送るまで Agent Session Transcript を書かないので、貼った後に短い prompt を送る。Agent Session Transcript が他の Agent Session の分と混ざらないよう、一時 directory に cd してから claude を起こす。
 - **clipboard への書き込み**（`navigator.clipboard.writeText`）は、合成のキーイベントでは user activation が無いので `NotAllowedError` で断られる。確かめるのは binding が拾って書きにいくところまでにし、実キーでの確認はユーザーに頼む。
-- **Agent Session の状態**（status dot）は、backend-headless の「Agent Session の状態を claude 無しで動かす」の手順で作る。`MONICA_HOME` は desktop の home にする。
-- **Task の Bench**（sidebar のラベル、Bench の Tab）は、backend-headless の「Task の Bench を確かめる」の手順で ghq と origin を一時 directory に閉じ込めて作る。`GHQ_ROOT` は `bun run desktop` の env に渡す。
+- **Agent Session の状態**（status dot）は、`surfaces/headless.md` の「Agent Session の状態（dot、通知）を claude 無しで動かすには」の手順で作る。`MONICA_HOME` は desktop の home にする。
+- **Task の Bench**（sidebar のラベル、Bench の Tab）は、`surfaces/headless.md` の「Task の Bench を確かめる」の手順で ghq と origin を一時 directory に閉じ込めて作る。`GHQ_ROOT` は `bun run desktop` の env に渡す。
 - **starting の Tab**（Create の応答を待つ Terminal Session）は、`bun run dev:list` の PTYD の pid に `kill -STOP` を送ってから Tab を開いて作り、`kill -CONT` で進める。Backend の接続は切れないので、行は starting のまま留まる。Shell の command は webview から横取りできない（`__TAURI_INTERNALS__.invoke` は書き換えられない property）ので、attach したかは画面の文字で見る。
 - **一瞬だけ出る表示**（Tab を閉じた直後の画面など）は、webview の中で `requestAnimationFrame` ごとに DOM を見て、変わった時刻だけを配列に残す。操作も同じ script の中で起こし、frame の時刻とずれないようにする。
 - **長い script**: `webview_execute_js` は約 5 秒で timeout し、`timeout` を大きく渡しても延びない。async の処理は裏で走り続ける。数秒を超えるものは await せずに走らせ、結果は `window.__…` に貯めて、後の呼び出しで読む。timeout した後に同じ script を走らせると、2 本が重なる。
