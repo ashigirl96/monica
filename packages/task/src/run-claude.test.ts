@@ -110,6 +110,7 @@ test('run opens a new Tab at the end of the Bench, starts its shell at 24x80 and
     tabId: expect.any(String),
     terminalSessionId: expect.any(String),
     resumed: null,
+    forked: null,
   })
   expect(await benchTabs(fixture)).toMatchObject([
     { id: output.tabId, cwd: fixture.cwd, terminalSessionId: output.terminalSessionId },
@@ -559,4 +560,132 @@ test("run asked by a repo's old name follows the rename its sync finds, keeping 
   const output = await fixture.client.run({ ref })
 
   expect(output).toMatchObject({ ref: 'acme/renamed#12', cwd: fixture.cwd, resumed: null })
+})
+
+async function seenAgentSession(
+  fixture: Fixture,
+  sessionId = 's-0',
+  { transcript = 'written' as 'written' | 'missing' | 'none', live = false } = {},
+) {
+  const terminalSessionId = await fixture.openTabOutsideBench()
+  const fields =
+    transcript === 'none'
+      ? {}
+      : {
+          transcript_path: transcriptOf(fixture, sessionId, { written: transcript === 'written' }),
+        }
+  await fixture.hook(terminalSessionId, sessionId, 'SessionStart', fields)
+  if (!live) await fixture.hook(terminalSessionId, sessionId, 'SessionEnd', fields)
+  return sessionId
+}
+
+test('run --fork types claude resuming the Agent Session with --fork-session and /tackle into a new Tab of the Bench', async () => {
+  const fixture = await tracked()
+  const fork = await seenAgentSession(fixture)
+
+  const output = await fixture.client.run({ ref, fork })
+
+  expect(output).toMatchObject({ benchCreated: true, resumed: null, forked: 's-0' })
+  expect(await benchTabs(fixture)).toMatchObject([{ id: output.tabId, cwd: fixture.cwd }])
+  expect((await typedInto(fixture, output.terminalSessionId)).at(-1)).toMatchObject({
+    data: "claude --effort medium --model opus --resume 's-0' --fork-session '/tackle'\r",
+  })
+})
+
+test('run --fork passes the prompt after --fork-session', async () => {
+  const fixture = await tracked()
+  const fork = await seenAgentSession(fixture)
+
+  const output = await fixture.client.run({ ref, fork, prompt: 'the cwd moved to the Bench' })
+
+  expect((await typedInto(fixture, output.terminalSessionId)).at(-1)).toMatchObject({
+    data: "claude --effort medium --model opus --resume 's-0' --fork-session 'the cwd moved to the Bench'\r",
+  })
+})
+
+test('run --fork starts a new Run rather than resume the ended Run of the Task', async () => {
+  const fixture = await tracked()
+  await endedRun(fixture)
+  const fork = await seenAgentSession(fixture)
+
+  const output = await fixture.client.run({ ref, fork })
+
+  expect(output).toMatchObject({ resumed: null, forked: 's-0' })
+  expect((await typedInto(fixture, output.terminalSessionId)).at(-1)).toMatchObject({
+    data: "claude --effort medium --model opus --resume 's-0' --fork-session '/tackle'\r",
+  })
+})
+
+test('run --fork still refuses a Task with a live Run', async () => {
+  const fixture = await tracked()
+  fixture.taskLedger.start()
+  const { terminalSessionId } = await fixture.client.run({ ref })
+  await fixture.hook(terminalSessionId, 's-1', 'SessionStart', { source: 'startup' })
+  const fork = await seenAgentSession(fixture)
+
+  const error = await failure(fixture.client.run({ ref, fork }))
+
+  expect(error.code).toBe('CONFLICT')
+  expect(await benchTabs(fixture)).toHaveLength(1)
+})
+
+test('run --fork holds a new Run at the Blocker gate, and --force passes it', async () => {
+  const fixture = await tracked({ blockedBy: [blocker] })
+  const fork = await seenAgentSession(fixture)
+
+  const error = await failure(fixture.client.run({ ref, fork }))
+  const output = await fixture.client.run({ ref, fork, force: true })
+
+  expect(error.code).toBe('BLOCKED')
+  expect(output.forked).toBe('s-0')
+})
+
+test('run --fork refuses an Agent Session monica has not seen, before it tracks the Issue or opens the Bench', async () => {
+  const fixture = untracked({ origin: false })
+
+  const error = await failure(fixture.client.run({ ref, fork: 's-unknown' }))
+
+  expect([error.code, error.message]).toEqual(['NOT_FOUND', 'no Agent Session s-unknown to fork'])
+  expect((await fixture.client.list({})).tasks).toEqual([])
+  expect(await fixture.client.bench.list()).toEqual([])
+})
+
+test.each([
+  ['no path', 'none'],
+  ['a path to no file', 'missing'],
+] as const)(
+  'run --fork refuses an Agent Session with no Agent Session Transcript, as one with %s',
+  async (_, transcript) => {
+    const fixture = untracked({ origin: false })
+    const fork = await seenAgentSession(fixture, 's-0', { transcript })
+
+    const error = await failure(fixture.client.run({ ref, fork }))
+
+    expect([error.code, error.message]).toEqual([
+      'PRECONDITION_FAILED',
+      'Agent Session s-0 has no Agent Session Transcript to fork',
+    ])
+    expect((await fixture.client.list({})).tasks).toEqual([])
+  },
+)
+
+test('run --fork forks a live Agent Session', async () => {
+  const fixture = await tracked()
+  const fork = await seenAgentSession(fixture, 's-0', { live: true })
+
+  const output = await fixture.client.run({ ref, fork })
+
+  expect(output.forked).toBe('s-0')
+})
+
+test('the claude forked by run --fork becomes a new Run of the Task under its own Agent Session', async () => {
+  const fixture = await tracked()
+  fixture.taskLedger.start()
+  const fork = await seenAgentSession(fixture, 's-0', { live: true })
+
+  const output = await fixture.client.run({ ref, fork })
+  await fixture.hook(output.terminalSessionId, 's-forked', 'SessionStart', { source: 'resume' })
+
+  expect(runsOf(fixture)).toEqual([{ agentSessionId: 's-forked' }])
+  expect(await stateOf(fixture)).toMatchObject({ state: 'waiting', reason: 'idle' })
 })

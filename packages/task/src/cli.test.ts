@@ -140,6 +140,7 @@ test('run says first that it tracked the Issue only when it did', () => {
     tabId: 't-1',
     terminalSessionId: 'ts-1',
     resumed: null,
+    forked: null,
   }
 
   expect(formatters.run(output)).toBe(

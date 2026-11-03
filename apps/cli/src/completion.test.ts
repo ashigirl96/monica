@@ -44,6 +44,7 @@ test('__complete lists the options of the command and of its parents for a word 
   expect(result.stdout).toBe(
     "--in-place:use the Repo's checkout as the cwd, with no worktree and no setup\n" +
       '--force:start a new Run even when the Issue has open Blockers\n' +
+      '--fork:fork this Agent Session into the new claude instead of starting a new conversation\n' +
       '--help:display help for command\n' +
       '--format:output format\n',
   )
