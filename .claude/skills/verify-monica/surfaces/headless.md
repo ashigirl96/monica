@@ -1,7 +1,4 @@
----
-name: backend-headless
-description: "desktop 無しで Backend と monica-ptyd を起こし、CLI と RPC で振る舞いを確かめる。受け入れ条件を手で確かめるとき、Backend の起動・終了・ptyd との再接続を実機で見るとき、Tab で claude を動かして Agent Session を見るとき、Task の Bench（run・close）を確かめるとき、Job が予定の時刻に走るのを確かめるとき、zsh の補完を確かめるとき、notes の画面をブラウザで確かめるときに使う。"
----
+# desktop 無しの Backend と monica-ptyd
 
 Backend を本物の ptyd に繋いで起こす。Shell の役（親として生き続け、stdin の pipe の書き側を握る）は Bash の background job が演じる。
 
@@ -14,26 +11,16 @@ worktree の session では、guard が中身を読み切れない command を�
 
 ## 起こす
 
-1. `cargo build -p monica-ptyd`
-2. home は `${TMPDIR%/}/monica-s2` のように、`$TMPDIR` の下に短い名前で作る。名前は作業ごとに変える（issue 番号を入れるなど）。並行する他の agent も同じ手順で Backend を起こしている。ptyd の socket（`$MONICA_HOME/ptyd.sock`）の path が 104 byte を超えると bind できず、client には ENOENT にしか見えない。
-3. Bash の `run_in_background` で、stdin を無名 pipe で握って起こす。出力は scratchpad の file に向ける。
+SKILL.md の「起こす」の `launch.sh` と `doctor.sh --wait` で起こす。下の例の `monica-s2` は、名前を `s2` にしたときの home（`${TMPDIR%/}/monica-<名前>`）。Backend の stdout と stderr は `${TMPDIR%/}/verify-monica/s2/` の `out.jsonl`・`err.log` に出る。
 
-   ```bash
-   sleep 100002 | MONICA_HOME=${TMPDIR%/}/monica-s2 MONICA_PTYD_PATH=target/debug/monica-ptyd \
-     bun apps/backend/src/main.ts > $SCRATCH/out.jsonl 2> $SCRATCH/err.log
-   ```
+1. Bash の `run_in_background` で `.claude/skills/verify-monica/scripts/launch.sh s2` を流す。親の script は background job のまま生かす。`( … &)` で切り離すと親がすぐ死に、Backend は ppid=1 の見張りで約 1 秒後に黙って抜ける。
+   - `.app` でだけ起きること（gh や ghq が見つからないなど）を確かめるときは、後ろに `PATH=/usr/bin:/bin:/usr/sbin:/sbin` を足す。PATH が launchd の渡すものと同じになり、Backend が login shell から取った PATH が効いているかを見られる。起動時に login shell の PATH を読めなければ、Backend は起動時の PATH で始め、読めるまで 30 秒ごとに読み直して、失敗と読めた回を 1 行ずつ stderr に出す。
+   - release の build の Backend（同梱した SPA や migrations）は、`bun run build` の後に `VERIFY_BACKEND=$PWD/target/release/bundle/macos/Monica.app/Contents/MacOS/monica-backend` を前に付けて起こす。`.app` そのものは起こさない。identifier が release と同じなので、single-instance が手元の release の窓に回すか、release が居なければ `~/.monica` で Backend を起こす。
+     - Chat も確かめるなら `MONICA_CLAUDE_PATH` に claude の場所を渡す。build した `.app` には claude が無い（`install-app` が写す）ので、`bun run install-app --stage <dir>` で置いた `<dir>/Monica.app/Contents/MacOS/monica-backend` を `VERIFY_BACKEND` にし、同じ directory の `claude` を後ろの `MONICA_CLAUDE_PATH=…` に渡す（`release-notifications` skill の「Chat の claude と Chrome Extension」）。compile した Backend は node_modules の claude を解けないので、渡さないと Chat は答えられない。
 
-   - sleep の秒数は home ごとに固有の値にする（`monica-s2` なら `100002`）。止めるときにこの秒数で自分の sleep だけを探す。他の agent と同じ秒数だと、互いの sleep を kill し、相手の Backend が stdin の EOF で黙って抜ける。
-   - 親は background job のまま生かす。`( … &)` で切り離すと親がすぐ死に、Backend は ppid=1 の見張りで約 1 秒後に黙って抜ける。
-   - stdin は無名 pipe にする。Bun は fifo の EOF を拾わないので、fifo では stdin の EOF で抜ける振る舞いを確かめられない。
-   - `.app` でだけ起きること（gh や ghq が見つからないなど）を確かめるときは、`env -i HOME=$HOME USER=$USER SHELL=/bin/zsh LANG=$LANG TMPDIR=$TMPDIR PATH=/usr/bin:/bin:/usr/sbin:/sbin` を前に付け、bun を絶対 path（`~/.bun/bin/bun`）で起こす。PATH が launchd の渡すものと同じになり、Backend が login shell から取った PATH が効いているかを見られる。起動時に login shell の PATH を読めなければ、Backend は起動時の PATH で始め、読めるまで 30 秒ごとに読み直して、失敗と読めた回を 1 行ずつ stderr に出す。
-   - release の build の Backend（同梱した SPA や migrations）を確かめるときは、`bun run build` の後に `target/release/bundle/macos/Monica.app/Contents/MacOS/` の `monica-backend` を bun の代わりに起こし、同じ directory の `monica-ptyd` を `MONICA_PTYD_PATH` に渡す。`.app` そのものは起こさない。identifier が release と同じなので、single-instance が手元の release の窓に回すか、release が居なければ `~/.monica` で Backend を起こす。
-     - Chat も確かめるなら `MONICA_CLAUDE_PATH` に claude の場所を渡す。build した `.app` には claude が無い（`install-app` が写す）ので、`bun run install-app --stage <dir>` で置いた `<dir>/Monica.app` の `Contents/MacOS` の `monica-backend`・`monica-ptyd`・`claude` を使う（`release-notifications` skill の「Chat の claude と Chrome Extension」）。compile した Backend は node_modules の claude を解けないので、渡さないと Chat は答えられない。
-   - monica の Tab・Claude Code の中（`env | grep -E '^(MONICA_|CLAUDECODE)'` が出る）から起こすときは、`env -i HOME="$HOME" USER="$USER" SHELL=/bin/zsh TERM=xterm-256color LANG="$LANG" TMPDIR="$TMPDIR" PATH="$(printf %s "$PATH" | tr : '\n' | grep -v -E '\.monica' | paste -sd: -)"` を前に付ける。PATH は `Application Support` のように空白を含む dir を持つことがあるので、引用を外すと `env` が残りを command と読んで落ちる。ptyd は Backend の env から `MONICA_*` と Claude Code の env を落として tab に渡す。ユーザーの Job は Backend の env をそのまま受けるので、外側の `MONICA_TERMINAL_SESSION_ID` や `CLAUDECODE` も Job に届く。
+2. `.claude/skills/verify-monica/scripts/doctor.sh s2 --wait` が `OK` を返すまで待つ。Backend の生死は自分の home で見る。`pgrep -f apps/backend/src/main.ts` は他の agent の Backend にも当たる。
 
-4. tab の claude の hook を確かめるなら、起動した後に `ln -s $PWD/scripts/monica-dev ${TMPDIR%/}/monica-s2/bin/monica` を張る。hook の settings の command はこの path を指し、desktop では Shell が張る。
-
-起動できたのは、`out.jsonl` に `{"type":"endpoint",…}` の行が出て、`$MONICA_HOME/backend.json` ができたとき。待つのは、Bash の `run_in_background` で `for i in $(seq 60); do [ -f ${TMPDIR%/}/monica-s2/backend.json ] && break; sleep 0.5; done` を走らせる（前景の `sleep` は harness が止める）。Backend の生死は自分の home の `backend.json` で見る。`pgrep -f apps/backend/src/main.ts` は他の agent の Backend にも当たる。30 秒たっても `backend.json` が無いか、Backend の background job が終わったと知らされたら、Backend は落ちているので `err.log` を読む。
+3. tab の claude の hook を確かめるなら、起動した後に `ln -s $PWD/scripts/monica-dev ${TMPDIR%/}/monica-s2/bin/monica` を張る。hook の settings の command はこの path を指し、desktop では Shell が張る。
 
 ## 確かめる
 
@@ -104,7 +91,7 @@ worktree の session では、guard が中身を読み切れない command を�
 
 `run` と `close` は、checkout に branch と worktree を作り、消す。ユーザーの checkout に触れないよう、ghq と origin を一時 directory に閉じ込める。
 
-1. 起こすときに `GHQ_ROOT=${TMPDIR%/}/monica-s2-ghq` を Backend の env に足す（`env -i` で起こすときも）。ghq は `GHQ_ROOT` を `ghq root` の答えにする。渡し忘れると、ユーザーの本物の checkout で worktree を作る。
+1. 「起こす」の 1 の command の後ろに `GHQ_ROOT=${TMPDIR%/}/monica-s2-ghq` を足す。ghq は `GHQ_ROOT` を `ghq root` の答えにする。渡し忘れると、ユーザーの本物の checkout で worktree を作る。
 2. Task を 1 つ `run --in-place` する。`ghq get` が GitHub から `monica-s2-ghq` の下に checkout を clone する。
 3. その checkout から一時の origin を作る。`.monica/setup.sh` を commit した main を push し、checkout の `origin` をそこへ向ける。以後の worktree の Bench は、この main から作られる。setup の振る舞いは script が読む mode file で切り替えるので、commit し直さずに成功・失敗・長い setup を作れる。
 
@@ -117,7 +104,7 @@ worktree の session では、guard が中身を読み切れない command を�
    git -C $C remote set-url origin $O
    ```
 
-4. 片付けでは、home と一緒に `monica-s2-ghq`・`monica-s2-origin`・`monica-s2-mode` も消す。
+4. 「止めて片付ける」の cleanup.sh が、home と一緒に `monica-s2-ghq`・`monica-s2-origin`・`monica-s2-mode` も消す。名前は home の名前に `-ghq`・`-origin`・`-mode` を付けた形から変えない。
 
 ## Job を確かめる
 
@@ -132,7 +119,7 @@ worktree の session では、guard が中身を読み切れない command を�
   - `bindkey -e`。`EDITOR` が vi 系だと、zsh は vi の keymap で起きる。
   - `stty rows 50 cols 200`。pty の大きさが 0 のままだと、zsh は候補の一覧を出さない。
   - `autoload -Uz compinit && compinit` と `eval "$(monica completions zsh)"`。
-- Task の ref や Job の名前の候補は Backend に聞く。「起こす」の 4 で張った `$MONICA_HOME/bin/monica` を PATH の先頭に置き、同じ `MONICA_HOME` で zsh を起こす。
+- Task の ref や Job の名前の候補は Backend に聞く。「起こす」の 3 で張った `$MONICA_HOME/bin/monica` を PATH の先頭に置き、同じ `MONICA_HOME` で zsh を起こす。
 
 ## notes の画面をブラウザで確かめる
 
@@ -148,7 +135,7 @@ worktree の session では、guard が中身を読み切れない command を�
    console.log(browserPort, webPort);'
    ```
 
-2. 「起こす」の 3 の command に `MONICA_BROWSER_PORT=<ブラウザの口の port>` を足して Backend を起こす。port が埋まっていると、`err.log` に `[backend] no browser listener on port …` が出て、口なしで起きる。
+2. 「起こす」の 1 の command の後ろに `MONICA_BROWSER_PORT=<ブラウザの口の port>` を足して Backend を起こす。port が埋まっていると、`err.log` に `[backend] no browser listener on port …` が出て、口なしで起きる。
 3. Bash の `run_in_background` で Vite を起こす。`web.log` に `Local:   http://localhost:<Vite の port>/` が出たら開ける。
 
    ```bash
@@ -201,9 +188,13 @@ worktree の session では、guard が中身を読み切れない command を�
 
 ## 止めて片付ける
 
-- stdin の EOF で止める: sleep の pid を、起こしたときの固有の秒数で `pgrep -f "^sleep 100002$"` と取り、その pid に `kill` を送る。`pkill -f` は harness の zsh にも当たり、親ごと殺す。
-- SIGTERM で止める: `kill -TERM $(jq .pid ${TMPDIR%/}/monica-s2/backend.json)`。pipe の左の sleep は残り、background の job が終わらないので、続けて上の手順で sleep も止める。
-- Backend は抜けるときに `backend.json` を消すので、それが消えたら止まっている。`rm -rf ${TMPDIR%/}/monica-s2` で home を消す。ptyd は socket が消えたのを 2 秒おきの確認で見つけ、shell ごと終わるので、下の判定は数秒待ってからする。
-- Tab で claude を起こしたなら、claude が cwd ごとに作る `~/.claude/projects/-private-var-folders-…-monica-s2…` も消す（cwd の `/` と `.` が `-` になった名前）。`ls ~/.claude/projects | grep monica-s2` で見つかる。
+```bash
+.claude/skills/verify-monica/scripts/cleanup.sh s2
+```
 
-片付いたのは、`backend.json` が消えた後に `pgrep -f "monica-ptyd --monica-home ${TMPDIR%/}/monica-s2"` が何も返さず、home が消えたとき。消し忘れた dev は `bun run dev:list` で見つけ、`bun run dev:kill <NAME>` で片付ける。
+- 起こしたときの stdin の sleep を pid file から止め、Backend を stdin の EOF で抜けさせる。残った ptyd を `dev:kill` で止め、home を消す。`pkill -f` は harness の zsh にも当たり、親ごと殺すので使わない。
+- Task の Bench の `monica-s2-ghq`・`monica-s2-origin`・`monica-s2-mode` も消す。Tab の claude が cwd ごとに作る `~/.claude/projects` の dir（cwd の `/` と `.` が `-` になった名前）は取り戻せないので消さず、起動の後にできたものを挙げる。`${TMPDIR%/}/verify-monica/s2/` の log は残す。
+- SIGTERM で止める振る舞いを確かめるときは、先に `kill -TERM $(jq .pid ${TMPDIR%/}/monica-s2/backend.json)` を送る。Backend は抜けるときに `backend.json` を消す。Backend が抜けると、`launch.sh` が stdin の sleep も止めて終わる。`backend.json` が消えたのを見てから cleanup.sh を流す。
+- ptyd は socket が消えたのを 2 秒おきの確認で見つけ、shell ごと終わる。script はそれも待つ。
+
+片付いたのは、最後の行が `OK 片付いた` のとき。消し忘れた dev は `bun run dev:list` で見つけ、`bun run dev:kill <NAME>` で片付ける。

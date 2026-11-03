@@ -1,7 +1,4 @@
----
-name: extension-dev
-description: "dev の Chrome Extension を headless の Brave に読み込ませ、side panel を開いて中身を読み、撮る。受け入れ条件を side panel で確かめるとき、Chrome Extension の HMR と reload を見るときに使う。"
----
+# Chrome Extension の side panel
 
 `bun run extension` は、home ごとの port の Vite と、home ごとの profile（`$MONICA_HOME/dev-brave`）の Brave を起こし、dev の出力（`$MONICA_HOME/dev-extension`）を読み込ませる。`--headless` を付けると Brave に CDP の port を開け、`scripts/extension-panel.ts` がその port で side panel を操作する。ユーザーや別の worktree の Brave も同じ machine で動いているので、自分の Brave は home で見分ける。
 
@@ -16,7 +13,7 @@ description: "dev の Chrome Extension を headless の Brave に読み込ませ
 
    起動できたのは、log に `[extension] ready` が出たとき。待つのは、Bash の `run_in_background` で `until grep -qE '^\[extension\] ready|^\[extension exited\]' $SCRATCH/extension.log; do sleep 0.5; done` を走らせる。`[extension exited]` で抜けたら log を読む。Chrome Extension の port が埋まっていると、Vite が `Port … is already in use` で落ち、Brave は起きない。新しい profile では、script が先に headless の Brave を一度起こして開発者モードを書かせるので、数秒長くかかる。
 
-3. Backend が要るときは、backend-headless の「起こす」で同じ home に起こす。`bun run extension` は Backend を起こさない。side panel は Native Messaging の dev の host（`bun run extension` が `~/Library/Application Support/Google/Chrome/NativeMessagingHosts/com.ashigirl96.monica_dev.json` と `~/.monica-dev/native-host` に書く）から同じ home の Backend の token の口の port と Chrome Extension の token を受け取るので、ブラウザの口の port（`MONICA_BROWSER_PORT`）は Chat には要らない。
+3. Backend が要るときは、`.claude/skills/verify-monica/scripts/launch.sh <worktree の名前>` で同じ home に起こし、`.claude/skills/verify-monica/scripts/doctor.sh <worktree の名前> --wait` で待つ。`launch.sh` の home は `$TMPDIR/monica-<名前>` なので、手順 1 の home と同じになる。`bun run extension` は Backend を起こさない。side panel は Native Messaging の dev の host（`bun run extension` が `~/Library/Application Support/Google/Chrome/NativeMessagingHosts/com.ashigirl96.monica_dev.json` と `~/.monica-dev/native-host` に書く）から同じ home の Backend の token の口の port と Chrome Extension の token を受け取るので、ブラウザの口の port（`MONICA_BROWSER_PORT`）は Chat には要らない。
 
 ## 確かめる
 
@@ -58,7 +55,7 @@ Browser Tab は agent-browser（下の節）で動かし、side panel の見出�
   agent-browser --session <名前> network requests  # woff2 が chrome-extension:// から読まれること
   ```
 
-- headed の窓を撮るときは、上の command に `--headed` を足して Brave を起こし（`bun run extension` の headed の Brave には CDP の port が無い）、`MONICA_HOME=<home> bun scripts/extension-panel.ts open` で side panel を開く。窓は desktop-dev skill の「窓の枠」と同じく、Brave の main process の pid の窓の CGWindowID を取って `screencapture -x -o -l<id>` で撮る。main process は `pgrep -f "^/Applications/Brave Browser.app/Contents/MacOS/Brave Browser .*<home>/dev-brave"` で引く。
+- headed の窓を撮るときは、上の command に `--headed` を足して Brave を起こし（`bun run extension` の headed の Brave には CDP の port が無い）、`MONICA_HOME=<home> bun scripts/extension-panel.ts open` で side panel を開く。窓は `surfaces/desktop.md` の「窓の枠と端末の字形」と同じく、Brave の main process の pid の窓の CGWindowID を取って `screencapture -x -o -l<id>` で撮る。main process は `pgrep -f "^/Applications/Brave Browser.app/Contents/MacOS/Brave Browser .*<home>/dev-brave"` で引く。
 
 `Extensions.triggerAction` が使えないときは、Chrome Extension の page を Browser Tab で開き、そこから `chrome.sidePanel.open` を user gesture 付きで呼ぶ。Current Page が Chrome Extension の page に変わるので、Current Page を見る確かめには `open` を使う。dev の ID は `scripts/native-host.ts` の `DEV_EXTENSION_ORIGIN` にある。
 
@@ -83,7 +80,7 @@ cdp.close();'
 ### GitHub の Issues の一覧と Issue の画面の Run ボタン
 
 - Backend は本物の GitHub（`gh auth token`）から Issue を引く。headless の Brave は GitHub に未ログインだが、public な repo の一覧は開ける。
-- Run を押すと本物の ghq と claude が動く。Backend を `env -i` で起こし、`GHQ_ROOT=$MONICA_HOME/ghq`（clone と worktree を home の下に置き、本体の checkout に branch を作らない）と、`SHELL=/bin/sh` と `ENV=<claude() { echo "FAKE-CLAUDE argv: $*"; } を書いた file>`（Tab の対話 shell が読み、本物の claude の代わりに引数を出す）を渡す。Tab に打たれた行は backend-headless の「Tab への打ち込みと画面」の `attach` で読む。
+- Run を押すと本物の ghq と claude が動く。Backend を `launch.sh <worktree の名前>` で起こし、後ろに `GHQ_ROOT=${TMPDIR%/}/monica-<worktree の名前>/ghq`（clone と worktree を home の下に置き、本体の checkout に branch を作らない）と、`SHELL=/bin/sh` と `ENV=<claude() { echo "FAKE-CLAUDE argv: $*"; } を書いた file>`（Tab の対話 shell が読み、本物の claude の代わりに引数を出す）を渡す。Tab に打たれた行は `surfaces/headless.md` の「Tab への打ち込みと画面」の `attach` で読む。
 - ボタンの有無はページで `document.querySelectorAll('[data-monica-run-button]')` を読む。agent-browser の `eval`、`$(cat …)` で JS を渡す command、github.com の URL か scratchpad の path（`github-com` を含む）を `&&` や `;` でつないだ command は worktree の guard に止められる。JS は file に書いて `bun scripts/github-page.ts <ws URL> script <file>` で github.com の page に評価させ、agent-browser の手順は scratchpad の sh に書いて `sh <file>` の 1 command で流す。ws URL は `agent-browser --session <名前> [--cdp <port>] get cdp-url` で取る。`isTrusted` の確かめは、`Runtime.evaluate` の `.click()`（信頼されない）と agent-browser の `click`（信頼される）を比べる。
 - 押せない Run の tooltip は、agent-browser の `hover`（本物の mouse の経路）で出して `screenshot` で撮る。page の session に送った CDP の `Input.dispatchMouseEvent` では tooltip が出ない。focus で出すときは、先に page の空いた所を agent-browser の `mouse down`・`mouse up` で押して page に focus を移してから、agent-browser の `focus` を打つ。Chrome Extension も Backend も無しで試すときは、agent-browser で一覧か Issue の画面を開き、`bun scripts/github-page.ts <ws URL> inject '{ref} is blocked by acme/lib#3'` で、どの行（Issue の画面では header）にも押せない Run を出す `issues-page.ts` を注入する。
 - GitHub の一覧は行の中の要素に `tabindex="-1"` を付け、Tab の移動を自分の script で回すので、`tabIndex` や `focus()` の戻りでは focus が届くかを判断できない。CDP の `Input.dispatchKeyEvent` で Tab を送り、`document.activeElement` を読む。
@@ -107,4 +104,4 @@ printf %s "$KEY" | openssl base64 -d -A | shasum -a 256 | head -c32 | tr 0-9a-f 
 
 ## 止める
 
-`bun run dev:kill monica-<名前>` で止める。Brave を止めると、`bun run extension` が Vite を止めて抜け、log に `[extension exited]` が出る。同じ home の Backend と ptyd も同じ command で止まり、`$TMPDIR` の下の home（profile と dev の出力を含む）は消える。片付いたのは、`bun run dev:list` に `monica-<名前>` の行が無くなったとき。agent-browser に起こさせた Brave（build の出力と headed の窓）は `agent-browser --session <名前> close` で止め、写しに使った home を消す。
+Backend を手順 3 の `launch.sh` で起こしたときは、`.claude/skills/verify-monica/scripts/cleanup.sh <名前>` で止める。中で同じ `dev:kill` も流す。`dev:kill` だけでは `launch.sh` の stdin の sleep が残り、Backend の background job が終わらない。Backend が無ければ `bun run dev:kill monica-<名前>` で止める。Brave を止めると、`bun run extension` が Vite を止めて抜け、log に `[extension exited]` が出る。同じ home の Backend と ptyd も同じ command で止まり、`$TMPDIR` の下の home（profile と dev の出力を含む）は消える。片付いたのは、`bun run dev:list` に `monica-<名前>` の行が無くなったとき。agent-browser に起こさせた Brave（build の出力と headed の窓）は `agent-browser --session <名前> close` で止め、写しに使った home を消す。

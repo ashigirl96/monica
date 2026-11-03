@@ -67,7 +67,7 @@ dock() {
    plutil -p "$A/Contents/_CodeSignature/CodeResources" | grep -A3 '"MacOS/claude"'   # Anthropic の designated requirement
    ```
 
-3. 置いた `.app` の Backend を、`backend-headless` skill の「release の build の Backend」の形で起こす。env は `env -i` で絞り、`MONICA_HOME` は使い捨てにし、`MONICA_PTYD_PATH` と `MONICA_CLAUDE_PATH` は `$A/Contents/MacOS` の `monica-ptyd` と `claude` を指す。ブラウザの口の port は渡さなくてよい（Chat は token の口に載る）。`.app` そのものは起こさない。
+3. 置いた `.app` の Backend を、Bash の `run_in_background` で `VERIFY_BACKEND=$A/Contents/MacOS/monica-backend .claude/skills/verify-monica/scripts/launch.sh <名前> MONICA_CLAUDE_PATH=$A/Contents/MacOS/claude` で起こし、`.claude/skills/verify-monica/scripts/doctor.sh <名前> --wait` が `OK` を返すまで待つ。script は env を `env -i` で絞り、使い捨ての `MONICA_HOME`（`$TMPDIR/monica-<名前>`）と、同じ directory の `monica-ptyd` を渡す。ブラウザの口の port は渡さなくてよい（Chat は token の口に載る）。`.app` そのものは起こさない。
 4. token の口へ、`backend.json` の Chrome Extension の token で `chat.ask` を 1 回送る（Chrome Extension と同じ呼び方。ADR-0034）。port と Chrome Extension の token は、置いた `.app` の CLI を host として起こして受け取ってもよい。第 1 引数に `chrome-extension://<release の ID>/` を渡し、stdin に 4 byte の little-endian の長さと JSON の 1 通を書く（ADR-0034）。script を `apps/backend/` の下に置くと `@orpc/client` と `@monica/chat/contract` を解決できるので、終わったら消す。答えている間と答えた後に、Backend の子を `ps -A -o pid=,ppid=,command=` で読む。
 
    ```ts
@@ -87,7 +87,7 @@ dock() {
    ```
 
    答えの text が流れ、答えている間は Backend の子に `$A/Contents/MacOS/claude` が居て、答えた後にその pid が消える。答えた後には次の質問のための spare が別の pid で起きる。
-5. Backend を `backend-headless` skill の「止めて片付ける」で止め、home と `$SCRATCH/stage` を消す。SIGKILL された spare は `~/.claude/sessions/<pid>.json` を残すので、その pid の file も消す。
+5. `.claude/skills/verify-monica/scripts/cleanup.sh <名前>` で Backend と ptyd を止めて home を消し、`$SCRATCH/stage` を消す。SIGKILL された spare は `~/.claude/sessions/<pid>.json` を残すので、その pid の file も消す。
 
 ### 入れ替えた後（PR の確認でユーザーが行う）
 
