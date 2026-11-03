@@ -265,7 +265,7 @@ test('pressing a tackle Run tracks the Issue, types claude with /tackle into a T
     button: { kind: 'tackle', run: 'running' },
     reason: null,
   })
-  expect(await typedClaude(fixture)).toEqual(["claude '/tackle'\r"])
+  expect(await typedClaude(fixture)).toEqual(["claude --effort medium --model opus '/tackle'\r"])
   expect((await fixture.client.list({})).tasks.map((t) => t.ref)).toEqual([ref])
   expect(await fixture.client.bench.list()).toHaveLength(1)
 })
@@ -290,7 +290,9 @@ test('pressing a triage Run types claude with /triage and the Issue number', asy
   })
   await fixture.client.press({ ref, run: 'new' })
 
-  expect(await typedClaude(fixture)).toEqual(["claude '/triage #12'\r"])
+  expect(await typedClaude(fixture)).toEqual([
+    "claude --effort medium --model opus '/triage #12'\r",
+  ])
 })
 
 test('pressing the Run of a wayfinder map types claude with /wayfinder and the map, even when it has open sub-issues', async () => {
@@ -307,7 +309,9 @@ test('pressing the Run of a wayfinder map types claude with /wayfinder and the m
   })
   await fixture.client.press({ ref, run: 'new' })
 
-  expect(await typedClaude(fixture)).toEqual(["claude '/wayfinder 12'\r"])
+  expect(await typedClaude(fixture)).toEqual([
+    "claude --effort medium --model opus '/wayfinder 12'\r",
+  ])
 })
 
 test('pressing the Run of a ready-for-agent Issue with an open sub-issue types claude with /implement-spec and the Issue number', async () => {
@@ -321,7 +325,9 @@ test('pressing the Run of a ready-for-agent Issue with an open sub-issue types c
   })
   await fixture.client.press({ ref, run: 'new' })
 
-  expect(await typedClaude(fixture)).toEqual(["claude '/implement-spec #12'\r"])
+  expect(await typedClaude(fixture)).toEqual([
+    "claude --effort medium --model opus '/implement-spec #12'\r",
+  ])
 })
 
 test('a ready-for-agent Issue whose sub-issues are all closed gets no button', async () => {
@@ -360,7 +366,9 @@ test('pressing the Run of a wayfinder Issue under a map types claude with /wayfi
 
   await fixture.client.press({ ref, run: 'new' })
 
-  expect(await typedClaude(fixture)).toEqual(["claude '/wayfinder 7 12'\r"])
+  expect(await typedClaude(fixture)).toEqual([
+    "claude --effort medium --model opus '/wayfinder 7 12'\r",
+  ])
   expect((await fixture.client.list({})).tasks.map((t) => t.ref)).toEqual([ref])
 })
 
@@ -452,7 +460,7 @@ test('pressing Run picks the prompt from the Issue read when the sync that follo
   const pressed = await pressHeldUntilSync(fixture, () => fixture.github.fail('acme/app'))
 
   expect(pressed).toEqual({ ref, button: { kind: 'tackle', run: 'running' }, reason: null })
-  expect(await typedClaude(fixture)).toEqual(["claude '/tackle'\r"])
+  expect(await typedClaude(fixture)).toEqual(["claude --effort medium --model opus '/tackle'\r"])
 })
 
 test('pressing a Run fails without tracking when GitHub cannot be read', async () => {
@@ -573,7 +581,9 @@ test('an Issue whose Task has an ended Run gets a resume button, and pressing it
     button: { kind: 'tackle', run: 'running' },
     reason: null,
   })
-  expect((await typedClaude(fixture, 2)).at(-1)).toBe("claude --resume 's-1'\r")
+  expect((await typedClaude(fixture, 2)).at(-1)).toBe(
+    "claude --effort medium --model opus --resume 's-1'\r",
+  )
 })
 
 function blockOnGitHub(fixture: Fixture) {
@@ -608,7 +618,9 @@ test('an Issue with an open Blocker whose Task has an ended Run gets a resume bu
   await fixture.client.press({ ref, run: 'resume' })
   // 押した時に Issue を引き直す 1 本だけで、resume は sync しない。
   expect(fixture.github.requests).toHaveLength(requested + 1)
-  expect((await typedClaude(fixture, 2)).at(-1)).toBe("claude --resume 's-1'\r")
+  expect((await typedClaude(fixture, 2)).at(-1)).toBe(
+    "claude --effort medium --model opus --resume 's-1'\r",
+  )
 })
 
 test('a closed Issue whose open Task has a live Run gets a running button, and one with an ended Run gets a resume button', async () => {
@@ -730,7 +742,9 @@ test('pressing Resume of a sub-issue whose parent has stopped being a spec on Gi
     button: { kind: 'tackle', run: 'running' },
     reason: null,
   })
-  expect((await typedClaude(fixture, 3)).at(-1)).toBe("claude --resume 's-part'\r")
+  expect((await typedClaude(fixture, 3)).at(-1)).toBe(
+    "claude --effort medium --model opus --resume 's-part'\r",
+  )
 })
 
 test('a sub-issue with a live Run gets a running button while its spec has a live Run', async () => {
@@ -754,7 +768,9 @@ test('a Task whose repo was renamed before any sync still gets its resume button
     buttons: [{ ref: renamed, button: { kind: 'triage', run: 'resume' }, reason: null }],
   })
   await fixture.client.press({ ref: renamed, run: 'resume' })
-  expect((await typedClaude(fixture, 2)).at(-1)).toBe("claude --resume 's-1'\r")
+  expect((await typedClaude(fixture, 2)).at(-1)).toBe(
+    "claude --effort medium --model opus --resume 's-1'\r",
+  )
 })
 
 test('an Issue that GitHub now gives another node ID under the same name and number does not take the button state of the Task tracked there, and pressing its Run fails instead of resuming that Task', async () => {

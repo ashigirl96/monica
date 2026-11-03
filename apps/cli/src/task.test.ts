@@ -130,7 +130,9 @@ test('task run takes the prompt to claude as the argument after the ref', async 
 
   expect(result.code).toBe(0)
   await ptyd.received((op) => op.op === 'write')
-  expect(ptyd.sessionRequests().at(-1)).toMatchObject({ data: "claude 'fix the bug'\r" })
+  expect(ptyd.sessionRequests().at(-1)).toMatchObject({
+    data: "claude --effort medium --model opus 'fix the bug'\r",
+  })
 })
 
 test('task run exits 1 naming the open Blockers, and --force starts claude past them', async () => {

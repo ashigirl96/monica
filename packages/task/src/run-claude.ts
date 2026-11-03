@@ -109,7 +109,7 @@ function claudeCommand({ resumed }: Launch, prompt: string | undefined): string 
     resumed === null
       ? [quote(prompt ?? DEFAULT_PROMPT)]
       : ['--resume', quote(resumed), ...(prompt === undefined ? [] : [quote(prompt)])]
-  return ['claude', ...words].join(' ')
+  return ['claude', '--effort', 'medium', '--model', 'opus', ...words].join(' ')
 }
 
 // single quote の中では ' を escape できないので、一度閉じて \' を挟み、開き直す。
