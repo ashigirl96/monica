@@ -15,16 +15,16 @@ afterEach(() => {
 
 const forIssue = { repo: 'acme/app', number: 12 }
 
-function worktreeOnIssue12(files: Files = {}) {
+function worktreeOnIssue12(files: Files = {}, at = 'worktree') {
   const scratch = mkdtempSync(join(tmpdir(), 'monica-teardown-'))
   cleanups.push(() => rmSync(scratch, { recursive: true, force: true }))
   const ghq = fakeGhq(scratch)
   ghq.origin('acme/app', files)
   ghq.clone('acme/app')
   const checkout = ghq.checkout('acme/app')
-  const path = join(scratch, 'worktree')
+  const path = join(scratch, at)
   git(checkout, 'worktree', 'add', '--quiet', '-b', 'issue-12', path, 'origin/main')
-  return { ghq, checkout, path }
+  return { scratch, ghq, checkout, path }
 }
 
 async function inspectedClean({ squashMerged = false } = {}) {
@@ -80,6 +80,37 @@ test('without force, a git that fails in the trash stops the removal, and the wo
   expect(hasBranch(checkout, 'issue-12')).toBe(true)
   expect(readdirSync(trashBeside(inspected))).toEqual([])
 })
+
+// submodule の .git と core.worktree は相対 path なので、捨て場の深さが元と違えば前者が、同じなら後者が辿れなくなる。
+test.each([
+  ['a different depth', 'worktree'],
+  ['the same depth', 'a/b/worktree'],
+])(
+  'without force, a clean worktree with a submodule is removed through a trash at %s',
+  async (_, at) => {
+    const { scratch, ghq, checkout, path } = worktreeOnIssue12({}, at)
+    const lib = ghq.origin('acme/lib', { 'lib.txt': { content: 'lib\n' } })
+    git(path, '-c', 'protocol.file.allow=always', 'submodule', 'add', '--quiet', lib, 'vendor/lib')
+    commit(path, {}, 'add lib')
+    git(path, 'push', '--quiet', 'origin', 'issue-12')
+    const inspected = await inspectWorktree(
+      ghq.client,
+      { cwd: path, branch: 'issue-12' },
+      forIssue,
+      [],
+    )
+    expect(inspected.refusals).toEqual([])
+
+    const removed = await removeWorktree(inspected, {
+      force: false,
+      trash: join(scratch, 'trash'),
+    })
+
+    expect(removed.removedWorktree).toBe(path)
+    expect(existsSync(path)).toBe(false)
+    expect(hasBranch(checkout, 'issue-12')).toBe(false)
+  },
+)
 
 test('without force, commits made in the trash before the registration is dropped keep the branch, with a warning', async () => {
   const { checkout, inspected, path } = await inspectedClean()
