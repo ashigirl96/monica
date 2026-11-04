@@ -18,8 +18,11 @@ import { usePopupDismiss } from './use-popup-dismiss.ts'
  * AppShell 直下 = .notes-screen の外側にいるため、--ink-* / --paper は参照できない。
  * 配色は globals.css の global token（card / muted / border）で組む。
  */
-/** 写真なし（image: null）は敷くものが無いので、斜線を引いた空のスウォッチで表す */
-function swatch(image: string | null) {
+/** 写真なし（image: null）は敷くものが無いので、斜線を引いた空のスウォッチで表す。
+ * ink だけは紙の色そのものが選択肢なので、その色で塗る */
+function swatch(name: AmbientName) {
+  if (name === 'ink') return { backgroundColor: 'var(--ambient-ink-paper)' }
+  const { image } = AMBIENTS[name]
   return {
     backgroundImage:
       image === null
@@ -69,7 +72,7 @@ export function AmbientSwitcher() {
       >
         <span
           aria-hidden
-          style={swatch(current.image)}
+          style={swatch(selected)}
           className="size-6 rounded-full border bg-muted bg-cover bg-center"
         />
         <span className="font-mono text-[0.6rem] tracking-widest text-muted-foreground uppercase">
@@ -105,7 +108,7 @@ export function AmbientSwitcher() {
               >
                 <span
                   aria-hidden
-                  style={swatch(ambient.image)}
+                  style={swatch(name)}
                   className="size-9 shrink-0 rounded-md border bg-muted bg-cover bg-center"
                 />
                 <span className={`text-sm ${active ? 'text-foreground' : 'text-muted-foreground'}`}>

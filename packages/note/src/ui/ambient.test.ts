@@ -24,6 +24,7 @@ test('選んだ ambient は localStorage の monica-ambient に残り、次に�
 test.each<[string | null, AmbientName]>([
   [null, 'universe'],
   ['none', 'none'],
+  ['ink', 'ink'],
   ['shrine', 'shrine'],
   ['aurora', 'universe'],
   // Object の prototype の名前を ambient として読むと、写真を当てるところで throw して画面が描かれない。
@@ -59,7 +60,9 @@ test.each<[string, 1 | -1 | null, Partial<KeyboardEvent>]>([
 })
 
 test.each<[AmbientName, 1 | -1, AmbientName]>([
-  ['none', 1, 'universe'],
+  ['none', 1, 'ink'],
+  ['ink', 1, 'universe'],
+  ['ink', -1, 'none'],
   ['universe', 1, 'sakura'],
   ['shrine', 1, 'none'],
   ['none', -1, 'shrine'],
