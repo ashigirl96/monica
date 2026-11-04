@@ -1,27 +1,19 @@
-import { useCallback } from 'react'
+import { useMemo } from 'react'
 
 import { useNoteClient } from '../client.ts'
+import { createStarToggle } from './star-toggle.ts'
 
 /** 並びは Backend だけが決めるので、手元では並べ替えずに一覧を取り直す。 */
-export function useToggleStar(
-  list: readonly { id: string; starred: boolean }[] | null,
-  invalidate: () => void,
-) {
+export function useToggleStar(invalidate: () => void) {
   const client = useNoteClient()
-  return useCallback(
-    (id: string) => {
-      // 読み込んでいない頁の Note は、一覧からは Star の有無が分からない。
-      const listed = list?.find((s) => s.id === id)
-      const wasStarred = listed
-        ? Promise.resolve(listed.starred)
-        : client.get({ id }).then((note) => 'starred' in note && note.starred)
-      // 失敗しても、取り直した一覧が今の Star を出す。
-      void wasStarred
-        .then((starred) => client.star({ id, starred: !starred }))
-        .catch(() => {})
-        .finally(invalidate)
-    },
-    [client, list, invalidate],
+  return useMemo(
+    () =>
+      createStarToggle({
+        read: (id) => client.get({ id }).then((note) => 'starred' in note && note.starred),
+        send: (id, starred) => client.star({ id, starred }),
+        invalidate,
+      }),
+    [client, invalidate],
   )
 }
 

@@ -185,7 +185,7 @@ export function EssayEditorPage({ id }: { id: string }) {
     navigate(essayPath(restored.id))
   }, [removals, seedNote, invalidateEssays])
 
-  const toggleStar = useToggleStar(essays, invalidateEssays)
+  const toggleStar = useToggleStar(invalidateEssays)
 
   // 連打した 2 回が同じ status を読んで 1 回に潰れないよう、切り替えを直列にする
   const statusChainRef = useRef<Promise<void>>(Promise.resolve())
@@ -271,7 +271,7 @@ export function EssayEditorPage({ id }: { id: string }) {
         if (target?.kind !== 'essay') return
         e.preventDefault()
         e.stopPropagation()
-        toggleStar(target.id)
+        void toggleStar(target.id)
         return
       }
       // ⌥H/⌥L はサイドバーに見える範囲だけを変え、開いている Essay と URL は動かさない
@@ -324,7 +324,7 @@ export function EssayEditorPage({ id }: { id: string }) {
           onTabChange={setTab}
           selectedId={id}
           onSelect={selectEssay}
-          onStar={toggleStar}
+          onStar={(essayId) => void toggleStar(essayId)}
         />
       }
     >

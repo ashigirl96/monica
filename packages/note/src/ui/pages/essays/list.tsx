@@ -87,7 +87,7 @@ export function EssaysListPage() {
 
   useDocumentTitle(null)
 
-  const toggleStar = useToggleStar(essays, invalidateEssays)
+  const toggleStar = useToggleStar(invalidateEssays)
 
   const toggleStatus = useCallback(
     async (summary: EssaySummary) => {
@@ -178,7 +178,7 @@ export function EssaysListPage() {
           <PopoverMenuItem
             onClick={() => {
               closeMenu()
-              toggleStar(menu.target.id)
+              void toggleStar(menu.target.id)
             }}
           >
             {menu.target.starred ? 'Unstar' : 'Star'}

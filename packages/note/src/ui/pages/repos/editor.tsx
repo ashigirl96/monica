@@ -164,7 +164,7 @@ export function RepoEditor({ repo, noteId }: { repo: string; noteId: string | nu
     [removals, scheduleSave, repo, patchRepoNotes],
   )
 
-  const toggleStar = useToggleStar(timeline, invalidateRepoNotes)
+  const toggleStar = useToggleStar(invalidateRepoNotes)
 
   const undoDelete = useCallback(async () => {
     const restored = await removals.undo()
@@ -223,7 +223,7 @@ export function RepoEditor({ repo, noteId }: { repo: string; noteId: string | nu
         if (target?.kind === 'repo_note') {
           e.preventDefault()
           e.stopPropagation()
-          toggleStar(target.id)
+          void toggleStar(target.id)
         }
         return
       }
@@ -273,7 +273,7 @@ export function RepoEditor({ repo, noteId }: { repo: string; noteId: string | nu
           onLoadMore={loadMore}
           onSelectScratch={() => selectNote(null)}
           onSelect={selectNote}
-          onStar={toggleStar}
+          onStar={(id) => void toggleStar(id)}
           onDelete={(id) => void deleteById(id)}
         />
       }
