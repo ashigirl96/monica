@@ -27,6 +27,7 @@ import {
 } from '../../notes/queries.ts'
 import { isNotFound } from '../../notes/removals.ts'
 import { SaveStatus } from '../../notes/save-status.tsx'
+import { useToggleStar } from '../../notes/star.tsx'
 import { useRemovals } from '../../notes/use-removals.ts'
 import { navigate } from '../../router.ts'
 import { repoNotePath, repoNoteRedirect, repoPath } from '../../routes.ts'
@@ -163,6 +164,8 @@ export function RepoEditor({ repo, noteId }: { repo: string; noteId: string | nu
     [removals, scheduleSave, repo, patchRepoNotes],
   )
 
+  const toggleStar = useToggleStar(invalidateRepoNotes)
+
   const undoDelete = useCallback(async () => {
     const restored = await removals.undo()
     if (restored === null) return
@@ -214,6 +217,16 @@ export function RepoEditor({ repo, noteId }: { repo: string; noteId: string | nu
         void undoDelete()
         return
       }
+      if (e.code === 'KeyS') {
+        // Scratch には Star が無いので、エディタの入力（ß）に素通しする
+        const target = noteRef.current
+        if (target?.kind === 'repo_note') {
+          e.preventDefault()
+          e.stopPropagation()
+          void toggleStar(target.id)
+        }
+        return
+      }
       if (e.code !== 'KeyJ' && e.code !== 'KeyK') return
       e.preventDefault()
       e.stopPropagation()
@@ -222,7 +235,7 @@ export function RepoEditor({ repo, noteId }: { repo: string; noteId: string | nu
     }
     window.addEventListener('keydown', onKey, true)
     return () => window.removeEventListener('keydown', onKey, true)
-  }, [cycleIds, currentId, selectNote, createNew, deleteById, undoDelete])
+  }, [cycleIds, currentId, selectNote, createNew, deleteById, undoDelete, toggleStar])
 
   const onTitleChange = useCallback(
     (title: string) => {
@@ -260,6 +273,7 @@ export function RepoEditor({ repo, noteId }: { repo: string; noteId: string | nu
           onLoadMore={loadMore}
           onSelectScratch={() => selectNote(null)}
           onSelect={selectNote}
+          onStar={(id) => void toggleStar(id)}
           onDelete={(id) => void deleteById(id)}
         />
       }

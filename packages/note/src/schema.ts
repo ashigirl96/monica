@@ -18,6 +18,7 @@ export const note = sqliteTable(
     createdAt: timestamp('created_at').notNull(),
     updatedAt: timestamp('updated_at').notNull(),
     deletedAt: timestamp('deleted_at'),
+    starred: integer('starred', { mode: 'boolean' }).notNull().default(false),
   },
   (t) => [
     uniqueIndex('note_daily_per_date_idx')
@@ -35,5 +36,6 @@ export const note = sqliteTable(
     ),
     check('note_repo', sql`(kind IN ('repo_note', 'scratch')) = (repo IS NOT NULL)`),
     check('note_deleted_at', sql`deleted_at IS NULL OR kind IN ('essay', 'repo_note')`),
+    check('note_starred', sql`starred = 0 OR kind IN ('essay', 'repo_note')`),
   ],
 )

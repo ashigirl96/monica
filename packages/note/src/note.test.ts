@@ -7,6 +7,7 @@ import { eq } from 'drizzle-orm'
 import { drizzle } from 'drizzle-orm/bun-sqlite'
 import { migrate } from 'drizzle-orm/bun-sqlite/migrator'
 
+import type { Note } from './contract.ts'
 import { idNumber } from './row.ts'
 import { note } from './schema.ts'
 import { createNoteLedger, migrations, router } from './server.ts'
@@ -293,6 +294,7 @@ test('the list of Essays gives the preview of the body instead of the body', asy
       id: untouched.id,
       title: '',
       status: 'writing',
+      starred: false,
       date: '2026-10-06',
       preview: null,
       createdAt: untouched.createdAt,
@@ -303,6 +305,7 @@ test('the list of Essays gives the preview of the body instead of the body', asy
       id: saved.id,
       title: 'On ledgers',
       status: 'writing',
+      starred: false,
       date: '2026-10-06',
       preview: 'first line',
       createdAt: saved.createdAt,
@@ -482,5 +485,71 @@ test('only an Essay has a status', async () => {
     expect((await failure(client.essay.setStatus({ id, status: 'finished' }))).code).toBe(
       'BAD_REQUEST',
     )
+  }
+})
+
+test('a starred Essay comes above the others in the list, each part newest made first, and starring moves no updatedAt', async () => {
+  const { client } = setup()
+  setSystemTime(new Date(2026, 9, 6, 10, 0))
+  const oldest = await client.essay.create()
+  setSystemTime(new Date(2026, 9, 6, 11, 0))
+  const middle = await client.essay.create()
+  setSystemTime(new Date(2026, 9, 6, 12, 0))
+  const newest = await client.essay.create()
+
+  await client.star({ id: oldest.id, starred: true })
+  await client.star({ id: middle.id, starred: true })
+  await client.star({ id: middle.id, starred: true })
+  const starred = await client.essay.list()
+  await client.star({ id: middle.id, starred: false })
+  const unstarred = await client.essay.list()
+
+  expect(starred.map((e) => [e.id, e.starred])).toEqual([
+    [middle.id, true],
+    [oldest.id, true],
+    [newest.id, false],
+  ])
+  expect(unstarred.map((e) => e.id)).toEqual([oldest.id, newest.id, middle.id])
+  expect(await client.get({ id: oldest.id })).toEqual({ ...oldest, starred: true } as Note)
+})
+
+test('a Repo Note read by its id has its Star, so a Note on a page not yet loaded can be unstarred', async () => {
+  const { client } = setup()
+  const repoNote = await client.repoNote.create({ repo: 'owner/repo' })
+
+  await client.star({ id: repoNote.id, starred: true })
+
+  expect(repoNote).toMatchObject({ starred: false })
+  expect(await client.get({ id: repoNote.id })).toEqual({ ...repoNote, starred: true } as Note)
+})
+
+test('the Star of an Essay stays through deleting and undoing it and through changing its status', async () => {
+  const { client } = setup()
+  const essay = await client.essay.create()
+  await client.essay.create()
+  await client.star({ id: essay.id, starred: true })
+
+  await client.remove({ id: essay.id })
+  await client.restore({ id: essay.id })
+  await client.essay.setStatus({ id: essay.id, status: 'finished' })
+
+  expect((await client.essay.list()).map((e) => [e.id, e.starred, e.status])).toEqual([
+    [essay.id, true, 'finished'],
+    [expect.any(String), false, 'writing'],
+  ])
+})
+
+test('a Daily and a Scratch cannot be starred, and a deleted Note or an id no Note has is not found', async () => {
+  const { client } = setup()
+  const daily = await client.daily.open({ date: '2026-10-06' })
+  const scratch = await client.scratch.open({ repo: 'owner/repo' })
+  const deleted = await client.essay.create()
+  await client.remove({ id: deleted.id })
+
+  for (const kept of [daily, scratch]) {
+    expect((await failure(client.star({ id: kept.id, starred: true }))).code).toBe('BAD_REQUEST')
+  }
+  for (const id of [deleted.id, 'note-999']) {
+    expect((await failure(client.star({ id, starred: true }))).code).toBe('NOT_FOUND')
   }
 })

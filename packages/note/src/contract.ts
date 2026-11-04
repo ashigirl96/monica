@@ -42,10 +42,24 @@ const common = {
   updatedAt: NoteRowSchema.shape.updatedAt,
 }
 
+const starred = NoteRowSchema.shape.starred.describe('whether the Note has a Star')
+
 export const NoteSchema = z.discriminatedUnion('kind', [
   z.object({ kind: z.literal('daily'), ...common }),
-  z.object({ kind: z.literal('essay'), title: z.string(), status: EssayStatusSchema, ...common }),
-  z.object({ kind: z.literal('repo_note'), repo: z.string(), title: z.string(), ...common }),
+  z.object({
+    kind: z.literal('essay'),
+    title: z.string(),
+    status: EssayStatusSchema,
+    starred,
+    ...common,
+  }),
+  z.object({
+    kind: z.literal('repo_note'),
+    repo: z.string(),
+    title: z.string(),
+    starred,
+    ...common,
+  }),
   z.object({ kind: z.literal('scratch'), repo: z.string(), ...common }),
 ])
 
@@ -63,6 +77,7 @@ export const EssaySummarySchema = z.object({
   kind: z.literal('essay'),
   title: z.string(),
   status: EssayStatusSchema,
+  starred,
   ...summaryCommon,
 })
 
@@ -85,11 +100,12 @@ export const RepoNoteSummarySchema = z.object({
     'the first line of the body; null until the body is first saved',
   ),
   updatedAt: common.updatedAt,
+  starred,
 })
 
 export const RepoNotesCursorSchema = z
-  .object({ date: common.date, id: NoteIdSchema })
-  .describe('the date and id of the last Repo Note of the page before')
+  .object({ starred, date: common.date, id: NoteIdSchema })
+  .describe('the Star, date and id of the last Repo Note of the page before')
 
 export const RepoNotesPageSchema = z.object({
   notes: z.array(RepoNoteSummarySchema),
@@ -207,6 +223,13 @@ export const contract = {
     .meta({ description: 'Undo the deletion of a Note' })
     .input(z.object({ id }))
     .output(NoteSchema),
+  star: meta
+    .meta({
+      description:
+        'Put a Star on an Essay or a Repo Note, or take it off; a Daily and a Scratch have none',
+    })
+    .input(z.object({ id, starred: z.boolean() }))
+    .output(z.void()),
   daily: {
     open: meta
       .meta({ description: 'Get the Daily of a Logical Date, making it when there is none' })
@@ -233,7 +256,10 @@ export const contract = {
   essay: {
     create: meta.meta({ description: 'Make an Essay with no title, writing' }).output(NoteSchema),
     list: meta
-      .meta({ description: 'List the Essays with the preview of each body, newest made first' })
+      .meta({
+        description:
+          'List the Essays with the preview of each body, the starred first, each part newest made first',
+      })
       .output(z.array(EssaySummarySchema)),
     setStatus: meta
       .meta({ description: 'Set an Essay to writing or finished' })
@@ -247,7 +273,8 @@ export const contract = {
       .output(NoteSchema),
     list: meta
       .meta({
-        description: 'List the Repo Notes of a Repo, newest day first, 100 to a page',
+        description:
+          'List the Repo Notes of a Repo, the starred first, each part newest day first, 100 to a page',
       })
       .input(z.object({ repo: RepoSchema, after: RepoNotesCursorSchema.optional() }))
       .output(RepoNotesPageSchema),

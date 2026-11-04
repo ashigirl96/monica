@@ -160,6 +160,10 @@ _Avoid_: project note
 Repo ごとに 1 つある、長く追記していく書き殴りの Note。title を持たず、Repo で名指す。開いた時に作られ、削除できない。
 _Avoid_: primary note, pinned note（Pin は Tab の語）
 
+**Star**:
+Essay と Repo Note に付ける印。Star の付いた Note は、それが属する一覧の上に出る。Note を削除して取り消しても、Essay の状態を変えても残る。
+_Avoid_: Pin（Tab の語）, Favorite, お気に入り
+
 **Logical Date**:
 5 時を境目にした日付。0 時から 5 時までは前の日に数える。
 _Avoid_: 論理日付, 日付（単独で使うと暦の日付と紛れる）

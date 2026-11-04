@@ -131,16 +131,28 @@ describe('notePagePath', () => {
   })
 
   test('an Essay opens at the path of its id', () => {
-    expect(notePagePath({ kind: 'essay', title: 'On Rust', status: 'writing', ...common })).toBe(
-      '/essays/note-7',
-    )
+    expect(
+      notePagePath({
+        kind: 'essay',
+        title: 'On Rust',
+        status: 'writing',
+        starred: false,
+        ...common,
+      }),
+    ).toBe('/essays/note-7')
   })
 
   test('a Scratch opens at the path of its Repo, and a Repo Note under the notes of its Repo', () => {
     expect(notePagePath({ kind: 'scratch', repo: 'acme/app', ...common })).toBe('/repos/acme/app')
-    expect(notePagePath({ kind: 'repo_note', repo: 'acme/app', title: 'Spec', ...common })).toBe(
-      '/repos/acme/app/notes/note-7',
-    )
+    expect(
+      notePagePath({
+        kind: 'repo_note',
+        repo: 'acme/app',
+        title: 'Spec',
+        starred: false,
+        ...common,
+      }),
+    ).toBe('/repos/acme/app/notes/note-7')
   })
 })
 
@@ -154,7 +166,13 @@ describe('repoNoteRedirect', () => {
   }
 
   test('a Repo Note of the Repo stays, whatever the case of the Repo in the path', () => {
-    const note: Note = { kind: 'repo_note', repo: 'acme/app', title: 'Spec', ...common }
+    const note: Note = {
+      kind: 'repo_note',
+      repo: 'acme/app',
+      title: 'Spec',
+      starred: false,
+      ...common,
+    }
     expect(repoNoteRedirect('Acme/App', note)).toBeNull()
   })
 
@@ -167,12 +185,15 @@ describe('repoNoteRedirect', () => {
   test('a Note of another Repo or another kind goes to its own path', () => {
     const others: [Note, string][] = [
       [
-        { kind: 'repo_note', repo: 'acme/web', title: 'Spec', ...common },
+        { kind: 'repo_note', repo: 'acme/web', title: 'Spec', starred: false, ...common },
         '/repos/acme/web/notes/note-7',
       ],
       [{ kind: 'scratch', repo: 'acme/web', ...common }, '/repos/acme/web'],
       [{ kind: 'daily', ...common }, '/daily/2026-10-06'],
-      [{ kind: 'essay', title: 'On Rust', status: 'writing', ...common }, '/essays/note-7'],
+      [
+        { kind: 'essay', title: 'On Rust', status: 'writing', starred: false, ...common },
+        '/essays/note-7',
+      ],
     ]
     for (const [note, path] of others) expect(repoNoteRedirect('acme/app', note)).toBe(path)
   })

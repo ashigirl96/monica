@@ -8,7 +8,13 @@ import { isNotFound, type RemovableKind, Removals } from './removals.ts'
 const at = new Date(2026, 9, 6, 12)
 
 function note(kind: RemovableKind, id: string): Note {
-  const fields = { id, title: '', date: '2026-10-06', content: { type: 'doc' as const } }
+  const fields = {
+    id,
+    title: '',
+    starred: false,
+    date: '2026-10-06',
+    content: { type: 'doc' as const },
+  }
   return kind === 'essay'
     ? { kind, ...fields, status: 'writing', createdAt: at, updatedAt: at }
     : { kind, ...fields, repo: 'acme/app', createdAt: at, updatedAt: at }

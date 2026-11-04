@@ -137,7 +137,13 @@ describe('noteToOpen', () => {
   })
 
   test('未保存の title も、cache の title ではなくその編集を出す', () => {
-    const essay: Note = { ...note(V2), kind: 'essay', title: 'Saved', status: 'writing' }
+    const essay: Note = {
+      ...note(V2),
+      kind: 'essay',
+      title: 'Saved',
+      status: 'writing',
+      starred: false,
+    }
 
     expect(noteToOpen(essay, V2, { content: edited, title: 'Unsaved' })).toEqual({
       ...essay,

@@ -17,7 +17,7 @@ import { noteBlock, resolveNoteMention, searchNoteMentions } from './reference.t
 import { removeNote, restoreNote } from './remove.ts'
 import { listRepoNotes } from './repo.ts'
 import { toNote, undeletedNote } from './row.ts'
-import { saveNote, setEssayStatus } from './save.ts'
+import { saveNote, setEssayStatus, starNote } from './save.ts'
 
 export { migrations } from '../migrations/index.ts'
 export type { Ghq } from './ghq.ts'
@@ -30,6 +30,7 @@ export const router = os.router({
   save: os.save.handler(({ context, input, errors }) => saveNote(context.db, input, errors)),
   remove: os.remove.handler(({ context, input }) => removeNote(context.db, input.id)),
   restore: os.restore.handler(({ context, input }) => restoreNote(context.db, input.id)),
+  star: os.star.handler(({ context, input }) => starNote(context.db, input.id, input.starred)),
   daily: {
     open: os.daily.open.handler(({ context, input }) => openDaily(context.db, input.date)),
     dates: os.daily.dates.handler(({ context }) => dailyDates(context.db)),

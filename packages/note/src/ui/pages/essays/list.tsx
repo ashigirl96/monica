@@ -7,6 +7,7 @@ import { useDocumentTitle } from '../../document-title.ts'
 import { altOnly } from '../../keys.ts'
 import { slashDate } from '../../notes/dates.ts'
 import { useEssaysCache, useEssaysQuery } from '../../notes/queries.ts'
+import { useToggleStar } from '../../notes/star.tsx'
 import { useRemovals } from '../../notes/use-removals.ts'
 import { navigate, spaLinkClick } from '../../router.ts'
 import { ESSAYS_PATH, essayPath } from '../../routes.ts'
@@ -36,6 +37,14 @@ function EssayCard({
           writing ? 'bg-[var(--essay-mat-writing)]' : 'bg-[var(--essay-mat)]'
         }`}
       >
+        {summary.starred && (
+          <span
+            aria-label="Starred"
+            className="absolute top-2.5 right-3 text-[0.8rem] text-[var(--ink-muted)]"
+          >
+            ★
+          </span>
+        )}
         {writing && (
           <span className="absolute top-3 left-3 rounded-full bg-[var(--essay-badge-bg)] px-2 py-0.5 font-mono text-[0.55rem] tracking-widest text-[var(--essay-badge-ink)] uppercase">
             writing
@@ -66,7 +75,7 @@ function EssayCard({
 
 type Menu = { x: number; y: number; target: EssaySummary }
 
-/** /essays: Essay のカードの一覧。右クリックで status の切り替えと削除。 */
+/** /essays: Essay のカードの一覧。右クリックで Star と status の切り替えと削除。 */
 export function EssaysListPage() {
   const client = useNoteClient()
   const removals = useRemovals('essay')
@@ -77,6 +86,8 @@ export function EssaysListPage() {
   const closeMenu = useCallback(() => setMenu(null), [])
 
   useDocumentTitle(null)
+
+  const toggleStar = useToggleStar(invalidateEssays)
 
   const toggleStatus = useCallback(
     async (summary: EssaySummary) => {
@@ -164,6 +175,14 @@ export function EssaysListPage() {
 
       {menu && (
         <PopoverMenu anchor={{ top: menu.y, bottom: menu.y, left: menu.x }} onClose={closeMenu}>
+          <PopoverMenuItem
+            onClick={() => {
+              closeMenu()
+              void toggleStar(menu.target.id)
+            }}
+          >
+            {menu.target.starred ? 'Unstar' : 'Star'}
+          </PopoverMenuItem>
           <PopoverMenuItem
             onClick={() => {
               closeMenu()

@@ -76,5 +76,6 @@ export function create<D>Ledger(deps: { db: Db; home: string; ... }): <D>Ledger;
 - `package.json` の `exports` に entry を書き、root の `"."` は置かない。他の package への依存は `dependencies` に書く。bun の isolated linker は、書いていない依存を解決しないため（ADR-0009）。
 - `.oxlintrc.json` に entry ごとの override を足す。書き忘れは `scripts/oxlint/entry-boundaries.test.ts` が落とす。
 - migration は `drizzle.config.ts` の `out: "./migrations/<d>"` と `migrations/index.ts` で置く（ADR-0010）。table を持たない package は、`drizzle.config.ts`・`src/schema.ts`・`generate` の script を置かず、`migrations/<d>/meta/_journal.json` に `{"version":"7","dialect":"sqlite","entries":[]}` を手で置く。drizzle-kit は schema の file が無いと exit 1 し、`bun run generate` が落ちるため。
+- 列を足す migration で drizzle-kit generate が table を作り直す SQL を出したら、`ALTER TABLE <t> ADD <列> … CONSTRAINT "<名前>" CHECK(…)` の 1 文に書き直し、snapshot は generate が出したものを残す。作り直しの SQL は、古い table に無い新しい列を SELECT し、式の index（`lower(repo)`）を列名として引用するので、行のある DB で落ちる。
 - Backend の組み立て（`apps/backend`）で Ledger を作り、router を package 名で口に載せる（`CODING_STANDARDS.md` の「contract」）。CLI に出すなら `apps/cli/src/contract.ts` にも足す。
 - CLI に載せない domain は、contract を走査するテストを package に置く（`packages/note/src/contract.test.ts` と同じ形）。CLI に載せる domain は `apps/cli/src/contract.test.ts` が見る。
