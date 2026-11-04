@@ -34,7 +34,7 @@ SKILL.md の「起こす」の `launch.sh` と `doctor.sh --wait` で起こす�
   console.log(JSON.stringify(await client.workbench.layout.get()));'
   ```
 
-- Tab への打ち込みと画面: Tab は RPC の `workbench.runspace.create` で開き、`tab.terminalSessionId` に ptyd の socket で `write`（data は base64）を送る。画面は `attach`（`replay_bytes` で末尾を指定）の応答の `replay` を base64 で解き、escape sequence を除いて読み、`detach` する。Enter は `\r`、Shift+Tab は `\x1b[Z`。claude の状態の移り変わりは、`agentSession.list` を 200ms ごとに読んで、変わったときだけ出すと取りこぼさない。
+- Tab への打ち込みと画面: Tab は RPC の `workbench.runspace.create` で開き、`tab.terminalSessionId` に ptyd の socket で `write`（data は base64）を送る。画面は `attach`（`replay_bytes` で末尾を指定）の応答の `replay` を base64 で解き、escape sequence（CSI と、窓の題名を書く OSC）を除いて読み、`detach` する。Enter は `\r`、Shift+Tab は `\x1b[Z`。claude の状態の移り変わりは、`agentSession.list` を 200ms ごとに読んで、変わったときだけ出すと取りこぼさない。
 
   ```bash
   MONICA_HOME=${TMPDIR%/}/monica-s2 bun -e '
@@ -44,7 +44,7 @@ SKILL.md の「起こす」の `launch.sh` と `doctor.sh --wait` で起こす�
     socket: { data: (_, chunk) => {
       for (const line of chunk.toString().trim().split("\n")) {
         const m = JSON.parse(line);
-        if (m.body === "attached") console.log(Buffer.from(m.replay, "base64").toString().replace(/\x1b\[[0-9;?]*[ -\/]*[@-~]/g, "").slice(-2000));
+        if (m.body === "attached") console.log(Buffer.from(m.replay, "base64").toString().replace(/\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)|\x1b\[[0-9;?]*[ -\/]*[@-~]/g, "").slice(-2000));
       }
     } },
   });
@@ -59,7 +59,8 @@ SKILL.md の「起こす」の `launch.sh` と `doctor.sh --wait` で起こす�
   ```
 
 - Tab で本物の claude を起こすとき:
-  - 初めての directory（`GHQ_ROOT` の下の clone や worktree）では、claude が「Yes, I trust this folder」の確認で止まり、SessionStart の hook が届かない。既定の選択は「No, exit」なので、`\x1b[B` を送ってから `\r` を送って Yes を選ぶ。
+  - PATH に `ocx` があると、Tab の `claude` は `ocx claude` を通って起きる（`tab show` の COMMAND に `ocx claude` と opencodex の行が並び、その子が本物の claude）。hook と権限の flag は ocx の前で付くので、Agent Session の記録は変わらない。
+  - 初めての directory（`GHQ_ROOT` の下の clone など）では、claude が「Yes, I trust this folder」の確認で止まり、SessionStart の hook が届かない。Bench の worktree では出ないこともあるので、キーを送る前に画面を読む。既定の選択は「No, exit」なので、`\x1b[B` を送ってから `\r` を送って Yes を選ぶ。
   - resume を確かめるときは、prompt を 1 つ送って答えを待ってから抜ける。claude は最初の prompt まで Agent Session Transcript を書かないので、prompt を送らずに抜けた Agent Session の `--resume` は `No conversation found` で終わる。
 - Agent Session の状態（dot、通知）を claude 無しで動かすには、hook の payload を CLI の hook に流す。claude と同じ経路で `recordHook` に届き、待ちの状態や理由を狙って作れる。payload の field と場面ごとの順は `docs/research/hook-payloads.md`。field の欠けた payload（`tool_name` の無い PermissionRequest など）は記録されず、Backend の stderr に `ignored a hook it cannot read` が出る。Terminal Session は Workbench Ledger で live なもの（`runspace.create` で開いた Tab の `terminalSessionId`）を使う。それ以外は記録されない。通知は Backend の stdout（`out.jsonl`）に `{"type":"notify",…}` の行で出る。
 

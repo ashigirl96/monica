@@ -45,5 +45,6 @@ H1 の title と、ユーザーに見える振る舞いの 1 段落で始め、�
 - [Agent Session の状態](./agent-session.md): Tab の claude の状態（待ち・理由）と通知。
 - [Task の Bench](./task-bench.md): Task を run して Bench を作り、close で片付ける。
 - [Daily](./note-daily.md): notes の画面で Daily を開いて書き、残ったことを読み直す。
+- [Ambient](./note-ambient.md): notes の画面の背景を選び、⌥; で巡り、読み直しても残る。
 - [Tab の dot と未読](./desktop-agent-dot.md): desktop の Tab の dot、未読、Dock の数（`surfaces/desktop.md`）。
 - [side panel の Chat](./extension-chat.md): Brave の side panel で質問し、答えを受ける（`surfaces/extension.md`）。
