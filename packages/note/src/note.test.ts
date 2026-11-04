@@ -7,6 +7,7 @@ import { eq } from 'drizzle-orm'
 import { drizzle } from 'drizzle-orm/bun-sqlite'
 import { migrate } from 'drizzle-orm/bun-sqlite/migrator'
 
+import type { Note } from './contract.ts'
 import { idNumber } from './row.ts'
 import { note } from './schema.ts'
 import { createNoteLedger, migrations, router } from './server.ts'
@@ -509,7 +510,17 @@ test('a starred Essay comes above the others in the list, each part newest made 
     [newest.id, false],
   ])
   expect(unstarred.map((e) => e.id)).toEqual([oldest.id, newest.id, middle.id])
-  expect(await client.get({ id: oldest.id })).toEqual(oldest)
+  expect(await client.get({ id: oldest.id })).toEqual({ ...oldest, starred: true } as Note)
+})
+
+test('a Repo Note read by its id has its Star, so a Note on a page not yet loaded can be unstarred', async () => {
+  const { client } = setup()
+  const repoNote = await client.repoNote.create({ repo: 'owner/repo' })
+
+  await client.star({ id: repoNote.id, starred: true })
+
+  expect(repoNote).toMatchObject({ starred: false })
+  expect(await client.get({ id: repoNote.id })).toEqual({ ...repoNote, starred: true } as Note)
 })
 
 test('the Star of an Essay stays through deleting and undoing it and through changing its status', async () => {

@@ -6,8 +6,8 @@ import { noteLabel, summaryTitle, withSavedPreview } from './summary.ts'
 
 type Kind =
   | { kind: 'daily' }
-  | { kind: 'essay'; title: string; status: 'writing' | 'finished' }
-  | { kind: 'repo_note'; repo: string; title: string }
+  | { kind: 'essay'; title: string; status: 'writing' | 'finished'; starred: boolean }
+  | { kind: 'repo_note'; repo: string; title: string; starred: boolean }
   | { kind: 'scratch'; repo: string }
 
 function note(kind: Kind): Note {
@@ -24,19 +24,26 @@ function note(kind: Kind): Note {
 describe('noteLabel', () => {
   test('essay は非空 title を使う', () => {
     expect(
-      noteLabel(note({ kind: 'essay', title: 'On Rust', status: 'writing' }), 'Untitled'),
+      noteLabel(
+        note({ kind: 'essay', title: 'On Rust', status: 'writing', starred: false }),
+        'Untitled',
+      ),
     ).toBe('On Rust')
   })
 
   test('essay の無題は fallback', () => {
-    expect(noteLabel(note({ kind: 'essay', title: '', status: 'writing' }), 'Untitled')).toBe(
-      'Untitled',
-    )
+    expect(
+      noteLabel(note({ kind: 'essay', title: '', status: 'writing', starred: false }), 'Untitled'),
+    ).toBe('Untitled')
   })
 
   test('repo note は非空 title を使い、無題は fallback', () => {
-    expect(noteLabel(note({ kind: 'repo_note', repo: 'a/b', title: 'Spec' }), 'a/b')).toBe('Spec')
-    expect(noteLabel(note({ kind: 'repo_note', repo: 'a/b', title: '' }), 'a/b')).toBe('a/b')
+    expect(
+      noteLabel(note({ kind: 'repo_note', repo: 'a/b', title: 'Spec', starred: false }), 'a/b'),
+    ).toBe('Spec')
+    expect(
+      noteLabel(note({ kind: 'repo_note', repo: 'a/b', title: '', starred: false }), 'a/b'),
+    ).toBe('a/b')
   })
 
   test('daily は title を持たないので常に fallback', () => {

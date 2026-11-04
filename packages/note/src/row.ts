@@ -53,9 +53,21 @@ export function toNote(row: NoteRow): Note {
     case 'daily':
       return { kind: 'daily', ...common }
     case 'essay':
-      return { kind: 'essay', title: row.title!, status: row.status!, ...common }
+      return {
+        kind: 'essay',
+        title: row.title!,
+        status: row.status!,
+        starred: row.starred,
+        ...common,
+      }
     case 'repo_note':
-      return { kind: 'repo_note', repo: row.repo!, title: row.title!, ...common }
+      return {
+        kind: 'repo_note',
+        repo: row.repo!,
+        title: row.title!,
+        starred: row.starred,
+        ...common,
+      }
     case 'scratch':
       return { kind: 'scratch', repo: row.repo!, ...common }
   }

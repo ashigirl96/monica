@@ -42,14 +42,26 @@ const common = {
   updatedAt: NoteRowSchema.shape.updatedAt,
 }
 
+const starred = NoteRowSchema.shape.starred.describe('whether the Note has a Star')
+
 export const NoteSchema = z.discriminatedUnion('kind', [
   z.object({ kind: z.literal('daily'), ...common }),
-  z.object({ kind: z.literal('essay'), title: z.string(), status: EssayStatusSchema, ...common }),
-  z.object({ kind: z.literal('repo_note'), repo: z.string(), title: z.string(), ...common }),
+  z.object({
+    kind: z.literal('essay'),
+    title: z.string(),
+    status: EssayStatusSchema,
+    starred,
+    ...common,
+  }),
+  z.object({
+    kind: z.literal('repo_note'),
+    repo: z.string(),
+    title: z.string(),
+    starred,
+    ...common,
+  }),
   z.object({ kind: z.literal('scratch'), repo: z.string(), ...common }),
 ])
-
-const starred = NoteRowSchema.shape.starred.describe('whether the Note has a Star')
 
 const summaryCommon = {
   id: common.id,

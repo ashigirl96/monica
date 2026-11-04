@@ -12,6 +12,7 @@ function essay(id: string, status: EssayStatus = 'writing', updatedAt = before):
     id,
     title: 'On ledgers',
     status,
+    starred: false,
     date: '2026-10-07',
     content: { type: 'doc' },
     createdAt: before,
