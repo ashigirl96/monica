@@ -92,7 +92,14 @@ export async function removeWorktree(
 async function recheckInTrash(trashed: string, path: string) {
   let status: string
   try {
-    status = await git(treeOf(trashed), 'status', '--porcelain', '--untracked-files=normal')
+    // submodule の .git と core.worktree は相対 path で、捨て場からは辿れないので、submodule の中は調べた時の status に任せる。
+    status = await git(
+      treeOf(trashed),
+      'status',
+      '--porcelain',
+      '--untracked-files=normal',
+      '--ignore-submodules=all',
+    )
   } catch (error) {
     putBack(trashed, path)
     throw error
