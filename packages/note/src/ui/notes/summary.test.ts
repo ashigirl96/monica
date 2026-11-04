@@ -59,6 +59,7 @@ function summary(title: string, preview: string | null): NoteSummary {
     id: 'note-1',
     title,
     status: 'writing',
+    starred: false,
     date: '2026-08-29',
     preview,
     createdAt: at,

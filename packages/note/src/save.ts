@@ -46,6 +46,15 @@ export function setEssayStatus(db: Db, id: string, status: EssayStatus): Note {
   return toNote(updated!)
 }
 
+// Star は本文の版ではないので、updatedAt を進めず、開いているエディタの保存を CONFLICT にしない。
+export function starNote(db: Db, id: string, starred: boolean): void {
+  const row = undeletedNote(db, id)
+  if (!KINDS[row.kind].starrable) {
+    throw new ORPCError('BAD_REQUEST', { message: `a ${KINDS[row.kind].name} cannot be starred` })
+  }
+  db.update(note).set({ starred }).where(eq(note.id, row.id)).run()
+}
+
 // 同じ ms のうちに 2 度書いても updatedAt が進まないと、古い版からの保存が CONFLICT にならない。
 function nextUpdatedAt(previous: Date): Date {
   return new Date(Math.max(Date.now(), previous.getTime() + 1))

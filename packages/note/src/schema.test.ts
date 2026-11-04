@@ -30,6 +30,8 @@ test.each<[string, Partial<Row>]>([
   ['a Repo Note', { kind: 'repo_note', repo: 'owner/repo', title: '' }],
   ['a deleted Repo Note', { kind: 'repo_note', repo: 'owner/repo', title: 't', deletedAt: at }],
   ['a Scratch', { kind: 'scratch', repo: 'owner/repo' }],
+  ['a starred Essay', { kind: 'essay', title: '', status: 'writing', starred: true }],
+  ['a starred Repo Note', { kind: 'repo_note', repo: 'owner/repo', title: '', starred: true }],
 ])('the table takes %s', (_name, row) => {
   expect(() => insert(inMemoryDb(), row)).not.toThrow()
 })
@@ -62,6 +64,8 @@ test.each<[string, Partial<Row>, string]>([
   ['a Scratch with a title', { kind: 'scratch', repo: 'owner/repo', title: '' }, 'note_title'],
   ['a Scratch with no Repo', { kind: 'scratch' }, 'note_repo'],
   ['a deleted Scratch', { kind: 'scratch', repo: 'owner/repo', deletedAt: at }, 'note_deleted_at'],
+  ['a starred Daily', { kind: 'daily', starred: true }, 'note_starred'],
+  ['a starred Scratch', { kind: 'scratch', repo: 'owner/repo', starred: true }, 'note_starred'],
 ])('the table refuses %s', (_name, row, constraint) => {
   expect(() => insert(inMemoryDb(), row)).toThrow(`CHECK constraint failed: ${constraint}`)
 })

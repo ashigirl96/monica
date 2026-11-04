@@ -50,10 +50,11 @@ export function listEssays(db: Db): EssaySummary[] {
       preview: note.preview,
       createdAt: note.createdAt,
       updatedAt: note.updatedAt,
+      starred: note.starred,
     })
     .from(note)
     .where(and(eq(note.kind, 'essay'), isNull(note.deletedAt)))
-    .orderBy(desc(note.createdAt), desc(note.id))
+    .orderBy(desc(note.starred), desc(note.createdAt), desc(note.id))
     .all()
     .map(toEssaySummary)
 }

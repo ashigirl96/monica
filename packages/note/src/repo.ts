@@ -69,6 +69,7 @@ export function listRepoNotes(
       title: note.title,
       preview: note.preview,
       updatedAt: note.updatedAt,
+      starred: note.starred,
     })
     .from(note)
     .where(
@@ -79,20 +80,29 @@ export function listRepoNotes(
         after === undefined ? undefined : olderThan(after),
       ),
     )
-    .orderBy(desc(note.date), desc(note.id))
+    .orderBy(desc(note.starred), desc(note.date), desc(note.id))
     .limit(REPO_NOTES_PAGE_SIZE + 1)
     .all()
   const notes = rows
     .slice(0, REPO_NOTES_PAGE_SIZE)
     .map((row) => ({ ...row, id: noteId(row.id), title: row.title! }))
   const last = notes.at(-1)
-  const next = rows.length > REPO_NOTES_PAGE_SIZE && last ? { date: last.date, id: last.id } : null
+  const next =
+    rows.length > REPO_NOTES_PAGE_SIZE && last
+      ? { starred: last.starred, date: last.date, id: last.id }
+      : null
   return { notes, next }
 }
 
 function olderThan(cursor: RepoNotesCursor) {
   return or(
-    lt(note.date, cursor.date),
-    and(eq(note.date, cursor.date), lt(note.id, idNumber(cursor.id))),
+    lt(note.starred, cursor.starred),
+    and(
+      eq(note.starred, cursor.starred),
+      or(
+        lt(note.date, cursor.date),
+        and(eq(note.date, cursor.date), lt(note.id, idNumber(cursor.id))),
+      ),
+    ),
   )
 }

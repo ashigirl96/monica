@@ -11,10 +11,10 @@ const ID_PREFIX = 'note-'
 
 // note の CHECK が守る対応を、procedure が書く前に断るためにも持つ。
 export const KINDS = {
-  daily: { name: 'Daily', titled: false, deletable: false },
-  essay: { name: 'Essay', titled: true, deletable: true },
-  repo_note: { name: 'Repo Note', titled: true, deletable: true },
-  scratch: { name: 'Scratch', titled: false, deletable: false },
+  daily: { name: 'Daily', titled: false, deletable: false, starrable: false },
+  essay: { name: 'Essay', titled: true, deletable: true, starrable: true },
+  repo_note: { name: 'Repo Note', titled: true, deletable: true, starrable: true },
+  scratch: { name: 'Scratch', titled: false, deletable: false, starrable: false },
 } as const
 
 export function idNumber(id: string): number {
@@ -63,7 +63,7 @@ export function toNote(row: NoteRow): Note {
 
 type EssaySummaryRow = Pick<
   NoteRow,
-  'id' | 'title' | 'status' | 'date' | 'preview' | 'createdAt' | 'updatedAt'
+  'id' | 'title' | 'status' | 'date' | 'preview' | 'createdAt' | 'updatedAt' | 'starred'
 >
 
 // Essay の title と status が NOT NULL なのは note の CHECK が守る。

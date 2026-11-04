@@ -1,6 +1,7 @@
-import { useEffect, useRef } from 'react'
+import { Fragment, useEffect, useRef } from 'react'
 
 import type { EssayStatus } from '../../../contract.ts'
+import { StarButton, StarDivider, startsUnstarred } from '../../notes/star.tsx'
 import { summaryTitle } from '../../notes/summary.ts'
 import { spaLinkClick } from '../../router.ts'
 import { ESSAYS_PATH } from '../../routes.ts'
@@ -40,12 +41,14 @@ export function EssaysSidebar({
   onTabChange,
   selectedId,
   onSelect,
+  onStar,
 }: {
   groups: EssayGroups | null
   tab: EssayStatus
   onTabChange: (status: EssayStatus) => void
   selectedId: string
   onSelect: (id: string) => void
+  onStar: (id: string) => void
 }) {
   const essays = groups?.[tab] ?? null
   const selectedRef = useRef<HTMLButtonElement>(null)
@@ -82,29 +85,38 @@ export function EssaysSidebar({
         )}
       </div>
       <div className="flex-1 overflow-y-auto px-2 py-2">
-        {(essays ?? []).map((s) => {
+        {(essays ?? []).map((s, i, list) => {
           const selected = s.id === selectedId
           return (
-            <button
-              key={s.id}
-              ref={selected ? selectedRef : null}
-              type="button"
-              onClick={() => onSelect(s.id)}
-              className={`relative block w-full rounded-md px-2.5 py-1.5 text-left transition-colors duration-100 ${
-                selected ? 'bg-[var(--ink-hover)]' : 'hover:bg-[var(--ink-hover)]'
-              }`}
-            >
-              {selected && (
-                <span className="absolute top-1.5 bottom-1.5 left-0 w-0.5 rounded-full bg-[var(--water)]" />
-              )}
-              <span
-                className={`block truncate text-[0.8rem] ${
-                  selected ? 'text-[var(--ink-text)]' : 'text-[var(--ink-muted)]'
+            <Fragment key={s.id}>
+              {startsUnstarred(list, i) && <StarDivider />}
+              <div
+                className={`group relative flex items-center rounded-md transition-colors duration-100 ${
+                  selected ? 'bg-[var(--ink-hover)]' : 'hover:bg-[var(--ink-hover)]'
                 }`}
               >
-                {summaryTitle(s)}
-              </span>
-            </button>
+                {selected && (
+                  <span className="absolute top-1.5 bottom-1.5 left-0 w-0.5 rounded-full bg-[var(--water)]" />
+                )}
+                <button
+                  ref={selected ? selectedRef : null}
+                  type="button"
+                  onClick={() => onSelect(s.id)}
+                  className="min-w-0 flex-1 px-2.5 py-1.5 text-left"
+                >
+                  <span
+                    className={`block truncate text-[0.8rem] ${
+                      selected ? 'text-[var(--ink-text)]' : 'text-[var(--ink-muted)]'
+                    }`}
+                  >
+                    {summaryTitle(s)}
+                  </span>
+                </button>
+                <span className="mr-1 flex">
+                  <StarButton starred={s.starred} onToggle={() => onStar(s.id)} />
+                </span>
+              </div>
+            </Fragment>
           )
         })}
         {essays !== null && essays.length === 0 && (

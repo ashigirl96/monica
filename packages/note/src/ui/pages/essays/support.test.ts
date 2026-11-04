@@ -12,6 +12,7 @@ function essay(id: string, status: EssayStatus): EssaySummary {
     id,
     title: id,
     status,
+    starred: false,
     date: '2026-07-21',
     preview: null,
     createdAt: at,

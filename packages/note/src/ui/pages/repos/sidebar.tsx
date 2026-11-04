@@ -1,17 +1,20 @@
-import { useEffect, useRef } from 'react'
+import { Fragment, useEffect, useRef } from 'react'
 
 import type { RepoNoteSummary } from '../../../contract.ts'
+import { StarButton, StarDivider, startsUnstarred } from '../../notes/star.tsx'
 import { summaryTitle } from '../../notes/summary.ts'
 
 function TimelineItem({
   summary,
   selected,
   onSelect,
+  onStar,
   onDelete,
 }: {
   summary: RepoNoteSummary
   selected: boolean
   onSelect: () => void
+  onStar: () => void
   onDelete: () => void
 }) {
   return (
@@ -32,6 +35,7 @@ function TimelineItem({
           {summaryTitle(summary)}
         </span>
       </button>
+      <StarButton starred={summary.starred} onToggle={onStar} />
       <button
         type="button"
         aria-label="Delete note"
@@ -65,6 +69,7 @@ export function RepoSidebar({
   onLoadMore,
   onSelectScratch,
   onSelect,
+  onStar,
   onDelete,
 }: {
   repoName: string
@@ -75,6 +80,7 @@ export function RepoSidebar({
   onLoadMore: () => void
   onSelectScratch: () => void
   onSelect: (id: string) => void
+  onStar: (id: string) => void
   onDelete: (id: string) => void
 }) {
   const sentinelRef = useRef<HTMLDivElement>(null)
@@ -132,14 +138,17 @@ export function RepoSidebar({
       </div>
       <div className="mx-4.5 border-t border-[var(--ink-border)]" />
       <div className="flex-1 overflow-y-auto px-2 py-2">
-        {(notes ?? []).map((s) => (
-          <TimelineItem
-            key={s.id}
-            summary={s}
-            selected={s.id === selectedId}
-            onSelect={() => onSelect(s.id)}
-            onDelete={() => onDelete(s.id)}
-          />
+        {(notes ?? []).map((s, i, list) => (
+          <Fragment key={s.id}>
+            {startsUnstarred(list, i) && <StarDivider />}
+            <TimelineItem
+              summary={s}
+              selected={s.id === selectedId}
+              onSelect={() => onSelect(s.id)}
+              onStar={() => onStar(s.id)}
+              onDelete={() => onDelete(s.id)}
+            />
+          </Fragment>
         ))}
         {notes !== null && notes.length === 0 && (
           <p className="px-2.5 py-2 text-[0.75rem] text-[var(--ink-faint)]">

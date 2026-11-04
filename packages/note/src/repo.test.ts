@@ -100,6 +100,7 @@ test('a Repo Note in the list has its title and the first line of its body, not 
       title: '',
       preview: null,
       updatedAt: untouched.updatedAt,
+      starred: false,
     },
     {
       id: repoNote.id,
@@ -107,6 +108,7 @@ test('a Repo Note in the list has its title and the first line of its body, not 
       title: 'Plan',
       preview: 'first line',
       updatedAt: expect.any(Date),
+      starred: false,
     },
   ])
   expect(next).toBeNull()
@@ -196,4 +198,53 @@ test('when ghq fails or its root has no github.com, the Repos are those with a N
 
     expect(await client.repo.candidates()).toEqual(['owner/repo'])
   }
+})
+
+test('starred Repo Notes come on the first page above the others, even one more than 100 Notes down, and the pages after hold the rest once', async () => {
+  const client = setup()
+  setSystemTime(new Date(2026, 9, 5, 12))
+  const oldest = await client.repoNote.create({ repo: 'owner/repo' })
+  const olderStarred = await client.repoNote.create({ repo: 'owner/repo' })
+  setSystemTime(new Date(2026, 9, 6, 12))
+  const made = []
+  for (let i = 0; i < 100; i++) made.push(await client.repoNote.create({ repo: 'owner/repo' }))
+  await client.star({ id: oldest.id, starred: true })
+  await client.star({ id: made[50]!.id, starred: true })
+  await client.star({ id: olderStarred.id, starred: true })
+  await client.star({ id: olderStarred.id, starred: false })
+
+  const first = await client.repoNote.list({ repo: 'owner/repo' })
+  const second = await client.repoNote.list({ repo: 'owner/repo', after: first.next! })
+
+  const rest = [...made.filter((_, i) => i !== 50).toReversed(), olderStarred]
+  expect(first.notes.map((n) => [n.id, n.starred])).toEqual([
+    [made[50]!.id, true],
+    [oldest.id, true],
+    ...rest.slice(0, 98).map((n) => [n.id, false]),
+  ])
+  expect(second.notes.map((n) => n.id)).toEqual(rest.slice(98).map((n) => n.id))
+  expect(second.next).toBeNull()
+})
+
+test('when more than 100 Repo Notes are starred, the next page goes on with the starred before the others', async () => {
+  const client = setup()
+  setSystemTime(new Date(2026, 9, 6, 12))
+  const unstarred = await client.repoNote.create({ repo: 'owner/repo' })
+  const starred = []
+  for (let i = 0; i < 101; i++) {
+    const made = await client.repoNote.create({ repo: 'owner/repo' })
+    await client.star({ id: made.id, starred: true })
+    starred.push(made)
+  }
+
+  const first = await client.repoNote.list({ repo: 'owner/repo' })
+  const second = await client.repoNote.list({ repo: 'owner/repo', after: first.next! })
+
+  expect(first.notes.map((n) => n.id)).toEqual(
+    starred
+      .slice(1)
+      .map((n) => n.id)
+      .toReversed(),
+  )
+  expect(second.notes.map((n) => n.id)).toEqual([starred[0]!.id, unstarred.id])
 })

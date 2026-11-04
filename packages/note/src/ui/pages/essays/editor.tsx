@@ -14,6 +14,7 @@ import { NotesShell } from '../../notes/notes-shell.tsx'
 import { useEssaysCache, useEssaysQuery, useNoteQuery, useSeedNote } from '../../notes/queries.ts'
 import { isNotFound } from '../../notes/removals.ts'
 import { SaveStatus } from '../../notes/save-status.tsx'
+import { useToggleStar } from '../../notes/star.tsx'
 import { noteLabel } from '../../notes/summary.ts'
 import { useRemovals } from '../../notes/use-removals.ts'
 import { navigate } from '../../router.ts'
@@ -184,6 +185,8 @@ export function EssayEditorPage({ id }: { id: string }) {
     navigate(essayPath(restored.id))
   }, [removals, seedNote, invalidateEssays])
 
+  const toggleStar = useToggleStar(essays, invalidateEssays)
+
   // 連打した 2 回が同じ status を読んで 1 回に潰れないよう、切り替えを直列にする
   const statusChainRef = useRef<Promise<void>>(Promise.resolve())
 
@@ -263,6 +266,14 @@ export function EssayEditorPage({ id }: { id: string }) {
         void undoDelete()
         return
       }
+      if (e.code === 'KeyS') {
+        const target = noteRef.current
+        if (target?.kind !== 'essay') return
+        e.preventDefault()
+        e.stopPropagation()
+        toggleStar(target.id)
+        return
+      }
       // ⌥H/⌥L はサイドバーに見える範囲だけを変え、開いている Essay と URL は動かさない
       if (e.code === 'KeyH' || e.code === 'KeyL') {
         e.preventDefault()
@@ -279,7 +290,7 @@ export function EssayEditorPage({ id }: { id: string }) {
     }
     window.addEventListener('keydown', onKey, true)
     return () => window.removeEventListener('keydown', onKey, true)
-  }, [cycleIds, id, selectEssay, createNew, toggleStatus, deleteEssay, undoDelete])
+  }, [cycleIds, id, selectEssay, createNew, toggleStatus, deleteEssay, undoDelete, toggleStar])
 
   const onTitleChange = useCallback(
     (title: string) => {
@@ -313,6 +324,7 @@ export function EssayEditorPage({ id }: { id: string }) {
           onTabChange={setTab}
           selectedId={id}
           onSelect={selectEssay}
+          onStar={toggleStar}
         />
       }
     >
