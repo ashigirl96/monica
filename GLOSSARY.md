@@ -46,7 +46,7 @@ Run を起こすために claude の Tab を開いてから、その Tab の Age
 _Avoid_: launch（単独で使わない）, 起動中の Run（まだ Run ではない）
 
 **Bench**:
-Task が 1 つ所有する Runspace。最初に開いた時か、Bench の無い Task に Attach した時に作られ、cwd（worktree か Repo の checkout か）はその後変えない。Workbench で最後の Tab を閉じるか、Jump Mode で Tab ごと消すと Task を close する。close の guard で止まったときと、Tab を外へ移したときは、Tab が無くても残る。guard で止まった Bench は、Workbench で止めた理由と、2 度押して強制で close する「Close anyway」を出す。止めた理由の無い Tab の無い Bench は、1 度押して強制でない close をやり直す「Close」を出す。Task を close すると壊れ（close を呼んだ Tab と、強制でない close の間にその Task の Run になった Tab だけは普通の Runspace に残る）、reopen すると作り直す。Workbench（画面）とは別物。
+Task が 1 つ所有する Runspace。最初に開いた時か、Bench の無い Task に Attach した時に作られ、cwd（worktree か Repo の checkout か）はその後変えない。Workbench で最後の Tab を閉じるか、Jump Mode で Tab ごと消すと Task を close する。close の guard で止まったときと、Tab を外へ移したときは、Tab が無くても残る。guard で止まった Bench は、Workbench で止めた理由と、2 度押して強制で close する「Close anyway」を出す。止めた理由の無い Tab の無い Bench は、1 度押して強制でない close をやり直す「Close」を出す。Task を close すると壊れ（close を呼んだ Tab と、強制でない close の間にその Task の Run になった Tab だけは普通の Runspace に残る）、reopen すると作り直す。呼び手が自分の Tab も消すよう頼んだ close では、呼んだ Tab も残らない。Workbench（画面）とは別物。
 _Avoid_: task runspace, bench runspace
 
 **Attach**:

@@ -83,6 +83,37 @@ test('close called by the agent in a Tab of the Bench keeps that Tab and its cla
   })
 })
 
+test('close called by the agent in a Tab of the Bench with closeCaller takes down that Tab and its claude too, and leaves no Runspace', async () => {
+  const fixture = await withWorktreeBench()
+  const { db, client, claudeTab, runspaceId } = fixture
+  const other = await fixture.openTab(runspaceId)
+  await fixture.hook(claudeTab, 's-1', 'SessionStart', { source: 'startup' })
+
+  const output = await client.close({ ref, terminalSessionId: claudeTab, closeCaller: true })
+
+  expect(output).toMatchObject({ removedWorktree: fixture.cwd, spared: false, warnings: [] })
+  expect(db.select().from(runspace).all()).toEqual([])
+  expect(tabsOf(fixture)).toEqual([])
+  expect((await terminatedAfterClose(fixture, 2)).toSorted()).toEqual([claudeTab, other].toSorted())
+})
+
+test('a forced close with closeCaller takes down the Tab it was called from too', async () => {
+  const fixture = await withWorktreeBench()
+  const { db, client, claudeTab } = fixture
+  writeFileSync(join(fixture.cwd, 'draft.txt'), 'draft\n')
+
+  const output = await client.close({
+    ref,
+    force: true,
+    terminalSessionId: claudeTab,
+    closeCaller: true,
+  })
+
+  expect(output).toMatchObject({ spared: false })
+  expect(db.select().from(runspace).all()).toEqual([])
+  expect(await terminatedAfterClose(fixture, 1)).toEqual([claudeTab])
+})
+
 test('close refuses with every reason it finds, a live Run, uncommitted changes and commits on no remote, and changes nothing; --force closes anyway', async () => {
   const fixture = await withWorktreeBench()
   const { client, cwd, ghq, claudeTab } = fixture

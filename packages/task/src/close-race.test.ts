@@ -161,6 +161,24 @@ test("a claude that becomes a Run while close removes the worktree keeps its Tab
   expect((await client.list({ closed: true })).tasks).toMatchObject([{ ref }])
 })
 
+test('a claude that becomes a Run while close removes the worktree keeps its Tab even when the caller asks with closeCaller to take its own Tab down', async () => {
+  const fixture = await withWorktreeBench()
+  const { db, client, claudeTab, runspaceId } = fixture
+  const caller = await fixture.openTab(runspaceId)
+  const pause = pauseBranchDeletion(fixture)
+  const closing = client.close({ ref, terminalSessionId: caller, closeCaller: true })
+  await until(() => existsSync(pause.started))
+
+  await fixture.hook(claudeTab, 's-1', 'SessionStart', { source: 'startup' })
+  writeFileSync(pause.release, '')
+  const output = await closing
+
+  expect(output).toMatchObject({ spared: false })
+  expect(db.select().from(runspace).all()).toMatchObject([{ id: runspaceId, owned: false }])
+  expect(tabsOf(fixture)).toEqual([{ terminalSessionId: claudeTab }])
+  expect(await terminatedAfterClose(fixture, 1)).toEqual([caller])
+})
+
 test('a claude that becomes a Run while close removes the worktree and then has its Tab closed is no late Run, and close completes', async () => {
   const fixture = await withWorktreeBench()
   const { db, client, claudeTab } = fixture

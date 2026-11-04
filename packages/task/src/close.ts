@@ -19,7 +19,7 @@ import { trashOf } from './trash.ts'
 
 export async function closeTask(
   deps: SyncDeps & BenchDeps,
-  input: { ref: string; force?: boolean; terminalSessionId?: string },
+  input: { ref: string; force?: boolean; closeCaller?: boolean; terminalSessionId?: string },
   errors: ORPCErrorConstructorMap<typeof closeErrors>,
 ): Promise<CloseOutput> {
   const asked = parseRef(input.ref)
@@ -36,7 +36,7 @@ export async function closeTask(
 async function closeReserved(
   deps: SyncDeps & BenchDeps,
   tracked: FoundTask,
-  input: { force?: boolean; terminalSessionId?: string },
+  input: { force?: boolean; closeCaller?: boolean; terminalSessionId?: string },
   errors: ORPCErrorConstructorMap<typeof closeErrors>,
 ): Promise<CloseOutput> {
   const { found, warnings } = await refreshTask(deps, tracked, 'close')
@@ -82,7 +82,10 @@ async function closeReserved(
       const { runspaceId } = now.bench
       tx.delete(bench).where(eq(bench.taskIssueId, found.issue.id)).run()
       deps.workbenchLedger.removeRunspace(tx, runspaceId, {
-        spare: [...(caller ? [caller] : []), ...lateRuns.map((r) => r.terminalSessionId)],
+        spare: [
+          ...(caller && !input.closeCaller ? [caller] : []),
+          ...lateRuns.map((r) => r.terminalSessionId),
+        ],
       })
       spared = caller !== undefined && tabIn(tx, runspaceId, caller)
     }
