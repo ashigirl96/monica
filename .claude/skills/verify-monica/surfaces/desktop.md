@@ -20,6 +20,8 @@ dev の desktop は `MONICA_HOME` ごとに identifier と vite の port が分�
 
 起動を待つ間（desktop の crate の build）は `bun run check:brief` を流さない。build が CPU を取り、変更と関係の無いテストが 5 秒の timeout で落ちる。
 
+ユーザーが自分のブラウザで見たいと言ったら（「URL は？」）、同じ `MONICA_HOME` で `bun run web` を `run_in_background` で起こし、`devInstance(<home>).webPort` の `http://localhost:<webPort>/` を渡す。dev の desktop の Backend は同じ home の browserPort でブラウザの口を開いているので、Vite がそこへ proxy する。
+
 自分の desktop の pid は、`bun run dev:list` の `monica-<名前>` の行の DESKTOP から引く。`pgrep -f target/debug/monica-desktop` はユーザーや別の worktree の desktop にも当たる。
 
 ## 確かめる

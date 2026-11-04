@@ -26,6 +26,14 @@ export const AMBIENTS = {
     blur: '0px',
     opacity: { dark: 0, light: 0 },
   },
+  /** 写真なしで dark の机と紙を黒に寄せる。色は notes.css の --ambient-ink-* が持つので、
+   * none と同じくキー名を変えるなら notes.css も直す。 */
+  ink: {
+    label: 'Ink',
+    image: null,
+    blur: '0px',
+    opacity: { dark: 0, light: 0 },
+  },
   universe: {
     label: 'Universe',
     image: universeImage,
