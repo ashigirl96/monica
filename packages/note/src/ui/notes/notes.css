@@ -110,13 +110,28 @@
   --jb-callout-under: oklch(0.345 0.045 264);
 }
 
-/* 写真なし（ambient.ts の none）。透かす相手がいないのに alpha を残すと、机と紙が
+/* 写真なし（ambient.ts の none と ink）。透かす相手がいないのに alpha を残すと、机と紙が
    同じ --background の上で合成されて階調差が潰れ「机の上の紙」が読めなくなる。
    dark は oklch の alpha、light は color-mix の % として同じ --paper-alpha を消費して
    いるので、1 に戻すこの 1 ブロックで両テーマに効く。
    ファイル末尾に置くのは light テーマのブロックと特異性が同点 (0,3,0) で、後に書いた側
    でないと勝てないため — 位置を上げると light だけ効かなくなる。 */
-:root[data-ambient="none"] .notes-screen {
+:root[data-ambient="none"] .notes-screen,
+:root[data-ambient="ink"] .notes-screen {
   --desk-alpha: 1;
   --paper-alpha: 1;
+}
+
+/* ink（ambient.ts）は dark の机と紙を黒に寄せる。机を紙より一段暗くするのは none と同じ
+   「机の上の紙」の明度順を保つため。hue 264 をわずかに残すのは、無彩色の黒だと
+   紺の差し色（線・バッジ）から浮くため。
+   :root に置くのは .notes-screen の外にいる AmbientSwitcher の swatch も紙の色を読むため。 */
+:root {
+  --ambient-ink-desk: oklch(0.135 0.02 264);
+  --ambient-ink-paper: oklch(0.17 0.02 264);
+}
+
+:root[data-theme="dark"][data-ambient="ink"] .notes-screen {
+  --desk: var(--ambient-ink-desk);
+  --paper: var(--ambient-ink-paper);
 }
