@@ -35,7 +35,7 @@ monica job add <名前> --schedule '<cron 式>' --cwd <repo の root> --timeout 
   --command "claude -p '/<skill>' --output-format json --allowedTools <tool …>"
 ```
 
-- PATH の先頭の `claude` は monica の wrapper だが、Tab の外では hook を付けずに本物を exec する。`claude` のまま呼ぶ。Agent Session にはならず、結果は LOG の result 行でしか見えない。
+- PATH の先頭の `claude` は monica の wrapper だが、Tab の外では hook を付けずに本物を exec する（`ocx` が PATH にあれば `ocx claude` を通す）。`claude` のまま呼ぶ。Agent Session にはならず、結果は LOG の result 行でしか見えない。
 - stdin が無いので、許可を求めた tool は拒否される。呼ぶ skill を読み、使う tool を `--allowedTools` に並べる。cwd の外の dir（scratchpad など）を触る skill には `--add-dir` も付ける。
 - `--output-format json` で、LOG に result 行（`is_error`・`permission_denials`・`session_id`）が残る。`session_id` で Tab から `claude --resume` できる。
 - tool を拒否された回も claude は exit 0 で終わり、`succeeded` になる。成否は 5 で LOG の result 行から読む。予定の回の失敗も `failed` で知りたいとユーザーが望んだときだけ、shell の Job として「claude を呼ぶ script」を書く。

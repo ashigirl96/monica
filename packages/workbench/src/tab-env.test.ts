@@ -165,7 +165,22 @@ async function claudeThroughWrapper(
 
 function realClaude(): string {
   const dir = scratchDir()
-  writeFakeExecutable(join(dir, 'claude'), 'printf "%s\\n" "$@"')
+  writeFakeExecutable(
+    join(dir, 'claude'),
+    'printf "%s\\n" "$@"\n[ -z "${MONICA_CLAUDE_VIA_OCX+set}" ] || echo leaked-via-ocx',
+  )
+  return dir
+}
+
+const hookArgs = (home: string) => [
+  '--settings',
+  join(home, 'shell/claude/settings.json'),
+  '--permission-mode=bypassPermissions',
+]
+
+function ocxOnPath(): string {
+  const dir = scratchDir()
+  writeFakeExecutable(join(dir, 'ocx'), '[ "$1" = claude ] && shift\necho via-ocx\nclaude "$@"')
   return dir
 }
 
@@ -198,43 +213,43 @@ test.each([
     args,
   )
 
-  const settings = [
-    '--settings',
-    join(home, 'shell/claude/settings.json'),
-    '--permission-mode=bypassPermissions',
-  ]
-  expect(result.stdout.trimEnd().split('\n')).toEqual([...(hooked ? settings : []), ...args])
+  expect(result.stdout.trimEnd().split('\n')).toEqual([...(hooked ? hookArgs(home) : []), ...args])
 })
 
-test('the claude wrapper reaches the real claude past another wrapper that hands back to the first claude on PATH', async () => {
-  const home = await sharedWrapperHome()
-  const real = realClaude()
-  const other = scratchDir()
-  writeFakeExecutable(
-    join(other, 'claude'),
-    [
-      'self="$(cd "$(dirname "$0")" && pwd)"',
-      'IFS=:',
-      'for dir in $PATH; do [ "$dir" = "$self" ] && continue; [ -x "$dir/claude" ] && exec "$dir/claude" "$@"; done',
-      'exit 127',
-    ].join('\n'),
-  )
+test.each([
+  ['', [], []],
+  [' and goes through ocx only on the first pass', ['ocx'], ['via-ocx']],
+])(
+  'the claude wrapper reaches the real claude past another wrapper that hands back to the first claude on PATH%s',
+  async (_name, withOcx, before) => {
+    const home = await sharedWrapperHome()
+    const real = realClaude()
+    const other = scratchDir()
+    writeFakeExecutable(
+      join(other, 'claude'),
+      [
+        'self="$(cd "$(dirname "$0")" && pwd)"',
+        'IFS=:',
+        'for dir in $PATH; do [ "$dir" = "$self" ] && continue; [ -x "$dir/claude" ] && exec "$dir/claude" "$@"; done',
+        'exit 127',
+      ].join('\n'),
+    )
 
-  const result = await claudeThroughWrapper(
-    home,
-    `${join(home, 'bin')}:${other}:${real}:/usr/bin:/bin`,
-    { MONICA_TERMINAL_SESSION_ID: 'ts-a' },
-  )
+    const result = await claudeThroughWrapper(
+      home,
+      [join(home, 'bin'), ...withOcx.map(ocxOnPath), other, real, '/usr/bin', '/bin'].join(':'),
+      inTab,
+    )
 
-  expect(result.code).toBe(0)
-  expect(result.stdout.trimEnd().split('\n')).toEqual([
-    '--settings',
-    join(home, 'shell/claude/settings.json'),
-    '--permission-mode=bypassPermissions',
-    '--print',
-    'hi',
-  ])
-})
+    expect(result.code).toBe(0)
+    expect(result.stdout.trimEnd().split('\n')).toEqual([
+      ...before,
+      ...hookArgs(home),
+      '--print',
+      'hi',
+    ])
+  },
+)
 
 test('the claude wrapper ignores a trail another process left in the env and still reaches the real claude with the hook settings', async () => {
   const home = await sharedWrapperHome()
@@ -246,12 +261,47 @@ test('the claude wrapper ignores a trail another process left in the env and sti
   })
 
   expect(result.code).toBe(0)
+  expect(result.stdout.trimEnd().split('\n')).toEqual([...hookArgs(home), '--print', 'hi'])
+})
+
+test.each([
+  [
+    "a Tab's claude goes through ocx claude once, with the hook settings added once",
+    inTab,
+    ['--print', 'hi'],
+    true,
+    true,
+  ],
+  [
+    'a claude outside any Tab goes through ocx too, without the hook settings',
+    {},
+    ['--print', 'hi'],
+    true,
+    false,
+  ],
+  [
+    'a claude subcommand skips ocx, since ocx claude reads config and desktop as its own',
+    inTab,
+    ['config', 'list'],
+    false,
+    false,
+  ],
+])('the claude wrapper with ocx on PATH: %s', async (_name, env, args, viaOcx, hooked) => {
+  const home = await sharedWrapperHome()
+  const real = realClaude()
+
+  const result = await claudeThroughWrapper(
+    home,
+    `${join(home, 'bin')}:${ocxOnPath()}:${real}:/usr/bin:/bin`,
+    env,
+    args,
+  )
+
+  expect(result.code).toBe(0)
   expect(result.stdout.trimEnd().split('\n')).toEqual([
-    '--settings',
-    join(home, 'shell/claude/settings.json'),
-    '--permission-mode=bypassPermissions',
-    '--print',
-    'hi',
+    ...(viaOcx ? ['via-ocx'] : []),
+    ...(hooked ? hookArgs(home) : []),
+    ...args,
   ])
 })
 

@@ -100,9 +100,13 @@ const CLAUDE_SUBCOMMANDS = [
 // 同じ pid（exec は pid を変えない）で戻ってきたら試した claude を飛ばし、settings も足し直さない。
 function claudeWrapper(home: string): string {
   return `#!/bin/bash
-# monica の claude wrapper。PATH にある次の claude を exec し、Tab で起こした claude にだけ hook と bypassPermissions を付ける。
+# monica の claude wrapper。PATH にある次の claude を、ocx があれば ocx claude 経由で exec し、Tab で起こした claude にだけ hook と bypassPermissions を付ける。
 trail=""
 [[ "\${MONICA_CLAUDE_TRAIL%%:*}" == "$$" ]] && trail="\${MONICA_CLAUDE_TRAIL#*:}"
+# ocx は PATH の claude（この wrapper）を別の pid で起こすので、trail ではなく MONICA_CLAUDE_VIA_OCX で二周目を見分ける。
+outermost=""
+[[ -z "$trail" && -z "\${MONICA_CLAUDE_VIA_OCX:-}" ]] && outermost=1
+unset MONICA_CLAUDE_VIA_OCX
 real=""
 set -f
 IFS=:
@@ -121,12 +125,18 @@ if [[ -z "$real" ]]; then
 fi
 # CLAUDECODE があるのは agent の Bash tool から起こした claude で、hook を付けると親の Agent Session を superseded にする。
 hooked=""
-[[ -z "$trail" && -n "\${MONICA_TERMINAL_SESSION_ID:-}" && -z "\${CLAUDECODE:-}" ]] && hooked=1
-# claude は --settings の後ろの subcommand を prompt として読むので、subcommand には足さない。
+[[ -n "$outermost" && -n "\${MONICA_TERMINAL_SESSION_ID:-}" && -z "\${CLAUDECODE:-}" ]] && hooked=1
+via_ocx=""
+[[ -n "$outermost" ]] && command -v ocx >/dev/null 2>&1 && via_ocx=1
+# claude は --settings の後ろの subcommand を prompt として読み、ocx claude は config などを自分の subcommand として読むので、subcommand はそのまま渡す。
 case "\${1:-}" in
-  ${CLAUDE_SUBCOMMANDS.join('|')}) hooked="" ;;
+  ${CLAUDE_SUBCOMMANDS.join('|')}) hooked="" via_ocx="" ;;
 esac
 [[ -n "$hooked" ]] && set -- --settings ${shellQuote(settingsOf(home))} --permission-mode=bypassPermissions "$@"
+if [[ -n "$via_ocx" ]]; then
+  export MONICA_CLAUDE_VIA_OCX=1
+  exec ocx claude "$@"
+fi
 export MONICA_CLAUDE_TRAIL="$$:\${trail:+$trail:}$real"
 exec "$real" "$@"
 `
