@@ -63,7 +63,7 @@ exit code は 0 = 成功、1 = それ以外の失敗、2 = Backend 不在。CLI 
 
 ## 証拠
 
-証拠は `$TMPDIR/verify-monica/<name>/` に置く。`launch.sh` が `out.jsonl`（Backend の stdout、`endpoint` と `notify` の行）と `err.log` をここに書く。片付けてもこの dir は残る。
+証拠は `$TMPDIR/verify-monica/<name>/` に置く。`launch.sh` が `out.jsonl`（Backend の stdout、`endpoint` と `notify` の行）と `err.log` をここに書く。片付けてもこの dir は残るが、同じ `<name>` で起こし直すと `launch.sh` が `out.jsonl` と `err.log` を空にする。前の回の行を証拠にするなら、起こし直す前に `$E` の中で別の名前に写す。
 
 - 本物のユーザーの経路を通す。CLI・RPC・端末への打ち込み・画面の操作で動かし、DB への直接の書き込みや test 用の fake で状態を作らない。DB は Backend が `locking_mode=EXCLUSIVE` で握るので、`sqlite3` で読むのは片付けの前に Backend だけを止めた後。
 - 操作と、その後の状態の両方を残す。CLI なら command・stdout・stderr・exit code を `<feature>.transcript` に追記する。画面なら操作の前と後を撮る。

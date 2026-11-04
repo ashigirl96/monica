@@ -34,4 +34,4 @@ Preconditions:
 - ptyd の socket の操作は `bun -e` の script で行う。worktree の session では guard が `bun -e` を断るので、script を scratchpad の file に書いて `bun <file>` で流す。
 - `replay` は escape sequence を含む。除いてから読まないと、`done` が色の sequence に割られて見つからない。
 - `write` の直後に `attach` すると、shell がまだ出力していない。数秒待ってから読む。
-- Runspace の最後の Tab を閉じると Runspace も消える（`runspaceEmptied`）。Runspace が残る前提で次の手順を書かない。
+- Runspace の最後の Tab を閉じると Runspace も消える（`tab.close` の応答の `emptiedRunspaceId` は `null` で、`runspaceEmptied` は出ない）。Runspace が残る前提で次の手順を書かない。

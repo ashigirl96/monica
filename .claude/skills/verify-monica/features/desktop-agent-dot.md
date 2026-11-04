@@ -26,12 +26,13 @@ Preconditions:
 - **dot を出す.** A の Terminal Session で SessionStart の payload を流す（payload は `docs/research/hook-payloads.md`）。`printf '%s' '<payload>' | MONICA_HOME=$H MONICA_TERMINAL_SESSION_ID=<A の id> scripts/monica-dev workbench hook claude`。`webview_execute_js` で `document.querySelector('[data-tab-id="<A>"] span[title="手空き"]') !== null` が `true`。
 - **待ちにする.** 同じく `"hook_event_name":"PreToolUse","tool_name":"AskUserQuestion"` の payload を流す。`[data-tab-id="<A>"] span[title="質問"]` が出る。
 - **Dock の数を読む.** `lsappinfo info -only StatusLabel "$(lsappinfo find pid=<DESKTOP の pid>)"` が `{ "label"="1" }` を返す。Dock の数は screenshot に写らないので、この出力を証拠にする。
-- **見る.** tauri-mcp の `manage_window` の `focus` で窓を前に出し、`document.hasFocus()` が `true` になってから、`[data-tab-id="<A>"]` の button に `pointerdown` と `pointerup` を `dispatchEvent` する。もう一度 `lsappinfo` を読むと `[ NULL ]` か `kCFNULL` になる。
+- **見る.** tauri-mcp の `manage_window` の `focus` で窓を前に出し、間に他の操作を挟まずに `[data-tab-id="<A>"]` の button に `pointerdown` を `dispatchEvent` する。もう一度 `lsappinfo` を読むと `[ NULL ]` か `kCFNULL` になる。数が残っていれば窓が背面に戻っているので、`surfaces/desktop.md` の「窓の前面と背面」の System Events の `frontmost` で前に出すと消える。
 - **証拠.** 待ちにした後と見た後の窓を、`surfaces/desktop.md` の「窓の枠と端末の字形」の `screencapture` で `$E/desktop-agent-dot-{waiting,seen}.png` に撮る。流した payload・`webview_execute_js` の結果・各回の `lsappinfo` の出力を `$E/desktop-agent-dot.transcript` に残す。
 
 ## Gotchas
 
 - 起動直後の手空きでは通知が出ず、未読にもならない。未読を作るのは質問・許可・エラーの待ちか、turn の終わりの手空き。
+- 未読を消すのは Tauri の窓の focus の event で、webview の `document.hasFocus()` は前面でも `false` を返すことがある。前面かは `hasFocus` で決めず、`lsappinfo` の数で見る。`focus` と押す操作の間に `screencapture` など別の app に触る操作を挟むと、窓が背面に戻る。
 - 待ちに入れた時に A を表示していると、窓が前面なら見たことになり、未読にならない。先に別の Tab を前面にする。
 - `webview_screenshot` には Tab の dot は写るが、Dock の数は写らない。数は `lsappinfo` で読む。
 - tauri-mcp の click は `pointerdown` を出さないので Tab が切り替わらない。必ず `dispatchEvent` で送る。

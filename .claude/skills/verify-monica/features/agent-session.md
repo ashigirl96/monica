@@ -22,7 +22,7 @@ Preconditions:
 - `doctor.sh <name>` が `OK`。
 - [Tab と端末](./workbench-tab.md) の「Runspace を開く」で開いた Tab の `terminalSessionId` がある。hook は live な Terminal Session のものしか記録されない。
 
-- **Agent Session を作る.** SessionStart の payload を流す。field と場面ごとの順は `docs/research/hook-payloads.md`。`printf '%s' '<payload>' | MONICA_HOME=$H MONICA_TERMINAL_SESSION_ID=<ts-id> scripts/monica-dev workbench hook claude`。exit 0 で、`monica workbench agent-session list --format json` にその `session_id` が出る。
+- **Agent Session を作る.** SessionStart の payload を流す。field と場面ごとの順は `docs/research/hook-payloads.md`。`printf '%s' '<payload>' | MONICA_HOME=$H MONICA_TERMINAL_SESSION_ID=<ts-id> scripts/monica-dev workbench hook claude`。`monica workbench agent-session list --format json` にその `session_id` が `waiting`・`idle` で出る。起動の手空きでは `notify` の行は出ない。
 - **ユーザー待ちにする.** `"hook_event_name":"PreToolUse","tool_name":"AskUserQuestion"` の payload を同じく流す。`agent-session list` の状態が待ちになり、理由が質問になる。
 - **通知を見る.** `$E/out.jsonl` に `{"type":"notify",…}` の行が足される。
 - **終わらせる.** SessionEnd の payload を流す。`agent-session list` からその id が消える。
@@ -30,6 +30,7 @@ Preconditions:
 
 ## Gotchas
 
-- field の欠けた payload（`tool_name` の無い PermissionRequest など）は記録されず、`$E/err.log` に `ignored a hook it cannot read` が出る。一覧に出ないときはまずここを見る。
+- hook の CLI は、hook が記録されなかったときも exit 0 で終わる。記録できたかは `agent-session list` と `$E/err.log` で見る。
+- field の欠けた payload（`tool_name` の無い PermissionRequest など）は記録されず、`$E/err.log` に `ignored a hook it cannot read` が出る。live でない Terminal Session の hook は `dropped a <event> hook from Terminal Session <id> (…)` が出る。一覧に出ないときはまずここを見る。
 - `MONICA_TERMINAL_SESSION_ID` を渡し忘れると、この session の env にある外側の id（ユーザーの Tab）が使われ、記録されないか、ユーザーの Backend に届く。`MONICA_HOME` と一緒に毎回渡す。
 - 本物の claude を Tab で起こす経路は `surfaces/headless.md` の「Tab で本物の claude を起こすとき」。初めての directory では trust の確認で止まり、SessionStart が届かない。

@@ -23,7 +23,7 @@ Preconditions:
 - agent-browser は `--session verify-<name>` を付けて使う。
 
 - **開く.** `agent-browser --session verify-<name> open http://localhost:<Vite の port>/` の後に `snapshot` を取る。今日の Daily のエディタ（`.ProseMirror`）がある。
-- **書く.** `click '[data-block-content]'` で最初の段落に入り、1 秒待ってから `type 'verify-daily-ok'` を送る。画面に文字が出る。
+- **書く.** `click '[data-block-content]'` で最初の段落に入り、1 秒待ってから `keyboard type 'verify-daily-ok'` を送る。`type` は最初の引数を selector として読み、`Element not found` で失敗する。画面に文字が出る。
 - **読み込み直す.** autosave を待ってから `open` で頁を読み直し、`snapshot` に `verify-daily-ok` がある。
 - **別の経路で読む.** ブラウザの口の `POST /rpc/note/daily/open`（`Sec-Fetch-Site: same-origin`）で今日の Daily を読み、本文に `verify-daily-ok` がある。
 - **証拠.** 書いた後と読み直した後の `screenshot` を `$E/note-daily-*.png` に、RPC の応答を `$E/note-daily.transcript` に残す。
