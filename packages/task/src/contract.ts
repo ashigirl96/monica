@@ -323,7 +323,7 @@ export const contract = {
   close: meta
     .meta({
       description:
-        'Close a Task and take down its Bench: the worktree, the branch issue-n, the Runspace and its Tabs, all but the Tab this runs in',
+        'Close a Task and take down its Bench: the worktree, the branch issue-n, the Runspace and its Tabs, all but the Tab this runs in unless --close-caller',
       cli: true,
     })
     .errors(closeErrors)
@@ -334,6 +334,10 @@ export const contract = {
           .boolean()
           .optional()
           .describe('close even with live Runs, uncommitted changes or commits on no remote'),
+        closeCaller: z
+          .boolean()
+          .optional()
+          .describe('take down the Tab this runs in too, when it is in the Bench'),
         terminalSessionId: z.string().optional(),
       }),
     )
