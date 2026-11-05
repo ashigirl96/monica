@@ -107,6 +107,8 @@ const down: Entry = { kind: 'cycleRunspace', direction: 'down' }
 const up: Entry = { kind: 'cycleRunspace', direction: 'up' }
 const left: Entry = { kind: 'cycleTab', direction: 'left' }
 const right: Entry = { kind: 'cycleTab', direction: 'right' }
+const tileDown: Entry = { kind: 'cycleTile', direction: 'down' }
+const tileUp: Entry = { kind: 'cycleTile', direction: 'up' }
 
 test.each([
   ['pressing a row', row('l'), true],
@@ -116,6 +118,7 @@ test.each([
   ['clicking a notification', notification('ts-l.0'), true],
   ['clicking a notification of a Terminal Session no Tab shows', notification('ts-gone'), false],
   ['cycling Runspaces', down, false],
+  ['cycling Tiles', tileDown, true],
   ['cycling Tabs', right, false],
 ])("whether %s asks for the terminal's focus", (_, entry, focus) => {
   const world = worldOf([runspace('a', APP, { tabs: 2 }), runspace('l', LIB)])
@@ -263,6 +266,35 @@ test('cycling Tabs wraps around the Tabs of the active Runspace', () => {
   const backToFirst = run(world, [right], toLast).state
 
   expect([onScreen(toLast, world).tab, onScreen(backToFirst, world).tab]).toEqual(['a.2', 'a.0'])
+})
+
+test('cycling Tiles goes down and up the Rail from the selected Tile, through the Tile for outside the Repos and around, bringing up the Runspace last active under each', () => {
+  const world = worldOf([
+    runspace('a1', APP),
+    runspace('a2', APP),
+    runspace('l', LIB),
+    runspace('h', HOME),
+  ])
+  const shown = run(world, [row('a2')]).state
+
+  const downs = [1, 2, 3].map((n) =>
+    onScreen(
+      run(
+        world,
+        Array.from({ length: n }, () => tileDown),
+        shown,
+      ).state,
+      world,
+    ),
+  )
+  const upward = onScreen(run(world, [tileUp], shown).state, world)
+
+  expect(downs).toEqual([
+    { tile: 'acme/lib', runspace: 'l', tab: 'l.0' },
+    { tile: OUTSIDE, runspace: 'h', tab: 'h.0' },
+    { tile: 'acme/app', runspace: 'a2', tab: 'a2.0' },
+  ])
+  expect(upward).toEqual({ tile: OUTSIDE, runspace: 'h', tab: 'h.0' })
 })
 
 test.each([

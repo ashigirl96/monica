@@ -6,6 +6,7 @@ import {
   activeRunspaceAtom,
   activeTerminalTabAtom,
   cycleRunspaceAtom,
+  cycleTileAtom,
   cycleTerminalTabAtom,
   pickTileByNumberAtom,
   shownRunspaceIdsAtom,
@@ -200,6 +201,20 @@ export const keymap = createKeymap([
   { alt: true, code: 'KeyJ', editable: true, action: (s) => s.set(cycleRunspaceAtom, 'down') },
   { alt: true, code: 'KeyC', editable: true, action: (s) => s.set(copyActiveAgentSessionIdAtom) },
   { alt: true, code: 'KeyK', editable: true, action: (s) => s.set(cycleRunspaceAtom, 'up') },
+  {
+    meta: true,
+    alt: true,
+    code: 'KeyJ',
+    editable: true,
+    action: (s) => s.set(cycleTileAtom, 'down'),
+  },
+  {
+    meta: true,
+    alt: true,
+    code: 'KeyK',
+    editable: true,
+    action: (s) => s.set(cycleTileAtom, 'up'),
+  },
   {
     ctrl: true,
     key: 'Tab',

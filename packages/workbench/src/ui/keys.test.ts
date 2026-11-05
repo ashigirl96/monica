@@ -85,6 +85,26 @@ test('with the terminal focused, the ⌥, ⌃Tab and ⌘ bindings act and ⌘= /
   expect(store.get(uiZoomAtom)).toBe(uiZoom)
 })
 
+test('with the terminal focused, ⌘⌥J and ⌘⌥K cycle Tiles, so with two Runspaces under the one Tile each leaves the active Runspace as it is', async () => {
+  const { client } = setup()
+  const store = createStore()
+  store.set(workbenchClientAtom, () => client)
+  const first = await client.runspace.create(size)
+  await client.runspace.create(size)
+  await store.set(reloadAtom)
+  store.set(activateRunspaceAtom, first.runspaceId)
+  const terminal = inTerminal(store)
+
+  const metaAltJ = terminal.press(keydown('∆', 'KeyJ', { meta: true, alt: true }))
+  const afterJ = store.get(activeRunspaceAtom)?.id
+  const metaAltK = terminal.press(keydown('˚', 'KeyK', { meta: true, alt: true }))
+  const afterK = store.get(activeRunspaceAtom)?.id
+
+  const acted = { toTerminal: false, handled: true }
+  expect([metaAltJ, metaAltK]).toEqual([acted, acted])
+  expect([afterJ, afterK]).toEqual([first.runspaceId, first.runspaceId])
+})
+
 test('a key added to the binding table is taken from the focused terminal and acts', () => {
   const store = createStore()
   const ctrlG = keydown('g', 'KeyG', { ctrl: true })

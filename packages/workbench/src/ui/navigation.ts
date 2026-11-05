@@ -36,6 +36,7 @@ export type Entry =
   | { kind: 'terminalSession'; terminalSessionId: string }
   | { kind: 'cycleRunspace'; direction: 'up' | 'down' }
   | { kind: 'cycleTab'; direction: 'left' | 'right' }
+  | { kind: 'cycleTile'; direction: 'up' | 'down' }
   | { kind: 'layout'; previous: World }
   | { kind: 'restore' }
 
@@ -156,6 +157,11 @@ export function navigate(state: Navigation, entry: Entry, world: World): Step {
       const step = entry.direction === 'left' ? -1 : 1
       const next = cycle(runspace.tabs, activeTabOf(state, runspace), step)
       return withoutFocus(next ? activate(state, world, runspace.id, next.id) : state)
+    }
+    case 'cycleTile': {
+      const keys = world.tiles.tiles.map((t) => t.key)
+      const next = cycle(keys, selectedTileOf(state, world), entry.direction === 'up' ? -1 : 1)
+      return next ? pressTile(state, world, next) : withoutFocus(state)
     }
     case 'layout':
       return withoutFocus(readLayout(state, entry.previous, world))
@@ -352,6 +358,11 @@ export const cycleRunspaceAtom = entryAtom((direction: 'up' | 'down') => ({
 
 export const cycleTerminalTabAtom = entryAtom((direction: 'left' | 'right') => ({
   kind: 'cycleTab',
+  direction,
+}))
+
+export const cycleTileAtom = entryAtom((direction: 'up' | 'down') => ({
+  kind: 'cycleTile',
   direction,
 }))
 
