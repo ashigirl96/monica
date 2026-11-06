@@ -278,7 +278,7 @@ export function RepoEditor({ repo, noteId }: { repo: string; noteId: string | nu
         />
       }
     >
-      <main className="flex-1 overflow-y-auto bg-[var(--paper)]">
+      <main className="flex-1 [zoom:var(--note-zoom,1)] overflow-y-auto bg-[var(--paper)]">
         {loadError ? (
           <div className="flex h-full items-center justify-center text-sm text-destructive">
             {loadError.message}

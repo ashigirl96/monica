@@ -665,7 +665,9 @@ export class ImageView implements NodeView {
     event.preventDefault()
     this.resizing = true
     const startX = event.clientX
-    const startWidth = this.img.getBoundingClientRect().width
+    const startWidth = this.img.offsetWidth
+    // pointer の座標は CSS zoom の後の px なので、本文の拡大率で割って style の px に揃える
+    const scale = startWidth > 0 ? this.img.getBoundingClientRect().width / startWidth : 1
     const maxWidth = this.view.dom.clientWidth || startWidth
     const handle = event.currentTarget as HTMLElement
     handle.setPointerCapture(event.pointerId)
@@ -673,7 +675,10 @@ export class ImageView implements NodeView {
 
     const onMove = (e: PointerEvent) => {
       if (!this.img) return
-      latest = Math.max(IMAGE_MIN_WIDTH, Math.min(startWidth + (e.clientX - startX), maxWidth))
+      latest = Math.max(
+        IMAGE_MIN_WIDTH,
+        Math.min(startWidth + (e.clientX - startX) / scale, maxWidth),
+      )
       this.img.style.width = `${Math.round(latest)}px`
     }
     const onUp = () => {
