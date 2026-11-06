@@ -328,7 +328,7 @@ export function EssayEditorPage({ id }: { id: string }) {
         />
       }
     >
-      <main className="flex-1 overflow-y-auto bg-[var(--paper)]">
+      <main className="flex-1 [zoom:var(--note-zoom,1)] overflow-y-auto bg-[var(--paper)]">
         {noteError ? (
           <div className="flex h-full items-center justify-center text-sm text-destructive">
             {noteError}
