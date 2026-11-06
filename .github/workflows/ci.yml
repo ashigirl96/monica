@@ -25,6 +25,12 @@ jobs:
           bun-version-file: package.json
       - run: bun install --frozen-lockfile
       - run: bun run check:ts
+      # テストの DB は migration の SQL から作るので、schema を変えて generate を忘れてもテストは通る。
+      - name: migrations match the schema
+        run: |
+          bun run generate
+          git status --porcelain -- 'packages/*/migrations'
+          test -z "$(git status --porcelain -- 'packages/*/migrations')"
       - run: docker run --rm -v "$PWD:/repo" --workdir /repo rhysd/actionlint:1.7.12 -color
 
   secrets:
