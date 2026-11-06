@@ -35,6 +35,11 @@ export function openScratch(db: Db, repo: string): Note {
   return toNote(found ?? insertNote(db, { kind: 'scratch', repo }))
 }
 
+export function openPad(db: Db): Note {
+  const found = db.select().from(note).where(eq(note.kind, 'pad')).get()
+  return toNote(found ?? insertNote(db, { kind: 'pad' }))
+}
+
 export function createEssay(db: Db): Note {
   return toNote(insertNote(db, { kind: 'essay', title: '', status: 'writing' }))
 }

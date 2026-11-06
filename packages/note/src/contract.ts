@@ -61,6 +61,7 @@ export const NoteSchema = z.discriminatedUnion('kind', [
     ...common,
   }),
   z.object({ kind: z.literal('scratch'), repo: z.string(), ...common }),
+  z.object({ kind: z.literal('pad'), ...common }),
 ])
 
 const summaryCommon = {
@@ -86,6 +87,7 @@ export const NoteSummarySchema = z.discriminatedUnion('kind', [
   EssaySummarySchema,
   z.object({ kind: z.literal('repo_note'), repo: z.string(), title: z.string(), ...summaryCommon }),
   z.object({ kind: z.literal('scratch'), repo: z.string(), ...summaryCommon }),
+  z.object({ kind: z.literal('pad'), ...summaryCommon }),
 ])
 
 const ImageUrlSchema = z
@@ -151,6 +153,7 @@ export type Named =
   | { kind: 'daily'; date: string }
   | { kind: 'essay' | 'repo_note'; title: string }
   | { kind: 'scratch'; repo: string }
+  | { kind: 'pad' }
 
 export function displayName(named: Named): string {
   switch (named.kind) {
@@ -161,6 +164,8 @@ export function displayName(named: Named): string {
       return named.title || 'Untitled'
     case 'scratch':
       return named.repo
+    case 'pad':
+      return 'Pad'
   }
 }
 
@@ -216,7 +221,7 @@ export const contract = {
     )
     .output(z.object({ updatedAt: NoteRowSchema.shape.updatedAt })),
   remove: meta
-    .meta({ description: 'Delete an Essay or a Repo Note; a Daily and a Scratch stay' })
+    .meta({ description: 'Delete an Essay or a Repo Note; a Daily, a Scratch and the Pad stay' })
     .input(z.object({ id }))
     .output(z.void()),
   restore: meta
@@ -226,7 +231,7 @@ export const contract = {
   star: meta
     .meta({
       description:
-        'Put a Star on an Essay or a Repo Note, or take it off; a Daily and a Scratch have none',
+        'Put a Star on an Essay or a Repo Note, or take it off; a Daily, a Scratch and the Pad have none',
     })
     .input(z.object({ id, starred: z.boolean() }))
     .output(z.void()),
@@ -251,6 +256,11 @@ export const contract = {
     open: meta
       .meta({ description: 'Get the Scratch of a Repo, making it when there is none' })
       .input(z.object({ repo: RepoSchema }))
+      .output(NoteSchema),
+  },
+  pad: {
+    open: meta
+      .meta({ description: 'Get the Pad, making it when there is none' })
       .output(NoteSchema),
   },
   essay: {

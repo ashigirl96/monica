@@ -12,20 +12,24 @@ import { NoteBlockEditor } from '../../notes/note-block-editor.tsx'
 import { readBody, UnreadableBody, UnreadableNotice } from '../../notes/note-body.tsx'
 import { useServerDoc } from '../../notes/note-sync.ts'
 import { NotesShell } from '../../notes/notes-shell.tsx'
-import { useDailyDatesQuery, useDailyNoteQuery } from '../../notes/queries.ts'
+import { useDailyDatesQuery, useDailyOrPadQuery } from '../../notes/queries.ts'
 import { SaveStatus } from '../../notes/save-status.tsx'
 import { noteLabel } from '../../notes/summary.ts'
 import { queryKeys } from '../../query.ts'
 import { navigate } from '../../router.ts'
-import { dailyPath } from '../../routes.ts'
+import { dailyPath, PAD_PATH } from '../../routes.ts'
 import { DailyCalendar } from './calendar.tsx'
 import { DailySidebar } from './sidebar.tsx'
+
+// 日付と衝突しない、⌥K/J の巡回と docKey での Pad の名前。
+const PAD_KEY = 'pad'
 
 /**
  * /daily/:date: 1 日 1 note の daily 専用画面。開く = get-or-create なので EmptyState も
  * 新規作成キー（⌥N）も持たない。title は日付固定で入力 UI を出さない。
+ * date が null なら /pad: サイドバーの最上段の Pad を開いている。
  */
-export function DailyPage({ date }: { date: string }) {
+export function DailyPage({ date }: { date: string | null }) {
   // /daily を開き直すと、この画面は作り直されて今日を導き直す。
   const [today] = useState(() => logicalDate(new Date()))
   const [month, setMonth] = useState<Month>(() => monthOf(today))
@@ -36,13 +40,14 @@ export function DailyPage({ date }: { date: string }) {
   const contentRef = useRef<unknown>(null)
   const noteRef = useRef<Note | null>(null)
 
-  useDocumentTitle(dayLabelWithYear(date))
+  const heading = date === null ? 'Pad' : dayLabelWithYear(date)
+  useDocumentTitle(heading)
 
   // 開く = 作る（get-or-create、冪等）。docKey は note id ではなく date —
   // id はフェッチするまで分からないため
-  const noteQuery = useDailyNoteQuery(date)
+  const noteQuery = useDailyOrPadQuery(date)
   const { note, generation, reload } = useServerDoc({
-    docKey: date,
+    docKey: date ?? PAD_KEY,
     data: noteQuery.data,
     autosave,
     contentRef,
@@ -61,7 +66,7 @@ export function DailyPage({ date }: { date: string }) {
   useEffect(() => {
     // 空日を開いた（= その場で作成された）場合に存在日リストへ反映する。
     // 一覧の到着が後になる場合もあるので、datesQuery.data が入れ替わるたびに撃ち直す
-    if (noteQuery.data === undefined) return
+    if (date === null || noteQuery.data === undefined) return
     queryClient.setQueryData(queryKeys.dailyDates(), (prev: string[] | undefined) =>
       prev === undefined || prev.includes(date) ? prev : [...prev, date],
     )
@@ -82,18 +87,18 @@ export function DailyPage({ date }: { date: string }) {
       .toReversed()
   }, [dates, today])
 
-  const selectDate = useCallback(
-    (day: string) => {
+  const select = useCallback(
+    (key: string) => {
       void flush()
-      navigate(dailyPath(day))
+      navigate(key === PAD_KEY ? PAD_PATH : dailyPath(key))
     },
     [flush],
   )
 
   const goToday = useCallback(() => {
     setMonth((m) => (sameMonth(m, monthOf(today)) ? m : monthOf(today)))
-    selectDate(today)
-  }, [today, selectDate])
+    select(today)
+  }, [today, select])
 
   useEffect(() => {
     // capture phase で登録する: エディタ（ProseMirror）より先に横取りする必要がある。
@@ -103,27 +108,28 @@ export function DailyPage({ date }: { date: string }) {
       if (e.code !== 'KeyJ' && e.code !== 'KeyK') return
       e.preventDefault()
       e.stopPropagation()
-      const next = cycleSelect(sidebarDates ?? [], date, e.code === 'KeyJ' ? 1 : -1)
-      if (next !== undefined) selectDate(next)
+      const keys = [PAD_KEY, ...(sidebarDates ?? [])]
+      const next = cycleSelect(keys, date ?? PAD_KEY, e.code === 'KeyJ' ? 1 : -1)
+      if (next !== undefined) select(next)
     }
     window.addEventListener('keydown', onKey, true)
     return () => window.removeEventListener('keydown', onKey, true)
-  }, [sidebarDates, date, selectDate])
+  }, [sidebarDates, date, select])
 
   const onDocChange = useCallback(
     (doc: unknown) => {
       contentRef.current = doc
       const current = noteRef.current
       if (current && readBody(current.content).ok) {
-        // daily は title を持たないので送らない。競合通知の見出しも title ではなく日付になる
+        // daily と Pad は title を持たないので送らない。競合通知の見出しは日付か Pad になる
         schedule(
           current.id,
           { content: persistableContent(contentRef.current ?? current.content) },
-          noteLabel(current, dayLabelWithYear(current.date)),
+          noteLabel(current, heading),
         )
       }
     },
-    [schedule],
+    [schedule, heading],
   )
 
   return (
@@ -134,7 +140,9 @@ export function DailyPage({ date }: { date: string }) {
             dates={sidebarDates}
             selectedDate={date}
             today={today}
-            onSelect={selectDate}
+            padSelected={date === null}
+            onSelectPad={() => select(PAD_KEY)}
+            onSelect={select}
           />
           <DailyCalendar
             month={month}
@@ -142,7 +150,7 @@ export function DailyPage({ date }: { date: string }) {
             selectedDate={date}
             today={today}
             onMonthChange={(delta) => setMonth((m) => addMonths(m, delta))}
-            onSelectDay={selectDate}
+            onSelectDay={select}
             onToday={goToday}
           />
         </>
@@ -158,7 +166,7 @@ export function DailyPage({ date }: { date: string }) {
             <header className="pt-10">
               <div className="flex items-baseline justify-between gap-3">
                 <h1 className="font-mono text-[0.8rem] tracking-widest text-[var(--ink-muted)] uppercase">
-                  {dayLabelWithYear(date)}
+                  {heading}
                 </h1>
                 <span className="truncate text-xs">
                   <SaveStatus noteId={note.id} onReload={() => void reload()} />

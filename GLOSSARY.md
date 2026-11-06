@@ -142,7 +142,7 @@ _Avoid_: Execution（単独で使わない）, Job Run, Run（Task の語）, ti
 ### Note
 
 **Note**:
-本文を持つ 1 枚の文書。Daily・Essay・Repo Note・Scratch のどれか 1 つの種類に属し、種類も作った時点の Logical Date も後から変えない。削除すると一覧と Note Mention の候補から消え、その Note を指す Note Mention と Synced Block には削除されたと出る。削除した画面にいる間は取り消せる。Essay の一覧と編集は合わせて 1 つの画面、Repo Note は Repo ごとに 1 つの画面と数える。
+本文を持つ 1 枚の文書。Daily・Essay・Repo Note・Scratch・Pad のどれか 1 つの種類に属し、種類も作った時点の Logical Date も後から変えない。削除すると一覧と Note Mention の候補から消え、その Note を指す Note Mention と Synced Block には削除されたと出る。削除した画面にいる間は取り消せる。Essay の一覧と編集は合わせて 1 つの画面、Repo Note は Repo ごとに 1 つの画面、Pad は 1 つの画面と数える。
 _Avoid_: memo, journal, page, document, ノート
 
 **Daily**:
@@ -159,6 +159,10 @@ _Avoid_: project note
 **Scratch**:
 Repo ごとに 1 つある、長く追記していく書き殴りの Note。title を持たず、Repo で名指す。開いた時に作られ、削除できない。
 _Avoid_: primary note, pinned note（Pin は Tab の語）
+
+**Pad**:
+どの Repo にも Logical Date にも属さず、全体でちょうど 1 つある Note。日をまたいで書き足し、書き消しを続ける。title を持たず、Pad と名指す。開いた時に作られ、削除できない。Daily の画面から開くが、Daily には属さない。
+_Avoid_: memo, inbox, global scratch, Repo の無い Scratch
 
 **Star**:
 Essay と Repo Note に付ける印。Star の付いた Note は、それが属する一覧の上に出る。Note を削除して取り消しても、Essay の状態を変えても残る。

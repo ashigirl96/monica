@@ -206,6 +206,7 @@ test('the page of a Note carries its name and preview as OGP, so a pasted Note U
     ['/essays/note-999', 'monica', null],
     ['/daily/2026-10-06', 'monica', null],
     ['/repos/ashigirl96/unscratched', 'monica', null],
+    ['/pad', 'monica', null],
   ]
   for (const [path, title, description] of cases) {
     const read = await notes.linkMetadata({ url: `http://127.0.0.1:${port}${path}` })
@@ -214,6 +215,12 @@ test('the page of a Note carries its name and preview as OGP, so a pasted Note U
   // 頁を読むだけで、開くと作られる Daily を作らない。
   expect(await notes.daily.dates()).toEqual([])
   expect(await notes.noteMention.search({ q: 'unscratched' })).toEqual([])
+  expect(await notes.noteMention.search({ q: 'pad' })).toEqual([])
+
+  const pad = await notes.pad.open()
+  await write(pad.id, 'on the pad')
+  const read = await notes.linkMetadata({ url: `http://127.0.0.1:${port}/pad` })
+  expect([read.title, read.description]).toEqual(['Pad', 'on the pad'])
 })
 
 const PNG = Uint8Array.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 0x0d])

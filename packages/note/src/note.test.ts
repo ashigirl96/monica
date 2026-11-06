@@ -102,6 +102,18 @@ test('opening the Scratch of a Repo gives the same Note whatever the case of the
   expect(other.id).not.toBe(first.id)
 })
 
+test('opening the Pad twice gives the same Note, which has no title and no Repo', async () => {
+  const { client } = setup()
+
+  const first = await client.pad.open()
+  const again = await client.pad.open()
+
+  expect(first.kind).toBe('pad')
+  expect(first).not.toHaveProperty('title')
+  expect(first).not.toHaveProperty('repo')
+  expect(again).toEqual(first)
+})
+
 test('an Essay is made writing with no title, and a Repo Note with no title in its Repo, both on the Logical Date they are made', async () => {
   const { client } = setup()
   setSystemTime(new Date(2026, 9, 6, 4, 30))
@@ -185,12 +197,13 @@ test('saving on an old version fails with CONFLICT and leaves the body, even whe
   })
 })
 
-test('a title is refused for a Daily and a Scratch, and the body is left', async () => {
+test('a title is refused for a Daily, a Scratch and the Pad, and the body is left', async () => {
   const { client } = setup()
   const daily = await client.daily.open({ date: '2026-10-06' })
   const scratch = await client.scratch.open({ repo: 'owner/repo' })
+  const pad = await client.pad.open()
 
-  for (const { id, updatedAt } of [daily, scratch]) {
+  for (const { id, updatedAt } of [daily, scratch, pad]) {
     const error = await failure(
       client.save({ id, content: doc('text'), title: 'title', expectedUpdatedAt: updatedAt }),
     )
@@ -200,12 +213,13 @@ test('a title is refused for a Daily and a Scratch, and the body is left', async
   }
 })
 
-test('a Daily and a Scratch cannot be deleted', async () => {
+test('a Daily, a Scratch and the Pad cannot be deleted', async () => {
   const { client } = setup()
   const daily = await client.daily.open({ date: '2026-10-06' })
   const scratch = await client.scratch.open({ repo: 'owner/repo' })
+  const pad = await client.pad.open()
 
-  for (const kept of [daily, scratch]) {
+  for (const kept of [daily, scratch, pad]) {
     expect((await failure(client.remove({ id: kept.id }))).code).toBe('BAD_REQUEST')
     expect(await client.get({ id: kept.id })).toEqual(kept)
   }
@@ -332,6 +346,7 @@ test('the Note Mention candidates are the Notes whose title, name, preview or Re
   })
   const repoNote = await client.repoNote.create({ repo: 'ashigirl96/monica' })
   const scratch = await client.scratch.open({ repo: 'owner/Monica' })
+  const pad = await client.pad.open()
   const untitled = await client.essay.create()
 
   const ids = async (q: string) => (await client.noteMention.search({ q })).map(({ id }) => id)
@@ -343,6 +358,7 @@ test('the Note Mention candidates are the Notes whose title, name, preview or Re
   expect(await ids('PLUMBER')).toEqual([daily.id])
   expect(await ids('ashigirl96')).toEqual([repoNote.id])
   expect(await ids('owner/monica')).toEqual([scratch.id])
+  expect(await ids('pad')).toEqual([pad.id])
   expect(await ids('untitled')).toEqual([untitled.id, repoNote.id])
   expect(await ids('2026-10-06')).toEqual([])
 })
@@ -408,9 +424,11 @@ test('a Note Mention resolves to the name the Note has now', async () => {
   const { client } = setup()
   const essay = await client.essay.create()
   const daily = await client.daily.open({ date: '2026-10-06' })
+  const pad = await client.pad.open()
 
   expect(await client.noteMention.resolve({ id: essay.id })).toEqual({ displayName: 'Untitled' })
   expect(await client.noteMention.resolve({ id: daily.id })).toEqual({ displayName: '2026-10-06' })
+  expect(await client.noteMention.resolve({ id: pad.id })).toEqual({ displayName: 'Pad' })
 
   await client.save({
     id: essay.id,
@@ -539,14 +557,15 @@ test('the Star of an Essay stays through deleting and undoing it and through cha
   ])
 })
 
-test('a Daily and a Scratch cannot be starred, and a deleted Note or an id no Note has is not found', async () => {
+test('a Daily, a Scratch and the Pad cannot be starred, and a deleted Note or an id no Note has is not found', async () => {
   const { client } = setup()
   const daily = await client.daily.open({ date: '2026-10-06' })
   const scratch = await client.scratch.open({ repo: 'owner/repo' })
+  const pad = await client.pad.open()
   const deleted = await client.essay.create()
   await client.remove({ id: deleted.id })
 
-  for (const kept of [daily, scratch]) {
+  for (const kept of [daily, scratch, pad]) {
     expect((await failure(client.star({ id: kept.id, starred: true }))).code).toBe('BAD_REQUEST')
   }
   for (const id of [deleted.id, 'note-999']) {
