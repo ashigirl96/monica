@@ -173,15 +173,37 @@ describe('foldedIndexes', () => {
     expect(rootFolds(doc)).toEqual([1, 2, 3, 4])
   })
 
-  test('本文間の空行は最内の h3 section を終端し、自身は一緒に隠れる', () => {
+  test('本文間に 2 行続いた空行は最内の h3 section を終端し、自身は一緒に隠れる', () => {
     const doc = docOf(
       block('h2a', heading('A', 2)),
       block('h3a', heading('A-1', 3, true)),
       block('p1', para('1')),
+      block('gap1', para()),
+      block('gap2', para()),
+      block('p2', para('2')),
+    )
+    expect(rootFolds(doc)).toEqual([2, 3, 4])
+  })
+
+  test('末尾まで続く空行も 2 行で終端し、その後ろの空行は可視', () => {
+    const doc = docOf(
+      block('h2a', heading('A', 2, true)),
+      block('p1', para('1')),
+      block('gap1', para()),
+      block('gap2', para()),
+      block('gap3', para()),
+    )
+    expect(rootFolds(doc)).toEqual([1, 2, 3])
+  })
+
+  test('本文間の 1 行だけの空行は区切りにならない', () => {
+    const doc = docOf(
+      block('h3a', heading('A', 3, true)),
+      block('p1', para('1')),
       block('gap', para()),
       block('p2', para('2')),
     )
-    expect(rootFolds(doc)).toEqual([2, 3])
+    expect(rootFolds(doc)).toEqual([1, 2, 3])
   })
 
   test('空行で h3 が切れても h2 を畳めば末尾まで隠れる', () => {
@@ -189,10 +211,11 @@ describe('foldedIndexes', () => {
       block('h2a', heading('A', 2, true)),
       block('h3a', heading('A-1', 3)),
       block('p1', para('1')),
-      block('gap', para()),
+      block('gap1', para()),
+      block('gap2', para()),
       block('p2', para('2')),
     )
-    expect(rootFolds(doc)).toEqual([1, 2, 3, 4])
+    expect(rootFolds(doc)).toEqual([1, 2, 3, 4, 5])
   })
 
   test('heading 直後の空行は余白として section 内に留まる', () => {
@@ -205,8 +228,8 @@ describe('foldedIndexes', () => {
       block('gap3', para()),
       block('p3', para('3')),
     )
-    // gap2 が section を終端して一緒に隠れ、gap3 以降は可視
-    expect(rootFolds(doc)).toEqual([1, 2, 3, 4])
+    // gap2・gap3 の 2 行が section を終端して一緒に隠れ、p3 は可視
+    expect(rootFolds(doc)).toEqual([1, 2, 3, 4, 5])
   })
 
   test('sub-heading 直前の空行は区切りにならない', () => {
@@ -233,17 +256,19 @@ describe('foldedIndexes', () => {
     expect(rootFolds(doc)).toEqual([1, 2])
   })
 
-  test('連続した空行は 1 行につき 1 レベル終端する', () => {
+  test('連続した空行は 2 行につき 1 レベル終端する', () => {
     const doc = docOf(
       block('h2a', heading('A', 2, true)),
       block('h3a', heading('A-1', 3)),
       block('p1', para('1')),
       block('gap1', para()),
       block('gap2', para()),
+      block('gap3', para()),
+      block('gap4', para()),
       block('p2', para('2')),
     )
-    // gap1 が h3 を、gap2 が h2 を終端するので p2 は h2 の外
-    expect(rootFolds(doc)).toEqual([1, 2, 3, 4])
+    // gap2 が h3 を、gap4 が h2 を終端するので p2 は h2 の外
+    expect(rootFolds(doc)).toEqual([1, 2, 3, 4, 5, 6])
   })
 
   test('h2 を展開しても内側の collapsed h3 は畳まれたまま', () => {
@@ -365,11 +390,12 @@ describe('resolveFoldTarget', () => {
     const doc = docOf(
       block('h2a', heading('A', 2)),
       block('p1', para('1')),
-      block('gap', para()),
+      block('gap1', para()),
+      block('gap2', para()),
       block('p2', para('2')),
     )
     expect(resolveFoldTarget(resolveIn(doc, 'p2'))).toBeNull()
-    expect(resolveFoldTarget(resolveIn(doc, 'gap'))?.containerPos).toBe(posOf(doc, 'h2a'))
+    expect(resolveFoldTarget(resolveIn(doc, 'gap2'))?.containerPos).toBe(posOf(doc, 'h2a'))
   })
 
   test('h3 を終端する空行の後ろでは h2 が対象', () => {
@@ -377,7 +403,8 @@ describe('resolveFoldTarget', () => {
       block('h2a', heading('A', 2)),
       block('h3a', heading('A-1', 3)),
       block('p1', para('1')),
-      block('gap', para()),
+      block('gap1', para()),
+      block('gap2', para()),
       block('p2', para('2')),
     )
     expect(resolveFoldTarget(resolveIn(doc, 'p2'))?.containerPos).toBe(posOf(doc, 'h2a'))

@@ -6,8 +6,8 @@ import { isEmptyParagraphContainer, nodes } from './schema.ts'
 
 // 折りたたみの判定・範囲導出・開示操作をここに集約する。callout / toggle は構造上の子
 // blockGroup を隠すだけだが、heading は doc 上の子を持たない（`## ` 直後の段落は兄弟）
-// ため「後続兄弟のうち、次の同レベル以上 heading / divider の手前、または本文間の空行
-// まで」を範囲とする。範囲が attr ではなく内容から毎回導出されるので、範囲へ block や
+// ため「後続兄弟のうち、次の同レベル以上 heading / divider の手前、または本文間の 2 行
+// 続きの空行まで」を範囲とする。範囲が attr ではなく内容から毎回導出されるので、範囲へ block や
 // カーソルを送り込む操作は支配 heading を開く（expandedHeading / revealPos）。
 // 「畳まれているか」を toggle は open、heading / callout は collapsed で表す差は
 // foldAttrOf に閉じ込め、外へは出さない。
@@ -88,13 +88,20 @@ function isSectionBoundary(content: PMNode): boolean {
   return content.type === nodes.heading || content.type === nodes.divider
 }
 
-// 空行が section を終端するのは「本文と本文の間」にあるときだけ。heading 直後の空行は
-// section 内の余白であり、heading / divider に（空行の連なり越しに）隣接する空行は
-// その境界に従属するので、どちらも区切りにならない。
+// 空行が section を終端するのは「本文と本文の間」で 2 行続いたときだけで、連なりの
+// 2 行ごとに 1 レベル終端する。1 行だけの空行は段落間の余白として section 内に留まる。
+// heading 直後の空行は section 内の余白であり、heading / divider に（空行の連なり越しに）
+// 隣接する空行はその境界に従属するので、どちらも区切りにならない。
+// 末尾まで空行が続くときも終端する。最後の行を ⌃K で空にしただけで区切りが消え、
+// カーソルの行が section に飲まれて開いてしまうのを防ぐ。
 function blankTerminates(siblings: readonly PMNode[], index: number): boolean {
+  let run = 1
+  while (index - run >= 0 && isEmptyParagraphContainer(siblings[index - run]!)) run++
+  if (run % 2 !== 0) return false
   const bodyAt = (i: number, step: 1 | -1): boolean => {
     while (i >= 0 && i < siblings.length && isEmptyParagraphContainer(siblings[i]!)) i += step
-    if (i < 0 || i >= siblings.length) return false
+    if (i < 0) return false
+    if (i >= siblings.length) return true
     return !isSectionBoundary(siblings[i]!.child(0))
   }
   return bodyAt(index - 1, -1) && bodyAt(index + 1, 1)
@@ -102,7 +109,7 @@ function blankTerminates(siblings: readonly PMNode[], index: number): boolean {
 
 // 兄弟列を前から走査し、各 index とそれを支配する heading の連鎖を visit へ渡す。
 // 同レベル以上の heading が section を終端するので、連鎖は level 昇順に保たれる
-// （h3 の section は必ず h2 の section に含まれる）。divider と本文間の空行は最内の
+// （h3 の section は必ず h2 の section に含まれる）。divider と本文間の 2 行続きの空行は最内の
 // section だけを終端する（h3 の section 内なら h3 を閉じるが h2 の範囲には留まる）。
 // visit が false を返すと打ち切る。
 function scanFolds(
