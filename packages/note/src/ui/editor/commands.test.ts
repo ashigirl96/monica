@@ -997,6 +997,27 @@ describe('normalizer（不可視カーソルの救済）', () => {
     expect(contentAttrs(after.doc, 'H').collapsed).toBe(false)
   })
 
+  test('最後の行を ⌃K で空にしても開かず、Backspace で隠れた空行へ入ったときに開く', () => {
+    const doc = docOf(
+      block('H', heading('A', 2, true)),
+      block('P1', para('1')),
+      block('G1', para()),
+      block('G2', para()),
+      block('P2', para('テスト')),
+    )
+    const lineStart = containerById(doc, 'P2')!.pos + 2
+    const state = EditorState.create({
+      doc,
+      selection: TextSelection.create(doc, lineStart),
+      plugins: [normalizerPlugin()],
+    })
+    const killed = state.apply(state.tr.delete(lineStart, lineStart + 'テスト'.length))
+    expect(contentAttrs(killed.doc, 'H').collapsed).toBe(true)
+
+    const merged = run(killed, backspaceBlock)!.state
+    expect(contentAttrs(merged.doc, 'H').collapsed).toBe(false)
+  })
+
   test('末尾が折りたたみ範囲なら exitDocEnd の空行を可視にする', () => {
     const doc = docOf(
       block('P0', para('p')),
