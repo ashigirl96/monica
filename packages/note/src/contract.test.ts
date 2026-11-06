@@ -22,13 +22,14 @@ test('every procedure has a description and an output', () => {
   expect(missing.map(({ path }) => path.join('.'))).toEqual([])
 })
 
-test('a Daily is named by its date, an Essay and a Repo Note by the title or Untitled, a Scratch by its Repo', () => {
+test('a Daily is named by its date, an Essay and a Repo Note by the title or Untitled, a Scratch by its Repo, the Pad as Pad', () => {
   expect(displayName({ kind: 'daily', date: '2026-10-06' })).toBe('2026-10-06')
   expect(displayName({ kind: 'essay', title: 'On ledgers' })).toBe('On ledgers')
   expect(displayName({ kind: 'essay', title: '' })).toBe('Untitled')
   expect(displayName({ kind: 'repo_note', title: 'Release plan' })).toBe('Release plan')
   expect(displayName({ kind: 'repo_note', title: '' })).toBe('Untitled')
   expect(displayName({ kind: 'scratch', repo: 'Ashigirl96/Monica' })).toBe('Ashigirl96/Monica')
+  expect(displayName({ kind: 'pad' })).toBe('Pad')
 })
 
 test('the Logical Date counts 4:59 as the day before and 5:00 as the day itself', () => {

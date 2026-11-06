@@ -11,6 +11,7 @@ import {
   dailyDates,
   listEssays,
   openDaily,
+  openPad,
   openScratch,
 } from './open.ts'
 import { noteBlock, resolveNoteMention, searchNoteMentions } from './reference.ts'
@@ -40,6 +41,9 @@ export const router = os.router({
   },
   scratch: {
     open: os.scratch.open.handler(({ context, input }) => openScratch(context.db, input.repo)),
+  },
+  pad: {
+    open: os.pad.open.handler(({ context }) => openPad(context.db)),
   },
   essay: {
     create: os.essay.create.handler(({ context }) => createEssay(context.db)),

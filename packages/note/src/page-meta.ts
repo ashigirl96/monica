@@ -30,7 +30,7 @@ export function withPageMeta(db: Db, pathname: string, page: Response): Response
     .transform(page)
 }
 
-// 画面を開くと作られる Daily と Scratch も、ここでは作らずに在るものだけを読む。
+// 画面を開くと作られる Daily・Scratch・Pad も、ここでは作らずに在るものだけを読む。
 function noteOfPath(db: Db, pathname: string): NoteRow | undefined {
   const route = routeOf(pathname)
   const undeleted = isNull(note.deletedAt)
@@ -51,6 +51,8 @@ function noteOfPath(db: Db, pathname: string): NoteRow | undefined {
         .from(note)
         .where(and(eq(note.kind, 'daily'), eq(note.date, route.date), undeleted))
         .get()
+    case 'pad':
+      return db.select().from(note).where(eq(note.kind, 'pad')).get()
     default:
       return undefined
   }

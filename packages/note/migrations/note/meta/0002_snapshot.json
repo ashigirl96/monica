@@ -1,0 +1,171 @@
+{
+  "version": "6",
+  "dialect": "sqlite",
+  "id": "696ddb3b-048a-43c1-bd7e-3283e504aae6",
+  "prevId": "a4a7249d-54d3-4eb9-9d03-fd31d3c068ce",
+  "tables": {
+    "note": {
+      "name": "note",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "integer",
+          "primaryKey": true,
+          "notNull": true,
+          "autoincrement": true
+        },
+        "kind": {
+          "name": "kind",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "repo": {
+          "name": "repo",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "title": {
+          "name": "title",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "status": {
+          "name": "status",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "date": {
+          "name": "date",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "content": {
+          "name": "content",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "preview": {
+          "name": "preview",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "deleted_at": {
+          "name": "deleted_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "starred": {
+          "name": "starred",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": false
+        }
+      },
+      "indexes": {
+        "note_daily_per_date_idx": {
+          "name": "note_daily_per_date_idx",
+          "columns": [
+            "date"
+          ],
+          "isUnique": true,
+          "where": "kind = 'daily'"
+        },
+        "note_scratch_per_repo_idx": {
+          "name": "note_scratch_per_repo_idx",
+          "columns": [
+            "lower(repo)"
+          ],
+          "isUnique": true,
+          "where": "kind = 'scratch'"
+        },
+        "note_one_pad_idx": {
+          "name": "note_one_pad_idx",
+          "columns": [
+            "kind"
+          ],
+          "isUnique": true,
+          "where": "kind = 'pad'"
+        }
+      },
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "checkConstraints": {
+        "note_kind": {
+          "name": "note_kind",
+          "value": "kind IN ('daily', 'essay', 'repo_note', 'scratch', 'pad')"
+        },
+        "note_title": {
+          "name": "note_title",
+          "value": "(kind IN ('essay', 'repo_note')) = (title IS NOT NULL)"
+        },
+        "note_status": {
+          "name": "note_status",
+          "value": "(kind = 'essay') = (status IS NOT NULL) AND (status IS NULL OR status IN ('writing', 'finished'))"
+        },
+        "note_repo": {
+          "name": "note_repo",
+          "value": "(kind IN ('repo_note', 'scratch')) = (repo IS NOT NULL)"
+        },
+        "note_deleted_at": {
+          "name": "note_deleted_at",
+          "value": "deleted_at IS NULL OR kind IN ('essay', 'repo_note')"
+        },
+        "note_starred": {
+          "name": "note_starred",
+          "value": "starred = 0 OR kind IN ('essay', 'repo_note')"
+        }
+      }
+    }
+  },
+  "views": {},
+  "enums": {},
+  "_meta": {
+    "schemas": {},
+    "tables": {},
+    "columns": {}
+  },
+  "internal": {
+    "indexes": {
+      "note_scratch_per_repo_idx": {
+        "columns": {
+          "lower(repo)": {
+            "isExpression": true
+          }
+        }
+      }
+    }
+  }
+}

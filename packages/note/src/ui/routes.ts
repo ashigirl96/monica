@@ -3,6 +3,7 @@ import { logicalDate, type Note, sameRepo } from '../contract.ts'
 export const DAILY_PATH = '/daily'
 export const ESSAYS_PATH = '/essays'
 export const REPOS_PATH = '/repos'
+export const PAD_PATH = '/pad'
 
 export function dailyPath(date: string): string {
   return `${DAILY_PATH}/${date}`
@@ -42,6 +43,7 @@ function idOfPath(pattern: RegExp, pathname: string): string | null {
 export type Route =
   | { page: 'today' }
   | { page: 'daily'; date: string }
+  | { page: 'pad' }
   | { page: 'essays' }
   | { page: 'essay'; id: string }
   | { page: 'repos' }
@@ -53,6 +55,7 @@ export function routeOf(pathname: string): Route {
   if (/^\/(notes\/?|daily\/?)?$/.test(pathname)) return { page: 'today' }
   const daily = /^\/daily\/([^/]+)\/?$/.exec(pathname)
   if (daily) return { page: 'daily', date: daily[1]! }
+  if (/^\/pad\/?$/.test(pathname)) return { page: 'pad' }
   if (/^\/essays\/?$/.test(pathname)) return { page: 'essays' }
   const essayId = idOfPath(/^\/essays\/([^/]+)\/?$/, pathname)
   if (essayId !== null) return { page: 'essay', id: essayId }
@@ -88,6 +91,7 @@ export function removalScreenOf(route: Route, previous: RemovalScreen): RemovalS
       return previous
     case 'today':
     case 'daily':
+    case 'pad':
     case 'not-found':
       return null
   }
@@ -114,6 +118,8 @@ export function notePagePath(note: Note): string {
       return repoNotePath(note.repo, note.id)
     case 'scratch':
       return repoPath(note.repo)
+    case 'pad':
+      return PAD_PATH
   }
 }
 

@@ -8,7 +8,7 @@ export const note = sqliteTable(
   'note',
   {
     id: integer('id').primaryKey({ autoIncrement: true }),
-    kind: text('kind', { enum: ['daily', 'essay', 'repo_note', 'scratch'] }).notNull(),
+    kind: text('kind', { enum: ['daily', 'essay', 'repo_note', 'scratch', 'pad'] }).notNull(),
     repo: text('repo'),
     title: text('title'),
     status: text('status', { enum: ['writing', 'finished'] }),
@@ -28,7 +28,10 @@ export const note = sqliteTable(
     uniqueIndex('note_scratch_per_repo_idx')
       .on(sql`lower(repo)`)
       .where(sql`kind = 'scratch'`),
-    check('note_kind', sql`kind IN ('daily', 'essay', 'repo_note', 'scratch')`),
+    uniqueIndex('note_one_pad_idx')
+      .on(t.kind)
+      .where(sql`kind = 'pad'`),
+    check('note_kind', sql`kind IN ('daily', 'essay', 'repo_note', 'scratch', 'pad')`),
     check('note_title', sql`(kind IN ('essay', 'repo_note')) = (title IS NOT NULL)`),
     check(
       'note_status',

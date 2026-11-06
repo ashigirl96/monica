@@ -25,6 +25,10 @@ describe('routeOf', () => {
     expect(routeOf('/notes/note-7')).toEqual({ page: 'note', id: 'note-7' })
   })
 
+  test('/pad opens the Pad', () => {
+    for (const path of ['/pad', '/pad/']) expect(routeOf(path)).toEqual({ page: 'pad' })
+  })
+
   test('/essays opens the list of Essays, and /essays/:id the Essay', () => {
     for (const path of ['/essays', '/essays/']) expect(routeOf(path)).toEqual({ page: 'essays' })
     expect(routeOf('/essays/note-7')).toEqual({ page: 'essay', id: 'note-7' })
@@ -97,8 +101,8 @@ describe('removalScreenOf', () => {
     }
   })
 
-  test('the Daily, today and an unknown path are screens without undo', () => {
-    for (const path of ['/daily/2026-10-06', '/daily', '/settings']) {
+  test('the Daily, today, the Pad and an unknown path are screens without undo', () => {
+    for (const path of ['/daily/2026-10-06', '/daily', '/pad', '/settings']) {
       expect(removalScreenOf(routeOf(path), essays)).toBeNull()
       expect(removalScreenOf(routeOf(path), repo)).toBeNull()
     }
@@ -140,6 +144,10 @@ describe('notePagePath', () => {
         ...common,
       }),
     ).toBe('/essays/note-7')
+  })
+
+  test('the Pad opens at /pad', () => {
+    expect(notePagePath({ kind: 'pad', ...common })).toBe('/pad')
   })
 
   test('a Scratch opens at the path of its Repo, and a Repo Note under the notes of its Repo', () => {
@@ -190,6 +198,7 @@ describe('repoNoteRedirect', () => {
       ],
       [{ kind: 'scratch', repo: 'acme/web', ...common }, '/repos/acme/web'],
       [{ kind: 'daily', ...common }, '/daily/2026-10-06'],
+      [{ kind: 'pad', ...common }, '/pad'],
       [
         { kind: 'essay', title: 'On Rust', status: 'writing', starred: false, ...common },
         '/essays/note-7',

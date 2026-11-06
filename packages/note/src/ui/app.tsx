@@ -25,8 +25,8 @@ export function App() {
       {/* 今日への replace の間も外さない。外すと zen が解ける。 */}
       <AppShell active={sectionOf(route)}>
         <RemovalsContext value={removals}>
-          {toToday ? null : route.page === 'daily' ? (
-            <DailyPage date={route.date} />
+          {toToday ? null : route.page === 'daily' || route.page === 'pad' ? (
+            <DailyPage date={route.page === 'daily' ? route.date : null} />
           ) : route.page === 'essays' ? (
             <EssaysListPage />
           ) : route.page === 'essay' ? (
@@ -51,6 +51,7 @@ function sectionOf(route: Route): Section | null {
   switch (route.page) {
     case 'today':
     case 'daily':
+    case 'pad':
       return 'daily'
     case 'essays':
     case 'essay':

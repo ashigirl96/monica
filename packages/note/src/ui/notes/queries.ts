@@ -26,13 +26,13 @@ export function useNoteQuery(id: string | null) {
   })
 }
 
-/** daily は get ではなく get-or-create（開く = 作る）。既存 note があるときは
- * updatedAt を触らないので、復帰のたびに叩いても版は進まない。 */
-export function useDailyNoteQuery(date: string) {
+/** date が null なら Pad。daily も Pad も get ではなく get-or-create（開く = 作る）。
+ * 既存 note があるときは updatedAt を触らないので、復帰のたびに叩いても版は進まない。 */
+export function useDailyOrPadQuery(date: string | null) {
   const client = useNoteClient()
   return useQuery({
-    queryKey: queryKeys.dailyNote(date),
-    queryFn: () => client.daily.open({ date }),
+    queryKey: date === null ? queryKeys.pad() : queryKeys.dailyNote(date),
+    queryFn: () => (date === null ? client.pad.open() : client.daily.open({ date })),
   })
 }
 

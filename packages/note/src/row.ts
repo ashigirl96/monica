@@ -15,6 +15,7 @@ export const KINDS = {
   essay: { name: 'Essay', titled: true, deletable: true, starrable: true },
   repo_note: { name: 'Repo Note', titled: true, deletable: true, starrable: true },
   scratch: { name: 'Scratch', titled: false, deletable: false, starrable: false },
+  pad: { name: 'Pad', titled: false, deletable: false, starrable: false },
 } as const
 
 export function idNumber(id: string): number {
@@ -70,6 +71,8 @@ export function toNote(row: NoteRow): Note {
       }
     case 'scratch':
       return { kind: 'scratch', repo: row.repo!, ...common }
+    case 'pad':
+      return { kind: 'pad', ...common }
   }
 }
 
@@ -98,5 +101,7 @@ export function displayNameOf(row: Pick<NoteRow, 'kind' | 'date' | 'title' | 're
       return displayName({ kind: row.kind, title: row.title! })
     case 'scratch':
       return displayName({ kind: 'scratch', repo: row.repo! })
+    case 'pad':
+      return displayName({ kind: 'pad' })
   }
 }
