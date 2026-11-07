@@ -24,8 +24,8 @@ export type WorkbenchLedger = {
     input: { runspaceId: string; cwd?: string; size?: Size; input?: string },
   ): { tabId: string; terminalSessionId: string }
   moveTab(tx: Tx, tabId: string, runspaceId: string): void
-  /** 消した Tab の Terminal Session は transaction の後に終わらせる。 */
-  removeRunspace(tx: Tx, id: string, options?: { spare?: string[] }): void
+  /** 消した Tab の Terminal Session は transaction の後に終わらせる。残した Tab の Terminal Session を返す。 */
+  removeRunspace(tx: Tx, id: string, options?: { spare?: string[] }): string[]
 }
 
 type Internals = {

@@ -137,10 +137,11 @@ test("removeRunspace keeps the spared Tab, pinned or not, in the Runspace it no 
   const spared = await client.tab.open({ runspaceId: owned, ...size })
   await client.tab.pin({ id: spared.id })
 
-  db.transaction((tx) =>
+  const kept = db.transaction((tx) =>
     workbenchLedger.removeRunspace(tx, owned, { spare: [spared.terminalSessionId] }),
   )
 
+  expect(kept).toEqual([spared.terminalSessionId])
   expect(await terminated(ptyd, 1)).toEqual([other.terminalSessionId])
   expect((await client.layout.get()).runspaces).toEqual([
     {
@@ -159,12 +160,13 @@ test('removeRunspace keeps every spared Tab in their order', async () => {
   const other = await client.tab.open({ runspaceId: owned, ...size })
   const last = await client.tab.open({ runspaceId: owned, ...size })
 
-  db.transaction((tx) =>
+  const kept = db.transaction((tx) =>
     workbenchLedger.removeRunspace(tx, owned, {
       spare: [last.terminalSessionId, first.terminalSessionId],
     }),
   )
 
+  expect(kept).toEqual([first.terminalSessionId, last.terminalSessionId])
   expect(await terminated(ptyd, 1)).toEqual([other.terminalSessionId])
   expect((await client.layout.get()).runspaces).toMatchObject([
     {
@@ -195,10 +197,11 @@ test('removeRunspace removes the whole Runspace when the spared Terminal Session
   const inBench = await client.tab.open({ runspaceId: owned, ...size })
   const elsewhere = await client.runspace.create(size)
 
-  db.transaction((tx) =>
+  const kept = db.transaction((tx) =>
     workbenchLedger.removeRunspace(tx, owned, { spare: [elsewhere.tab.terminalSessionId] }),
   )
 
+  expect(kept).toEqual([])
   expect(await terminated(ptyd, 1)).toEqual([inBench.terminalSessionId])
   expect((await client.layout.get()).runspaces.map((r) => r.id)).toEqual([elsewhere.runspaceId])
 })

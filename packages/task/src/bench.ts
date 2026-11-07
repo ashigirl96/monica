@@ -140,6 +140,17 @@ export function insertBench(
     .get()
 }
 
+/** `spare` の Terminal Session の Tab は所有を解いた Runspace に残し、残した Terminal Session を返す。 */
+export function dropBench(
+  tx: Tx,
+  workbenchLedger: WorkbenchLedger,
+  row: Pick<Bench, 'taskIssueId' | 'runspaceId'>,
+  { spare }: { spare: string[] },
+): string[] {
+  tx.delete(bench).where(eq(bench.taskIssueId, row.taskIssueId)).run()
+  return workbenchLedger.removeRunspace(tx, row.runspaceId, { spare })
+}
+
 // 準備中の Bench に来た run は同じ準備を待つ。呼び手が切れても準備は Backend の中で続く。
 function preparation(deps: BenchDeps, row: Bench, forIssue: Issue): Promise<Prepared> {
   const running = deps.reservations.preparation(row.taskIssueId)
