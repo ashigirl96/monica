@@ -88,7 +88,7 @@ function verdictFor(current: AgentSession, event: HookEvent, now: Date): Verdict
       return { fields: { state: 'waiting', waitReason: 'question' } }
     case 'planSubmitted':
       return 'unchanged'
-    // 許可した tool が終わるまで許可待ちに見えたままなので、その間に来た次の許可も新しい待ちにする（ADR-0008）。
+    // 許可した tool が終わるまで許可待ちに見えたままなので、その間に来た次の許可も新しい待ちにする。
     case 'permissionRequested':
       return {
         fields: { state: 'waiting', waitReason: 'permission', waitTool: event.tool },

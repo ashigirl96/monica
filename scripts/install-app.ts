@@ -76,7 +76,7 @@ await $`cp -R ${built} ${staging}`
 await $`cp ${claude} ${join(staging, 'Contents/MacOS/claude')}`
 await $`cp -R ${extension} ${join(staging, 'Contents/Resources/extension')}`
 // Keychain Access で作った自己署名の identity。ad-hoc と違い、build をまたいで署名の同一性が保たれる。
-// --deep を付けると claude の Anthropic の署名が Monica のものに置き換わる（ADR-0032）。
+// --deep を付けると claude の Anthropic の署名が Monica のものに置き換わる。
 await $`codesign --force --sign Monica ${staging}`
 await $`xattr -dr com.apple.quarantine ${staging}`.nothrow().quiet()
 

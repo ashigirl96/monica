@@ -15,7 +15,7 @@ use std::time::Duration;
 use backend::{Status, Supervisor};
 use tauri::{AppHandle, Manager, RunEvent, State};
 
-/// Backend は通常 50ms 以内に抜けるので、これは固まった Backend のための上限（ADR-0007）。
+/// Backend は通常 50ms 以内に抜けるので、これは固まった Backend のための上限。
 const STOP_GRACE: Duration = Duration::from_secs(2);
 
 #[tauri::command]

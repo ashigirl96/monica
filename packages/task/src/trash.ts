@@ -14,7 +14,7 @@ import { dirname, join } from 'node:path'
 
 import { messageOf } from './prepare.ts'
 
-// Terminate の後に残った process が止まる 7 秒（ADR-0040）と close の応答より長くとる。
+// Terminate の後に残った process が止まる 7 秒と close の応答より長くとる。
 const GRACE_MS = 60_000
 
 export const trashOf = (home: string) => join(home, 'trash/worktrees')

@@ -12,7 +12,7 @@ const probe = 'export const id = chrome.runtime.id\n'
 const domains = readdirSync(join(repo, 'packages'), { withFileTypes: true })
   .filter((entry) => entry.isDirectory())
   .map((entry) => entry.name)
-// chat の ui は Chrome Extension の side panel でだけ動く（ADR-0029）。
+// chat の ui は Chrome Extension の side panel でだけ動く。
 const allowed = ['apps/extension/src/probe.ts', 'packages/chat/src/ui/probe.ts']
 const refused = [
   'apps/web/src/probe.ts',

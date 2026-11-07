@@ -41,7 +41,7 @@ export const workbenchClientAtom = atom<WorkbenchClient | null>(null)
 
 export type LastTabClosed = (runspaceId: string) => void
 
-// workbench は誰が Runspace を所有するかを知らないので、閉じて空になった所有された Runspace は slot に渡す（ADR-0005）。
+// workbench は誰が Runspace を所有するかを知らないので、閉じて空になった所有された Runspace は slot に渡す。
 export const lastTabClosedAtom = atom<LastTabClosed | null>(null)
 
 function clientOf(get: Getter): WorkbenchClient {
@@ -321,7 +321,7 @@ function isGone(e: unknown): boolean {
   return typeof e === 'object' && e !== null && 'code' in e && e.code === 'NOT_FOUND'
 }
 
-// Terminal Session の終了は Backend が tab.close の transaction の後に予約するので、webview からは頼まない（ADR-0023）。
+// Terminal Session の終了は Backend が tab.close の transaction の後に予約するので、webview からは頼まない。
 async function closeTab(get: Getter, set: Setter, { tab }: TabInRunspace) {
   try {
     await clientOf(get).tab.close({ id: tab.id })
@@ -337,7 +337,7 @@ export const closeTerminalTabAtom = action(async (get, set, tabId?: string) => {
   if (found) await closeTab(get, set, found)
 })
 
-// Terminal Session の終了は Backend が runspace.remove の transaction の後に予約する（ADR-0023）。
+// Terminal Session の終了は Backend が runspace.remove の transaction の後に予約する。
 export const removeRunspaceAtom = action(async (get, set, runspace: Runspace) => {
   try {
     await clientOf(get).runspace.remove({ id: runspace.id })
@@ -348,7 +348,7 @@ export const removeRunspaceAtom = action(async (get, set, runspace: Runspace) =>
   await set(reloadAtom)
 })
 
-// Bench は Task の close の guard を通さずに消せないので、Tab を閉じて空の Bench を slot に渡す（ADR-0041）。
+// Bench は Task の close の guard を通さずに消せないので、Tab を閉じて空の Bench を slot に渡す。
 export const closeBenchAtom = action(async (get, set, bench: Runspace) => {
   if (bench.tabs.length === 0) {
     get(lastTabClosedAtom)?.(bench.id)
@@ -367,7 +367,7 @@ export const deadTabsAtom = atom((get) => {
   return dead
 })
 
-// 閉じるか張り直すかは Backend が決め（ADR-0011）、閉じる Tab に overlay を出さないよう終わった印も付けない。
+// 閉じるか張り直すかは Backend が決め、閉じる Tab に overlay を出さないよう終わった印も付けない。
 export const tabExitedAtom = atom(null, (get, set, tabId: string, terminalSessionId: string) => {
   // Backend の張り直しが先に届いた Tab は、もう新しい shell を指している。
   if (findTab(get, tabId)?.tab.terminalSessionId !== terminalSessionId) return

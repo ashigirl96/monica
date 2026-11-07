@@ -62,7 +62,14 @@ SKILL.md の「起こす」の `launch.sh` と `doctor.sh --wait` で起こす�
   - PATH に `ocx` があると、Tab の `claude` は `ocx claude` を通って起きる（`tab show` の COMMAND に `ocx claude` と opencodex の行が並び、その子が本物の claude）。hook と権限の flag は ocx の前で付くので、Agent Session の記録は変わらない。
   - 初めての directory（`GHQ_ROOT` の下の clone など）では、claude が「Yes, I trust this folder」の確認で止まり、SessionStart の hook が届かない。Bench の worktree では出ないこともあるので、キーを送る前に画面を読む。既定の選択は「No, exit」なので、`\x1b[B` を送ってから `\r` を送って Yes を選ぶ。
   - resume を確かめるときは、prompt を 1 つ送って答えを待ってから抜ける。claude は最初の prompt まで Agent Session Transcript を書かないので、prompt を送らずに抜けた Agent Session の `--resume` は `No conversation found` で終わる。
-- Agent Session の状態（dot、通知）を claude 無しで動かすには、hook の payload を CLI の hook に流す。claude と同じ経路で `recordHook` に届き、待ちの状態や理由を狙って作れる。payload の field と場面ごとの順は `docs/research/hook-payloads.md`。field の欠けた payload（`tool_name` の無い PermissionRequest など）は記録されず、Backend の stderr に `ignored a hook it cannot read` が出る。Terminal Session は Workbench Ledger で live なもの（`runspace.create` で開いた Tab の `terminalSessionId`）を使う。それ以外は記録されない。通知は Backend の stdout（`out.jsonl`）に `{"type":"notify",…}` の行で出る。
+- Agent Session の状態（dot、通知）を claude 無しで動かすには、hook の payload を CLI の hook に流す。claude と同じ経路で `recordHook` に届き、待ちの状態や理由を狙って作れる。payload の例は `packages/workbench/src/hook-payloads/`。field の欠けた payload（`tool_name` の無い PermissionRequest など）は記録されず、Backend の stderr に `ignored a hook it cannot read` が出る。Terminal Session は Workbench Ledger で live なもの（`runspace.create` で開いた Tab の `terminalSessionId`）を使う。それ以外は記録されない。通知は Backend の stdout（`out.jsonl`）に `{"type":"notify",…}` の行で出る。
+  - 本物の claude（2.1.28x で確かめた）は、場面ごとに次の順で送る。同じ順で流すと本物と同じ状態になる。
+    - 質問: PreToolUse(AskUserQuestion) → PermissionRequest(AskUserQuestion)。auto mode でも来る。答えるまで何も来ず、答えると PostToolUse(AskUserQuestion) → Stop。
+    - 許可待ちの subagent: background に回され、subagent の PermissionRequest → main の Stop（`background_tasks` に subagent が running）→ 許可すると subagent の PostToolUse。
+    - background の shell・subagent が終わる: claude が自分で turn を起こし、UserPromptSubmit（`prompt` は `<task-notification>…`）→ … → Stop（`background_tasks` は `[]`）。
+    - `/clear`: 旧 id に SessionEnd(`clear`) → 新 id に SessionStart(`clear`)。`--resume` は同じ id で SessionStart(`resume`)。`/compact` は SubagentStop（`agent_type` は `""`）→ SessionStart(`compact`) で、UserPromptSubmit も Stop も来ない。`/exit` は SessionEnd(`prompt_input_exit`)。
+    - 動作中の Esc、許可の No、質問の Esc、ExitPlanMode の Esc: 何も来ない。
+    - SIGHUP・SIGTERM: SessionEnd(`other`)。SIGKILL: 何も来ない。
 
   ```bash
   printf '%s' '{"session_id":"s-1","transcript_path":"/tmp/t.jsonl","cwd":"/Users/me/src/monica","hook_event_name":"PreToolUse","tool_name":"AskUserQuestion"}' |
@@ -71,7 +78,7 @@ SKILL.md の「起こす」の `launch.sh` と `doctor.sh --wait` で起こす�
 
 - HTTP: `/health` は token 無しで返る。port と token は `backend.json` にある。procedure は `POST /rpc/<domain>/<path>`（`/rpc/workbench/runspace/create` など）に `Authorization: Bearer <token>` と `{"json": <input>}` の body を送って呼び、応答の `json` が output になる。CLI に出ていない procedure（`tab.open`・`tab.pin` など）もこれで呼べる。
 - Tab で動いている process は `scripts/monica-dev workbench tab show <tab-id>` で見る。Terminal Session の状態と shell の pid、process の表（pid・ppid・pgid・STAT・command）を出す。MARK の `shell` は shell の行、`stays` は Terminal Session が終わっても止まらない行（setsid で抜けた shell の子孫）。Tab を閉じる前に流すと、掃除で何が止まり何が残るかが分かる。
-- ptyd にだけある session を作るには、Backend を止めてから socket に直接 `hello` と `create` を送る。ptyd は Backend が止まっても残る。Backend を起こし直すと reconcile がその session を terminate し、Exit を受けて Reap するので、ptyd の `list` から消え、`create` の応答の pid の shell も終わる（ADR-0023）。protocol は `crates/terminal-protocol/src/lib.rs`。
+- ptyd にだけある session を作るには、Backend を止めてから socket に直接 `hello` と `create` を送る。ptyd は Backend が止まっても残る。Backend を起こし直すと reconcile がその session を terminate し、Exit を受けて Reap するので、ptyd の `list` から消え、`create` の応答の pid の shell も終わる。protocol は `crates/terminal-protocol/src/lib.rs`。
 
   ```bash
   MONICA_HOME=${TMPDIR%/}/monica-s2 bun -e '

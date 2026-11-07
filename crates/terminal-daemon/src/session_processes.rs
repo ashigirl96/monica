@@ -1,4 +1,4 @@
-//! Terminal Session Process (ADR-0040): a process whose session id is its Terminal Session's
+//! Terminal Session Process: a process whose session id is its Terminal Session's
 //! shell pid. The shell leads its session, so its jobs and nohup children stay in it even after
 //! the shell is gone; a setsid child leaves it.
 

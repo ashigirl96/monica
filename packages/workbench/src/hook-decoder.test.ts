@@ -5,7 +5,7 @@ import { join } from 'node:path'
 import { decodeHook } from './hook-decoder.ts'
 import type { HookSignal } from './transition.ts'
 
-const fixtures = join(import.meta.dir, '../../../docs/research/hook-payloads')
+const fixtures = join(import.meta.dir, 'hook-payloads')
 
 type Captured = {
   session_id: string

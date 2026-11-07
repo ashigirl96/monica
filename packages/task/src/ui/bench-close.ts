@@ -16,7 +16,7 @@ export type BenchClose =
 
 export const IDLE: BenchClose = { phase: 'idle' }
 
-// Backend に問い合わせ直さず webview の memory にだけ持つので、再起動の後は空になる（ADR-0036）。
+// Backend に問い合わせ直さず webview の memory にだけ持つので、再起動の後は空になる。
 export const benchClosesAtom = atom<ReadonlyMap<string, BenchClose>>(new Map())
 
 export function benchCloseOf(store: Store, runspaceId: string): BenchClose {

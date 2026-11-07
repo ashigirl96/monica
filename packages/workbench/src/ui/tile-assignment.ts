@@ -11,7 +11,7 @@ export const OUTSIDE = 'outside'
 
 export type BenchSetup = { text: string; error: boolean }
 
-// workbench は Task を知らないので、Bench の Task の Repo と Issue は task の ui から slot で受ける（ADR-0005）。
+// workbench は Task を知らないので、Bench の Task の Repo と Issue は task の ui から slot で受ける。
 export type BenchLabel = {
   repo: string
   number: number

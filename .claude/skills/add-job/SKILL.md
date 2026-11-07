@@ -3,7 +3,7 @@ name: add-job
 description: ユーザーの Job を登録する。「毎日〜したい」「定期的に〜を走らせたい」のように、予定で繰り返し走る処理を monica に足したいときに使う。登録した Job が failed・timed_out になったときも使う。
 ---
 
-依頼を Job に落とし、release の Backend に登録して、1 回走らせて確かめる。add の引数の形は `monica job add --help` に、予定・成否・env の決まりは ADR-0016 にある。登録済みの Job が failed・timed_out になった依頼は、[DEBUG.md](DEBUG.md) から始める。
+依頼を Job に落とし、release の Backend に登録して、1 回走らせて確かめる。add の引数の形は `monica job add --help` にある。登録済みの Job が failed・timed_out になった依頼は、[DEBUG.md](DEBUG.md) から始める。
 
 この skill の `monica` は release の CLI を指す。`$MONICA_HOME` が空か `$HOME/.monica` でなければ（dev の Tab）、`env MONICA_HOME="$HOME/.monica" "$HOME/.local/bin/monica"` に置き換える。
 

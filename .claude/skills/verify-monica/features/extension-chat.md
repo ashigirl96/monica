@@ -34,6 +34,17 @@ Preconditions:
 - **届かない.** 最後に、Backend だけを `kill -TERM $(jq .pid $H/backend.json)` で止め、`backend.json` が消えたのを見てから `close` と `open` で開き直す。`eval 'document.body.innerText.includes("monica の desktop が起動していません")'` が数秒のうちに `true` になる。
 - **証拠.** `launch.sh` を同じ名前で起こし直すと `out.jsonl` と `err.log` が空になるので、Backend を止める前に `$E` の中で別の名前に写す。送る前と答えた後に `bun scripts/extension-panel.ts screenshot $E/extension-chat-{before,after}.png` を撮る。各 `eval` の出力を `$E/extension-chat.transcript` に残す。
 
+## Agent SDK の版を上げたとき
+
+Chat の claude の options の効き目は、確かめた版のものしか分からない。`@anthropic-ai/claude-agent-sdk` の版を変えたら、新しい版と同梱の claude で、`launch.sh` の dev の Backend（`env -i` で起き、`HOME` と `USER` は本物）を相手に次を確かめる。SDK 0.3.293 と claude 2.1.293 ではどれも成り立った。
+
+- `chat.prepare` で、Backend を親に持つ claude（node_modules の platform package のもの）が 1 つ起きる。その pid の `~/.claude/sessions/<pid>.json` に `messagingSocketPath` が無く、`/tmp/cc-socks/<pid>.sock` も無い。
+- `chat.ask` で `text` の event が流れて stream が閉じる。Backend の stderr の `[chat]` の行は spare の pid で、model は `claude-haiku-5-5`、tools 0、MCP servers 0。答えた後に新しい spare が起きる。
+- 最初の `text` で client が abort すると、答えていた claude はすぐ居なくなり、新しい spare は起きない。
+- `~/.claude/projects` に `<MONICA_HOME>/chat` の path の directory ができず、`~/.claude.json` の `projects` に `<MONICA_HOME>` の path が入らない。
+- Backend に SIGTERM を送ると spare が居なくなる。
+- `CLAUDE_CODE_MAX_RETRIES=4` が効く。`ANTHROPIC_BASE_URL` を、すべての `POST /v1/messages` に 529 を返す手元の proxy に向けて本物の claude を `exec` する wrapper を `MONICA_CLAUDE_PATH` に渡すと、proxy に 5 回届いてから `AGENT_FAILED` になり、`detail` に `529 Overloaded` が入る。
+
 ## Gotchas
 
 - `open` の直後はまだ描かれておらず、入力欄の確認は `false`、screenshot は白になる。`false` を失敗と読まずに待つ。

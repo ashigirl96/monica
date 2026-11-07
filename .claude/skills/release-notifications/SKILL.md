@@ -3,7 +3,7 @@ name: release-notifications
 description: "通知センター・バナー・Dock の数・通知のクリックと、`.app` に同梱した Chat の claude と Chrome Extension を、release の Monica で実機で確かめる。.app の中でしか動かないものの受け入れ条件を確かめるときに使う。"
 ---
 
-release の Shell は .app の中でだけ UNUserNotificationCenter を使い、dev は別の経路で通知を出す（ADR-0022）。そのため、通知センターとバナーとクリックは release でしか確かめられない。release の Monica はユーザーが毎日使っている app なので、入れ替える前に了承を取る。
+release の Shell は .app の中でだけ UNUserNotificationCenter を使い、dev は別の経路で通知を出す。そのため、通知センターとバナーとクリックは release でしか確かめられない。release の Monica はユーザーが毎日使っている app なので、入れ替える前に了承を取る。
 
 ## 入れる
 
@@ -32,7 +32,7 @@ dock() {
 ```
 
 - テスト用の Runspace は `rpc workbench/runspace/create` で、scratchpad の下の `tab-a`・`tab-b` のように cwd を分けて開く。通知の title は Agent Session の cwd の末尾 2 つなので、通知センターで見分けられる。外から開いた Runspace を webview は自動では選ばない。
-- 手空きは `Stop`、許可は `PermissionRequest`（`tool_name` と `tool_input` が要る）、待ちを解くのは `UserPromptSubmit`（`prompt` が要る）、claude の終了は `SessionEnd`（`reason`）。payload の field は `docs/research/hook-payloads.md`。
+- 手空きは `Stop`、許可は `PermissionRequest`（`tool_name` と `tool_input` が要る）、待ちを解くのは `UserPromptSubmit`（`prompt` が要る）、claude の終了は `SessionEnd`（`reason`）。payload の例は `packages/workbench/src/hook-payloads/`、場面ごとの順は `.claude/skills/verify-monica/surfaces/headless.md` の hook の節。
 - 終了した Agent Session の session id に `Stop` を送っても、遷移せずに捨てられる。作り直すときは新しい session id を使う。Runspace が閉じられた Terminal Session の hook も捨てられる。
 - 未読と、いつ見たかは `rpc workbench/agentSession/list` の `unread`・`notifiedAt`・`seenAt` で読む。
 
@@ -68,7 +68,7 @@ dock() {
    ```
 
 3. 置いた `.app` の Backend を、Bash の `run_in_background` で `VERIFY_BACKEND=$A/Contents/MacOS/monica-backend .claude/skills/verify-monica/scripts/launch.sh <名前> MONICA_CLAUDE_PATH=$A/Contents/MacOS/claude` で起こし、`.claude/skills/verify-monica/scripts/doctor.sh <名前> --wait` が `OK` を返すまで待つ。script は env を `env -i` で絞り、使い捨ての `MONICA_HOME`（`$TMPDIR/monica-<名前>`）と、同じ directory の `monica-ptyd` を渡す。ブラウザの口の port は渡さなくてよい（Chat は token の口に載る）。`.app` そのものは起こさない。
-4. token の口へ、`backend.json` の Chrome Extension の token で `chat.ask` を 1 回送る（Chrome Extension と同じ呼び方。ADR-0034）。port と Chrome Extension の token は、置いた `.app` の CLI を host として起こして受け取ってもよい。第 1 引数に `chrome-extension://<release の ID>/` を渡し、stdin に 4 byte の little-endian の長さと JSON の 1 通を書く（ADR-0034）。script を `apps/backend/` の下に置くと `@orpc/client` と `@monica/chat/contract` を解決できるので、終わったら消す。答えている間と答えた後に、Backend の子を `ps -A -o pid=,ppid=,command=` で読む。
+4. token の口へ、`backend.json` の Chrome Extension の token で `chat.ask` を 1 回送る（Chrome Extension と同じ呼び方）。port と Chrome Extension の token は、置いた `.app` の CLI を host として起こして受け取ってもよい。第 1 引数に `chrome-extension://<release の ID>/` を渡し、stdin に 4 byte の little-endian の長さと JSON の 1 通を書く。script を `apps/backend/` の下に置くと `@orpc/client` と `@monica/chat/contract` を解決できるので、終わったら消す。答えている間と答えた後に、Backend の子を `ps -A -o pid=,ppid=,command=` で読む。
 
    ```ts
    const { port, extensionToken } = await Bun.file(`${process.env.MONICA_HOME}/backend.json`).json()
@@ -99,7 +99,7 @@ dock() {
 ### Brave での読み込みと reload（PR の確認でユーザーが行う）
 
 1. 普段の Brave の `brave://extensions` で「パッケージ化されていない拡張機能を読み込む」を押し、⌘⇧G で `/Applications/Monica.app/Contents/Resources/extension` を選ぶ。ID が release の ID（`apps/desktop/src-tauri/src/native_host.rs` の `RELEASE_ORIGIN`）になる。
-2. もう一度 `install-app` を流した後、reload を押す前に Brave が何を出すか（そのまま動くか、エラーか）を見る。reload の後も有効のままで、action で side panel が開く。結果は `docs/research/brave-unpacked-reload.md` に書く。
+2. もう一度 `install-app` を流した後、reload を押す前に Brave が何を出すか（そのまま動くか、エラーか）を見る。reload の後も有効のままで、action で side panel が開く。
 
 ## 片付ける
 

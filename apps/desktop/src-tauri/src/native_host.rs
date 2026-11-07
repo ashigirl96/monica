@@ -1,4 +1,4 @@
-//! Chrome Extension が Backend の port と自分の token を引く Native Messaging の host の manifest（ADR-0034）。
+//! Chrome Extension が Backend の port と自分の token を引く Native Messaging の host の manifest。
 
 use std::fs;
 use std::io;

@@ -2,7 +2,7 @@ import { integer, primaryKey, sqliteTable, text } from 'drizzle-orm/sqlite-core'
 
 export const CALLERS = ['webview', 'cli', 'extension', 'notes'] as const
 
-// 行は Feature × Caller × 日数に収まるので、消さずに残す（ADR-0037）。
+// 行は Feature × Caller × 日数に収まるので、消さずに残す。
 export const usage = sqliteTable(
   'usage',
   {
