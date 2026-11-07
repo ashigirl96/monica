@@ -32,7 +32,7 @@ git grep -nE 'ADR-[0-9]{4}|docs/adr|docs/research'
 1. **データ**は、読むテストの隣へ `git mv` で移し、読む側の path と、`.oxfmtrc.json` の `ignorePatterns` のような設定の path を直す。
 2. **案内**は、了承を得た中身を移し先に「こうなれば成り立つ」の確認の形で書き、案内の文をその移し先を指す形に直す。
 3. 置き場を `git rm -r` で消す。
-4. **括弧書き**は、手順 1 の grep に当たった file のうち、残す file を除いたものに `perl .claude/skills/sweep-records/strip-citations.pl <file>…` を流して外す。引数無しで流すと、外し方の自己確認だけをする。
+4. **括弧書き**は、手順 1 の grep に当たった file のうち、残す file を除いたものに `.claude/skills/sweep-records/strip-citations.ts <file>…` を流して外す。引数無しで流すと、外し方の自己確認だけをする。
 5. **文中の参照**は 1 行ずつ手で直す。記録が決めた中身を文に書くか、文ごと消す。番号だけを言うコメントで、テスト名や関数名と同じことしか言わないものは、行ごと消す。
 
 ## 4. 確かめる
