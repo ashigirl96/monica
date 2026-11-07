@@ -102,6 +102,10 @@ _Avoid_: Tab の process（process を持つのは Terminal Session）, 子 proc
 ptyd が Terminal Session の出力をそのまま書き残したもの。直近の分だけを持ち、再 attach ではその末尾を replay する。Terminal Session が終わると消える。
 _Avoid_: Transcript（単独で使わない）, log（ptyd の診断の log と紛れる）, scrollback（xterm の語）
 
+**Tab の接続**:
+Tab が、表示する Terminal Session の出力を受け、入力を送る経路。繋ぐとまず Terminal Session Transcript の末尾を replay し、その後に流れてくる出力へ切れ目なく続ける。Tab が Layout から消えると切れる。1 つの Tab に接続は 1 つまで。
+_Avoid_: connection, session（Terminal Session と Agent Session と紛れる）, attach（繋ぐ手順の 1 歩の語）
+
 **Agent Session**:
 Tab の中で動く agent が自分で名乗るセッション。同一性は agent の session_id で、resume と compact は同じ Agent Session の再開、fork は別の Agent Session。Terminal Session とは別物で、同じ Tab に両方が存在する。Tab の中の agent の状態の唯一の正本で、Task に紐づかない Tab でも観測する。状態は次の 4 つ。動作中とユーザー待ちには agent 自身の報告でだけ入る。終了には Terminal Session の終わりでも入り、未観測には Backend の不在でだけ入る。
 
