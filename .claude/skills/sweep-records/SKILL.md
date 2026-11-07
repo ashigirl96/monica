@@ -11,7 +11,7 @@ disable-model-invocation: true
 ## 1. 読み手を全部挙げる
 
 ```bash
-git grep -nE 'ADR-[0-9]{4}|docs/adr|docs/research'
+git grep -nE 'ADR-[0-9]{4}|docs/adr|docs/research' -- . ':!.claude/skills/sweep-records'
 ```
 
 対象の置き場の中の行と、残す file の行を除き、残りの行を 1 行ずつ次の 4 種類に分ける。すべての行に種類が付いたら終わり。
