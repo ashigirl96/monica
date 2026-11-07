@@ -3,7 +3,7 @@ import { check, integer, sqliteTable, text, uniqueIndex } from 'drizzle-orm/sqli
 
 const timestamp = (name: string) => integer(name, { mode: 'timestamp_ms' })
 
-// id は外に `note-N` で出す。AUTOINCREMENT なので消した番号も再利用しない（ADR-0019）。
+// id は外に `note-N` で出す。AUTOINCREMENT なので消した番号も再利用しない。
 export const note = sqliteTable(
   'note',
   {

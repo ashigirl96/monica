@@ -137,7 +137,7 @@ export default {
           context.report({
             node,
             message:
-              'transaction に async 関数を渡さない。throw しても rollback されない（ADR-0009）。fs への副作用は commit の後に呼ぶ。ptyd には workbench が送る',
+              'transaction に async 関数を渡さない。throw しても rollback されない。fs への副作用は commit の後に呼ぶ。ptyd には workbench が送る',
           })
         return {
           FunctionDeclaration(node) {
@@ -194,7 +194,7 @@ export default {
             context.report({
               node,
               message:
-                '他の domain の table に直接書かない。書き込みは相手の domain の method を通す（ADR-0009）',
+                '他の domain の table に直接書かない。書き込みは相手の domain の method を通す',
             })
           },
         }

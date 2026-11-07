@@ -14,7 +14,7 @@ export const terminalSession = sqliteTable('terminal_session', {
 })
 
 // sort_order は兄弟を 1 行ずつ UPDATE して振り直すので、途中で同値ができる。unique にしない。
-// owned は他の domain が作った Runspace の印で、Workbench の操作では消さない（ADR-0012）。
+// owned は他の domain が作った Runspace の印で、Workbench の操作では消さない。
 export const runspace = sqliteTable('runspace', {
   id: text('id').primaryKey(),
   cwd: text('cwd').notNull(),

@@ -17,7 +17,7 @@ import type { ChatEvent } from './contract.ts'
 import { ChatFailure } from './failure.ts'
 import { EndedEarly, translate } from './translate.ts'
 
-// 並びは research（docs/research/chat-failures.md の §2）で本物の claude が流したもの。
+// 並びは本物の claude が流したもの。
 const RESETS_AT = 1_800_000_000
 const session_id = 'session'
 const uuid = '00000000-0000-4000-8000-000000000000'

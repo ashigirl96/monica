@@ -84,7 +84,7 @@ function NewShellButton({ onClick, children }: { onClick: () => void; children: 
   )
 }
 
-// Task の中身は task を知らない workbench の外から slot ではめる（ADR-0005）。
+// Task の中身は task を知らない workbench の外から slot ではめる。
 export type EmptyBenchContent = (runspaceId: string) => ReactNode
 
 // 所有されていない Runspace は常に Tab を持つので、ここに来るのは Tab の無い Bench だけ。

@@ -17,7 +17,7 @@ const exitPlanMode = JSON.parse(
   readFileSync(
     join(
       import.meta.dir,
-      '../../../docs/research/hook-payloads/permission-request-exit-plan-mode.json',
+      '../../../packages/workbench/src/hook-payloads/permission-request-exit-plan-mode.json',
     ),
     'utf8',
   ),

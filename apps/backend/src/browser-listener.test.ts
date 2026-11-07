@@ -74,7 +74,7 @@ test('the browser listener answers on both loopbacks to the three names of its p
   }
 })
 
-// 外の site からの top-level の form POST は loopback まで届き、user が起こす navigation には none が付く（docs/research/browser-loopback.md、ADR-0028）。
+// 外の site からの top-level の form POST は loopback まで届き、user が起こす navigation には none が付く。
 test('a request other than GET runs a note procedure only from the same origin or from a Chrome Extension', async () => {
   const port = freePort()
   listen(port)

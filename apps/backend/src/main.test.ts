@@ -215,7 +215,7 @@ test('the token listener carries workbench, task, job and chat but not note, and
   expect((await viaToken(backend, 'note/essay/create')).status).toBe(404)
 })
 
-// Chrome Extension で script が動いても、任意の prompt を打つ task.run や shell に打鍵する workbench.openTab には届かせない（ADR-0017・0034・0035）。
+// Chrome Extension で script が動いても、任意の prompt を打つ task.run や shell に打鍵する workbench.openTab には届かせない。
 test('the Chrome Extension token in backend.json opens only chat and the Run Button procedures of task on the token listener, the full token opens everything, and no token opens nothing', async () => {
   const backend = await startBackend(freePort())
   const endpoint = endpointFile(backend.home)

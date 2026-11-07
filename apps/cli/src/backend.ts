@@ -10,7 +10,7 @@ import type { contract } from './contract.ts'
 
 export type Client = ContractRouterClient<typeof contract>
 
-/** extensionToken は chat と task の Run ボタンの 2 つの procedure だけを開く token で、Native Messaging の host が Chrome Extension に渡す（ADR-0034・0035）。 */
+/** extensionToken は chat と task の Run ボタンの 2 つの procedure だけを開く token で、Native Messaging の host が Chrome Extension に渡す。 */
 type Endpoint = { port: number; token: string; extensionToken?: string; pid: number }
 
 export class BackendNotRunning extends Error {

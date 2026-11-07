@@ -137,7 +137,7 @@ function answer(question: string) {
   result(ANSWER)
 }
 
-// research（docs/research/chat-failures.md の §2）で本物の claude が流した並び。
+// 本物の claude が流した並び。
 const scenarios: Record<
   Exclude<FakeScenario, 'exit-at-start' | 'exit-leaving-stderr-open'>,
   (question: string) => void

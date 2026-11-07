@@ -92,7 +92,7 @@ export function liveRunsByTask(reader: Reader, taskIssueIds: number[]) {
 export const liveRunsOf = (reader: Reader, taskIssueId: number) =>
   liveRunsByTask(reader, [taskIssueId])(taskIssueId)
 
-// Active Run。呼び手の Run は close の後も呼び手の Tab に残り、Terminating な Terminal Session の Run は終わったものと読むので除く（ADR-0023）。
+// Active Run。呼び手の Run は close の後も呼び手の Tab に残り、Terminating な Terminal Session の Run は終わったものと読むので除く。
 export function activeRunsBesides(reader: Reader, taskIssueId: number, caller: string | undefined) {
   return reader
     .select({
@@ -166,7 +166,7 @@ export function createRunLaunches() {
   }
 }
 
-// Terminating な Terminal Session は Exit の記録を待たずに外す（ADR-0023）。
+// Terminating な Terminal Session は Exit の記録を待たずに外す。
 function stillLaunching(reader: Reader, taskIssueId: number, terminalSessionId: string): boolean {
   const live = reader
     .select({ id: terminalSession.id })

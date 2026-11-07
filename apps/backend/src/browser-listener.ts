@@ -10,8 +10,8 @@ import { type Context, Hono } from 'hono'
 
 const IMMUTABLE = 'public, max-age=31536000, immutable'
 
-// openTab の input は shell に打鍵されるので、token の無い口に workbench・task・job を載せると任意のコマンドになる（ADR-0017）。
-// chat は Current Page を送るので、port を先に握った別の process に渡さないよう token の口に載せる（ADR-0034）。
+// openTab の input は shell に打鍵されるので、token の無い口に workbench・task・job を載せると任意のコマンドになる。
+// chat は Current Page を送るので、port を先に握った別の process に渡さないよう token の口に載せる。
 export const browserRouter = { note: noteRouter }
 
 type BrowserContext = InferRouterInitialContext<typeof noteRouter>
@@ -81,7 +81,7 @@ export function listenBrowser(
 }
 
 // token の代わりに CSRF を止める。port を見ない same-site は localhost の別の app からも付き、
-// none は user の navigation にも付くので、Chrome Extension の fetch が作る cors との組だけを通す（ADR-0028）。
+// none は user の navigation にも付くので、Chrome Extension の fetch が作る cors との組だけを通す。
 function fromSameOriginOrExtension(c: Context): boolean {
   const site = c.req.header('sec-fetch-site')
   return site === 'same-origin' || (site === 'none' && c.req.header('sec-fetch-mode') === 'cors')

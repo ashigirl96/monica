@@ -6,7 +6,7 @@ export const CHROME_EXTENSION_ORIGIN = 'chrome-extension://'
 export type NativeHostReply = { port: number; token: string } | { error: 'not-running' }
 
 /**
- * Native Messaging の host として、home の Backend の port と Chrome Extension の token を 1 通で返す。全権の token は渡さない（ADR-0034）。
+ * Native Messaging の host として、home の Backend の port と Chrome Extension の token を 1 通で返す。全権の token は渡さない。
  * sendNativeMessage は応答を受けてから stdin を閉じるので、EOF を待たずに 1 通だけ読む。
  */
 export async function answerChromeExtension(home: string): Promise<number> {

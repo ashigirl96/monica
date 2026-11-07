@@ -22,7 +22,7 @@ export async function attachTab(
 ): Promise<AttachOutput> {
   const { workbenchLedger } = deps
   const terminalSessionId = callerTerminalSession(input.terminalSessionId)
-  // Tab の検査で断っても track は巻き戻さない（ADR-0024）。
+  // Tab の検査で断っても track は巻き戻さない。
   const { found: requested, tracked } = await findOrTrack(deps, parseRef(input.ref))
   // ghq root は async なので transaction の前に引く。待つ間に run が Bench を作ることも、sync が repo の改名を写すこともある。
   const ghqRoot = requested.bench ? null : await lookUpGhqRoot(deps.ghq)

@@ -2,7 +2,7 @@ import { z } from 'zod'
 
 import type { HookEvent, HookSignal } from './transition.ts'
 
-// shell や monitor などを数えないのは、dev server を background に置いたまま turn を終えた agent を手空きに見せるため（ADR-0008）。
+// shell や monitor などを数えないのは、dev server を background に置いたまま turn を終えた agent を手空きに見せるため。
 const AGENT_WORK = ['subagent', 'workflow', 'teammate']
 
 const Payload = z.object({

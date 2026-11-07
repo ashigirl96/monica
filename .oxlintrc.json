@@ -43,7 +43,7 @@
       "error",
       {
         "name": "chrome",
-        "message": "chrome を使うのは apps/extension と chat の ui だけ（ADR-0029）"
+        "message": "chrome を使うのは apps/extension と chat の ui だけ"
       }
     ],
     "no-restricted-properties": [
@@ -77,7 +77,7 @@
               },
               {
                 "group": ["@monica/task", "@monica/task/*"],
-                "message": "workbench は task を import しない（ADR-0005）"
+                "message": "workbench は task を import しない"
               }
             ]
           }
@@ -90,7 +90,7 @@
         "no-restricted-imports": [
           "error",
           {
-            "paths": [{ "name": "bun:sqlite", "message": "ui は browser で動く（ADR-0009）" }],
+            "paths": [{ "name": "bun:sqlite", "message": "ui は browser で動く" }],
             "patterns": [
               {
                 "group": ["@monica/*/cli"],
@@ -98,12 +98,12 @@
               },
               {
                 "group": ["@monica/task", "@monica/task/*"],
-                "message": "workbench は task を import しない（ADR-0005）"
+                "message": "workbench は task を import しない"
               },
               {
                 "group": ["@monica/*/server", "../server", "../server.ts"],
                 "allowTypeImports": true,
-                "message": "ui は browser で動くので server entry を import しない（ADR-0009）"
+                "message": "ui は browser で動くので server entry を import しない"
               },
               {
                 "group": [
@@ -114,7 +114,7 @@
                   "drizzle-orm/**"
                 ],
                 "allowTypeImports": true,
-                "message": "DB に触るのは Backend だけで、webview は procedure を呼ぶ（ADR-0003）"
+                "message": "DB に触るのは Backend だけで、webview は procedure を呼ぶ"
               }
             ]
           }
@@ -130,7 +130,7 @@
             "paths": [
               {
                 "name": "bun:sqlite",
-                "message": "DB に触るのは Backend だけで、CLI は procedure を呼ぶ（ADR-0003）"
+                "message": "DB に触るのは Backend だけで、CLI は procedure を呼ぶ"
               }
             ],
             "patterns": [
@@ -140,7 +140,7 @@
               },
               {
                 "group": ["@monica/task", "@monica/task/*"],
-                "message": "workbench は task を import しない（ADR-0005）"
+                "message": "workbench は task を import しない"
               },
               {
                 "group": [
@@ -154,7 +154,7 @@
                   "drizzle-orm/**"
                 ],
                 "allowTypeImports": true,
-                "message": "DB に触るのは Backend だけで、CLI は procedure を呼ぶ（ADR-0003）"
+                "message": "DB に触るのは Backend だけで、CLI は procedure を呼ぶ"
               }
             ]
           }
@@ -183,7 +183,7 @@
         "no-restricted-imports": [
           "error",
           {
-            "paths": [{ "name": "bun:sqlite", "message": "ui は browser で動く（ADR-0009）" }],
+            "paths": [{ "name": "bun:sqlite", "message": "ui は browser で動く" }],
             "patterns": [
               {
                 "group": ["@monica/*/cli"],
@@ -192,7 +192,7 @@
               {
                 "group": ["@monica/*/server", "../server", "../server.ts"],
                 "allowTypeImports": true,
-                "message": "ui は browser で動くので server entry を import しない（ADR-0009）"
+                "message": "ui は browser で動くので server entry を import しない"
               },
               {
                 "group": [
@@ -203,7 +203,7 @@
                   "drizzle-orm/**"
                 ],
                 "allowTypeImports": true,
-                "message": "DB に触るのは Backend だけで、webview は procedure を呼ぶ（ADR-0003）"
+                "message": "DB に触るのは Backend だけで、webview は procedure を呼ぶ"
               }
             ]
           }
@@ -219,7 +219,7 @@
             "paths": [
               {
                 "name": "bun:sqlite",
-                "message": "DB に触るのは Backend だけで、CLI は procedure を呼ぶ（ADR-0003）"
+                "message": "DB に触るのは Backend だけで、CLI は procedure を呼ぶ"
               }
             ],
             "patterns": [
@@ -239,7 +239,7 @@
                   "drizzle-orm/**"
                 ],
                 "allowTypeImports": true,
-                "message": "DB に触るのは Backend だけで、CLI は procedure を呼ぶ（ADR-0003）"
+                "message": "DB に触るのは Backend だけで、CLI は procedure を呼ぶ"
               }
             ]
           }
@@ -264,7 +264,7 @@
                   "@monica/workbench",
                   "@monica/workbench/*"
                 ],
-                "message": "job は task も workbench も import しない（ADR-0016）"
+                "message": "job は task も workbench も import しない"
               }
             ]
           }
@@ -280,7 +280,7 @@
             "paths": [
               {
                 "name": "bun:sqlite",
-                "message": "DB に触るのは Backend だけで、CLI は procedure を呼ぶ（ADR-0003）"
+                "message": "DB に触るのは Backend だけで、CLI は procedure を呼ぶ"
               }
             ],
             "patterns": [
@@ -295,7 +295,7 @@
                   "@monica/workbench",
                   "@monica/workbench/*"
                 ],
-                "message": "job は task も workbench も import しない（ADR-0016）"
+                "message": "job は task も workbench も import しない"
               },
               {
                 "group": [
@@ -309,7 +309,7 @@
                   "drizzle-orm/**"
                 ],
                 "allowTypeImports": true,
-                "message": "DB に触るのは Backend だけで、CLI は procedure を呼ぶ（ADR-0003）"
+                "message": "DB に触るのは Backend だけで、CLI は procedure を呼ぶ"
               }
             ]
           }
@@ -356,7 +356,7 @@
             "paths": [
               {
                 "name": "bun:sqlite",
-                "message": "DB に触るのは Backend だけで、CLI は procedure を呼ぶ（ADR-0003）"
+                "message": "DB に触るのは Backend だけで、CLI は procedure を呼ぶ"
               }
             ],
             "patterns": [
@@ -391,7 +391,7 @@
                   "drizzle-orm/**"
                 ],
                 "allowTypeImports": true,
-                "message": "DB に触るのは Backend だけで、CLI は procedure を呼ぶ（ADR-0003）"
+                "message": "DB に触るのは Backend だけで、CLI は procedure を呼ぶ"
               }
             ]
           }
@@ -433,7 +433,7 @@
         "no-restricted-imports": [
           "error",
           {
-            "paths": [{ "name": "bun:sqlite", "message": "ui は browser で動く（ADR-0009）" }],
+            "paths": [{ "name": "bun:sqlite", "message": "ui は browser で動く" }],
             "patterns": [
               {
                 "group": ["@monica/*/cli"],
@@ -455,7 +455,7 @@
               {
                 "group": ["@monica/*/server", "../server", "../server.ts"],
                 "allowTypeImports": true,
-                "message": "ui は browser で動くので server entry を import しない（ADR-0009）"
+                "message": "ui は browser で動くので server entry を import しない"
               },
               {
                 "group": [
@@ -466,7 +466,7 @@
                   "drizzle-orm/**"
                 ],
                 "allowTypeImports": true,
-                "message": "DB に触るのは Backend だけで、webview は procedure を呼ぶ（ADR-0003）"
+                "message": "DB に触るのは Backend だけで、webview は procedure を呼ぶ"
               }
             ]
           }
@@ -559,7 +559,7 @@
         "no-restricted-imports": [
           "error",
           {
-            "paths": [{ "name": "bun:sqlite", "message": "ui は browser で動く（ADR-0009）" }],
+            "paths": [{ "name": "bun:sqlite", "message": "ui は browser で動く" }],
             "patterns": [
               {
                 "group": ["@monica/*/cli"],
@@ -583,7 +583,7 @@
               {
                 "group": ["@monica/*/server", "../server", "../server.ts"],
                 "allowTypeImports": true,
-                "message": "ui は browser で動くので server entry を import しない（ADR-0009）"
+                "message": "ui は browser で動くので server entry を import しない"
               },
               {
                 "group": [
@@ -594,7 +594,7 @@
                   "drizzle-orm/**"
                 ],
                 "allowTypeImports": true,
-                "message": "DB に触るのは Backend だけで、Chrome Extension は procedure を呼ぶ（ADR-0003）"
+                "message": "DB に触るのは Backend だけで、Chrome Extension は procedure を呼ぶ"
               }
             ]
           }
@@ -607,7 +607,7 @@
         "no-restricted-imports": [
           "error",
           {
-            "paths": [{ "name": "bun:sqlite", "message": "ui は browser で動く（ADR-0009）" }],
+            "paths": [{ "name": "bun:sqlite", "message": "ui は browser で動く" }],
             "patterns": [
               {
                 "group": ["@monica/*"],
@@ -720,7 +720,7 @@
                   "@monica/web",
                   "@monica/web/*"
                 ],
-                "message": "apps どうしは import しない（ADR-0002）"
+                "message": "apps どうしは import しない"
               }
             ]
           }
@@ -745,7 +745,7 @@
                   "@monica/web",
                   "@monica/web/*"
                 ],
-                "message": "apps どうしは import しない（ADR-0002）"
+                "message": "apps どうしは import しない"
               }
             ]
           }
@@ -762,7 +762,7 @@
             "paths": [
               {
                 "name": "bun:sqlite",
-                "message": "DB に触るのは Backend だけで、CLI は procedure を呼ぶ（ADR-0003）"
+                "message": "DB に触るのは Backend だけで、CLI は procedure を呼ぶ"
               }
             ],
             "patterns": [
@@ -777,12 +777,12 @@
                   "@monica/web",
                   "@monica/web/*"
                 ],
-                "message": "apps どうしは import しない（ADR-0002）"
+                "message": "apps どうしは import しない"
               },
               {
                 "group": ["@monica/*/server", "@monica/*/schema", "drizzle-orm", "drizzle-orm/**"],
                 "allowTypeImports": true,
-                "message": "DB に触るのは Backend だけで、CLI は procedure を呼ぶ（ADR-0003）"
+                "message": "DB に触るのは Backend だけで、CLI は procedure を呼ぶ"
               }
             ]
           }
@@ -798,7 +798,7 @@
             "paths": [
               {
                 "name": "bun:sqlite",
-                "message": "DB に触るのは Backend だけで、webview は procedure を呼ぶ（ADR-0003）"
+                "message": "DB に触るのは Backend だけで、webview は procedure を呼ぶ"
               }
             ],
             "patterns": [
@@ -817,12 +817,12 @@
                   "@monica/web",
                   "@monica/web/*"
                 ],
-                "message": "apps どうしは import しない（ADR-0002）"
+                "message": "apps どうしは import しない"
               },
               {
                 "group": ["@monica/*/server", "@monica/*/schema", "drizzle-orm", "drizzle-orm/**"],
                 "allowTypeImports": true,
-                "message": "DB に触るのは Backend だけで、webview は procedure を呼ぶ（ADR-0003）"
+                "message": "DB に触るのは Backend だけで、webview は procedure を呼ぶ"
               }
             ]
           }
@@ -838,7 +838,7 @@
             "paths": [
               {
                 "name": "bun:sqlite",
-                "message": "DB に触るのは Backend だけで、ブラウザは procedure を呼ぶ（ADR-0003）"
+                "message": "DB に触るのは Backend だけで、ブラウザは procedure を呼ぶ"
               }
             ],
             "patterns": [
@@ -857,12 +857,12 @@
                   "@monica/extension",
                   "@monica/extension/*"
                 ],
-                "message": "apps どうしは import しない（ADR-0002）"
+                "message": "apps どうしは import しない"
               },
               {
                 "group": ["@monica/*/server", "@monica/*/schema", "drizzle-orm", "drizzle-orm/**"],
                 "allowTypeImports": true,
-                "message": "DB に触るのは Backend だけで、ブラウザは procedure を呼ぶ（ADR-0003）"
+                "message": "DB に触るのは Backend だけで、ブラウザは procedure を呼ぶ"
               }
             ]
           }
@@ -878,7 +878,7 @@
             "paths": [
               {
                 "name": "bun:sqlite",
-                "message": "DB に触るのは Backend だけで、ブラウザは procedure を呼ぶ（ADR-0003）"
+                "message": "DB に触るのは Backend だけで、ブラウザは procedure を呼ぶ"
               }
             ],
             "patterns": [
@@ -897,12 +897,12 @@
                   "@monica/web",
                   "@monica/web/*"
                 ],
-                "message": "apps どうしは import しない（ADR-0002）"
+                "message": "apps どうしは import しない"
               },
               {
                 "group": ["@monica/*/server", "@monica/*/schema", "drizzle-orm", "drizzle-orm/**"],
                 "allowTypeImports": true,
-                "message": "DB に触るのは Backend だけで、ブラウザは procedure を呼ぶ（ADR-0003）"
+                "message": "DB に触るのは Backend だけで、ブラウザは procedure を呼ぶ"
               }
             ]
           }

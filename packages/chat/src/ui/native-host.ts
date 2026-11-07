@@ -1,7 +1,7 @@
 import { ORPCError } from '@orpc/client'
 import { z } from 'zod'
 
-/** Native Messaging の host が返す、Backend の token の口の port と Chrome Extension の token（ADR-0034）。 */
+/** Native Messaging の host が返す、Backend の token の口の port と Chrome Extension の token。 */
 const AddressSchema = z.object({ port: z.number(), token: z.string() })
 
 type Address = z.infer<typeof AddressSchema>

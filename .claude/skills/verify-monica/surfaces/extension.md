@@ -90,7 +90,7 @@ cdp.close();'
 
 ## ID と鍵と icon を作り直す
 
-ID は manifest の `key`（公開鍵の DER の base64）で決まる（ADR-0029）。秘密鍵は file に書かず、公開鍵と ID だけを取る。
+ID は manifest の `key`（公開鍵の DER の base64）で決まる。秘密鍵は file に書かず、公開鍵と ID だけを取る。
 
 ```bash
 KEY=$(openssl genrsa 2048 2>/dev/null | openssl rsa -pubout -outform DER 2>/dev/null | openssl base64 -A)

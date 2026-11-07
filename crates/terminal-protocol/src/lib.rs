@@ -198,7 +198,7 @@ pub enum ResponseBody {
     },
 }
 
-/// A Terminal Session Process (ADR-0040), or a descendant of the live shell that left its
+/// A Terminal Session Process, or a descendant of the live shell that left its
 /// session, such as a command claude's Bash tool runs in the background.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ProcessInfo {

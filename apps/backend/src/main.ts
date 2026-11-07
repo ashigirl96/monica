@@ -147,7 +147,7 @@ const clientInterceptors = [usageLedger.count]
 const handler = new RPCHandler(os.$context<TokenContext>().router(tokenRouter), {
   clientInterceptors,
 })
-// Chrome Extension に渡す token は chat と、prompt を受け取らない task の procedure だけを持つ handler に通すので、path の書き方で workbench や task.run に届くことは無い（ADR-0035）。
+// Chrome Extension に渡す token は chat と、prompt を受け取らない task の procedure だけを持つ handler に通すので、path の書き方で workbench や task.run に届くことは無い。
 const extensionHandler = new RPCHandler(
   os.$context<TokenContext>().router({
     chat: chatRouter,
@@ -161,7 +161,7 @@ const origins = ['tauri://localhost', 'http://tauri.localhost']
 if (process.env.MONICA_DEV_URL) origins.push(new URL(process.env.MONICA_DEV_URL).origin)
 
 const token = crypto.randomUUID()
-// Native Messaging の host が Chrome Extension に渡す。Chrome Extension で script が動いても shell に打鍵する workbench.openTab に届かせない（ADR-0034）。
+// Native Messaging の host が Chrome Extension に渡す。Chrome Extension で script が動いても shell に打鍵する workbench.openTab に届かせない。
 const extensionToken = crypto.randomUUID()
 const startedAt = new Date().toISOString()
 type TokenEnv = { Variables: { handler: typeof handler } }

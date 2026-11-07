@@ -41,7 +41,7 @@ pub fn take_notification_click(pending: State<'_, PendingClick>) -> Option<Strin
     pending.guard().take()
 }
 
-/// .app の外の process で `currentNotificationCenter` を呼ぶと catch できない例外で abort するので、dev は plugin で出す（ADR-0022）。
+/// .app の外の process で `currentNotificationCenter` を呼ぶと catch できない例外で abort するので、dev は plugin で出す。
 fn in_app_bundle() -> bool {
     static IN_APP_BUNDLE: OnceLock<bool> = OnceLock::new();
     *IN_APP_BUNDLE.get_or_init(|| is_app_bundle(&NSBundle::mainBundle().bundlePath().to_string()))
@@ -102,7 +102,7 @@ fn post_to_center(
         .addNotificationRequest_withCompletionHandler(&request, Some(&added));
 }
 
-/// Backend ごとに作る。その Backend からの最初の集合でだけ、前の起動の通知を届いた通知から探すため（ADR-0025）。
+/// Backend ごとに作る。その Backend からの最初の集合でだけ、前の起動の通知を届いた通知から探すため。
 #[derive(Default)]
 pub struct UnreadNotifications {
     previous: Option<Vec<String>>,
