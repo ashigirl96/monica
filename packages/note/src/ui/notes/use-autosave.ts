@@ -59,15 +59,10 @@ export function useAutosave() {
   }, [queue])
 
   return {
-    schedule: queue.schedule,
+    queue,
     flush: queue.flush,
     discard: queue.discard,
-    dropPending: queue.dropPending,
-    baseVersion: queue.baseVersion,
-    setBase: queue.setBase,
     hasUnsaved: queue.hasUnsaved,
-    unsavedDraft: queue.unsavedDraft,
-    editMark: queue.editMark,
     hasConflict,
     saveError,
     setOpenNote,

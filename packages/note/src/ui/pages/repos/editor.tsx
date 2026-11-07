@@ -7,27 +7,22 @@ import { useDocumentTitle } from '../../document-title.ts'
 import type { BlockEditorHandle } from '../../editor/block-editor.tsx'
 import { altOnly, ctrlOnly } from '../../keys.ts'
 import { useAutosaveContext } from '../../notes/autosave-context.tsx'
-import {
-  cycleSelect,
-  persistableContent,
-  titleFieldKeyDown,
-  useEditorDoc,
-} from '../../notes/editor-support.ts'
+import { cycleSelect, titleFieldKeyDown } from '../../notes/editor-support.ts'
 import { NoteBlockEditor } from '../../notes/note-block-editor.tsx'
 import { readBody, UnreadableBody, UnreadableNotice } from '../../notes/note-body.tsx'
-import { useServerDoc } from '../../notes/note-sync.ts'
 import { NotesShell } from '../../notes/notes-shell.tsx'
 import {
-  useNoteQuery,
+  noteQueryOptions,
+  scratchQueryOptions,
   useRepoCandidatesQuery,
   useRepoNotesCache,
   useRepoNotesQuery,
   useScratchQuery,
   useSeedNote,
 } from '../../notes/queries.ts'
-import { isNotFound } from '../../notes/removals.ts'
 import { SaveStatus } from '../../notes/save-status.tsx'
 import { useToggleStar } from '../../notes/star.tsx'
+import { useOpenNote } from '../../notes/use-open-note.ts'
 import { useRemovals } from '../../notes/use-removals.ts'
 import { navigate } from '../../router.ts'
 import { repoNotePath, repoNoteRedirect, repoPath } from '../../routes.ts'
@@ -42,14 +37,11 @@ export function RepoEditor({ repo, noteId }: { repo: string; noteId: string | nu
   const client = useNoteClient()
   const [pickerOpen, setPickerOpen] = useState(false)
 
-  const autosave = useAutosaveContext()
-  const { schedule, flush } = autosave
+  const { flush } = useAutosaveContext()
   const editorHandleRef = useRef<BlockEditorHandle | null>(null)
   const titleRef = useRef<HTMLInputElement>(null)
   // ⌥N で作った Repo Note は、本文ではなく title から書き始める。
   const [titleFocusId, setTitleFocusId] = useState<string | null>(null)
-  const contentRef = useRef<unknown>(null)
-  const noteRef = useRef<Note | null>(null)
   const removals = useRemovals('repo_note')
 
   const scratchQuery = useScratchQuery(repo)
@@ -70,36 +62,30 @@ export function RepoEditor({ repo, noteId }: { repo: string; noteId: string | nu
     setLastRepo(repo)
   }, [repo])
 
-  const noteQuery = useNoteQuery(noteId)
-  const redirect = noteQuery.data === undefined ? null : repoNoteRedirect(repo, noteQuery.data)
+  // 表示する doc は noteId 無し = Scratch、あり = その Repo Note。開く Note の名前も同じ軸で切る
+  const { openNote, view } = useOpenNote(
+    noteId ?? repo,
+    noteId === null ? scratchQueryOptions(client, repo) : noteQueryOptions(client, noteId),
+    (fetched: Note) => noteId === null || repoNoteRedirect(repo, fetched) === null,
+  )
+  const { note, generation } = view
+  const redirect =
+    noteId === null || view.data === undefined ? null : repoNoteRedirect(repo, view.data)
   useEffect(() => {
     if (redirect !== null) navigate(redirect, { replace: true })
   }, [redirect])
-
-  // 表示する doc は noteId 無し = Scratch、あり = その Repo Note。latch のキーも同じ軸で切る
-  const openQuery = noteId === null ? scratchQuery : noteQuery
-  const { note, generation, reload, patchNote } = useServerDoc({
-    docKey: noteId ?? repo,
-    data: redirect === null ? openQuery.data : undefined,
-    autosave,
-    contentRef,
-    noteRef,
-    refetch: openQuery.refetch,
-  })
 
   useDocumentTitle(note === null ? repoName : displayName(note))
 
   // 描画できる note がある間はエラーを出さない（Daily と同じ理由 — 復帰時の一時的な
   // 再フェッチ失敗でエディタを unmount すると、保存済みの編集が巻き戻る）。
-  const loadError = note === null ? openQuery.error : null
+  const loadError = note === null ? view.error : null
   const read = note === null ? null : readBody(note.content)
 
-  // 開いた本文を出し続けると、書いた分の保存が NOT_FOUND で再試行され続ける。
-  const goneId = note !== null && isNotFound(noteQuery.error) ? noteId : null
+  const goneId = view.gone
   useEffect(() => {
     if (goneId === null) return
     removals.removedElsewhere(goneId, {
-      editor: { noteRef },
       leave: () => navigate(repoPath(repo), { replace: true }),
     })
   }, [goneId, removals, repo])
@@ -142,26 +128,14 @@ export function RepoEditor({ repo, noteId }: { repo: string; noteId: string | nu
     void notesQuery.fetchNextPage()
   }, [notesQuery])
 
-  const scheduleSave = useCallback(
-    (target: Note) => {
-      if (!readBody(target.content).ok) return
-      const content = persistableContent(contentRef.current ?? target.content)
-      // Scratch の保存に title を付けると、server は本文ごと断る。
-      const draft = target.kind === 'repo_note' ? { content, title: target.title } : { content }
-      schedule(target.id, draft, displayName(target))
-    },
-    [schedule],
-  )
-
   const deleteById = useCallback(
     async (targetId: string) => {
-      const removed = await removals.remove(targetId, {
-        editor: { noteRef, reschedule: scheduleSave },
-        leave: () => navigate(repoPath(repo), { replace: true }),
-      })
+      const removed = await openNote.remove(targetId, removals, () =>
+        navigate(repoPath(repo), { replace: true }),
+      )
       if (removed) patchRepoNotes((notes) => notes.filter((s) => s.id !== targetId))
     },
-    [removals, scheduleSave, repo, patchRepoNotes],
+    [openNote, removals, repo, patchRepoNotes],
   )
 
   const toggleStar = useToggleStar(invalidateRepoNotes)
@@ -203,7 +177,7 @@ export function RepoEditor({ repo, noteId }: { repo: string; noteId: string | nu
       }
       if (e.code === 'Backspace' || e.code === 'Delete') {
         // Scratch は消せないので、エディタの単語の削除に素通しする
-        const target = noteRef.current
+        const target = openNote.editing
         if (target?.kind === 'repo_note') {
           e.preventDefault()
           e.stopPropagation()
@@ -219,7 +193,7 @@ export function RepoEditor({ repo, noteId }: { repo: string; noteId: string | nu
       }
       if (e.code === 'KeyS') {
         // Scratch には Star が無いので、エディタの入力（ß）に素通しする
-        const target = noteRef.current
+        const target = openNote.editing
         if (target?.kind === 'repo_note') {
           e.preventDefault()
           e.stopPropagation()
@@ -235,26 +209,18 @@ export function RepoEditor({ repo, noteId }: { repo: string; noteId: string | nu
     }
     window.addEventListener('keydown', onKey, true)
     return () => window.removeEventListener('keydown', onKey, true)
-  }, [cycleIds, currentId, selectNote, createNew, deleteById, undoDelete, toggleStar])
+  }, [openNote, cycleIds, currentId, selectNote, createNew, deleteById, undoDelete, toggleStar])
 
   const onTitleChange = useCallback(
     (title: string) => {
-      const current = noteRef.current
-      if (current?.kind !== 'repo_note') return
-      const next = { ...current, title }
-      patchNote(next)
-      scheduleSave(next)
+      const next = openNote.changeTitle(title)
+      if (next === null) return
       patchRepoNotes((notes) => notes.map((s) => (s.id === next.id ? { ...s, title } : s)))
     },
-    [scheduleSave, patchNote, patchRepoNotes],
+    [openNote, patchRepoNotes],
   )
 
-  const { onDocChange, focusEditorStart } = useEditorDoc({
-    contentRef,
-    noteRef,
-    editorHandleRef,
-    scheduleSave,
-  })
+  const focusEditorStart = useCallback(() => editorHandleRef.current?.focusStart(), [])
 
   const pickerItems = useMemo(
     () => (candidatesQuery.data ?? []).map((candidate) => ({ key: candidate, label: candidate })),
@@ -311,7 +277,7 @@ export function RepoEditor({ repo, noteId }: { repo: string; noteId: string | nu
                 <span className="ml-auto font-mono text-[0.7rem] text-[var(--ink-faint)]">
                   {note.date.replaceAll('-', '.')}
                 </span>
-                <SaveStatus noteId={note.id} onReload={() => void reload()} />
+                <SaveStatus noteId={note.id} onReload={() => void openNote.reload()} />
               </div>
               {!read.ok && <UnreadableNotice error={read.error} />}
             </header>
@@ -321,7 +287,7 @@ export function RepoEditor({ repo, noteId }: { repo: string; noteId: string | nu
                 doc={read.doc}
                 generation={generation}
                 autoFocus={note.id !== titleFocusId}
-                onDocChange={onDocChange}
+                onDocChange={openNote.changeBody}
                 onExitUp={isScratch ? undefined : () => titleRef.current?.focus()}
                 handleRef={editorHandleRef}
               />
