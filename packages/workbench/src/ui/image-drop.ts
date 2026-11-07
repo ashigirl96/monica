@@ -6,7 +6,7 @@ import { useEffect } from 'react'
 
 import { activeTerminalTabAtom } from './navigation.ts'
 import { shell } from './shell.ts'
-import { getTabTerminal } from './terminal-connections.ts'
+import { tabConnectionsAtom } from './terminal-connections.ts'
 
 const IMAGE_EXTENSIONS = ['.png', '.jpg', '.jpeg', '.gif', '.webp', '.heic', '.tiff', '.bmp']
 
@@ -50,8 +50,9 @@ export function useImageDrop() {
   useEffect(() => {
     const unlisten = getCurrentWebview().onDragDropEvent((event) => {
       if (event.payload.type !== 'drop') return
-      const tab = getDefaultStore().get(activeTerminalTabAtom)
-      const term = tab && getTabTerminal(tab.id)
+      const store = getDefaultStore()
+      const tab = store.get(activeTerminalTabAtom)
+      const term = tab && store.get(tabConnectionsAtom).terminal(tab.id)
       if (!term) return
       void pasteDroppedImage(event.payload.paths, () => pressCtrlV(term))
     })

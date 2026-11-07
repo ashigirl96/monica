@@ -7,16 +7,6 @@ import type { Store } from 'jotai'
 import type { Tab } from '../contract.ts'
 import { OUTSIDE } from './tile-assignment.ts'
 
-// Shell の command は Tauri の外では呼べないので、呼ばれた command だけを記録する。
-const shellCalls: { command: string; args: Record<string, unknown> }[] = []
-const tauriCore = await import('@tauri-apps/api/core')
-await mock.module('@tauri-apps/api/core', () => ({
-  ...tauriCore,
-  invoke: async (command: string, args: Record<string, unknown>) => {
-    shellCalls.push({ command, args })
-  },
-}))
-
 // toast は画面の外にあるので、出した文言だけを記録する。
 const toasts: string[] = []
 const ui = await import('@monica/ui')
@@ -58,13 +48,14 @@ const {
 } = await import('./store.ts')
 const { terminalSessionStatusAtom } = await import('./terminal-sessions.ts')
 const { jumpModeActiveAtom, keymap, leaveJumpModeOnSwitch } = await import('./keys.ts')
-const { getTabConnection, openTabConnection } = await import('./terminal-connections.ts')
+const { tabConnectionsAtom } = await import('./terminal-connections.ts')
+const { connectAsPane, fakeTerminalPort, mountFakeTerminal } =
+  await import('./fake-terminal-port.ts')
 
 const size = { rows: 24, cols: 80 }
 
 afterEach(() => {
   cleanUp()
-  shellCalls.length = 0
   toasts.length = 0
 })
 
@@ -77,6 +68,20 @@ function bench() {
 }
 
 type Backend = ReturnType<typeof bench>
+
+async function connected(store: Store, tab: Tab) {
+  const shell = fakeTerminalPort(store)
+  mountFakeTerminal(store, tab.id)
+  connectAsPane(store, tab.id, tab.terminalSessionId, () =>
+    store.set(tabExitedAtom, tab.id, tab.terminalSessionId),
+  )
+  await shell.received(1)
+  return shell
+}
+
+function isConnected(store: Store, tab: Tab) {
+  return store.get(tabConnectionsAtom).tabIds().includes(tab.id)
+}
 
 function ownedRunspace({ db, workbenchLedger }: Backend) {
   return db.transaction((tx) => workbenchLedger.createRunspace(tx, { cwd: '/work/bench' }))
@@ -172,15 +177,16 @@ test('closing the active Tab ends its Terminal Session and activates the Tab tha
   await settled(b.terminalSessionId)
   await store.set(reloadAtom)
   store.set(activateTerminalTabAtom, b.id)
-  openTabConnection(b.id)
+  const shell = await connected(store, b)
 
   await store.set(closeTerminalTabAtom)
 
   expect((await client.layout.get()).runspaces[0]!.tabs.map((t) => t.id)).toEqual([a.id, c.id])
   expect(store.get(activeTerminalTabAtom)?.id).toBe(c.id)
   await ptyd.received((op) => op.op === 'terminate' && op.session_id === b.terminalSessionId)
-  expect(getTabConnection(b.id)).toBeUndefined()
-  expect(shellCalls.map((call) => call.command)).not.toContain('terminal_detach')
+  expect(isConnected(store, b)).toBe(false)
+  expect(shell.listening()).toEqual([])
+  expect(shell.calls).toEqual([{ command: 'attach', sessionId: b.terminalSessionId }])
 })
 
 test('d in jump mode closes the active Tab and ends its Terminal Session', async () => {
@@ -571,14 +577,16 @@ test('a Runspace moves by key only within its sidebar group', async () => {
 })
 
 test('an Exit releases the connection of its Tab without an overlay, and reads as ended before the Backend records it', async () => {
-  const { client, store } = bench()
+  const { client, store, settled } = bench()
   const { tab } = await client.runspace.create(size)
+  await settled(tab.terminalSessionId)
   await store.set(reloadAtom)
-  openTabConnection(tab.id)
+  const shell = await connected(store, tab)
 
-  store.set(tabExitedAtom, tab.id, tab.terminalSessionId)
+  shell.exit(tab.terminalSessionId, 0)
 
-  expect(getTabConnection(tab.id)).toBeUndefined()
+  expect(isConnected(store, tab)).toBe(false)
+  expect(shell.listening()).toEqual([])
   expect(store.get(deadTabsAtom)).toEqual({})
   await store.set(reloadAtom)
   expect(store.get(terminalSessionStatusAtom)[tab.terminalSessionId]?.status).toBe('exited')
@@ -602,15 +610,17 @@ test('an Exit that arrives after the Tab was bound to a new shell leaves the new
 })
 
 test('a Close Tab that does not reach the Backend leaves the Tab connected to its shell', async () => {
-  const { client, store } = bench()
+  const { client, store, settled } = bench()
   const { tab } = await client.runspace.create(size)
+  await settled(tab.terminalSessionId)
   await store.set(reloadAtom)
-  openTabConnection(tab.id)
+  const shell = await connected(store, tab)
   store.set(workbenchClientAtom, null)
 
   await store.set(closeTerminalTabAtom, tab.id)
 
-  expect(getTabConnection(tab.id)).toBeDefined()
+  expect(isConnected(store, tab)).toBe(true)
+  expect(shell.listening()).toContain(`exit:${tab.terminalSessionId}`)
   expect(toasts).toEqual(['Backend is unavailable'])
 })
 

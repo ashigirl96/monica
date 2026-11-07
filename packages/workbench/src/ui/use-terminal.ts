@@ -7,20 +7,13 @@ import '@xterm/xterm/css/xterm.css'
 import { getDefaultStore } from 'jotai'
 import { useEffect, useLayoutEffect, useRef } from 'react'
 
-import { encoder, toBase64 } from './base64.ts'
 import { EventCleanupManager } from './event-cleanup.ts'
 import { pasteFilePaths } from './file-paste.ts'
 import { keymap } from './keys.ts'
 import { terminalFocusRequestAtom } from './navigation.ts'
 import { openInEditorAtom, resolveEditorPathsAtom } from './store.ts'
 import { attachTapSelection } from './tap-selection.ts'
-import {
-  clearTabTerminal,
-  connectTab,
-  endReplay,
-  replyToShell,
-  setTabTerminal,
-} from './terminal-connections.ts'
+import { connectTab, type TabConnections, tabConnectionsAtom } from './terminal-connections.ts'
 import { attachTerminalLinks } from './terminal-links.ts'
 import type { TerminalSessionStatus } from './terminal-sessions.ts'
 import {
@@ -31,10 +24,14 @@ import {
   TERMINAL_THEME,
 } from './terminal-setup.ts'
 import { terminalFontSizeAtom, zoomTerminalAtom } from './terminal-zoom.ts'
-import { terminalResize, terminalWrite } from './terminal.ts'
 import { webglRendererPool } from './webgl-renderer.ts'
 
-function fitAndResize(fit: FitAddon, term: Terminal, sessionId: string): void {
+function fitAndResize(
+  fit: FitAddon,
+  term: Terminal,
+  connections: TabConnections,
+  tabId: string,
+): void {
   // A display:none pane has no box to measure — fitting it could clamp the grid to
   // FitAddon's 2x1 minimum and shrink the PTY under a running TUI. It refits on
   // activation instead.
@@ -44,7 +41,7 @@ function fitAndResize(fit: FitAddon, term: Terminal, sessionId: string): void {
   // fit() also no-ops for size changes too small to move the grid; the PTY already
   // has these dimensions, so skip the resize round-trip.
   if (term.rows !== rows || term.cols !== cols) {
-    void terminalResize(sessionId, term.rows, term.cols)
+    connections.resize(tabId)
   }
 }
 
@@ -108,23 +105,22 @@ export function useTerminal(
 
     termRef.current = term
     fitRef.current = fitAddon
-    setTabTerminal(options.tabId, term)
+    const tabId = options.tabId
+    const connections = store.get(tabConnectionsAtom)
+    const unmount = connections.mount(tabId, term)
 
     const cleanup = new EventCleanupManager()
 
-    const sendBytes = (bytes: Uint8Array) => {
-      void terminalWrite(optionsRef.current.sessionId, toBase64(bytes))
-    }
-    const writeText = (text: string) => sendBytes(encoder.encode(text))
+    const writeText = (text: string) => connections.input(tabId, text)
 
-    onTerminalData(term, { input: writeText, reply: (text) => replyToShell(options.tabId, text) })
+    onTerminalData(term, { input: writeText, reply: (text) => connections.reply(tabId, text) })
 
     term.onBinary((data) => {
       const bytes = new Uint8Array(data.length)
       for (let i = 0; i < data.length; i++) {
         bytes[i] = data.charCodeAt(i)
       }
-      sendBytes(bytes)
+      connections.input(tabId, bytes)
     })
 
     term.onTitleChange((title) => {
@@ -176,7 +172,7 @@ export function useTerminal(
       const size = store.get(terminalFontSizeAtom)
       term.options.fontSize = size
       if (openedRef.current && fitRef.current) {
-        fitAndResize(fitRef.current, term, optionsRef.current.sessionId)
+        fitAndResize(fitRef.current, term, connections, tabId)
       }
     })
     cleanup.add(unsubFontSize)
@@ -186,8 +182,7 @@ export function useTerminal(
       // it is released when the tab closes, leaves the layout, or starts a new shell. The
       // terminal registry entry must go first so in-flight writes stop resolving to a
       // disposed instance.
-      clearTabTerminal(options.tabId, term)
-      endReplay(options.tabId)
+      unmount()
       // Release before disposeAll: the pool must not keep a GL context alive because
       // an unrelated listener cleanup threw.
       webglRendererPool.release(term)
@@ -215,20 +210,23 @@ export function useTerminal(
 
     // A dead session never reconnects; the pane overlay offers a fresh shell instead. A
     // starting one is attached when the status turns running and reruns this effect.
+    const store = getDefaultStore()
+    const connections = store.get(tabConnectionsAtom)
+    const tabId = options.tabId
     const sessionId = options.sessionId
-    const attached = connectTab(getDefaultStore(), {
-      tabId: options.tabId,
+    const attached = connectTab(store, {
+      tabId,
       sessionId,
       status: options.sessionStatus,
       onExit: (code) => optionsRef.current.onExit(sessionId, code),
     })
-    if (attached) void terminalResize(sessionId, term.rows, term.cols)
+    if (attached) connections.resize(tabId)
     term.focus()
 
     const observer = new ResizeObserver(() => {
       if (fitDebounce) clearTimeout(fitDebounce)
       fitDebounce = window.setTimeout(() => {
-        fitAndResize(fit, term, optionsRef.current.sessionId)
+        fitAndResize(fit, term, connections, tabId)
       }, 100)
     })
 

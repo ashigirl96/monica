@@ -22,7 +22,7 @@ import {
   selectedTileAtom,
 } from './navigation.ts'
 import { buildSidebar, isPathTitle, sectionPeersOf, type Sidebar } from './sidebar-model.ts'
-import { getTabTerminal, releaseTabConnection } from './terminal-connections.ts'
+import { tabConnectionsAtom } from './terminal-connections.ts'
 import {
   applyTerminalSessionListAtom,
   isDeadStatus,
@@ -70,8 +70,8 @@ export function action<Args extends unknown[]>(
 const DEFAULT_SIZE = { rows: 24, cols: 80 }
 
 // 新しい Tab の pane はまだ無いので、同じ領域に出ている Tab の大きさで作り、attach の resize で追いつかせる。
-function sizeOf(tab: Tab | null) {
-  const term = tab && getTabTerminal(tab.id)
+function sizeOf(get: Getter, tab: Tab | null) {
+  const term = tab && get(tabConnectionsAtom).terminal(tab.id)
   return term ? { rows: term.rows, cols: term.cols } : DEFAULT_SIZE
 }
 
@@ -280,7 +280,7 @@ export const createRunspaceAtom = action(async (get, set) => {
   const { runspaceId } = await clientOf(get).runspace.create({
     cwd: tab?.cwd,
     index: active ? active.sortOrder + 1 : undefined,
-    ...sizeOf(tab),
+    ...sizeOf(get, tab),
   })
   await set(reloadAtom)
   set(activateRunspaceAtom, runspaceId)
@@ -294,7 +294,7 @@ export const createTerminalTabAtom = action(async (get, set) => {
     runspaceId: runspace.id,
     cwd: tab?.cwd,
     index: tab ? tab.sortOrder + 1 : undefined,
-    ...sizeOf(tab),
+    ...sizeOf(get, tab),
   })
   await set(reloadAtom)
   set(activateTerminalTabAtom, opened.id)
@@ -328,7 +328,7 @@ async function closeTab(get: Getter, set: Setter, { tab }: TabInRunspace) {
   } catch (e) {
     if (!isGone(e)) throw e
   }
-  releaseTabConnection(tab.id)
+  get(tabConnectionsAtom).release(tab.id)
   await set(reloadAtom)
 }
 
@@ -344,7 +344,7 @@ export const removeRunspaceAtom = action(async (get, set, runspace: Runspace) =>
   } catch (e) {
     if (!isGone(e)) throw e
   }
-  for (const tab of runspace.tabs) releaseTabConnection(tab.id)
+  for (const tab of runspace.tabs) get(tabConnectionsAtom).release(tab.id)
   await set(reloadAtom)
 })
 
@@ -371,7 +371,7 @@ export const deadTabsAtom = atom((get) => {
 export const tabExitedAtom = atom(null, (get, set, tabId: string, terminalSessionId: string) => {
   // Backend の張り直しが先に届いた Tab は、もう新しい shell を指している。
   if (findTab(get, tabId)?.tab.terminalSessionId !== terminalSessionId) return
-  releaseTabConnection(tabId)
+  get(tabConnectionsAtom).release(tabId)
   set(markEndedAtom, terminalSessionId)
 })
 
@@ -387,8 +387,8 @@ export const toggleTabPinAtom = action(async (get, set, tabId?: string) => {
 export const startNewShellForTabAtom = action(async (get, set, tabId: string) => {
   const found = findTab(get, tabId)
   if (!found) return
-  releaseTabConnection(tabId)
-  await clientOf(get).tab.respawn({ id: tabId, ...sizeOf(found.tab) })
+  get(tabConnectionsAtom).release(tabId)
+  await clientOf(get).tab.respawn({ id: tabId, ...sizeOf(get, found.tab) })
   await set(reloadAtom)
 })
 
