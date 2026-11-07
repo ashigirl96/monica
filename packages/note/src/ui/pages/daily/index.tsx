@@ -1,20 +1,20 @@
 import { useQueryClient } from '@tanstack/react-query'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 
-import { logicalDate, type Note } from '../../../contract.ts'
+import { logicalDate } from '../../../contract.ts'
+import { useNoteClient } from '../../client.ts'
 import { useDocumentTitle } from '../../document-title.ts'
 import type { BlockEditorHandle } from '../../editor/block-editor.tsx'
 import { altOnly } from '../../keys.ts'
 import { useAutosaveContext } from '../../notes/autosave-context.tsx'
 import { addMonths, dayLabelWithYear, type Month, monthOf, sameMonth } from '../../notes/dates.ts'
-import { cycleSelect, persistableContent } from '../../notes/editor-support.ts'
+import { cycleSelect } from '../../notes/editor-support.ts'
 import { NoteBlockEditor } from '../../notes/note-block-editor.tsx'
 import { readBody, UnreadableBody, UnreadableNotice } from '../../notes/note-body.tsx'
-import { useServerDoc } from '../../notes/note-sync.ts'
 import { NotesShell } from '../../notes/notes-shell.tsx'
-import { useDailyDatesQuery, useDailyOrPadQuery } from '../../notes/queries.ts'
+import { dailyOrPadQueryOptions, useDailyDatesQuery } from '../../notes/queries.ts'
 import { SaveStatus } from '../../notes/save-status.tsx'
-import { noteLabel } from '../../notes/summary.ts'
+import { useOpenNote } from '../../notes/use-open-note.ts'
 import { queryKeys } from '../../query.ts'
 import { navigate } from '../../router.ts'
 import { dailyPath, PAD_PATH } from '../../routes.ts'
@@ -34,31 +34,22 @@ export function DailyPage({ date }: { date: string | null }) {
   const [today] = useState(() => logicalDate(new Date()))
   const [month, setMonth] = useState<Month>(() => monthOf(today))
   const queryClient = useQueryClient()
-  const autosave = useAutosaveContext()
-  const { schedule, flush } = autosave
+  const client = useNoteClient()
+  const { flush } = useAutosaveContext()
   const editorHandleRef = useRef<BlockEditorHandle | null>(null)
-  const contentRef = useRef<unknown>(null)
-  const noteRef = useRef<Note | null>(null)
 
   const heading = date === null ? 'Pad' : dayLabelWithYear(date)
   useDocumentTitle(heading)
 
   // 開く = 作る（get-or-create、冪等）。docKey は note id ではなく date —
   // id はフェッチするまで分からないため
-  const noteQuery = useDailyOrPadQuery(date)
-  const { note, generation, reload } = useServerDoc({
-    docKey: date ?? PAD_KEY,
-    data: noteQuery.data,
-    autosave,
-    contentRef,
-    noteRef,
-    refetch: noteQuery.refetch,
-  })
+  const { openNote, view } = useOpenNote(date ?? PAD_KEY, dailyOrPadQueryOptions(client, date))
+  const { note, generation } = view
 
   // 描画できる note がある間はエラーを出さない。復帰時の再フェッチが一時的に失敗しても
   // エディタを unmount しないため（latch の古い content で remount され、保存済みの
   // 編集が巻き戻ってそのまま上書きされる）。
-  const noteError = note === null && noteQuery.error !== null ? noteQuery.error.message : null
+  const noteError = note === null && view.error !== null ? view.error.message : null
   const read = note === null ? null : readBody(note.content)
 
   const datesQuery = useDailyDatesQuery()
@@ -66,12 +57,12 @@ export function DailyPage({ date }: { date: string | null }) {
   useEffect(() => {
     // 空日を開いた（= その場で作成された）場合に存在日リストへ反映する。
     // 一覧の到着が後になる場合もあるので、datesQuery.data が入れ替わるたびに撃ち直す
-    if (date === null || noteQuery.data === undefined) return
+    if (date === null || view.data === undefined) return
     queryClient.setQueryData(queryKeys.dailyDates(), (prev: string[] | undefined) =>
       prev === undefined || prev.includes(date) ? prev : [...prev, date],
     )
     // oxlint-disable-next-line react/exhaustive-effect-dependencies -- 一覧が後から届くと開いた日を含まないことがあるので、届くたびに足し直す。
-  }, [date, noteQuery.data, datesQuery.data, queryClient])
+  }, [date, view.data, datesQuery.data, queryClient])
 
   const dates = datesQuery.data ?? null
 
@@ -116,22 +107,6 @@ export function DailyPage({ date }: { date: string | null }) {
     return () => window.removeEventListener('keydown', onKey, true)
   }, [sidebarDates, date, select])
 
-  const onDocChange = useCallback(
-    (doc: unknown) => {
-      contentRef.current = doc
-      const current = noteRef.current
-      if (current && readBody(current.content).ok) {
-        // daily と Pad は title を持たないので送らない。競合通知の見出しは日付か Pad になる
-        schedule(
-          current.id,
-          { content: persistableContent(contentRef.current ?? current.content) },
-          noteLabel(current, heading),
-        )
-      }
-    },
-    [schedule, heading],
-  )
-
   return (
     <NotesShell
       sidebar={
@@ -169,7 +144,7 @@ export function DailyPage({ date }: { date: string | null }) {
                   {heading}
                 </h1>
                 <span className="truncate text-xs">
-                  <SaveStatus noteId={note.id} onReload={() => void reload()} />
+                  <SaveStatus noteId={note.id} onReload={() => void openNote.reload()} />
                 </span>
               </div>
               {!read.ok && <UnreadableNotice error={read.error} />}
@@ -180,7 +155,7 @@ export function DailyPage({ date }: { date: string | null }) {
                 doc={read.doc}
                 generation={generation}
                 autoFocus
-                onDocChange={onDocChange}
+                onDocChange={openNote.changeBody}
                 handleRef={editorHandleRef}
               />
             ) : (

@@ -27,8 +27,8 @@ export function visibleConflicts(list: NoteConflict[], openNoteId: string | null
  *
  * 単調にしか進めない: 巻き戻すと偽の CONFLICT か、古い doc での静かな上書きに直結する。
  *
- * 加えて、競合が未解決の間は進めない。競合した note を開き直すと `useServerDoc` の
- * mount 分岐（latch がまだ空なので無条件に adopt する）が勝者の doc を採用し、そのまま
+ * 加えて、競合が未解決の間は進めない。競合した note を開き直すと `OpenNote` の
+ * 開いた直後の分岐（latch がまだ空なので無条件に adopt する）が勝者の doc を採用し、そのまま
  * だと基準版が競合を跨いで前進する。すると行き場を失った draft を抱えたまま保存が通る
  * ようになり、競合を解決しないまま勝者の変更を上書きしてしまう。ピンが解けるのは
  * 「最新を読み込む」（dropPending）と削除（discard）だけ。

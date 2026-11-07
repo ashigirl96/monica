@@ -1,25 +1,27 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 
-import { displayName, type EssayStatus, type Note } from '../../../contract.ts'
+import { displayName, type EssayStatus } from '../../../contract.ts'
 import { useNoteClient } from '../../client.ts'
 import { useDocumentTitle } from '../../document-title.ts'
 import type { BlockEditorHandle } from '../../editor/block-editor.tsx'
 import { altOnly, ctrlOnly } from '../../keys.ts'
 import { useAutosaveContext } from '../../notes/autosave-context.tsx'
-import { cycleSelect, persistableContent, titleFieldKeyDown } from '../../notes/editor-support.ts'
+import { cycleSelect, titleFieldKeyDown } from '../../notes/editor-support.ts'
 import { NoteBlockEditor } from '../../notes/note-block-editor.tsx'
 import { readBody, UnreadableBody, UnreadableNotice } from '../../notes/note-body.tsx'
-import { useServerDoc } from '../../notes/note-sync.ts'
 import { NotesShell } from '../../notes/notes-shell.tsx'
-import { useEssaysCache, useEssaysQuery, useNoteQuery, useSeedNote } from '../../notes/queries.ts'
-import { isNotFound } from '../../notes/removals.ts'
+import {
+  noteQueryOptions,
+  useEssaysCache,
+  useEssaysQuery,
+  useSeedNote,
+} from '../../notes/queries.ts'
 import { SaveStatus } from '../../notes/save-status.tsx'
 import { useToggleStar } from '../../notes/star.tsx'
-import { noteLabel } from '../../notes/summary.ts'
+import { useOpenNote } from '../../notes/use-open-note.ts'
 import { useRemovals } from '../../notes/use-removals.ts'
 import { navigate } from '../../router.ts'
 import { ESSAYS_PATH, essayPath } from '../../routes.ts'
-import { setOpenEssayStatus } from './actions.ts'
 import { EssaysSidebar } from './sidebar.tsx'
 import { dropEssay, otherEssayTab, patchEssay, splitEssaysByStatus } from './support.ts'
 
@@ -50,8 +52,7 @@ export function EssayEditorPage({ id }: { id: string }) {
   const client = useNoteClient()
   // ⌥H/⌥L の手動の切り替えと、開いた Essay の status への同期で動く
   const [tab, setTab] = useState<EssayStatus>('writing')
-  const autosave = useAutosaveContext()
-  const { schedule, flush, setBase, hasUnsaved } = autosave
+  const { flush } = useAutosaveContext()
   const removals = useRemovals('essay')
   const { data: essays = null } = useEssaysQuery()
   const { patchEssays, invalidateEssays } = useEssaysCache()
@@ -60,24 +61,13 @@ export function EssayEditorPage({ id }: { id: string }) {
   const titleRef = useRef<HTMLInputElement>(null)
   // ⌥N で作った Essay は本文ではなく title から書き始める。title を離れたら手放す
   const [titleFirst, setTitleFirst] = useState<string | null>(null)
-  const contentRef = useRef<unknown>(null)
-  // onDocChange は BlockEditor の再レンダーより先に呼ばれうるので、closure の note ではなく
-  // 常に最新を持つ ref から保存を組み立てる
-  const noteRef = useRef<Note | null>(null)
 
-  const noteQuery = useNoteQuery(id)
-  const { note, generation, reload, adopt, patchNote } = useServerDoc({
-    docKey: id,
-    data: noteQuery.data,
-    autosave,
-    contentRef,
-    noteRef,
-    refetch: noteQuery.refetch,
-  })
+  const { openNote, view } = useOpenNote(id, noteQueryOptions(client, id))
+  const { note, generation } = view
 
   // 描画できる note がある間はエラーを出さない（Daily と同じく、復帰の取り直しの一時的な失敗で
   // エディタを外すと、保存済みの編集が巻き戻る）。
-  const noteError = note === null && noteQuery.error !== null ? noteQuery.error.message : null
+  const noteError = note === null && view.error !== null ? view.error.message : null
   const read = note === null ? null : readBody(note.content)
 
   useDocumentTitle(note?.kind === 'essay' ? displayName(note) : null)
@@ -116,21 +106,6 @@ export function EssayEditorPage({ id }: { id: string }) {
     [flush],
   )
 
-  const scheduleSave = useCallback(
-    (target: Note) => {
-      if (target.kind !== 'essay' || !readBody(target.content).ok) return
-      schedule(
-        target.id,
-        {
-          title: target.title,
-          content: persistableContent(contentRef.current ?? target.content),
-        },
-        noteLabel(target, 'Untitled'),
-      )
-    },
-    [schedule],
-  )
-
   const createNew = useCallback(async () => {
     await flush()
     try {
@@ -159,22 +134,18 @@ export function EssayEditorPage({ id }: { id: string }) {
 
   const deleteEssay = useCallback(
     async (targetId: string) => {
-      const removed = await removals.remove(targetId, {
-        editor: { noteRef, reschedule: scheduleSave },
-        leave: () => leaveEssay(targetId),
-      })
+      const removed = await openNote.remove(targetId, removals, () => leaveEssay(targetId))
       if (removed) patchEssays((list) => dropEssay(list, targetId))
     },
-    [removals, scheduleSave, leaveEssay, patchEssays],
+    [openNote, removals, leaveEssay, patchEssays],
   )
 
-  // 開いた本文を出し続けると、書いた分の保存が NOT_FOUND で再試行され続ける。
-  const goneId = note?.kind === 'essay' && isNotFound(noteQuery.error) ? id : null
+  const goneId = view.gone
   useEffect(() => {
     if (goneId === null) return
     const listed = listedCycleRef.current
     const ids = listed?.tab === tab ? listed.ids : cycleIds
-    removals.removedElsewhere(goneId, { editor: { noteRef }, leave: () => leaveEssay(goneId, ids) })
+    removals.removedElsewhere(goneId, { leave: () => leaveEssay(goneId, ids) })
   }, [goneId, removals, leaveEssay, tab, cycleIds])
 
   const undoDelete = useCallback(async () => {
@@ -187,61 +158,26 @@ export function EssayEditorPage({ id }: { id: string }) {
 
   const toggleStar = useToggleStar(invalidateEssays)
 
-  // 連打した 2 回が同じ status を読んで 1 回に潰れないよう、切り替えを直列にする
-  const statusChainRef = useRef<Promise<void>>(Promise.resolve())
-
-  const toggleStatus = useCallback(() => {
-    // 押した時の Essay が対象。順番を待つ間に別の Essay へ移ったら何もしない
-    const targetId = noteRef.current?.id
-    if (targetId === undefined) return
-    const run = async () => {
-      try {
-        const updated = await setOpenEssayStatus({
-          targetId,
-          gate: noteRef,
-          shownContent: () => persistableContent(contentRef.current).toJSON(),
-          flush,
-          hasUnsaved,
-          setStatus: (essayId, status) => client.essay.setStatus({ id: essayId, status }),
-          setBase,
-          adopt: (next, remount) => {
-            seedNote(next)
-            adopt(next, remount)
-          },
-          patchStatus: (status) => {
-            const current = noteRef.current
-            if (current?.kind === 'essay') patchNote({ ...current, status })
-          },
-        })
-        if (updated?.kind === 'essay') {
-          patchEssays((list) => patchEssay(list, updated.id, { status: updated.status }))
-        }
-      } catch {
-        // 手元の一覧が古いだけなので、取り直せば追いつく
-        invalidateEssays()
+  const toggleStatus = useCallback(async () => {
+    try {
+      const updated = await openNote.toggleStatus()
+      if (updated?.kind === 'essay') {
+        patchEssays((list) => patchEssay(list, updated.id, { status: updated.status }))
       }
+    } catch {
+      // 手元の一覧が古いだけなので、取り直せば追いつく
+      invalidateEssays()
     }
-    statusChainRef.current = statusChainRef.current.then(run)
-  }, [
-    client,
-    flush,
-    hasUnsaved,
-    setBase,
-    seedNote,
-    adopt,
-    patchNote,
-    patchEssays,
-    invalidateEssays,
-  ])
+  }, [openNote, patchEssays, invalidateEssays])
 
   useEffect(() => {
     // エディタ（ProseMirror）より先に取るため capture phase で張る
     function onKey(e: KeyboardEvent) {
       if (e.isComposing) return
-      if (ctrlOnly(e) && e.code === 'KeyW' && noteRef.current !== null) {
+      if (ctrlOnly(e) && e.code === 'KeyW' && openNote.editing !== null) {
         e.preventDefault()
         e.stopPropagation()
-        toggleStatus()
+        void toggleStatus()
         return
       }
       if (!altOnly(e)) return
@@ -253,7 +189,7 @@ export function EssayEditorPage({ id }: { id: string }) {
       }
       if (e.code === 'Backspace' || e.code === 'Delete') {
         // 種類の違う Note はこの画面にエディタが無く、単語の削除に渡す先が無いので、それでも呑む
-        const target = noteRef.current
+        const target = openNote.editing
         if (target === null) return
         e.preventDefault()
         e.stopPropagation()
@@ -267,7 +203,7 @@ export function EssayEditorPage({ id }: { id: string }) {
         return
       }
       if (e.code === 'KeyS') {
-        const target = noteRef.current
+        const target = openNote.editing
         if (target?.kind !== 'essay') return
         e.preventDefault()
         e.stopPropagation()
@@ -290,27 +226,24 @@ export function EssayEditorPage({ id }: { id: string }) {
     }
     window.addEventListener('keydown', onKey, true)
     return () => window.removeEventListener('keydown', onKey, true)
-  }, [cycleIds, id, selectEssay, createNew, toggleStatus, deleteEssay, undoDelete, toggleStar])
+  }, [
+    openNote,
+    cycleIds,
+    id,
+    selectEssay,
+    createNew,
+    toggleStatus,
+    deleteEssay,
+    undoDelete,
+    toggleStar,
+  ])
 
   const onTitleChange = useCallback(
     (title: string) => {
-      const current = noteRef.current
-      if (current?.kind !== 'essay') return
-      const next: Note = { ...current, title }
-      patchNote(next)
-      scheduleSave(next)
-      patchEssays((list) => patchEssay(list, next.id, { title }))
+      const next = openNote.changeTitle(title)
+      if (next !== null) patchEssays((list) => patchEssay(list, next.id, { title }))
     },
-    [scheduleSave, patchNote, patchEssays],
-  )
-
-  const onDocChange = useCallback(
-    (doc: unknown) => {
-      contentRef.current = doc
-      const current = noteRef.current
-      if (current) scheduleSave(current)
-    },
-    [scheduleSave],
+    [openNote, patchEssays],
   )
 
   const focusEditorStart = useCallback(() => editorHandleRef.current?.focusStart(), [])
@@ -347,11 +280,11 @@ export function EssayEditorPage({ id }: { id: string }) {
                 className="w-full bg-transparent text-[20px] font-normal tracking-[0.03em] text-[var(--ink-text)] outline-none placeholder:text-[var(--ink-faint)]"
               />
               <div className="mt-2.5 flex items-center gap-2 text-xs">
-                <StatusChip status={note.status} onToggle={toggleStatus} />
+                <StatusChip status={note.status} onToggle={() => void toggleStatus()} />
                 <span className="ml-auto font-mono text-[0.7rem] text-[var(--ink-faint)]">
                   {note.date.replaceAll('-', '.')}
                 </span>
-                <SaveStatus noteId={note.id} onReload={() => void reload()} />
+                <SaveStatus noteId={note.id} onReload={() => void openNote.reload()} />
               </div>
               {!read.ok && <UnreadableNotice error={read.error} />}
             </header>
@@ -361,7 +294,7 @@ export function EssayEditorPage({ id }: { id: string }) {
                 doc={read.doc}
                 generation={generation}
                 autoFocus={note.id !== titleFirst}
-                onDocChange={onDocChange}
+                onDocChange={openNote.changeBody}
                 onExitUp={() => titleRef.current?.focus()}
                 handleRef={editorHandleRef}
               />
