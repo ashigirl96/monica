@@ -1,45 +1,33 @@
 import { listen, type UnlistenFn } from '@tauri-apps/api/event'
+import { atom } from 'jotai'
 
+import { fromBase64, toBase64 } from './base64.ts'
 import { shell } from './shell.ts'
 
-export type AttachResult = { replay: string; rows: number; cols: number }
+export type AttachResult = { replay: Uint8Array; rows: number; cols: number }
 
-export function terminalAttach(sessionId: string, replayBytes?: number): Promise<AttachResult> {
-  return shell('terminal_attach', { sessionId, replayBytes: replayBytes ?? null })
+export type TerminalPort = {
+  attach(sessionId: string): Promise<AttachResult>
+  write(sessionId: string, data: Uint8Array): Promise<void>
+  resize(sessionId: string, rows: number, cols: number): Promise<void>
+  onOutput(sessionId: string, cb: (data: Uint8Array) => void): Promise<UnlistenFn>
+  onExit(sessionId: string, cb: (code: number | null) => void): Promise<UnlistenFn>
 }
 
-// Shell は command を別々の thread で走らせ順番を保たないので、書き込みと resize は前の 1 つが届いてから送る。
-const lastSends = new Map<string, Promise<void>>()
-
-function inOrder(sessionId: string, command: string, args: Record<string, unknown>) {
-  const previous = lastSends.get(sessionId) ?? Promise.resolve()
-  const sent = previous.then(() => shell<void>(command, { sessionId, ...args }))
-  const settled = sent.catch(() => {})
-  lastSends.set(sessionId, settled)
-  void settled.then(() => {
-    if (lastSends.get(sessionId) === settled) lastSends.delete(sessionId)
-  })
-  return sent
+export const tauriTerminalPort: TerminalPort = {
+  async attach(sessionId) {
+    const attached = await shell<{ replay: string; rows: number; cols: number }>(
+      'terminal_attach',
+      { sessionId, replayBytes: null },
+    )
+    return { ...attached, replay: fromBase64(attached.replay) }
+  },
+  write: (sessionId, data) => shell('terminal_write', { sessionId, data: toBase64(data) }),
+  resize: (sessionId, rows, cols) => shell('terminal_resize', { sessionId, rows, cols }),
+  onOutput: (sessionId, cb) =>
+    listen<string>(`terminal:output:${sessionId}`, (event) => cb(fromBase64(event.payload))),
+  onExit: (sessionId, cb) =>
+    listen<number | null>(`terminal:exit:${sessionId}`, (event) => cb(event.payload)),
 }
 
-export function terminalWrite(sessionId: string, data: string): Promise<void> {
-  return inOrder(sessionId, 'terminal_write', { data })
-}
-
-export function terminalResize(sessionId: string, rows: number, cols: number): Promise<void> {
-  return inOrder(sessionId, 'terminal_resize', { rows, cols })
-}
-
-export function onTerminalOutput(
-  sessionId: string,
-  cb: (data: string) => void,
-): Promise<UnlistenFn> {
-  return listen<string>(`terminal:output:${sessionId}`, (event) => cb(event.payload))
-}
-
-export function onTerminalExit(
-  sessionId: string,
-  cb: (code: number | null) => void,
-): Promise<UnlistenFn> {
-  return listen<number | null>(`terminal:exit:${sessionId}`, (event) => cb(event.payload))
-}
+export const terminalPortAtom = atom<TerminalPort>(tauriTerminalPort)

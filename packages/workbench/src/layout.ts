@@ -62,9 +62,9 @@ export function createLayoutWrites(deps: {
 
   /**
    * `spare` の Terminal Session の Tab が中にあれば、Runspace を消さずに所有を解いてその Tab だけを残す。
-   * 消した Tab の Terminal Session は transaction の後に終わらせる。
+   * 消した Tab の Terminal Session は transaction の後に終わらせる。残した Tab の Terminal Session を返す。
    */
-  function dropRunspace(tx: Tx, id: string, { spare = [] }: { spare?: string[] } = {}) {
+  function dropRunspace(tx: Tx, id: string, { spare = [] }: { spare?: string[] } = {}): string[] {
     runspaceOf(tx, id)
     const tabs = tx
       .select({ tabId: tab.id, terminalSessionId: tab.terminalSessionId })
@@ -76,7 +76,7 @@ export function createLayoutWrites(deps: {
     terminalSessions.terminateRemoved(tabs.filter((t) => !kept.includes(t)))
     if (kept.length === 0) {
       deleteRunspace(tx, id)
-      return
+      return []
     }
     const keptIds = kept.map((t) => t.tabId)
     tx.delete(tab)
@@ -84,6 +84,7 @@ export function createLayoutWrites(deps: {
       .run()
     tx.update(runspace).set({ owned: false }).where(eq(runspace.id, id)).run()
     restack(tx, tab, keptIds)
+    return kept.map((t) => t.terminalSessionId)
   }
 
   function removeTab(
@@ -124,9 +125,10 @@ export function createLayoutWrites(deps: {
       dropRunspace(tx, id)
       signalLayout()
     },
-    removeOwnedRunspace(tx: Tx, id: string, options?: { spare?: string[] }) {
-      dropRunspace(tx, id, options)
+    removeOwnedRunspace(tx: Tx, id: string, options?: { spare?: string[] }): string[] {
+      const kept = dropRunspace(tx, id, options)
       signalLayout()
+      return kept
     },
     moveRunspace(tx: Tx, input: { id: string; index: number }) {
       runspaceOf(tx, input.id)

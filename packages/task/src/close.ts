@@ -1,9 +1,8 @@
-import { tab } from '@monica/workbench/schema'
 import type { Db } from '@monica/workbench/server'
 import { ORPCError, type ORPCErrorConstructorMap } from '@orpc/server'
 import { and, eq, ne } from 'drizzle-orm'
 
-import type { Bench, BenchDeps } from './bench.ts'
+import { type Bench, type BenchDeps, dropBench } from './bench.ts'
 import type { CloseOutput, CloseRefusal, closeErrors, ReopenOutput } from './contract.ts'
 import { isIssue } from './copy.ts'
 import { findTask, refreshTask } from './find-task.ts'
@@ -77,18 +76,15 @@ async function closeReserved(
     // git を待つ間に live になった Run（Bench の Tab で起こしたものと、Bench の外で resume したもの）は、呼び手と同じく Tab を残す。
     const lateRuns = force ? [] : activeRunsBesides(tx, found.issue.id, caller)
     tx.update(task).set({ closedAt: new Date() }).where(eq(task.issueId, found.issue.id)).run()
-    let spared = false
-    if (now.bench) {
-      const { runspaceId } = now.bench
-      tx.delete(bench).where(eq(bench.taskIssueId, found.issue.id)).run()
-      deps.workbenchLedger.removeRunspace(tx, runspaceId, {
-        spare: [
-          ...(caller && !input.closeCaller ? [caller] : []),
-          ...lateRuns.map((r) => r.terminalSessionId),
-        ],
-      })
-      spared = caller !== undefined && tabIn(tx, runspaceId, caller)
-    }
+    const kept = now.bench
+      ? dropBench(tx, deps.workbenchLedger, now.bench, {
+          spare: [
+            ...(caller && !input.closeCaller ? [caller] : []),
+            ...lateRuns.map((r) => r.terminalSessionId),
+          ],
+        })
+      : []
+    const spared = caller !== undefined && kept.includes(caller)
     return { ref: formatRef(now.issue), spared, lateRuns }
   })
   deps.publish({ type: 'task', ref: closed.ref })
@@ -105,16 +101,6 @@ async function closeReserved(
       ),
     ],
   }
-}
-
-function tabIn(db: Pick<Db, 'select'>, runspaceId: string, terminalSessionId: string): boolean {
-  return (
-    db
-      .select({ id: tab.id })
-      .from(tab)
-      .where(and(eq(tab.runspaceId, runspaceId), eq(tab.terminalSessionId, terminalSessionId)))
-      .get() !== undefined
-  )
 }
 
 export async function reopenTask(
