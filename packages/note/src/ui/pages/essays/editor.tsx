@@ -2,9 +2,9 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 
 import { displayName, type EssayStatus } from '../../../contract.ts'
 import { useNoteClient } from '../../client.ts'
+import { useNoteKeys } from '../../components/use-note-keys.ts'
 import { useDocumentTitle } from '../../document-title.ts'
 import type { BlockEditorHandle } from '../../editor/block-editor.tsx'
-import { altOnly, ctrlOnly } from '../../keys.ts'
 import { useAutosaveContext } from '../../notes/autosave-context.tsx'
 import { cycleSelect, titleFieldKeyDown } from '../../notes/editor-support.ts'
 import { NoteBlockEditor } from '../../notes/note-block-editor.tsx'
@@ -170,73 +170,37 @@ export function EssayEditorPage({ id }: { id: string }) {
     }
   }, [openNote, patchEssays, invalidateEssays])
 
-  useEffect(() => {
-    // エディタ（ProseMirror）より先に取るため capture phase で張る
-    function onKey(e: KeyboardEvent) {
-      if (e.isComposing) return
-      if (ctrlOnly(e) && e.code === 'KeyW' && openNote.editing !== null) {
-        e.preventDefault()
-        e.stopPropagation()
-        void toggleStatus()
-        return
-      }
-      if (!altOnly(e)) return
-      if (e.code === 'KeyN') {
-        e.preventDefault()
-        e.stopPropagation()
-        void createNew()
-        return
-      }
-      if (e.code === 'Backspace' || e.code === 'Delete') {
-        // 種類の違う Note はこの画面にエディタが無く、単語の削除に渡す先が無いので、それでも呑む
-        const target = openNote.editing
-        if (target === null) return
-        e.preventDefault()
-        e.stopPropagation()
-        void deleteEssay(target.id)
-        return
-      }
-      if (e.code === 'KeyZ') {
-        e.preventDefault()
-        e.stopPropagation()
-        void undoDelete()
-        return
-      }
-      if (e.code === 'KeyS') {
-        const target = openNote.editing
-        if (target?.kind !== 'essay') return
-        e.preventDefault()
-        e.stopPropagation()
-        void toggleStar(target.id)
-        return
-      }
-      // ⌥H/⌥L はサイドバーに見える範囲だけを変え、開いている Essay と URL は動かさない
-      if (e.code === 'KeyH' || e.code === 'KeyL') {
-        e.preventDefault()
-        e.stopPropagation()
-        setTab(otherEssayTab)
-        return
-      }
-      if (e.code !== 'KeyJ' && e.code !== 'KeyK') return
-      e.preventDefault()
-      e.stopPropagation()
-      // 反対のタブに移っていると、開いている Essay は一覧の外として先頭か末尾から巡る
-      const next = cycleSelect(cycleIds, id, e.code === 'KeyJ' ? 1 : -1)
-      if (next !== undefined) selectEssay(next)
-    }
-    window.addEventListener('keydown', onKey, true)
-    return () => window.removeEventListener('keydown', onKey, true)
-  }, [
-    openNote,
-    cycleIds,
-    id,
-    selectEssay,
-    createNew,
-    toggleStatus,
-    deleteEssay,
-    undoDelete,
-    toggleStar,
-  ])
+  const cycle = (step: 1 | -1) => {
+    // 反対のタブに移っていると、開いている Essay は一覧の外として先頭か末尾から巡る
+    const next = cycleSelect(cycleIds, id, step)
+    if (next !== undefined) selectEssay(next)
+  }
+  useNoteKeys('essays', {
+    toggleStatus: () => {
+      if (openNote.editing === null) return false
+      void toggleStatus()
+      return true
+    },
+    create: () => void createNew(),
+    remove: () => {
+      // 種類の違う Note はこの画面にエディタが無く、単語の削除に渡す先が無いので、それでも呑む
+      const target = openNote.editing
+      if (target === null) return false
+      void deleteEssay(target.id)
+      return true
+    },
+    undoRemove: () => void undoDelete(),
+    toggleStar: () => {
+      const target = openNote.editing
+      if (target?.kind !== 'essay') return false
+      void toggleStar(target.id)
+      return true
+    },
+    // ⌥H/⌥L はサイドバーに見える範囲だけを変え、開いている Essay と URL は動かさない
+    switchEssayList: () => setTab(otherEssayTab),
+    next: () => cycle(1),
+    prev: () => cycle(-1),
+  })
 
   const onTitleChange = useCallback(
     (title: string) => {

@@ -1,6 +1,7 @@
 import { useEffect } from 'react'
 
-import { AppShell, type Section } from './components/app-shell.tsx'
+import { AppShell } from './components/app-shell.tsx'
+import type { Section } from './keys.ts'
 import { NoteConflictNotice } from './notes/conflict-notice.tsx'
 import { RemovalsContext, useScreenRemovals } from './notes/use-removals.ts'
 import { DailyPage } from './pages/daily/index.tsx'

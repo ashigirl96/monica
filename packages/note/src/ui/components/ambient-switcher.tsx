@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useRef, useState } from 'react'
 
 import {
   type AmbientName,
@@ -9,6 +9,7 @@ import {
   cycleAmbient,
   setAmbientPref,
 } from '../ambient.ts'
+import { useNoteKeys } from './use-note-keys.ts'
 import { usePopupDismiss } from './use-popup-dismiss.ts'
 
 /**
@@ -39,21 +40,13 @@ export function AmbientSwitcher() {
   const close = useCallback(() => setOpen(false), [])
   usePopupDismiss({ open, rootRef, triggerRef, onClose: close })
 
-  // ⌥; / ⇧⌥; で popup を開かずに巡回する。capture phase なのはエディタ（ProseMirror）に
-  // 食われる前に横取りするため。
-  useEffect(() => {
-    function onKey(e: KeyboardEvent) {
-      const step = ambientStepOf(e)
-      if (step === null) return
-      e.preventDefault()
-      e.stopPropagation()
-      const next = cycleAmbient(selected, step)
+  useNoteKeys(null, {
+    cycleAmbient: (k) => {
+      const next = cycleAmbient(selected, ambientStepOf(k))
       setAmbientPref(next)
       setSelected(next)
-    }
-    window.addEventListener('keydown', onKey, true)
-    return () => window.removeEventListener('keydown', onKey, true)
-  }, [selected])
+    },
+  })
 
   const current = AMBIENTS[selected]
 

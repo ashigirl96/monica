@@ -3,9 +3,9 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 
 import { displayName, type Note, sameRepo } from '../../../contract.ts'
 import { useNoteClient } from '../../client.ts'
+import { useNoteKeys } from '../../components/use-note-keys.ts'
 import { useDocumentTitle } from '../../document-title.ts'
 import type { BlockEditorHandle } from '../../editor/block-editor.tsx'
-import { altOnly, ctrlOnly } from '../../keys.ts'
 import { useAutosaveContext } from '../../notes/autosave-context.tsx'
 import { cycleSelect, titleFieldKeyDown } from '../../notes/editor-support.ts'
 import { NoteBlockEditor } from '../../notes/note-block-editor.tsx'
@@ -158,58 +158,31 @@ export function RepoEditor({ repo, noteId }: { repo: string; noteId: string | nu
     [flush, repo],
   )
 
-  useEffect(() => {
-    // capture phase: ProseMirror より先に横取りする
-    function onKey(e: KeyboardEvent) {
-      if (e.isComposing) return
-      if (ctrlOnly(e) && e.code === 'KeyW') {
-        e.preventDefault()
-        e.stopPropagation()
-        setPickerOpen(true)
-        return
-      }
-      if (!altOnly(e)) return
-      if (e.code === 'KeyN') {
-        e.preventDefault()
-        e.stopPropagation()
-        void createNew()
-        return
-      }
-      if (e.code === 'Backspace' || e.code === 'Delete') {
-        // Scratch は消せないので、エディタの単語の削除に素通しする
-        const target = openNote.editing
-        if (target?.kind === 'repo_note') {
-          e.preventDefault()
-          e.stopPropagation()
-          void deleteById(target.id)
-        }
-        return
-      }
-      if (e.code === 'KeyZ') {
-        e.preventDefault()
-        e.stopPropagation()
-        void undoDelete()
-        return
-      }
-      if (e.code === 'KeyS') {
-        // Scratch には Star が無いので、エディタの入力（ß）に素通しする
-        const target = openNote.editing
-        if (target?.kind === 'repo_note') {
-          e.preventDefault()
-          e.stopPropagation()
-          void toggleStar(target.id)
-        }
-        return
-      }
-      if (e.code !== 'KeyJ' && e.code !== 'KeyK') return
-      e.preventDefault()
-      e.stopPropagation()
-      const next = cycleSelect(cycleIds, currentId, e.code === 'KeyJ' ? 1 : -1)
-      if (next !== undefined) selectNote(next)
-    }
-    window.addEventListener('keydown', onKey, true)
-    return () => window.removeEventListener('keydown', onKey, true)
-  }, [openNote, cycleIds, currentId, selectNote, createNew, deleteById, undoDelete, toggleStar])
+  const cycle = (step: 1 | -1) => {
+    const next = cycleSelect(cycleIds, currentId, step)
+    if (next !== undefined) selectNote(next)
+  }
+  useNoteKeys('repos', {
+    openPicker: () => setPickerOpen(true),
+    create: () => void createNew(),
+    remove: () => {
+      // Scratch は消せないので、エディタの単語の削除に素通しする
+      const target = openNote.editing
+      if (target?.kind !== 'repo_note') return false
+      void deleteById(target.id)
+      return true
+    },
+    undoRemove: () => void undoDelete(),
+    toggleStar: () => {
+      // Scratch には Star が無いので、エディタの入力（ß）に素通しする
+      const target = openNote.editing
+      if (target?.kind !== 'repo_note') return false
+      void toggleStar(target.id)
+      return true
+    },
+    next: () => cycle(1),
+    prev: () => cycle(-1),
+  })
 
   const onTitleChange = useCallback(
     (title: string) => {
