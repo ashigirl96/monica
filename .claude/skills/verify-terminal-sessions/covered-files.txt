@@ -1,7 +1,7 @@
 b8b9bc42a7d3a42c56cde10f552ad9f291b5873e  packages/workbench/src/terminal-session.ts
-e06b3bc20015ec4320e4cd01bd2626d37572c6b5  packages/workbench/src/workbench.ts
+5b136c65fd4aa12f198d20874f66f2d115f51c4d  packages/workbench/src/workbench.ts
 91b817979d4192f356d661df610e71a58cae011f  packages/workbench/src/ptyd.ts
-f7a84a081632038c6f73f816cca306be7626e5eb  packages/workbench/src/layout.ts
+4933785a96c4d8d4205feb8379bba9b9510ea842  packages/workbench/src/layout.ts
 5201f8de03e169c30c3140187ca82493222fe2d6  packages/workbench/src/pin.ts
 ba87eea488ffe34e670be40e2c74fc5761780a93  crates/terminal-daemon/src/daemon/connection.rs
 e5b7299fc6bf1807fe47d0303ec65845a22ee57c  crates/terminal-daemon/src/daemon/state.rs
