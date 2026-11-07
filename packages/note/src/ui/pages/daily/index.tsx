@@ -2,9 +2,9 @@ import { useQueryClient } from '@tanstack/react-query'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 
 import { logicalDate, type Note } from '../../../contract.ts'
+import { useNoteKeys } from '../../components/use-note-keys.ts'
 import { useDocumentTitle } from '../../document-title.ts'
 import type { BlockEditorHandle } from '../../editor/block-editor.tsx'
-import { altOnly } from '../../keys.ts'
 import { useAutosaveContext } from '../../notes/autosave-context.tsx'
 import { addMonths, dayLabelWithYear, type Month, monthOf, sameMonth } from '../../notes/dates.ts'
 import { cycleSelect, persistableContent } from '../../notes/editor-support.ts'
@@ -100,21 +100,13 @@ export function DailyPage({ date }: { date: string | null }) {
     select(today)
   }, [today, select])
 
-  useEffect(() => {
-    // capture phase で登録する: エディタ（ProseMirror）より先に横取りする必要がある。
-    // /daily に ⌥N は無い（新規作成の概念が「日付を開く」に吸収されるため登録しない）
-    function onKey(e: KeyboardEvent) {
-      if (e.isComposing || !altOnly(e)) return
-      if (e.code !== 'KeyJ' && e.code !== 'KeyK') return
-      e.preventDefault()
-      e.stopPropagation()
-      const keys = [PAD_KEY, ...(sidebarDates ?? [])]
-      const next = cycleSelect(keys, date ?? PAD_KEY, e.code === 'KeyJ' ? 1 : -1)
-      if (next !== undefined) select(next)
-    }
-    window.addEventListener('keydown', onKey, true)
-    return () => window.removeEventListener('keydown', onKey, true)
-  }, [sidebarDates, date, select])
+  // /daily に ⌥N は無い（新規作成の概念が「日付を開く」に吸収されるため登録しない）
+  const cycle = (step: 1 | -1) => {
+    const keys = [PAD_KEY, ...(sidebarDates ?? [])]
+    const next = cycleSelect(keys, date ?? PAD_KEY, step)
+    if (next !== undefined) select(next)
+  }
+  useNoteKeys('daily', { next: () => cycle(1), prev: () => cycle(-1) })
 
   const onDocChange = useCallback(
     (doc: unknown) => {

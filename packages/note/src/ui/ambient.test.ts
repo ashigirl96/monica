@@ -36,27 +36,11 @@ test.each<[string | null, AmbientName]>([
   expect(ambientPref()).toBe(expected)
 })
 
-function keydown(init: Partial<KeyboardEvent>): KeyboardEvent {
-  const none = {
-    altKey: false,
-    shiftKey: false,
-    metaKey: false,
-    ctrlKey: false,
-    isComposing: false,
-  }
-  return { ...none, ...init } as KeyboardEvent
-}
-
-test.each<[string, 1 | -1 | null, Partial<KeyboardEvent>]>([
-  ['⌥;', 1, { altKey: true, code: 'Semicolon' }],
-  ['⇧⌥;', -1, { altKey: true, shiftKey: true, code: 'Semicolon' }],
-  ['変換中の ⌥;', 1, { altKey: true, code: 'Semicolon', isComposing: true }],
-  [';', null, { code: 'Semicolon' }],
-  ['⌘⌥;', null, { altKey: true, metaKey: true, code: 'Semicolon' }],
-  ['⌃⌥;', null, { altKey: true, ctrlKey: true, code: 'Semicolon' }],
-  ['⌥L', null, { altKey: true, code: 'KeyL' }],
-])('%s で巡る向きは %p', (_, expected, init) => {
-  expect(ambientStepOf(keydown(init))).toBe(expected)
+test.each<[string, boolean, 1 | -1]>([
+  ['⌥;', false, 1],
+  ['⇧⌥;', true, -1],
+])('%s で巡る向きは %p', (_, shift, expected) => {
+  expect(ambientStepOf({ shift })).toBe(expected)
 })
 
 test.each<[AmbientName, 1 | -1, AmbientName]>([

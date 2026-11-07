@@ -3,7 +3,7 @@ import sakuraImage from './ambients/sakura.jpg'
 import shrineImage from './ambients/shrine.jpg'
 import universeImage from './ambients/universe.jpg'
 import villageImage from './ambients/village.jpg'
-import { altAllowingShift } from './keys.ts'
+import type { KeyFacts } from './keys.ts'
 
 /**
  * 面の下に敷く背景写真のプリセット。light / dark とは直交する軸で、色は変えずに
@@ -86,13 +86,8 @@ export function cycleAmbient(current: AmbientName, step: 1 | -1): AmbientName {
   return AMBIENT_NAMES[(i + step + AMBIENT_NAMES.length) % AMBIENT_NAMES.length]!
 }
 
-/** ⌥; で次、⇧⌥; で前に巡る。code で見るのは物理キー基準で ⇧ の有無に依らないから
- * （⌥; は macOS では "…" になるので e.key では判定できない）。
- * 他の ⌥ ショートカットと違い e.isComposing を見ないのは、日本語の変換中でも切り替えたい
- * ため — ambient は文書に触らないので、変換バッファを持っている間に奪っても害がない。 */
-export function ambientStepOf(e: KeyboardEvent): 1 | -1 | null {
-  if (!altAllowingShift(e) || e.code !== 'Semicolon') return null
-  return e.shiftKey ? -1 : 1
+export function ambientStepOf(k: Pick<KeyFacts, 'shift'>): 1 | -1 {
+  return k.shift ? -1 : 1
 }
 
 export function ambientPref(): AmbientName {

@@ -1,10 +1,10 @@
 import { PopoverMenu, PopoverMenuItem, PopoverMenuSeparator } from '@monica/ui'
-import { type MouseEvent as ReactMouseEvent, useCallback, useEffect, useState } from 'react'
+import { type MouseEvent as ReactMouseEvent, useCallback, useState } from 'react'
 
 import { displayName, type EssaySummary } from '../../../contract.ts'
 import { useNoteClient } from '../../client.ts'
+import { useNoteKeys } from '../../components/use-note-keys.ts'
 import { useDocumentTitle } from '../../document-title.ts'
-import { altOnly } from '../../keys.ts'
 import { slashDate } from '../../notes/dates.ts'
 import { useEssaysCache, useEssaysQuery } from '../../notes/queries.ts'
 import { useToggleStar } from '../../notes/star.tsx'
@@ -124,28 +124,15 @@ export function EssaysListPage() {
     invalidateEssays()
   }, [removals, invalidateEssays])
 
-  useEffect(() => {
-    function onKey(e: KeyboardEvent) {
-      if (e.isComposing || !altOnly(e)) return
-      if (e.code === 'KeyN') {
-        e.preventDefault()
-        e.stopPropagation()
-        // 作れなくても次の ⌥N で作り直せる。
-        void client.essay.create().then(
-          (created) => navigate(essayPath(created.id)),
-          () => {},
-        )
-        return
-      }
-      if (e.code === 'KeyZ') {
-        e.preventDefault()
-        e.stopPropagation()
-        void undoDelete()
-      }
-    }
-    window.addEventListener('keydown', onKey, true)
-    return () => window.removeEventListener('keydown', onKey, true)
-  }, [client, undoDelete])
+  useNoteKeys('essays', {
+    create: () =>
+      // 作れなくても次の ⌥N で作り直せる。
+      void client.essay.create().then(
+        (created) => navigate(essayPath(created.id)),
+        () => {},
+      ),
+    undoRemove: () => void undoDelete(),
+  })
 
   const openMenu = (e: ReactMouseEvent, target: EssaySummary) => {
     e.preventDefault()

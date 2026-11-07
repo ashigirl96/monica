@@ -4,6 +4,7 @@ import { useEffect, useLayoutEffect, useState, useSyncExternalStore } from 'reac
 import { initAmbient } from './ambient.ts'
 import { App } from './app.tsx'
 import { ClientContext, type NoteClient, reach } from './client.ts'
+import { listenNoteKeys } from './keys.ts'
 import { initNoteWidth } from './note-width.ts'
 import { initNoteZoom } from './note-zoom.ts'
 import { AutosaveProvider } from './notes/autosave-context.tsx'
@@ -21,6 +22,8 @@ export function NotesApp({ client }: { client: NoteClient }) {
   }, [])
 
   useEffect(initTheme, [])
+
+  useEffect(listenNoteKeys, [])
 
   useEffect(() => reach.watch(() => client.daily.dates()), [client])
 

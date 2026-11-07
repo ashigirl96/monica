@@ -1,8 +1,8 @@
 import { FuzzyPickerModal } from '@monica/ui'
 import { useEffect, useState } from 'react'
 
+import { useNoteKeys } from '../../components/use-note-keys.ts'
 import { useDocumentTitle } from '../../document-title.ts'
-import { ctrlOnly } from '../../keys.ts'
 import { useRepoCandidatesQuery } from '../../notes/queries.ts'
 import { navigate } from '../../router.ts'
 import { repoPath } from '../../routes.ts'
@@ -27,19 +27,7 @@ function RepoChooser() {
     if (saved !== null) navigate(repoPath(saved), { replace: true })
   }, [saved])
 
-  useEffect(() => {
-    // ⌃W で picker を開き直せる（他画面と流儀を揃えて capture phase）
-    function onKey(e: KeyboardEvent) {
-      if (e.isComposing) return
-      if (ctrlOnly(e) && e.code === 'KeyW') {
-        e.preventDefault()
-        e.stopPropagation()
-        setPickerOpen(true)
-      }
-    }
-    window.addEventListener('keydown', onKey, true)
-    return () => window.removeEventListener('keydown', onKey, true)
-  }, [])
+  useNoteKeys('repos', { openPicker: () => setPickerOpen(true) })
 
   if (saved !== null) return null
   return (

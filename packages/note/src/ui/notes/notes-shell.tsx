@@ -1,6 +1,6 @@
 import { type CSSProperties, type ReactNode, useEffect, useState } from 'react'
 
-import { altOnly } from '../keys.ts'
+import { useNoteKeys } from '../components/use-note-keys.ts'
 
 import './notes.css'
 
@@ -106,18 +106,9 @@ export function NotesShell({ sidebar, children }: { sidebar: ReactNode; children
     }
   }, [resizeStart, maxWidth])
 
-  useEffect(() => {
-    // capture phase で登録する: エディタ（ProseMirror）に食われる前に横取りする
-    function onKey(e: KeyboardEvent) {
-      if (e.isComposing || !altOnly(e)) return
-      if (e.code !== 'KeyD') return
-      e.preventDefault()
-      e.stopPropagation()
-      setDensity((d) => (d === 'compact' ? 'relaxed' : 'compact'))
-    }
-    window.addEventListener('keydown', onKey, true)
-    return () => window.removeEventListener('keydown', onKey, true)
-  }, [])
+  useNoteKeys(null, {
+    toggleDensity: () => setDensity((d) => (d === 'compact' ? 'relaxed' : 'compact')),
+  })
 
   return (
     <div
