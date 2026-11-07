@@ -46,6 +46,7 @@ H1 の title と、ユーザーに見える振る舞いの 1 段落で始め、�
 - [Task の Bench](./task-bench.md): Task を run して Bench を作り、close で片付ける。
 - [Daily](./note-daily.md): notes の画面で Daily を開いて書き、残ったことを読み直す。
 - [Pad](./note-pad.md): Daily の画面の最上段か ⌥K で Pad を開いて書き、残ったことを読み直す。
+- [Repo Note](./note-repo.md): notes の Repo の画面で、⌃W の選択の窓から Repo を開く。
 - [Ambient](./note-ambient.md): notes の画面の背景を選び、⌥; で巡り、読み直しても残る。
 - [Tab の dot と未読](./desktop-agent-dot.md): desktop の Tab の dot、未読、Dock の数（`surfaces/desktop.md`）。
 - [side panel の Chat](./extension-chat.md): Brave の side panel で質問し、答えを受ける（`surfaces/extension.md`）。
