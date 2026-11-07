@@ -27,7 +27,14 @@ function RepoChooser() {
     if (saved !== null) navigate(repoPath(saved), { replace: true })
   }, [saved])
 
-  useNoteKeys('repos', { openPicker: () => setPickerOpen(true) })
+  useNoteKeys('repos', {
+    openPicker: () => {
+      // 窓が開いている間の ⌃W は、窓の「選ばずに閉じる」に素通しする
+      if (pickerOpen) return false
+      setPickerOpen(true)
+      return true
+    },
+  })
 
   if (saved !== null) return null
   return (

@@ -163,7 +163,12 @@ export function RepoEditor({ repo, noteId }: { repo: string; noteId: string | nu
     if (next !== undefined) selectNote(next)
   }
   useNoteKeys('repos', {
-    openPicker: () => setPickerOpen(true),
+    openPicker: () => {
+      // 窓が開いている間の ⌃W は、窓の「選ばずに閉じる」に素通しする
+      if (pickerOpen) return false
+      setPickerOpen(true)
+      return true
+    },
     create: () => void createNew(),
     remove: () => {
       // Scratch は消せないので、エディタの単語の削除に素通しする
