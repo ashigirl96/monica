@@ -276,7 +276,6 @@ test('while a page whose DOM nests 3,000 deep turns into text, the Backend answe
 
 const pairs = (argv: string[]) => argv.map((arg, i) => [arg, argv[i + 1]])
 
-// ADR-0033・0038 の options が、argv と initialize の control request で claude に届く。
 test('claude starts as haiku at low effort with WebSearch as its only tool, no MCP, no user settings and no session file, and refuses other sessions', async () => {
   const { client, records } = startChat()
 

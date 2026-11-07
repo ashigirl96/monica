@@ -27,7 +27,7 @@ import { defaultReaders, type Readers, snapshotOf } from './page/snapshot.ts'
 import { promptless, singleTurn, userMessage } from './prompt.ts'
 import { EndedEarly, translate } from './translate.ts'
 
-// 1 つ 270〜290MB の claude を token の無い口から起こせるので、spare も含めてこの数で止める（ADR-0031）。
+// 1 つ 270〜290MB の claude を token の無い口から起こせるので、spare も含めてこの数で止める。
 const MAX_CLAUDES = 4
 const SPARE_LIFETIME_MS = 5 * 60_000
 

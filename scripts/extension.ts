@@ -102,7 +102,7 @@ function developerModeOn(): boolean {
 }
 
 // 開発者モードが off の profile では、CRXJS の reload の後に unpacked の Chrome Extension が無効になる。
-// Default/Preferences に書いても Brave は Secure Preferences の MAC で既定に戻すので、Brave 自身に書かせる（ADR-0029）。
+// Default/Preferences に書いても Brave は Secure Preferences の MAC で既定に戻すので、Brave 自身に書かせる。
 async function enableDeveloperMode(): Promise<void> {
   if (developerModeOn()) return
   forgetDevToolsPort()

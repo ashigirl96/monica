@@ -26,7 +26,7 @@ export const commands = [
 async function hookClaude(_argv: string[], { connect }: { connect: Connect }): Promise<number> {
   const terminalSessionId = process.env.MONICA_TERMINAL_SESSION_ID
   if (!terminalSessionId) return 0
-  // Backend の不在・失敗・timeout のどれでも claude を止めない。retry もしない（ADR-0007）。
+  // Backend の不在・失敗・timeout のどれでも claude を止めない。retry もしない。
   try {
     const payload = JSON.parse(await Bun.stdin.text())
     if (payload.hook_event_name === 'PermissionRequest' && payload.tool_name === 'ExitPlanMode') {

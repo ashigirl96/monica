@@ -1,13 +1,13 @@
 # Coding standards
 
-review で差分に当てる規則。どれも判断が要るもので、理由は規則の文か括弧の中にある。括弧は、決定を記録した ADR、規則が守る振る舞いを見るテストの名前、この file の別の規則、規則に当たるコードのどれかを指す。機械で判定できる規則は lint・型・テストに置き、ここには書かない。
+review で差分に当てる規則。どれも判断が要るもので、理由は規則の文か括弧の中にある。括弧は、規則が守る振る舞いを見るテストの名前、この file の別の規則、規則に当たるコードのどれかを指す。機械で判定できる規則は lint・型・テストに置き、ここには書かない。
 
 ## domain と package
 
-- 1 つの概念は `packages/<domain>` の 1 箇所で定義する。層ごとの写し型、DTO、port と adapter を作らない（ADR-0002）。
-- apps は packages を組み立てるだけで、ロジックを持たない（ADR-0002）。
-- 他の domain の table には、`sql` で書いた文や table を引数で受け取る helper を通しても直接書かない。書き込みは相手の domain の method を通す（ADR-0009）。
-- 他の domain から呼ばれる書き込みは、第 1 引数に transaction を取る同期の method にする。fs への副作用は別の async method にし、呼び手が commit の後に呼ぶ。ptyd への副作用は workbench が transaction の後に自分で送る（ADR-0009、ADR-0015）。
+- 1 つの概念は `packages/<domain>` の 1 箇所で定義する。層ごとの写し型、DTO、port と adapter を作らない。
+- apps は packages を組み立てるだけで、ロジックを持たない。
+- 他の domain の table には、`sql` で書いた文や table を引数で受け取る helper を通しても直接書かない。書き込みは相手の domain の method を通す。
+- 他の domain から呼ばれる書き込みは、第 1 引数に transaction を取る同期の method にする。fs への副作用は別の async method にし、呼び手が commit の後に呼ぶ。ptyd への副作用は workbench が transaction の後に自分で送る。
 - await を挟んでから transaction に入る処理は、transaction の中で行を id で引き直し、path や名前のような行から作る値はその行から作る。await の間に sync が repo の改名を写したり、別の procedure が同じ行を書いたりするため。
 - GitHub から引いた Issue で写しの行や Task を引き当てるときは、node ID で照らし（`packages/task/src/copy.ts` の `isLinkedIssue`）、`(repo, number)` は node ID の無い行にだけ使う。判定する経路と run する経路のように、同じ Issue を引く箇所はすべて同じ照らし方にそろえる。repo の改名の後は sync まで行の名前が古く、旧名は別の repo が使い回すため。
 - await を挟む処理は、await の間に同じ Task や行を動かす経路（同じ domain の別の procedure、hook の購読、背景の sync、ユーザーの shell やエディタ）を数え上げ、経路ごとに、予約で断るか、最後の同期区間（transaction）で見直すか、git のような外の確かめに任せるかで閉じる。git や fs のように戻せない操作の後に見つけたものは、断らずに守ったまま処理を終える。断れば、壊した後の中途半端な状態が残るため（`packages/task/src/close-race.test.ts` の「a claude that becomes a Run while close removes the worktree keeps its Tab, like the caller's, and close completes」）。
@@ -23,14 +23,14 @@ review で差分に当てる規則。どれも判断が要るもので、理由�
 - 外から来た id（Shell の event、通知のクリック）で webview の layout や一覧を引く処理は、今の値が古い場合を数えて閉じる。窓が隠れている間は webview の JS が止まって読み直せず、Backend の再起動中は読み直しが失敗しても値が前のまま残る。読み直してから引き、読み直せなければ次に読めた値で引く（`packages/workbench/src/ui/notification-click.ts`）。
 - 合図（listener）を購読して待つ処理は、待つと決めてから購読するまでの間に合図が過ぎた場合を、購読した後に回数や版を見直して閉じる。過ぎた合図は来ないので、そのままでは次の合図まで待ち続ける（`packages/note/src/ui/notes/note-references.ts` の `untilReached`）。
 - 画面の effect の中で一度きりの値（module に置いた飛び先など）を取り出すときは、dev の StrictMode が effect を片付けて走らせ直しても、2 度目に同じ値を得られる形にする。取り出すたびに消すと、片付けで壊れる 1 度目にだけ効く（`packages/note/src/ui/notes/block-jump.ts` の `arrivalAt`）。
-- procedure が transaction の後に送る ptyd への副作用（Create、Terminate）の結果は、procedure が返った時点ではまだ DB に無い。終わらせた shell を終わったものとして他の判定に渡すときは、Backend が Exit を記録するのを一覧か合図で待つ（ADR-0015）。Tab を閉じた Terminal Session は例外で、Tab の無い live な行を Terminating と読めるので、close が止める Active Run と Run の起動は待たずに数えない（ADR-0023）。
-- DB の行と ptyd の両方を進める処理は、workbench の `terminal-session.ts` に置く（ADR-0015）。DB の行と ptyd や fs の両方を進める処理は、commit の前後や ptyd への要求の途中のどこで Backend が止まっても、ptyd との接続が切れても、次の reconcile が正しい状態に戻せる形にする（ADR-0011）。
+- procedure が transaction の後に送る ptyd への副作用（Create、Terminate）の結果は、procedure が返った時点ではまだ DB に無い。終わらせた shell を終わったものとして他の判定に渡すときは、Backend が Exit を記録するのを一覧か合図で待つ。Tab を閉じた Terminal Session は例外で、Tab の無い live な行を Terminating と読めるので、close が止める Active Run と Run の起動は待たずに数えない。
+- DB の行と ptyd の両方を進める処理は、workbench の `terminal-session.ts` に置く。DB の行と ptyd や fs の両方を進める処理は、commit の前後や ptyd への要求の途中のどこで Backend が止まっても、ptyd との接続が切れても、次の reconcile が正しい状態に戻せる形にする。
 - commit の後の副作用（通知など）が失敗しても、commit 済みの変更の合図（`events`）と記録は止めない。commit は戻らないので、副作用の失敗で合図を飛ばしたり呼び手に失敗を返したりすると、commit 済みの変更が無かったように見えるため。
 - procedure の output が変わる経路（reconcile や他の domain の行の変化を含む）は、どれも自分の domain の `events` で合図する。合図が来なければ、stream だけを購読して読み直す client は古い output を持ったまま残るため。
 - 合図（`events`）は、行を書いた関数が自分で出す。合図のための id や真偽を戻り値で返して、呼び手に出させない。呼び手を 1 つ忘れるだけで、購読側（task の Run の誕生、Dock の数、webview の読み直し）が黙って古いまま残るため。
-- 呼び手の transaction を受け取る関数は、その transaction の中で合図を出す。rollback しても購読側が読み直すだけで害は無い（ADR-0009）。
-- CLI と webview で動くコードは、cli entry が import する内側のファイルも含めて DB に触らず、procedure を呼ぶ（ADR-0003）。
-- Shell（`apps/desktop/src-tauri`）に置くのは、Tauri プロセスにしか無いもの（窓と webview の event、app の名義、AppKit）に触る処理と、端末の byte だけ。fs と process の spawn で済む処理は Backend の procedure にする（ADR-0001）。
+- 呼び手の transaction を受け取る関数は、その transaction の中で合図を出す。rollback しても購読側が読み直すだけで害は無い。
+- CLI と webview で動くコードは、cli entry が import する内側のファイルも含めて DB に触らず、procedure を呼ぶ。
+- Shell（`apps/desktop/src-tauri`）に置くのは、Tauri プロセスにしか無いもの（窓と webview の event、app の名義、AppKit）に触る処理と、端末の byte だけ。fs と process の spawn で済む処理は Backend の procedure にする。
 - Backend で動くコードの `Bun.spawn` には、ふつうは `env: process.env` を渡す。Bench の setup のように、Backend だけの env（`MONICA_*`、Claude Code の env）を子に渡さないときは、workbench の `inheritableEnv()` を渡す。lint の `monica/spawn-env` は `env` の key があるかしか見ないため。
 - Backend が起こして待つ子 process は、打ち切ったとき・Backend が SIGTERM で止まったとき（`exit` を登録する前の起動の途中も含む）のどちらでも、子孫ごと居なくなるようにする（`apps/backend/src/login-shell-path.ts` の `detached` と group の kill）。子孫は出力を握って待ちを終わらせず、`detached` の子には Backend の死が届かないため。
 - Backend の終了（`apps/backend/src/main.ts` の `exit`）は、口と ChatAgent を止めてから `process.exit` まで await を挟まない。await の間に token の口が新しい質問を受けると、止めた後に claude を起こすため。
@@ -40,12 +40,12 @@ review で差分に当てる規則。どれも判断が要るもので、理由�
 
 - 合成した contract の root には、domain の package 名で mount する。path の先頭が package 名になり、CLI の command（`monica task run`）もそれに従う。
 - `.errors()` で宣言するのは、呼び手が分岐する domain の error（close の guard のように `data` に理由の一覧を持つもの）だけにする。ほかは oRPC の標準の code（`NOT_FOUND`、`BAD_REQUEST`）で投げる。
-- 応答の stream（1 回の呼び出しへの応答を流す event iterator）の途中の失敗は、流した event の後に `.errors()` で宣言した error で投げる。handler の中で起きた想定外の error も宣言した error に包む。素の `Error` は client に `INTERNAL_SERVER_ERROR` の「Internal server error」で届き、理由が落ちるため（ADR-0028）。
+- 応答の stream（1 回の呼び出しへの応答を流す event iterator）の途中の失敗は、流した event の後に `.errors()` で宣言した error で投げる。handler の中で起きた想定外の error も宣言した error に包む。素の `Error` は client に `INTERNAL_SERVER_ERROR` の「Internal server error」で届き、理由が落ちるため。
 
 ## CLI
 
-- 一覧の command は `<noun> list`（1 行に 1 件）、1 件とその子の一覧は `<noun> show <id>` にし、子の複数形（`<noun> runs`）を command にしない。CLI は Skill の語彙なので、同じ形の出力には同じ動詞を使う（ADR-0003）。
-- 手で書く command も、失敗は stderr の 1 行目に `CODE: message` で書き、help と stack を続けない。exit code は 0（成功）・1（それ以外の失敗）・2（Backend 不在）だけを使い、`--format json` の stdout には成功したときの output だけを出す。Skill は stderr の 1 行目と exit code で失敗を読むため（ADR-0003）。
+- 一覧の command は `<noun> list`（1 行に 1 件）、1 件とその子の一覧は `<noun> show <id>` にし、子の複数形（`<noun> runs`）を command にしない。CLI は Skill の語彙なので、同じ形の出力には同じ動詞を使う。
+- 手で書く command も、失敗は stderr の 1 行目に `CODE: message` で書き、help と stack を続けない。exit code は 0（成功）・1（それ以外の失敗）・2（Backend 不在）だけを使い、`--format json` の stdout には成功したときの output だけを出す。Skill は stderr の 1 行目と exit code で失敗を読むため。
 
 ## 型
 
@@ -53,14 +53,14 @@ review で差分に当てる規則。どれも判断が要るもので、理由�
 
 ## 依存
 
-- `@anthropic-ai/claude-agent-sdk` は catalog で `^` を付けずに 1 つの版に固定する。版を変える PR は、`docs/research/chat-real-machine-checks.md` の 1 節の確かめを新しい版と同梱の claude でやり直し、その節を直す。Chat の claude の options の効き目は、確かめた版のものしか分からないため（ADR-0032）。
+- `@anthropic-ai/claude-agent-sdk` は catalog で `^` を付けずに 1 つの版に固定する。版を変える PR は、`.claude/skills/verify-monica/features/extension-chat.md` の「Agent SDK の版を上げたとき」を新しい版と同梱の claude で確かめ直す。Chat の claude の options の効き目は、確かめた版のものしか分からないため。
 
 ## テスト
 
-- DB は fake にせず、package ごとに in-memory の SQLite に自分の migration を当てる（task は workbench → task の順）。外から見える振る舞いは `createRouterClient(router, { context })` を通し、他の domain から呼ばれる method と module 内の関数はそのまま呼んで確かめる（ADR-0002）。
+- DB は fake にせず、package ごとに in-memory の SQLite に自分の migration を当てる（task は workbench → task の順）。外から見える振る舞いは `createRouterClient(router, { context })` を通し、他の domain から呼ばれる method と module 内の関数はそのまま呼んで確かめる。
 - procedure に出ない行（終わった行など）は、`@monica/<d>/schema` の table を SELECT して確かめてよい。他の domain が読むのと同じ面のため。
 - ptyd は、`@monica/workbench/testing` の fake の ptyd と `tempHome` の home で組む。本物の ptyd は CI の ts job に無く、Exit と Created の競合も決まった順で起こせないため。
-- task と CLI のテストも Workbench Ledger の method を差し替えず、fake の ptyd の home で `createWorkbenchLedger` を組んで本物の protocol に通す（ADR-0009）。Tab と Runspace は Workbench Ledger の method か workbench の router で開き、Agent Session は hook で作り、workbench の table に直に書かない。
+- task と CLI のテストも Workbench Ledger の method を差し替えず、fake の ptyd の home で `createWorkbenchLedger` を組んで本物の protocol に通す。Tab と Runspace は Workbench Ledger の method か workbench の router で開き、Agent Session は hook で作り、workbench の table に直に書かない。
 - procedure と Workbench Ledger の method は ptyd を待たずに返る。ptyd に届いた op は fake の `received` か `receivedAtLeast` で待ってから確かめ、Terminal Session が starting を抜けるのは `untilSettled` で待つ。
 - op が届かないことを `receivedAll(…)` が空で確かめるときは、後から送る別の op（Tab を開いた Create など）が届くのを待ってから読む。すぐに読むと、transaction の後に送る op が届く前の空を見て、送ってしまう変異も通すため。
 - await の間の競合は、await の途中で止めて決まった順で起こす。sync は fake の GitHub の `hold()` で、git の ref の更新（`branch -D` など）は checkout の `.git/hooks/reference-transaction` に置いた、file を待つ script で、ptyd の応答は fake の ptyd の `holdNext(op)` で止める（`packages/task/src/close-race.test.ts`）。
@@ -89,7 +89,7 @@ review で差分に当てる規則。どれも判断が要るもので、理由�
 - CLI が Backend の error をどう出すかと、接続を拒む Backend への retry は、router を `Bun.serve` に載せて HTTP で確かめる。in-process の client（`createRouterClient`）は handler の生の Error をそのまま投げ、HTTP のように `ORPCError` に包まないため（`apps/cli/src/backend.test.ts`）。
 - process の外からしか見えない約束（argv の振り分け、stdin と stdout の枠、exit code、打ち切り、env の読み方、stdout の行）は、入口の `main.ts` を subprocess で起こして確かめる（`apps/cli/src/hook.test.ts`・`native-host.test.ts`、`apps/backend/src/main.test.ts`）。Backend は Shell と同じく、fake の ptyd の home と、何も書かない stdin の pipe を渡して起こす。
 - 口に procedure が載っているかは、input の検証で断られる不正な input を送って確かめる。載っていれば 400、載っていなければ 404（Chrome Extension の token なら 401）になる。検証は handler の前で断るので、claude や GitHub に届かない。
-- Backend を process で起こして偽の claude（`MONICA_CLAUDE_PATH`）に答えさせるテストは、env から `USER` を落とす。偽の claude を渡し損ねて node_modules の claude が起きても、keychain の login を読めず本物の API を呼ばないため（ADR-0033）。
+- Backend を process で起こして偽の claude（`MONICA_CLAUDE_PATH`）に答えさせるテストは、env から `USER` を落とす。偽の claude を渡し損ねて node_modules の claude が起きても、keychain の login を読めず本物の API を呼ばないため。
 
 ## 語
 
@@ -98,6 +98,6 @@ review で差分に当てる規則。どれも判断が要るもので、理由�
 
 ## コメント
 
-- 既定は comment を書かない。何をしているかは、命名・型・構造・関数の切り出しで伝える（ADR-0039）。
-- comment を足す前に、テストの名前・型・命名・ADR・commit message のどれかで表せないかを確かめる。どれでも表せず、読んだ人が「直して」しまう行にだけ、1 文で書く（ADR-0039）。
+- 既定は comment を書かない。何をしているかは、命名・型・構造・関数の切り出しで伝える。
+- comment を足す前に、テストの名前・型・命名・commit message のどれかで表せないかを確かめる。どれでも表せず、読んだ人が「直して」しまう行にだけ、1 文で書く。
 - 経緯・task・呼び出し元・issue 番号は comment に書かず、commit message と PR に書く。

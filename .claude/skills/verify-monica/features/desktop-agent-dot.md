@@ -23,7 +23,7 @@ Preconditions:
 - `bun run dev:list` の `monica-<名前>` の行の DESKTOP の pid を控える。
 - Tab が 2 つある。1 つなら `surfaces/desktop.md` の「Tab を開く」（Ctrl+T の後に `c` の keydown）で足す。`MONICA_HOME=$H scripts/monica-dev workbench terminal-session list --format json` で、前面でない Tab（A）の `tabId` と id を控える。
 
-- **dot を出す.** A の Terminal Session で SessionStart の payload を流す（payload は `docs/research/hook-payloads.md`）。`printf '%s' '<payload>' | MONICA_HOME=$H MONICA_TERMINAL_SESSION_ID=<A の id> scripts/monica-dev workbench hook claude`。`webview_execute_js` で `document.querySelector('[data-tab-id="<A>"] span[title="手空き"]') !== null` が `true`。
+- **dot を出す.** A の Terminal Session で SessionStart の payload を流す（payload の例は `packages/workbench/src/hook-payloads/`、場面ごとの順は `surfaces/headless.md` の hook の節）。`printf '%s' '<payload>' | MONICA_HOME=$H MONICA_TERMINAL_SESSION_ID=<A の id> scripts/monica-dev workbench hook claude`。`webview_execute_js` で `document.querySelector('[data-tab-id="<A>"] span[title="手空き"]') !== null` が `true`。
 - **待ちにする.** 同じく `"hook_event_name":"PreToolUse","tool_name":"AskUserQuestion"` の payload を流す。`[data-tab-id="<A>"] span[title="質問"]` が出る。
 - **Dock の数を読む.** `lsappinfo info -only StatusLabel "$(lsappinfo find pid=<DESKTOP の pid>)"` が `{ "label"="1" }` を返す。Dock の数は screenshot に写らないので、この出力を証拠にする。
 - **見る.** tauri-mcp の `manage_window` の `focus` で窓を前に出し、間に他の操作を挟まずに `[data-tab-id="<A>"]` の button に `pointerdown` を `dispatchEvent` する。もう一度 `lsappinfo` を読むと `[ NULL ]` か `kCFNULL` になる。数が残っていれば窓が背面に戻っているので、`surfaces/desktop.md` の「窓の前面と背面」の System Events の `frontmost` で前に出すと消える。

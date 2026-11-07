@@ -39,7 +39,7 @@ function keepStderr(claude: Claude) {
   })
 }
 
-// Backend の env は Monica を起こした shell しだいで、認証・接続先・effort を替える key が届くので、通す key だけで組む（ADR-0033）。
+// Backend の env は Monica を起こした shell しだいで、認証・接続先・effort を替える key が届くので、通す key だけで組む。
 const PASSED_ENV_KEYS = ['USER', 'HOME']
 const ADDED_ENV = {
   ENABLE_CLAUDEAI_MCP_SERVERS: 'false',
@@ -59,7 +59,7 @@ function claudeEnv(): { [key: string]: string } {
 }
 
 // SDK の close() と AbortController では turn の途中の claude が数秒 delta を出し続けるので、
-// child を自分で持ち、止めるときは SIGKILL を送る（ADR-0031）。
+// child を自分で持ち、止めるときは SIGKILL を送る。
 export function claudeOptions(deps: {
   cwd: string
   claudePath: string | undefined
@@ -77,7 +77,7 @@ export function claudeOptions(deps: {
     skills: [],
     strictMcpConfig: true,
     tools: ['WebSearch'],
-    // 入れないと permissionPrompts: 'none' が WebSearch を聞かずに拒否する（ADR-0038）。
+    // 入れないと permissionPrompts: 'none' が WebSearch を聞かずに拒否する。
     allowedTools: ['WebSearch'],
     disallowedTools: ['mcp__*'],
     permissionPrompts: 'none',

@@ -15,7 +15,7 @@ export function isLive(status: TerminalSession['status']): boolean {
 const hostSession = alias(terminalSession, 'terminating_terminal_session')
 const shownTab = alias(tab, 'terminating_tab')
 
-// Tab を閉じると Terminate を予約するので、Exit の記録を待たずに終わったものと読む（ADR-0023）。
+// Tab を閉じると Terminate を予約するので、Exit の記録を待たずに終わったものと読む。
 export function terminating(
   reader: Pick<Db, 'select'>,
   terminalSessionId: AnyColumn | string,

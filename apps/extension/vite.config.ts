@@ -6,7 +6,7 @@ import { defineConfig } from 'vite'
 import { devHome, devInstance, extensionDevOutput } from '../../scripts/dev-instance.ts'
 import { DEV_NATIVE_HOST, RELEASE_NATIVE_HOST } from '../../scripts/native-host.ts'
 
-// key は公開鍵の DER の base64 で、ID を固定する（ADR-0029）。
+// key は公開鍵の DER の base64 で、ID を固定する。
 const RELEASE = {
   name: 'Monica',
   key: 'MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAuHoAgFcS1qQ4pN2xjNjHf6YprMN+GS1cf1Xa3b/BCHrWAujmObBMXHTL3Wt1FtskqE3YViSYzW1C9VyTy08qptaY8zDWb36bYS6QUy3vr3V9FlNI6FhqQz/dcBdwZHQ5AbdI56sqeB3ddunp9PT8eSpR+7EzqBXnFf30/Xxyn2OGJ0rOCLYnZ4EoBWR7YKNRAzEMl1ezYDwhNOD+4QMUh1o0dceBJe5K3jQNMzvhia4YICblk8QEMl1Uzkw2/pyHxnLJXrPCyqstMAqwREplyL8J52sr8u4UPR2LFvnZLfW3FLWJtoVK05SVr66w31wmLA66H6eCJrkzFVafSoHUFwIDAQAB',
@@ -32,11 +32,11 @@ const manifest = defineManifest(({ mode }) => ({
   action: { default_icon: ICONS },
   background: { service_worker: 'src/background.ts', type: 'module' },
   side_panel: { default_path: 'src/sidepanel/index.html' },
-  // GitHub の Issues の一覧の行と Issue の画面の header に Run ボタンを差し込む（ADR-0035）。GitHub は `/` や `/issues` からも client 側で移り、
+  // GitHub の Issues の一覧の行と Issue の画面の header に Run ボタンを差し込む。GitHub は `/` や `/issues` からも client 側で移り、
   // そこでは注入されないので、github.com の画面すべてに注入し、一覧か Issue の画面かは script が URL で見る。
   content_scripts: [{ matches: ['https://github.com/*'], js: ['src/issues-page.ts'] }],
   // scripting は、質問を送った時に Current Page の HTML と選択範囲を読む。
-  // nativeMessaging は、Backend の token の口の port と Chrome Extension の token を host から引く（ADR-0034）。
+  // nativeMessaging は、Backend の token の口の port と Chrome Extension の token を host から引く。
   permissions: ['sidePanel', 'scripting', 'nativeMessaging'],
   // Current Page の url と title を読み、Backend の token の口（loopback）を呼ぶ。
   host_permissions: ['<all_urls>'],

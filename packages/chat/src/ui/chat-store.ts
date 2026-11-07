@@ -165,7 +165,7 @@ export type Reading = { shown: CurrentPage; page: Promise<Page> }
  */
 export type ReadPage = (options: ReadOptions) => Reading
 
-/** side panel の Chat。document の memory にだけあり、どこにも残さない（ADR-0030・0031）。 */
+/** side panel の Chat。document の memory にだけあり、どこにも残さない。 */
 export type ChatStore = {
   snapshot: () => ChatSnapshot
   subscribe: (listener: () => void) => () => void
@@ -306,7 +306,7 @@ export function createChatStore(client: ChatClient, storage: ChoiceStorage): Cha
       reach?.reached()
       for await (const event of events) {
         if (!live()) return
-        // Backend は Chat を持たないので、本文にした Page Snapshot を返してもらい、次の質問から送り直す（ADR-0031）。
+        // Backend は Chat を持たないので、本文にした Page Snapshot を返してもらい、次の質問から送り直す。
         if (event.type === 'snapshot') {
           current.page = { ...event.page, ...sent }
           const notice = noticeOf(event)
@@ -408,7 +408,7 @@ export function createChatStore(client: ChatClient, storage: ChoiceStorage): Cha
         },
       )
       reach = watching
-      // spare の claude を起こさせ、最初の質問の答えを早める（ADR-0031）。届かなければ帯を出す。
+      // spare の claude を起こさせ、最初の質問の答えを早める。届かなければ帯を出す。
       watching.check()
       loadModels()
       return () => {

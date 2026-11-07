@@ -22,7 +22,7 @@ Preconditions:
 - `doctor.sh <name>` が `OK`。
 - [Tab と端末](./workbench-tab.md) の「Runspace を開く」で開いた Tab の `terminalSessionId` がある。hook は live な Terminal Session のものしか記録されない。
 
-- **Agent Session を作る.** SessionStart の payload を流す。field と場面ごとの順は `docs/research/hook-payloads.md`。`printf '%s' '<payload>' | MONICA_HOME=$H MONICA_TERMINAL_SESSION_ID=<ts-id> scripts/monica-dev workbench hook claude`。`monica workbench agent-session list --format json` にその `session_id` が `waiting`・`idle` で出る。起動の手空きでは `notify` の行は出ない。
+- **Agent Session を作る.** SessionStart の payload を流す。payload の例は `packages/workbench/src/hook-payloads/`、場面ごとの順は `surfaces/headless.md` の hook の節。`printf '%s' '<payload>' | MONICA_HOME=$H MONICA_TERMINAL_SESSION_ID=<ts-id> scripts/monica-dev workbench hook claude`。`monica workbench agent-session list --format json` にその `session_id` が `waiting`・`idle` で出る。起動の手空きでは `notify` の行は出ない。
 - **ユーザー待ちにする.** `"hook_event_name":"PreToolUse","tool_name":"AskUserQuestion"` の payload を同じく流す。`agent-session list` の状態が待ちになり、理由が質問になる。
 - **通知を見る.** `$E/out.jsonl` に `{"type":"notify",…}` の行が足される。
 - **終わらせる.** SessionEnd の payload を流す。`agent-session list` からその id が消える。

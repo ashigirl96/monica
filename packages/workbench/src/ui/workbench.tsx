@@ -42,7 +42,7 @@ function useWorkbenchChanges(client: WorkbenchClient | null) {
   }, [client, setClient, store])
 }
 
-// workbench は task を import しないので、Task に関わる表示と出来事は slot で受け渡す（ADR-0005）。
+// workbench は task を import しないので、Task に関わる表示と出来事は slot で受け渡す。
 export function Workbench({
   client,
   benchLabelOf,

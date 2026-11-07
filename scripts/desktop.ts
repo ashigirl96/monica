@@ -8,7 +8,7 @@ import { DEFAULT_HOME, RELEASE_HOME, devInstance, isReleaseHome } from './dev-in
 
 const repo = join(import.meta.dir, '..')
 
-// direnv に書かず process の中で決める（ADR-0006）。Shell → Backend → tab の env → CLI と継がれる。
+// direnv に書かず process の中で決める。Shell → Backend → tab の env → CLI と継がれる。
 // Shell は別の cwd で起きるので、相対 path は絶対 path にしてから渡す。
 process.env.MONICA_HOME = resolve(process.env.MONICA_HOME || DEFAULT_HOME)
 // release の Tab は MONICA_HOME=~/.monica を継ぐので、そこで起こすと dev の Shell が release の home を乗っ取る。

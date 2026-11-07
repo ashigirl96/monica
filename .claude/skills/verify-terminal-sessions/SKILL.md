@@ -78,7 +78,7 @@ TLC の結果は、通ったときも破れたときも pstack の `/statechart`
 
 - Backend が死んだ後、ptyd は古い接続に残った要求を、新しい Backend が繋ぐ前に処理し終える（Backend の起動は ptyd の 1 要求よりずっと遅い）。
 - ptyd 側から接続が切れると、読んでいない要求と送っていない答えは捨てられる（`PtydDropsConn`）。
-- SQLite の transaction は同期で、commit か rollback の後に microtask が動く（ADR-0015）。
-- Terminate の SIGHUP で shell はやがて終わる（ADR-0023）。
+- SQLite の transaction は同期で、commit か rollback の後に microtask が動く。
+- Terminate の SIGHUP で shell はやがて終わる。
 
 model に入っていないもの: Run の `input`（`claude\r`）の Write、Agent Session と hook、Tab の move と pin の付け外し、`dropRunspace` の `spare`、`processes`、`stop()`、`shouldRespawn` の 2 秒の下限（常に張り直すと置いた）、Tab を閉じる transaction の rollback、DB を消した後に ptyd にだけ残る session。規則は安全性だけで、「いつかは落ち着く」（liveness）は確かめていない。

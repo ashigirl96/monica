@@ -10,7 +10,7 @@ export const DEV_NATIVE_HOST = 'com.ashigirl96.monica_dev'
 
 const DEV_EXTENSION_ORIGIN = 'chrome-extension://jhcphbonbcemkjkhofopmhbfphenihoj/'
 
-// Brave は user-data-dir に依らず、Google Chrome の場所の manifest だけを読む（ADR-0034）。
+// Brave は user-data-dir に依らず、Google Chrome の場所の manifest だけを読む。
 const NATIVE_MESSAGING_HOSTS = join(
   homedir(),
   'Library/Application Support/Google/Chrome/NativeMessagingHosts',

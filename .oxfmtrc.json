@@ -1,6 +1,10 @@
 {
   "$schema": "./node_modules/oxfmt/configuration_schema.json",
-  "ignorePatterns": ["**/*.md", "docs/research/hook-payloads/**", "packages/*/migrations/*/**"],
+  "ignorePatterns": [
+    "**/*.md",
+    "packages/workbench/src/hook-payloads/**",
+    "packages/*/migrations/*/**"
+  ],
   "semi": false,
   "singleQuote": true,
   "sortImports": true,
