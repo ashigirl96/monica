@@ -1,6 +1,6 @@
 import {
   type InfiniteData,
-  skipToken,
+  type QueryObserverOptions,
   useInfiniteQuery,
   useQuery,
   useQueryClient,
@@ -14,26 +14,27 @@ import type {
   RepoNotesCursor,
   RepoNotesPage,
 } from '../../contract.ts'
-import { useNoteClient } from '../client.ts'
+import { type NoteClient, useNoteClient } from '../client.ts'
 import { queryKeys } from '../query.ts'
 
-/** 開いている note の本文。id が決まるまで（Scratch を開いている間など）は取らない。 */
-export function useNoteQuery(id: string | null) {
-  const client = useNoteClient()
-  return useQuery({
-    queryKey: queryKeys.note(id ?? ''),
-    queryFn: id === null ? skipToken : () => client.get({ id }),
-  })
+export type NoteQueryOptions = QueryObserverOptions<Note, Error, Note, Note>
+
+export function noteQueryOptions(client: NoteClient, id: string): NoteQueryOptions {
+  return { queryKey: queryKeys.note(id), queryFn: () => client.get({ id }) }
 }
 
 /** date が null なら Pad。daily も Pad も get ではなく get-or-create（開く = 作る）。
  * 既存 note があるときは updatedAt を触らないので、復帰のたびに叩いても版は進まない。 */
-export function useDailyOrPadQuery(date: string | null) {
-  const client = useNoteClient()
-  return useQuery({
+export function dailyOrPadQueryOptions(client: NoteClient, date: string | null): NoteQueryOptions {
+  return {
     queryKey: date === null ? queryKeys.pad() : queryKeys.dailyNote(date),
     queryFn: () => (date === null ? client.pad.open() : client.daily.open({ date })),
-  })
+  }
+}
+
+/** Scratch も daily と同じく get-or-create で、既にあれば updatedAt を触らない。 */
+export function scratchQueryOptions(client: NoteClient, repo: string): NoteQueryOptions {
+  return { queryKey: queryKeys.scratch(repo), queryFn: () => client.scratch.open({ repo }) }
 }
 
 export function useDailyDatesQuery() {
@@ -56,13 +57,9 @@ export function useRepoCandidatesQuery(enabled: boolean) {
   })
 }
 
-/** Scratch も daily と同じく get-or-create で、既にあれば updatedAt を触らない。 */
 export function useScratchQuery(repo: string) {
   const client = useNoteClient()
-  return useQuery({
-    queryKey: queryKeys.scratch(repo),
-    queryFn: () => client.scratch.open({ repo }),
-  })
+  return useQuery(scratchQueryOptions(client, repo))
 }
 
 export function useRepoNotesQuery(repo: string) {

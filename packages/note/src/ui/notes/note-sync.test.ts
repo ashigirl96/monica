@@ -1,8 +1,8 @@
 /// <reference types="bun" />
-import { describe, expect, mock, test } from 'bun:test'
+import { describe, expect, test } from 'bun:test'
 
 import type { Note } from '../../contract.ts'
-import { noteToOpen, reloadLatest, shouldAdoptServerDoc, usableServerDoc } from './note-sync.ts'
+import { noteToOpen, shouldAdoptServerDoc, usableServerDoc } from './note-sync.ts'
 
 const V1 = new Date('2026-08-29T10:00:00.000Z')
 const V2 = new Date('2026-08-29T10:00:00.001Z')
@@ -75,54 +75,6 @@ describe('usableServerDoc', () => {
 
   test('未取得（undefined）は採用しない', () => {
     expect(usableServerDoc(undefined, null)).toBeNull()
-  })
-})
-
-function reloadSetup(
-  result: { data?: Note; isError: boolean },
-  whileFetching: 'edit' | 'move' | null = null,
-) {
-  const steps: string[] = []
-  let mark = 0
-  let open = true
-  const dropPending = mock((id: string) => void steps.push(`drop ${id}`))
-  const adopt = mock((next: Note) => void steps.push(`adopt ${next.updatedAt.getTime()}`))
-  const refetch = () => {
-    if (whileFetching === 'edit') mark += 1
-    if (whileFetching === 'move') open = false
-    return Promise.resolve(result)
-  }
-  const editMark = () => mark
-  const isOpen = () => open
-  return {
-    steps,
-    run: () => reloadLatest({ id: 'note-1', refetch, dropPending, adopt, editMark, isOpen }),
-  }
-}
-
-describe('reloadLatest', () => {
-  test('取り直しが失敗したら、古い cache が返っても手元の編集と競合を捨てず、採用もしない', async () => {
-    const { steps, run } = reloadSetup({ data: note(V1), isError: true })
-    await run()
-    expect(steps).toEqual([])
-  })
-
-  test('取り直しが通ったら、手元の編集を捨ててから取り直した doc を採用する', async () => {
-    const { steps, run } = reloadSetup({ data: note(V3), isError: false })
-    await run()
-    expect(steps).toEqual(['drop note-1', `adopt ${V3.getTime()}`])
-  })
-
-  test('取り直しの間に別の note へ移ったら、取り直した doc を今の画面に採用しない', async () => {
-    const { steps, run } = reloadSetup({ data: note(V3), isError: false }, 'move')
-    await run()
-    expect(steps).toEqual([])
-  })
-
-  test('取り直しの間に書いた編集があれば、捨てずに競合のまま残す', async () => {
-    const { steps, run } = reloadSetup({ data: note(V3), isError: false }, 'edit')
-    await run()
-    expect(steps).toEqual([])
   })
 })
 
