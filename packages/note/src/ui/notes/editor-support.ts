@@ -1,12 +1,12 @@
-import type { KeyboardEvent as ReactKeyboardEvent } from 'react'
-
-import type { Doc } from '../../contract.ts'
-import type { NoteClient } from '../client.ts'
 import {
   type ImportExternalImage,
   stripPendingImages,
   type UploadImage,
-} from '../editor/image-upload.ts'
+} from '@monica/block-editor'
+import type { KeyboardEvent as ReactKeyboardEvent } from 'react'
+
+import type { Doc } from '../../contract.ts'
+import type { NoteClient } from '../client.ts'
 
 // editor は失敗を null で受け、upload は失敗の表示と retry に、取り込みは外部 URL のままにする。
 export function imageCallbacks(client: NoteClient): {

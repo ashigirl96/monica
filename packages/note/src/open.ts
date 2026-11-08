@@ -1,6 +1,6 @@
+import { EMPTY_DOC } from '@monica/block-editor/body'
 import { and, desc, eq, isNull } from 'drizzle-orm'
 
-import { EMPTY_DOC } from './body/index.ts'
 import { type EssaySummary, logicalDate, type Note } from './contract.ts'
 import type { Db } from './db.ts'
 import { isRepo, type NoteRow, toEssaySummary, toNote } from './row.ts'

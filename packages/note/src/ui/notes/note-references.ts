@@ -1,9 +1,12 @@
+import type {
+  NoteMentionInfo,
+  ResolveBlock,
+  ResolveNoteMention,
+  SearchNoteMentions,
+} from '@monica/block-editor'
 import { ORPCError } from '@orpc/client'
 
 import type { NoteClient } from '../client.ts'
-import type { NoteMentionInfo, ResolveNoteMention } from '../editor/node-views.ts'
-import type { SearchNoteMentions } from '../editor/note-mention-menu.ts'
-import type { ResolveBlock } from '../editor/synced-block.ts'
 import type { Reach } from '../reach.ts'
 
 export type NoteReferences = {

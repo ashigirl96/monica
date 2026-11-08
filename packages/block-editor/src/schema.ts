@@ -1,8 +1,8 @@
 import { Schema } from 'prosemirror-model'
 import type { Node as PMNode, NodeType } from 'prosemirror-model'
 
-import { IMAGE_URL_PREFIX } from '../../contract.ts'
-import { notePath } from '../routes.ts'
+import { IMAGE_URL_PREFIX } from './body/index.ts'
+import { notePath } from './body/index.ts'
 import { colgroupSpec, columnWidths, parseColumnWidths } from './column-widths.ts'
 
 export function newBlockId(): string {

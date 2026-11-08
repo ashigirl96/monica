@@ -6,7 +6,7 @@ import { type Node as PMNode, Slice } from 'prosemirror-model'
 import { EditorState, type Transaction } from 'prosemirror-state'
 import type { EditorView } from 'prosemirror-view'
 
-import { EMPTY_DOC } from '../../body/index.ts'
+import { EMPTY_DOC } from './body/index.ts'
 import {
   buildInsertImagesTr,
   imageUploadKey,

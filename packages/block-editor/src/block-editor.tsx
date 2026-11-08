@@ -44,6 +44,8 @@ type BlockEditorProps = {
   fetchLinkMetadata?: FetchLinkMetadata
   /** `[[` メニューのノート検索。未指定なら wiki link メニューは無効 */
   searchNoteMentions?: SearchNoteMentions
+  /** 同じ port なら origin が違っても自分の Note の URL と見なす host 名。mount 時に一度だけ読む */
+  notesHostnames?: readonly string[]
   /** noteMention チップの表示名解決。未指定なら noteId のまま表示 */
   resolveNoteMention?: ResolveNoteMention
   /** noteMention チップの素クリック（SPA 遷移用） */
@@ -77,6 +79,7 @@ export function BlockEditor({
   onExitUp,
   fetchLinkMetadata,
   searchNoteMentions,
+  notesHostnames,
   resolveNoteMention,
   onNoteMentionClick,
   noteId,
@@ -109,6 +112,7 @@ export function BlockEditor({
   const onUnmountRef = useLatest(onUnmount)
   // noteId は key={note.id} 再マウント前提で mount 時に固定する（initialDoc と同じ）
   const noteIdRef = useRef(noteId)
+  const notesHostnamesRef = useRef(notesHostnames)
   // callback の有無は plugin / keymap の登録可否を決めるため mount 時に固定される
   const hasExitUp = onExitUp !== undefined
   const hasFetchLinkMetadata = fetchLinkMetadata !== undefined
@@ -137,6 +141,7 @@ export function BlockEditor({
       searchNoteMentions: hasSearchNoteMentions
         ? (query) => searchNoteMentionsRef.current?.(query) ?? Promise.resolve([])
         : undefined,
+      notesHostnames: notesHostnamesRef.current,
       resolveNoteMention: hasResolveNoteMention
         ? (mentionNoteId) => resolveNoteMentionRef.current?.(mentionNoteId) ?? Promise.resolve(null)
         : undefined,

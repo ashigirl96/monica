@@ -5,9 +5,9 @@ import { Slice } from 'prosemirror-model'
 import { AllSelection, EditorState, TextSelection } from 'prosemirror-state'
 import type { EditorView } from 'prosemirror-view'
 
-import fullDoc from '../../body/fixtures/full-doc.json'
-import { fromMarkdown, toMarkdown } from '../../body/index.ts'
 import { blockSelectionPlugin } from './block-selection.ts'
+import fullDoc from './body/fixtures/full-doc.json'
+import { fromMarkdown, toMarkdown } from './body/index.ts'
 import {
   BLOCKS_MIME,
   clipboardPlugin,

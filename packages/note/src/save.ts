@@ -1,7 +1,7 @@
+import { preview } from '@monica/block-editor/body'
 import { ORPCError, type ORPCErrorConstructorMap } from '@orpc/server'
 import { eq } from 'drizzle-orm'
 
-import { preview } from './body/index.ts'
 import type { Doc, EssayStatus, Note, saveErrors } from './contract.ts'
 import type { Db } from './db.ts'
 import { KINDS, toNote, undeletedNote } from './row.ts'

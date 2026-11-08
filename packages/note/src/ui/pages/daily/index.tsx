@@ -1,3 +1,4 @@
+import type { BlockEditorHandle } from '@monica/block-editor'
 import { useQueryClient } from '@tanstack/react-query'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 
@@ -5,7 +6,6 @@ import { logicalDate } from '../../../contract.ts'
 import { useNoteClient } from '../../client.ts'
 import { useNoteKeys } from '../../components/use-note-keys.ts'
 import { useDocumentTitle } from '../../document-title.ts'
-import type { BlockEditorHandle } from '../../editor/block-editor.tsx'
 import { useAutosaveContext } from '../../notes/autosave-context.tsx'
 import { addMonths, dayLabelWithYear, type Month, monthOf, sameMonth } from '../../notes/dates.ts'
 import { cycleSelect } from '../../notes/editor-support.ts'

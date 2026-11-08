@@ -1,8 +1,8 @@
+import { IMAGE_URL_PREFIX } from '@monica/block-editor/body'
 import { oc } from '@orpc/contract'
 import { createSchemaFactory } from 'drizzle-zod'
 import { z } from 'zod'
 
-import { IMAGE_URL_PREFIX } from './body/image-url.ts'
 import { note } from './schema.ts'
 
 // ブラウザの口にだけ載せ、CLI には出さないので、meta に cli を持たない。

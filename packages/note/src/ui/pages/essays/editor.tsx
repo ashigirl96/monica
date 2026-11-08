@@ -1,10 +1,10 @@
+import type { BlockEditorHandle } from '@monica/block-editor'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 
 import { displayName, type EssayStatus } from '../../../contract.ts'
 import { useNoteClient } from '../../client.ts'
 import { useNoteKeys } from '../../components/use-note-keys.ts'
 import { useDocumentTitle } from '../../document-title.ts'
-import type { BlockEditorHandle } from '../../editor/block-editor.tsx'
 import { useAutosaveContext } from '../../notes/autosave-context.tsx'
 import { cycleSelect, titleFieldKeyDown } from '../../notes/editor-support.ts'
 import { NoteBlockEditor } from '../../notes/note-block-editor.tsx'

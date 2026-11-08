@@ -1,4 +1,8 @@
+import { noteIdOfPath } from '@monica/block-editor/body'
+
 import { logicalDate, type Note, sameRepo } from '../contract.ts'
+
+export { notePath } from '@monica/block-editor/body'
 
 export const DAILY_PATH = '/daily'
 export const ESSAYS_PATH = '/essays'
@@ -19,15 +23,6 @@ export function repoPath(repo: string): string {
 
 export function repoNotePath(repo: string, id: string): string {
   return `${repoPath(repo)}/notes/${id}`
-}
-
-// 保存済みの本文の link がこの形を持つ。
-export function notePath(id: string): string {
-  return `/notes/${id}`
-}
-
-export function noteIdOfPath(pathname: string): string | null {
-  return idOfPath(/^\/notes\/([^/]+)\/?$/, pathname)
 }
 
 function idOfPath(pattern: RegExp, pathname: string): string | null {

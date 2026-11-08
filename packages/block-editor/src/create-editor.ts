@@ -100,6 +100,8 @@ export type BlockEditorCallbacks = {
   /** `[[` メニューのノート検索。未指定なら wiki link メニューと
       内部 URL paste の自動 mention 化が無効になる */
   searchNoteMentions?: SearchNoteMentions
+  /** 同じ port なら origin が違っても自分の Note の URL と見なす host 名。未指定なら origin が同じときだけ */
+  notesHostnames?: readonly string[]
   /** noteMention チップの表示名解決。未指定なら noteId のまま表示 */
   resolveNoteMention?: ResolveNoteMention
   /** noteMention チップの素クリック（SPA 遷移用） */
@@ -128,6 +130,7 @@ export function createBlockEditor(
     onExitUp,
     fetchLinkMetadata,
     searchNoteMentions,
+    notesHostnames,
     resolveNoteMention,
     onNoteMentionClick,
     noteId,
@@ -151,7 +154,7 @@ export function createBlockEditor(
       tableMenuPlugin(),
       // plugin 不在なら clipboard の open meta は無視され、常にプレーンリンクに落ちる
       ...(fetchLinkMetadata ? [linkMenuPlugin(fetchLinkMetadata)] : []),
-      ...(searchNoteMentions ? [noteMentionMenuPlugin(searchNoteMentions)] : []),
+      ...(searchNoteMentions ? [noteMentionMenuPlugin(searchNoteMentions, notesHostnames)] : []),
       // block selection より前: paste 直後は選択が残っており、後ろに置くと Escape/Enter/↑↓
       // が block-selection の handleKeyDown に食われる。plugin 不在なら openPasteMenu meta は
       // 無視され plain paste に落ちる。

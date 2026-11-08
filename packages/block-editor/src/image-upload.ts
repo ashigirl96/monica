@@ -3,8 +3,8 @@ import type { EditorState, Transaction } from 'prosemirror-state'
 import { Decoration, DecorationSet } from 'prosemirror-view'
 import type { EditorView } from 'prosemirror-view'
 
-import { EMPTY_DOC } from '../../body/index.ts'
-import { IMAGE_URL_PREFIX } from '../../contract.ts'
+import { EMPTY_DOC } from './body/index.ts'
+import { IMAGE_URL_PREFIX } from './body/index.ts'
 import { getBlockContext } from './context.ts'
 import { createContainer, isEmptyParagraphContainer, isHttpUrl, nodes } from './schema.ts'
 
