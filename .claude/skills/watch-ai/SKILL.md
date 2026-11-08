@@ -19,7 +19,7 @@ gh pr comment <PR> --body "@codex review"
 
 ## 3. 返却を待つ
 
-返却は skill の base directory にある `codex-return.sh` で見る。`wait` を background の subagent（`model: "haiku"`）に走らせて turn を終え、subagent の返りを待つ。monica は background の subagent を待つ間を動作中に数えるが、`run_in_background` の Bash と Monitor の間は手空きにして通知を出すため。subagent への prompt は次の形にする。
+返却は skill の base directory にある `codex-return.sh` で見る。`wait` を background の subagent（`model: "haiku"`）に走らせて turn を終え、subagent の返りを待つ。monica は background の subagent を待つ間を Running（動作中）に数えるが、`run_in_background` の Bash と Monitor の間は Idle（手空き）にして Notification（通知）を出すため。subagent への prompt は次の形にする。
 
 ```
 次のコマンドを Bash の timeout 600000 で 1 回だけ実行し、出力の最後の行だけをそのまま返す。

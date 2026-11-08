@@ -352,7 +352,7 @@ test('a failure after some text of the answer reaches an RPCLink client after th
   })
 })
 
-// 新しい Tab の claude が turn を終え、手空きの通知が出る。
+// 新しい Tab の claude が turn を終え、Idle の Notification が出る。
 async function waitInANewTab(backend: Awaited<ReturnType<typeof startBackend>>) {
   const created = await viaToken(backend, 'workbench/runspace/create', { rows: 24, cols: 80 })
   const { json } = (await created.json()) as { json: { tab: { terminalSessionId: string } } }

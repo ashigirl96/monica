@@ -83,7 +83,7 @@ export function createTaskLedger(deps: {
   let backgroundSyncError: BackgroundSyncError | null = null
   let unsubscribe: (() => void) | undefined
 
-  // 表示状態は Run の Agent Session から導くので、Run の Agent Session が変わるたびに Task の変化として知らせる。
+  // Display State は Run の Agent Session から導くので、Run の Agent Session が変わるたびに Task の変化として知らせる。
   function onAgentSessionChanged(agentSessionId: string) {
     if (stopped.signal.aborted) return
     try {

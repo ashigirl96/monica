@@ -13,7 +13,7 @@ import {
 const DEBOUNCE_MS = 1000
 const RETRY_MS = 5000
 
-/** schedule に渡す payload。基準版は台帳が持つのでここには載らない。title を持たない
+/** schedule に渡す payload。Base Version は台帳が持つのでここには載らない。title を持たない
  * kind（daily）は title を省く。 */
 export type NoteDraft = { content: { toJSON: () => Doc }; title?: string }
 
@@ -28,9 +28,9 @@ export type SaveNote = (input: SaveInput, keepalive: boolean) => Promise<{ updat
  * pagehide（keepalive の保存）から呼ばれる。失敗した payload は同 id のより新しい pending や
  * 削除済み id がない限り復元し、RETRY_MS 後に自動再試行する。
  *
- * 併せて id ごとの基準版（最後に読んだ / 書いた updatedAt）を台帳に持ち、保存に
+ * 併せて id ごとの Base Version（最後に読んだ / 書いた updatedAt）を台帳に持ち、保存に
  * expectedUpdatedAt として添える。サーバが CONFLICT を返したら他クライアントに先を越された
- * ということなので、再試行せず競合台帳に積んで呼び手に委ねる（同じ stale な基準版で
+ * ということなので、再試行せず Note Conflict の台帳に積んで呼び手に委ねる（同じ stale な Base Version で
  * 再試行しても永久に CONFLICT になるため）。
  */
 export class SaveQueue {
@@ -38,14 +38,14 @@ export class SaveQueue {
   #pending = new Map<string, NoteDraft>()
   // 送信を始めた時点と返った時点で数が違えば、その送信は消した Note への保存なので結果を捨てる。
   #discards = new Map<string, number>()
-  // id ごとの基準版。保存が返す updatedAt で前進させる
+  // id ごとの Base Version。保存が返す updatedAt で前進させる
   #versions = new Map<string, Date>()
   // 送信中の draft。差し替え判定が in-flight な書き込みを見落とさないために要る
   #inflight = new Map<string, NoteDraft>()
   // CONFLICT で行き場を失った draft。再送しても永久に CONFLICT なので pending には戻さないが、
   // 「未保存」ではあるので削除や content 採用の前で止められるよう別に持つ
   #conflicted = new Map<string, NoteDraft>()
-  // 競合通知に出す見出し。kind ごとの決め方はページの知識なので schedule で受け取る
+  // Note Conflict の通知に出す見出し。kind ごとの決め方はページの知識なので schedule で受け取る
   #labels = new Map<string, string>()
   #editMarks = new Map<string, number>()
   #timer: ReturnType<typeof setTimeout> | null = null
@@ -54,7 +54,7 @@ export class SaveQueue {
   // 保存エラーも id ごとに持つ。全体で 1 値にすると、note A の失敗が note B のヘッダに
   // 出て「B の保存が落ちた」と嘘をつく（autosave がアプリ全体で 1 つになったため）
   #errors: Record<string, string> = {}
-  // 競合の一覧。開いている note に依らず保持するので、離脱後に返った CONFLICT も surface できる
+  // Note Conflict の一覧。Open Note に依らず保持するので、離脱後に返った CONFLICT も surface できる
   #conflicts: NoteConflict[] = []
   #listeners = new Set<() => void>()
 
@@ -73,14 +73,14 @@ export class SaveQueue {
 
   baseVersion = (id: string): Date | null => this.#versions.get(id) ?? null
 
-  /** 前進の可否は shouldAdvanceBase が持つ（単調性 + 競合中のピン留め）。 */
+  /** 前進の可否は shouldAdvanceBase が持つ（単調性 + Note Conflict の間のピン留め）。 */
   setBase = (id: string, updatedAt: Date): void => {
     const current = this.#versions.get(id) ?? null
     if (!shouldAdvanceBase(current, updatedAt, this.#conflicted.has(id))) return
     this.#versions.set(id, updatedAt)
   }
 
-  /** 未保存（pending・送信中・競合で滞留）の編集を抱えているか。 */
+  /** 未保存（pending・送信中・Note Conflict で滞留）の編集を抱えているか。 */
   hasUnsaved = (id: string): boolean =>
     this.#pending.has(id) || this.#inflight.has(id) || this.#conflicted.has(id)
 
@@ -129,9 +129,9 @@ export class SaveQueue {
     if (this.#pending.size === 0) this.#clearTimer()
   }
 
-  /** 競合解決で「サーバの最新を読む」を選んだときに、捨てる編集を落とす。
+  /** Note Conflict の解決で「サーバの最新を読む」を選んだときに、捨てる編集を落とす。
    * discard と違い削除済みの印は残さない（そのまま編集を続けられる）。
-   * 基準版のピン（shouldAdvanceBase）が解けるのはこの経路だけ。 */
+   * Base Version のピン（shouldAdvanceBase）が解けるのはこの経路だけ。 */
   dropPending = (id: string): void => {
     this.#pending.delete(id)
     this.#conflicted.delete(id)
@@ -155,12 +155,12 @@ export class SaveQueue {
         return this.#send(id, draft, keepalive)
           .then((version) => this.setBase(id, version.updatedAt))
           .catch((e: unknown) => {
-            // 消した Note は競合にも未保存にも残さない。外で戻して開き直すと、古い draft が出るため。
+            // 消した Note は Note Conflict にも未保存にも残さない。外で戻して開き直すと、古い draft が出るため。
             if (this.#discardCount(id) !== discards) return
             if (e instanceof ORPCError && e.code === 'CONFLICT') {
-              // 基準版が古いので同じ payload を投げ直しても永久に CONFLICT。pending へ戻して
-              // リトライさせず、競合として保持したうえで通知とバナーに渡す。
-              // failure にはしない（自動リトライを誘発し、競合表示とも二重になる）。
+              // Base Version が古いので同じ payload を投げ直しても永久に CONFLICT。pending へ戻して
+              // リトライさせず、Note Conflict として保持したうえで通知とバナーに渡す。
+              // failure にはしない（自動リトライを誘発し、Note Conflict の表示とも二重になる）。
               this.#conflicted.set(id, draft)
               const label = this.#labels.get(id) ?? 'Untitled'
               this.#setConflicts(upsertConflict(this.#conflicts, { id, label }))

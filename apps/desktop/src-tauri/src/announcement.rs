@@ -21,7 +21,7 @@ pub struct Unread {
 }
 
 impl Unread {
-    /// 終了でない Agent Session は Terminal Session に 1 つまでなので、id の数が未読の数になる。
+    /// Ended でない Agent Session は Terminal Session に 1 つまでなので、id の数が Unread の数になる。
     pub fn dock_count(&self) -> Option<i64> {
         // tauri の macOS 実装は Some(0) を "0" の label にして出すので、None で消す。
         i64::try_from(self.terminal_session_ids.len())

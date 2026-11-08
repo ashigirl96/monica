@@ -52,7 +52,7 @@ entry は層ではなく、import してよい実行環境で切る。domain の
 - 依存の向きは task → workbench だけで、workbench は task を import しない。
 - job は task も workbench も import しない。note・chat・usage は他の domain を import せず、他の domain からも import されない。
 - task の schema は workbench の table を FK のために import するが、re-export しない。
-- import できない向きに値を渡すときは、出す側の server entry が関数を出し、Backend の組み立てが受ける側の deps に渡す。workbench の通知の呼び名は、task の `nameAgentSession` をこの形で受ける。usage が数える処理と全 Feature の一覧も、Backend の組み立てが渡す。
+- import できない向きに値を渡すときは、出す側の server entry が関数を出し、Backend の組み立てが受ける側の deps に渡す。workbench の Notification（通知）の呼び名は、task の `nameAgentSession` をこの形で受ける。usage が数える処理と全 Feature の一覧も、Backend の組み立てが渡す。
 
 ## server entry の形
 
@@ -68,7 +68,7 @@ export function create<D>Ledger(deps: { db: Db; home: string; ... }): <D>Ledger;
 - 記録を持たない chat は、Ledger の代わりに `ChatAgent` を持ち、router の context に `db` を渡さない。
 - system の Job を持つ domain は、`systemJobs(<d>Ledger)` で `{ name, every, run }[]` を出し、Backend の組み立てが Job Ledger に渡す。domain は timer を持たず、job を import しない。
 - 他の domain から呼ばれる書き込みは、第 1 引数に transaction（`db` でもよい）を取る**同期**の method にする。呼び手は `db.transaction((tx) => { workbenchLedger.moveTab(tx, …); insertRun(tx, …) })` のように、両 domain の書き込みを 1 つの transaction にまとめる。fs への副作用は transaction に入らないので別の async method にし、呼び手が commit の後に呼ぶ。ptyd への副作用は workbench が transaction の後に自分で送る。workbench の書き込みは、呼び手の transaction の中で `{ type: "layout" }` を 1 つ出す。ptyd への Create・Write・Terminate は commit の後に workbench が送るので、呼び手は reconcile も ptyd も待たない。
-  - Terminal Session が Terminating か（live で、どの Tab にも指されていない）は、workbench の server entry の `terminating` が query の条件で返す。task の close が止める Active Run と Run の起動は、transaction の中でもこれで閉じた Tab の claude を数えない。
+  - Terminal Session が Terminating か（live で、どの Tab にも指されていない）は、workbench の server entry の `terminating` が query の条件で返す。task の close が止める Active Run と Run Launch（実行の起動）は、transaction の中でもこれで閉じた Tab の claude を数えない。
 - 他の domain が呼ばない書き込みは、module 内の関数として handler から呼び、Ledger には出さない。
 
 ## domain の package を足すとき

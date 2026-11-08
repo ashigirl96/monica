@@ -115,7 +115,7 @@ const unobserved: StateFields = { state: 'unobserved', unobservedSince: NOW }
 
 const columns = [...(Object.keys(prior) as (keyof typeof prior)[]), 'unknown'] as const
 
-// 列は今の行の状態。unknown は session_id が Workbench Ledger に無い（行を動作中で作ってから当てる）。
+// 列は今の行の状態。unknown は session_id が Workbench Ledger に無い（行を Running で作ってから当てる）。
 // prettier-ignore
 const table: [string, AgentEvent, Cell[]][] = [
   //                                                                                 running               unobserved            idle                  question              permission            error                 ended                 unknown

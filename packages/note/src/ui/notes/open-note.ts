@@ -27,7 +27,7 @@ type OpenNoteDeps = {
   queryClient: QueryClient
   saves: Saves
   client: { essay: Pick<NoteClient['essay'], 'setStatus'> }
-  /** 画面に出ている Note を autosave に知らせる。競合の通知はその Note の行を出さない。 */
+  /** 画面に出ている Note を autosave に知らせる。Note Conflict の通知はその Note の行を出さない。 */
   showOpen: (id: string | null) => void
   /** URL が開いている Note の id。navigate は URL をその場で書き換えるが、描画は後になる。 */
   openId: () => string | null
@@ -58,7 +58,7 @@ function labelOf(note: Note): string {
 }
 
 /**
- * 開いている Note の編集。保存を予約する経路はすべて `#editing` の Note へ予約するので、
+ * Open Note の編集。保存を予約する経路はすべて `#editing` の Note へ予約するので、
  * それを null にすれば予約が止まる（削除の間と、外で消された後）。画面に出す Note とは別に持つ。
  */
 export class OpenNote {
@@ -136,7 +136,7 @@ export class OpenNote {
 
   /**
    * 最新の読み込み。取り直しが失敗しても TanStack Query は古い cache を data に残して返すので、
-   * 成功を確かめてから未送信の編集を捨てる。取り直しの間に書いた編集は捨てずに競合のまま残す。
+   * 成功を確かめてから未送信の編集を捨てる。取り直しの間に書いた編集は捨てずに Note Conflict のまま残す。
    */
   reload = async (): Promise<void> => {
     const observer = this.#observer
@@ -146,7 +146,7 @@ export class OpenNote {
     const fresh = await observer.refetch()
     if (fresh.isError || fresh.data === undefined || this.#editing?.id !== id) return
     if (this.#deps.saves.editMark(id) !== mark) return
-    // 基準版ごと落とすので、取り直した doc は無条件に採用できる
+    // Base Version ごと落とすので、取り直した doc は無条件に採用できる
     this.#deps.saves.dropPending(id)
     this.#adopt(fresh.data, true)
   }
@@ -160,7 +160,7 @@ export class OpenNote {
   }
 
   /**
-   * Note を消す。開いている Note なら、待つ間の打鍵を予約しないよう予約先を外し、
+   * Note を消す。Open Note なら、待つ間の打鍵を予約しないよう予約先を外し、
    * 消せなかったら開き直して、外している間に打った分を保存し直す。
    */
   async remove(id: string, removals: Removals, leave: () => void): Promise<boolean> {
@@ -184,7 +184,7 @@ export class OpenNote {
     const current = this.#editing
     if (current === null || current.id !== targetId || current.kind !== 'essay') return null
     await saves.flush()
-    // 進めた版を基準版にすると、競合で残った古い本文が次の保存で外の変更を上書きする。
+    // 進めた版を Base Version にすると、Note Conflict で残った古い本文が次の保存で外の変更を上書きする。
     if (saves.hasUnsaved(current.id)) return null
     // 未保存が無いので、画面の title と本文は Backend の版と同じはず。
     const shown = this.#editing?.kind === 'essay' ? this.#editing : current
@@ -192,7 +192,7 @@ export class OpenNote {
     const status = current.status === 'writing' ? 'finished' : 'writing'
     const updated = await client.essay.setStatus({ id: current.id, status })
     if (updated.kind !== 'essay') return null
-    // 外で書き換わった版を基準版にすると、画面の古い本文が次の保存でその変更を競合なしに上書きする。
+    // 外で書き換わった版を Base Version にすると、画面の古い本文が次の保存でその変更を Note Conflict にならずに上書きする。
     const statusOnly = updated.title === shown.title && JSON.stringify(updated.content) === shownDoc
     if (statusOnly) saves.setBase(updated.id, updated.updatedAt)
     const open = this.#editing
@@ -201,7 +201,7 @@ export class OpenNote {
     if (saves.hasUnsaved(updated.id)) {
       if (open.kind === 'essay') this.#patch({ ...open, status: updated.status })
     } else {
-      // 先に cache へ置くと、observer が基準版の進む前に受けて、もう一度採用する。
+      // 先に cache へ置くと、observer が Base Version の進む前に受けて、もう一度採用する。
       this.#adopt(updated, !statusOnly)
       queryClient.setQueryData(queryKeys.note(updated.id), updated)
     }
@@ -238,7 +238,7 @@ export class OpenNote {
     this.#view = { ...this.#view, data, error, gone }
     if (data === undefined || gone !== null || !this.#accepts(data)) return
     const { saves } = this.#deps
-    // 基準版は届いた note の id で引く。latch を捨てた直後（往復で戻ってきた直後）でも
+    // Base Version は届いた note の id で引く。latch を捨てた直後（往復で戻ってきた直後）でも
     // 台帳は生きているので、1 世代古い cache をここで確実に弾ける。
     const base = saves.baseVersion(data.id)
     if (shown === null) {
@@ -265,7 +265,7 @@ export class OpenNote {
     this.#publish()
   }
 
-  /** title の編集のように、サーバから届いた本文を伴わない更新。基準版も世代も進めない。 */
+  /** title の編集のように、サーバから届いた本文を伴わない更新。Base Version も世代も進めない。 */
   #patch(next: Note): void {
     this.#editing = next
     this.#view = { ...this.#view, note: next }

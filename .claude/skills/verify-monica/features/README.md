@@ -6,7 +6,7 @@ monica のユーザーから見える振る舞いを確かめるときの正本�
 
 - 自分が起こした instance だけを操作する。ユーザーの release の `~/.monica` と、`bun run dev:list` の他の行は操作しない。
   - headless の機能: `launch.sh <name>` で起こし、`doctor.sh <name>` が `OK` を返したもの。
-  - desktop の機能（[Tab の dot と未読](./desktop-agent-dot.md)）: `surfaces/desktop.md` の「起こす」で起こし、tauri-mcp の identifier を確かめたもの。Backend は desktop が起こすので、`launch.sh` と `cleanup.sh` は使わない。
+  - desktop の機能（[Tab の dot と Unread（未読）](./desktop-agent-dot.md)）: `surfaces/desktop.md` の「起こす」で起こし、tauri-mcp の identifier を確かめたもの。Backend は desktop が起こすので、`launch.sh` と `cleanup.sh` は使わない。
   - side panel の機能（[side panel の Chat](./extension-chat.md)）: `surfaces/extension.md` の「起こす」で Brave を起こし、同じ home に `launch.sh <worktree の名前>` で Backend を起こしたもの。
 - `H=${TMPDIR%/}/monica-<name>`、`E=${TMPDIR%/}/verify-monica/<name>` と書く。地図の `monica <command>` は `MONICA_HOME=$H scripts/monica-dev <command>` と読み替えて流す。素の `monica` はユーザーの home の Backend に繋ぐ。`launch.sh`・`doctor.sh`・`cleanup.sh` は `.claude/skills/verify-monica/scripts/` のもの。
 - 新しい home には Runspace もユーザーの Job も Note も無い。system の Job（`task.sync` など）だけは起動時からある。各機能の手順は、その機能の前提を自分で作るところから始める。
@@ -42,11 +42,11 @@ H1 の title と、ユーザーに見える振る舞いの 1 段落で始め、�
 
 - [Job](./job.md): Job の登録・今すぐ走らせる・予定の時刻に走る・結果を見る・止める・消す。
 - [Tab と端末](./workbench-tab.md): Runspace と Tab を開き、端末に打ち込み、画面を読み、閉じる。
-- [Agent Session の状態](./agent-session.md): Tab の claude の状態（待ち・理由）と通知。
+- [Agent Session の状態](./agent-session.md): Tab の claude の状態（Waiting（ユーザー待ち）・理由）と Notification（通知）。
 - [Task の Bench](./task-bench.md): Task を run して Bench を作り、close で片付ける。
 - [Daily](./note-daily.md): notes の画面で Daily を開いて書き、残ったことを読み直す。
 - [Pad](./note-pad.md): Daily の画面の最上段か ⌥K で Pad を開いて書き、残ったことを読み直す。
 - [Repo Note](./note-repo.md): notes の Repo の画面で、⌃W の選択の窓から Repo を開く。
 - [Ambient](./note-ambient.md): notes の画面の背景を選び、⌥; で巡り、読み直しても残る。
-- [Tab の dot と未読](./desktop-agent-dot.md): desktop の Tab の dot、未読、Dock の数（`surfaces/desktop.md`）。
+- [Tab の dot と Unread](./desktop-agent-dot.md): desktop の Tab の dot、Unread、Dock の数（`surfaces/desktop.md`）。
 - [side panel の Chat](./extension-chat.md): Brave の side panel で質問し、答えを受ける（`surfaces/extension.md`）。

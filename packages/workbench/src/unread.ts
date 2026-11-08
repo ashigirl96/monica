@@ -10,7 +10,7 @@ export function isUnread(row: Pick<AgentSession, 'notifiedAt' | 'seenAt'>): bool
 }
 
 function unreadTerminalSessions(db: Db): string[] {
-  // 終わった行は未読でなく、消さずに溜まるので読まない。
+  // 終わった行は Unread でなく、消さずに溜まるので読まない。
   return db
     .select({
       terminalSessionId: agentSession.terminalSessionId,
@@ -29,7 +29,7 @@ function sameIds(a: string[], b: string[]): boolean {
   return a.length === b.length && a.every((id, i) => id === b[i])
 }
 
-/** followUnread を呼んだ時に 1 回、以降は未読の Agent Session が居る Terminal Session の集合が変わるたびに呼ぶ。 */
+/** followUnread を呼んだ時に 1 回、以降は Unread の Agent Session が居る Terminal Session の集合が変わるたびに呼ぶ。 */
 export type Unread = (terminalSessionIds: string[]) => void
 
 export function followUnread(deps: {

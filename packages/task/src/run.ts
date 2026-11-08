@@ -136,7 +136,7 @@ export const LAUNCH_TIMEOUT_MS = 60_000
 
 export type RunLaunches = ReturnType<typeof createRunLaunches>
 
-// Run の起動は Tab を開いてから Run になるまでの間で終わるので、DB ではなく Backend の memory に置く。
+// Run Launch は Tab を開いてから Run になるまでの間で終わるので、DB ではなく Backend の memory に置く。
 export function createRunLaunches() {
   const launches = new Map<number, { terminalSessionId: string; since: number }>()
 

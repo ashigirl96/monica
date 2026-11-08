@@ -269,7 +269,7 @@ test("a Bench's second line shows the dot and the terminal's title of the Tab wh
   })
 })
 
-// 未観測は Backend の起こし直しでしか作れないので、順位は sidebar の入力に dot を直に渡して確かめる。
+// Unobserved は Backend の起こし直しでしか作れないので、順位は sidebar の入力に dot を直に渡して確かめる。
 function benchRowWith(dots: (AgentDot | null)[], activeIndex = 0): RunspaceRow | undefined {
   const tabs = dots.map((_, i) => ({
     id: `tab-${i}`,

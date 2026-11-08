@@ -32,7 +32,7 @@ export function useAutosave() {
   // 画面に出ている note。通知はこの行を出さない（インラインバナーと二重になる）
   const [openNoteId, setOpenNote] = useState<string | null>(null)
 
-  /** 競合バナーの表示条件。台帳ではなく state から引くので、CONFLICT の到着で再描画される。 */
+  /** Note Conflict のバナーの表示条件。台帳ではなく state から引くので、CONFLICT の到着で再描画される。 */
   const hasConflict = useCallback((id: string) => conflicts.some((c) => c.id === id), [conflicts])
 
   /** その note の保存失敗メッセージ（再試行待ち）。 */

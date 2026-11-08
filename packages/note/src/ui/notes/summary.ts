@@ -15,7 +15,7 @@ export function summaryTitle(summary: { title: string; preview: string | null })
   return summary.title || summary.preview || 'Untitled'
 }
 
-/** 競合通知のように、開いていない note を名指しするときの短い見出し。title を持つ kind は
+/** Note Conflict の通知のように、開いていない note を名指しするときの短い見出し。title を持つ kind は
  * 非空 title を、持たない kind（daily）や無題は呼び手の fallback を使う（本文プレビューは
  * 手元に無いので summaryTitle とは別経路）。 */
 export function noteLabel(note: Note, fallback: string): string {

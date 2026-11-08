@@ -230,7 +230,7 @@ export function connectTab(store: Store, tab: Omit<ConnectingTab, 'onStatus'>): 
   })
 }
 
-// CLI の tab close や Task の close は webview を通らないので、読み直した Layout に無い Tab の接続をここで release する。
+// CLI の tab close や Task の close は webview を通らないので、読み直した Layout に無い Tab Connection をここで release する。
 export function releaseTabsLeavingLayout(store: Store): () => void {
   return store.sub(layoutAtom, () => {
     const tabIds = new Set(store.get(layoutAtom)?.runspaces.flatMap((r) => r.tabs.map((t) => t.id)))

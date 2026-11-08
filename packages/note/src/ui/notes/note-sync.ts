@@ -12,7 +12,7 @@ export function shouldAdoptServerDoc(args: {
   baseUpdatedAt: Date | null
   hasUnsaved: boolean
 }): boolean {
-  // 未保存があるうちは差し替えない（ローカル編集が消える）。競合は保存の CONFLICT が拾う。
+  // 未保存があるうちは差し替えない（ローカル編集が消える）。Note Conflict は保存の CONFLICT が拾う。
   if (args.hasUnsaved) return false
   // 初回ロードは mount がそのまま反映するので世代を進める必要がない。
   if (args.baseUpdatedAt === null) return false
@@ -33,8 +33,8 @@ export function usableServerDoc(note: Note | undefined, baseUpdatedAt: Date | nu
 /**
  * 開いた画面に出す note。未保存の本文と title は autosave にしか無いので、cache のものより優先する。
  * cache の title で開くと、次の打鍵の draft が未保存の title を古い title で置き換える。
- * その編集は基準版に積んだものなので版も基準版のままにし、cache に外の新しい版が入っていても
- * 基準版を進めない（進めると、保存が外の変更を競合なしで上書きする）。
+ * その編集は Base Version に積んだものなので版も Base Version のままにし、cache に外の新しい版が入っていても
+ * Base Version を進めない（進めると、保存が外の変更を Note Conflict にならずに上書きする）。
  */
 export function noteToOpen(
   data: Note,

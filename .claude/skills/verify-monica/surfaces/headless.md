@@ -68,7 +68,7 @@ SKILL.md の「起こす」の `launch.sh` と `doctor.sh --wait` で起こす�
     - 許可待ちの subagent: background に回され、subagent の PermissionRequest → main の Stop（`background_tasks` に subagent が running）→ 許可すると subagent の PostToolUse。
     - background の shell・subagent が終わる: claude が自分で turn を起こし、UserPromptSubmit（`prompt` は `<task-notification>…`）→ … → Stop（`background_tasks` は `[]`）。
     - `/clear`: 旧 id に SessionEnd(`clear`) → 新 id に SessionStart(`clear`)。`--resume` は同じ id で SessionStart(`resume`)。`/compact` は SubagentStop（`agent_type` は `""`）→ SessionStart(`compact`) で、UserPromptSubmit も Stop も来ない。`/exit` は SessionEnd(`prompt_input_exit`)。
-    - 動作中の Esc、許可の No、質問の Esc、ExitPlanMode の Esc: 何も来ない。
+    - Running（動作中）の Esc、Permission（許可）の No、Question（質問）の Esc、ExitPlanMode の Esc: 何も来ない。
     - SIGHUP・SIGTERM: SessionEnd(`other`)。SIGKILL: 何も来ない。
 
   ```bash

@@ -64,7 +64,7 @@ describe('shouldAdvanceBase', () => {
     expect(shouldAdvanceBase(V2, V1, false)).toBe(false)
   })
 
-  test('競合が未解決なら新しい版でも進まない', () => {
+  test('Note Conflict が未解決なら新しい版でも進まない', () => {
     expect(shouldAdvanceBase(V1, V2, true)).toBe(false)
     expect(shouldAdvanceBase(null, V1, true)).toBe(false)
   })

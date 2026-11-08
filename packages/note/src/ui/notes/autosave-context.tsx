@@ -4,7 +4,7 @@ import { type Autosave, useAutosave } from './use-autosave.ts'
 
 const AutosaveContext = createContext<Autosave | null>(null)
 
-/** autosave を router より上に置く。ページを跨いでも版台帳・pending・競合台帳が生き残るので、
+/** autosave を router より上に置く。ページを跨いでも版台帳・pending・Note Conflict の台帳が生き残るので、
  * note を離れた後に返った CONFLICT が行き場を失わない。 */
 export function AutosaveProvider({ children }: { children: ReactNode }) {
   const autosave = useAutosave()

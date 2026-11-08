@@ -67,7 +67,7 @@ export function routeOf(pathname: string): Route {
   return { page: 'not-found' }
 }
 
-/** 消せる種類（Essay と Repo Note）の画面が開いている Note の id。 */
+/** 消せる種類（Essay と Repo Note）の画面の Open Note の id。 */
 export function openNoteIdOfPath(pathname: string): string | null {
   const route = routeOf(pathname)
   if (route.page === 'essay') return route.id

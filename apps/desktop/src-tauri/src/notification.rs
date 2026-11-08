@@ -93,7 +93,7 @@ fn post_to_center(
     let user_info = NSDictionary::<NSString, AnyObject>::from_slices(&[&*key], &[value.as_ref()]);
     // SAFETY: userInfo は property list の値だけを持てばよく、NSString どうしの辞書はそれを満たす。
     unsafe { content.setUserInfo(&Retained::cast_unchecked::<NSDictionary>(user_info)) };
-    // 同じ Terminal Session の届いた通知を置き換え、未読でなくなったら id で取り下げられるようにする。
+    // 同じ Terminal Session の届いた Notification を置き換え、Unread でなくなったら id で取り下げられるようにする。
     let request =
         UNNotificationRequest::requestWithIdentifier_content_trigger(&value, &content, None);
     let added =
@@ -240,7 +240,7 @@ define_class!(
     unsafe impl NSObjectProtocol for Delegate {}
 
     unsafe impl UNUserNotificationCenterDelegate for Delegate {
-        // 前面の間は sidebar の未読が代わりになるので、バナーにせず通知センターにだけ入れる。
+        // 前面の間は sidebar の Unread が代わりになるので、バナーにせず通知センターにだけ入れる。
         #[unsafe(method(userNotificationCenter:willPresentNotification:withCompletionHandler:))]
         fn will_present(
             &self,

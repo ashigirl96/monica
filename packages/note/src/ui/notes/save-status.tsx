@@ -1,6 +1,6 @@
 import { useAutosaveContext } from './autosave-context.tsx'
 
-/** ヘッダ行に出す保存状態。競合（CONFLICT）は保存失敗より強く、リトライでは解けないので
+/** ヘッダ行に出す保存状態。Note Conflict（CONFLICT）は保存失敗より強く、リトライでは解けないので
  * 読み直しの導線を添えて優先表示する。状態は note id で autosave から引く — autosave は
  * アプリ全体で 1 つなので、別 note の失敗をこの行に出さないよう id で絞る必要がある。 */
 export function SaveStatus({ noteId, onReload }: { noteId: string; onReload: () => void }) {

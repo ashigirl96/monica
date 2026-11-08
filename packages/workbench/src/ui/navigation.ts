@@ -131,7 +131,7 @@ export function navigate(state: Navigation, entry: Entry, world: World): Step {
     case 'row': {
       const runspace = world.runspaces.find((r) => r.id === entry.runspaceId)
       if (!runspace) return withoutFocus(state)
-      // 通知を押さずに sidebar から来ても、未読の Tab へ 1 手で着くようにする。
+      // Notification を押さずに sidebar から来ても、Unread の Tab へ 1 手で着くようにする。
       const unread = runspace.tabs.find((t) => world.unreadOf(t.terminalSessionId))
       return withFocus(activate(state, world, runspace.id, unread?.id))
     }

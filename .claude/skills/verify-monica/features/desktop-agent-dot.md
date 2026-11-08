@@ -1,19 +1,19 @@
-# Tab の dot と未読
+# Tab の dot と Unread（未読）
 
-desktop の Tab には、その Tab の claude の状態が dot で出る。ユーザー待ちになった Agent Session をユーザーがまだ見ていなければ未読になり、Dock の icon に未読の数が出る。窓を前に出してその Tab を表示すると未読でなくなり、数が消える。
+desktop の Tab には、その Tab の claude の状態が dot で出る。Waiting（ユーザー待ち）になった Agent Session をユーザーがまだ見ていなければ Unread になり、Dock の icon に Unread の数が出る。窓を前に出してその Tab を表示すると Unread でなくなり、数が消える。
 
 ## Sub-features
 
 - `dot-state`: Tab の dot の title が状態（`動作中`・`手空き`・`質問`・`許可`・`エラー`・`未観測`）を出す。
-- `dot-unread`: 表示していない Tab の Agent Session が待ちに入ると、未読になる。
-- `dot-dock`: Dock の数が未読の Agent Session の数になる。
-- `dot-seen`: 窓を前に出してその Tab を表示すると、未読でなくなり数が消える。
+- `dot-unread`: 表示していない Tab の Agent Session がWaiting に入ると、Unread になる。
+- `dot-dock`: Dock の数が Unread の Agent Session の数になる。
+- `dot-seen`: 窓を前に出してその Tab を表示すると、Unread でなくなり数が消える。
 
 ## How to get to it (user POV)
 
 - desktop の窓の上の Tab の並び。dot は Tab の名前の左。
 - macOS の Dock の Monica の icon。
-- 通知センターの通知のクリック（`release-notifications` skill が確かめる。dev の desktop では確かめない）。
+- 通知センターの Notification（通知）のクリック（`release-notifications` skill が確かめる。dev の desktop では確かめない）。
 
 ## Driving it with dev の desktop と tauri-mcp
 
@@ -24,16 +24,16 @@ Preconditions:
 - Tab が 2 つある。1 つなら `surfaces/desktop.md` の「Tab を開く」（Ctrl+T の後に `c` の keydown）で足す。`MONICA_HOME=$H scripts/monica-dev workbench terminal-session list --format json` で、前面でない Tab（A）の `tabId` と id を控える。
 
 - **dot を出す.** A の Terminal Session で SessionStart の payload を流す（payload の例は `packages/workbench/src/hook-payloads/`、場面ごとの順は `surfaces/headless.md` の hook の節）。`printf '%s' '<payload>' | MONICA_HOME=$H MONICA_TERMINAL_SESSION_ID=<A の id> scripts/monica-dev workbench hook claude`。`webview_execute_js` で `document.querySelector('[data-tab-id="<A>"] span[title="手空き"]') !== null` が `true`。
-- **待ちにする.** 同じく `"hook_event_name":"PreToolUse","tool_name":"AskUserQuestion"` の payload を流す。`[data-tab-id="<A>"] span[title="質問"]` が出る。
+- **Waiting にする.** 同じく `"hook_event_name":"PreToolUse","tool_name":"AskUserQuestion"` の payload を流す。`[data-tab-id="<A>"] span[title="質問"]` が出る。
 - **Dock の数を読む.** `lsappinfo info -only StatusLabel "$(lsappinfo find pid=<DESKTOP の pid>)"` が `{ "label"="1" }` を返す。Dock の数は screenshot に写らないので、この出力を証拠にする。
 - **見る.** tauri-mcp の `manage_window` の `focus` で窓を前に出し、間に他の操作を挟まずに `[data-tab-id="<A>"]` の button に `pointerdown` を `dispatchEvent` する。もう一度 `lsappinfo` を読むと `[ NULL ]` か `kCFNULL` になる。数が残っていれば窓が背面に戻っているので、`surfaces/desktop.md` の「窓の前面と背面」の System Events の `frontmost` で前に出すと消える。
 - **証拠.** 待ちにした後と見た後の窓を、`surfaces/desktop.md` の「窓の枠と端末の字形」の `screencapture` で `$E/desktop-agent-dot-{waiting,seen}.png` に撮る。流した payload・`webview_execute_js` の結果・各回の `lsappinfo` の出力を `$E/desktop-agent-dot.transcript` に残す。
 
 ## Gotchas
 
-- 起動直後の手空きでは通知が出ず、未読にもならない。未読を作るのは質問・許可・エラーの待ちか、turn の終わりの手空き。
-- 未読を消すのは Tauri の窓の focus の event で、webview の `document.hasFocus()` は前面でも `false` を返すことがある。前面かは `hasFocus` で決めず、`lsappinfo` の数で見る。`focus` と押す操作の間に `screencapture` など別の app に触る操作を挟むと、窓が背面に戻る。
-- 待ちに入れた時に A を表示していると、窓が前面なら見たことになり、未読にならない。先に別の Tab を前面にする。
+- 起動直後の Idle（手空き）では Notification が出ず、Unread にもならない。Unread を作るのは Question（質問）・Permission（許可）・Error（失敗）の Waiting か、turn の終わりの Idle。
+- Unread を消すのは Tauri の窓の focus の event で、webview の `document.hasFocus()` は前面でも `false` を返すことがある。前面かは `hasFocus` で決めず、`lsappinfo` の数で見る。`focus` と押す操作の間に `screencapture` など別の app に触る操作を挟むと、窓が背面に戻る。
+- Waiting に入れた時に A を表示していると、窓が前面なら見たことになり、Unread にならない。先に別の Tab を前面にする。
 - `webview_screenshot` には Tab の dot は写るが、Dock の数は写らない。数は `lsappinfo` で読む。
 - tauri-mcp の click は `pointerdown` を出さないので Tab が切り替わらない。必ず `dispatchEvent` で送る。
 - 最小化した窓は `focus` だけでは前に出ず、見たことにならない。`surfaces/desktop.md` の「窓の前面と背面」の手順で前に出す。

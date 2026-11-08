@@ -68,7 +68,7 @@ export function createWorkbenchLedger(
   let connection: Promise<PtydClient> | null = null
   // List を待つ間に届いた Exit は、まだ取り込んでいない行に当たらず Reap する接続も無いので、reconcile の後で当てる。
   let exitsDuringReconcile: [string, number | null][] | null = null
-  // ptyd へ繋ぎ直す間も hook は届いているので、未観測にするのは Backend の起動直後の reconcile だけ。
+  // ptyd へ繋ぎ直す間も hook は届いているので、Unobserved にするのは Backend の起動直後の reconcile だけ。
   let backendRestarted = true
   let stopping = false
 

@@ -1,4 +1,4 @@
-/** note ごとの台帳（基準版・競合・保存エラー）の判定。autosave がアプリ全体で 1 つに
+/** note ごとの台帳（Base Version・Note Conflict・保存エラー）の判定。autosave がアプリ全体で 1 つに
  * なったので、どの台帳も「今どの note を開いているか」に依らず id で引ける形にしてある。
  */
 
@@ -6,7 +6,7 @@
  * （kind ごとの決め方はページの知識なので、schedule 時に受け取る）。 */
 export type NoteConflict = { id: string; label: string }
 
-/** 同じ note の再競合は 1 行に畳み、label だけ最新へ更新する。並び順を動かさないのは、
+/** 同じ note の Note Conflict は、起き直しても 1 行に畳み、label だけ最新へ更新する。並び順を動かさないのは、
  * 押そうとしたボタンが別 note のものに入れ替わるのを避けるため。 */
 export function upsertConflict(list: NoteConflict[], entry: NoteConflict): NoteConflict[] {
   if (!list.some((c) => c.id === entry.id)) return [...list, entry]
@@ -23,14 +23,14 @@ export function visibleConflicts(list: NoteConflict[], openNoteId: string | null
 }
 
 /**
- * 基準版を next へ進めてよいか。
+ * Base Version を next へ進めてよいか。
  *
  * 単調にしか進めない: 巻き戻すと偽の CONFLICT か、古い doc での静かな上書きに直結する。
  *
- * 加えて、競合が未解決の間は進めない。競合した note を開き直すと `OpenNote` の
+ * 加えて、Note Conflict が未解決の間は進めない。Note Conflict になった note を開き直すと `OpenNote` の
  * 開いた直後の分岐（latch がまだ空なので無条件に adopt する）が勝者の doc を採用し、そのまま
- * だと基準版が競合を跨いで前進する。すると行き場を失った draft を抱えたまま保存が通る
- * ようになり、競合を解決しないまま勝者の変更を上書きしてしまう。ピンが解けるのは
+ * だと Base Version が Note Conflict を跨いで前進する。すると行き場を失った draft を抱えたまま保存が通る
+ * ようになり、Note Conflict を解決しないまま勝者の変更を上書きしてしまう。ピンが解けるのは
  * 「最新を読み込む」（dropPending）と削除（discard）だけ。
  */
 export function shouldAdvanceBase(current: Date | null, next: Date, conflicted: boolean): boolean {

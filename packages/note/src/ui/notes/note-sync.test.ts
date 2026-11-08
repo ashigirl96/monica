@@ -42,7 +42,7 @@ describe('shouldAdoptServerDoc', () => {
     ).toBe(false)
   })
 
-  test('未保存の編集があるうちは差し替えない（競合は CONFLICT が拾う）', () => {
+  test('未保存の編集があるうちは差し替えない（Note Conflict は CONFLICT が拾う）', () => {
     expect(
       shouldAdoptServerDoc({ fetchedUpdatedAt: V3, baseUpdatedAt: V2, hasUnsaved: true }),
     ).toBe(false)
@@ -56,7 +56,7 @@ describe('shouldAdoptServerDoc', () => {
 })
 
 describe('usableServerDoc', () => {
-  test('基準版が無ければそのまま採用できる', () => {
+  test('Base Version が無ければそのまま採用できる', () => {
     expect(usableServerDoc(note(V1), null)).not.toBeNull()
   })
 
@@ -65,11 +65,11 @@ describe('usableServerDoc', () => {
     expect(usableServerDoc(note(V1), V2)).toBeNull()
   })
 
-  test('基準版と同じ版は採用できる', () => {
+  test('Base Version と同じ版は採用できる', () => {
     expect(usableServerDoc(note(new Date(V2)), V2)).not.toBeNull()
   })
 
-  test('基準版より新しい版は採用できる', () => {
+  test('Base Version より新しい版は採用できる', () => {
     expect(usableServerDoc(note(V3), V2)).not.toBeNull()
   })
 
@@ -104,7 +104,7 @@ describe('noteToOpen', () => {
     })
   })
 
-  test('cache が基準版より古くても、未保存の編集があればそれで開く', () => {
+  test('cache が Base Version より古くても、未保存の編集があればそれで開く', () => {
     expect(noteToOpen(note(V1), V2, { content: edited })).toEqual({
       ...note(V1),
       content: edited,
@@ -112,7 +112,7 @@ describe('noteToOpen', () => {
     })
   })
 
-  test('cache に外から新しい版が入っていても、未保存の編集は基準版のまま開き、競合を保存に拾わせる', () => {
+  test('cache に外から新しい版が入っていても、未保存の編集は Base Version のまま開き、Note Conflict を保存に拾わせる', () => {
     expect(noteToOpen(note(V3), V2, { content: edited })?.updatedAt).toEqual(V2)
   })
 

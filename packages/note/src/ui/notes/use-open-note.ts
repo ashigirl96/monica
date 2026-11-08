@@ -8,7 +8,7 @@ import { useAutosaveContext } from './autosave-context.tsx'
 import { emptyView, OpenNote, type OpenNoteView } from './open-note.ts'
 import type { NoteQueryOptions } from './queries.ts'
 
-/** 画面が開いている Note。`key` は開く Note の名前で、替わると `options` の query へ移る。 */
+/** 画面の Open Note。`key` は開く Note の名前で、替わると `options` の query へ移る。 */
 export function useOpenNote(
   key: string,
   options: NoteQueryOptions,

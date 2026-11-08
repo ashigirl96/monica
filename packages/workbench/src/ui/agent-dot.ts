@@ -58,7 +58,7 @@ export function tallyAgentDots(dots: (AgentDot | null)[]): AgentTally[] {
   })
 }
 
-// 未読の印は白にそろえ、dot の緑・琥珀・赤・灰と重ねない。
+// Unread の印は白にそろえ、dot の緑・琥珀・赤・灰と重ねない。
 // 円は dot から整数 px 広げた疑似要素で描き、円の箱を dot と同じ丸めで画素に乗せる。
 export const UNREAD_DOT_STYLE =
   'animate-none relative after:absolute after:-inset-[3px] after:rounded-full after:border-[1.5px] after:border-zinc-50'

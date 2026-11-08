@@ -29,7 +29,7 @@ export type RunspaceRow = {
   branch: string | null
 }
 
-// 畳んだセクションは rows を空にし、見出しに出す行の数と未読の Tab の数だけを持つ。
+// 畳んだセクションは rows を空にし、見出しに出す行の数と Unread の Tab の数だけを持つ。
 export type SidebarSection = {
   kind: SectionKind
   headed: boolean
@@ -78,7 +78,7 @@ function pathOf(cwd: string, place: RepoPlace | undefined): string {
   return place?.path ?? shortPath(cwd)
 }
 
-// 動いている claude を手空きで隠さないよう、Task の表示状態の集約（手空き > 未観測 > 動作中）とは違う順で選ぶ。
+// 動いている claude を Idle で隠さないよう、Task の Display State の集約（Idle > Unobserved > Running）とは違う順で選ぶ。
 const REPRESENTATIVE_RANK: Record<AgentDot, number> = {
   question: 0,
   permission: 0,
