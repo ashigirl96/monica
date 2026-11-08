@@ -1,5 +1,5 @@
 b8b9bc42a7d3a42c56cde10f552ad9f291b5873e  packages/workbench/src/terminal-session.ts
-5b136c65fd4aa12f198d20874f66f2d115f51c4d  packages/workbench/src/workbench.ts
+c77a8f3be4098524ae7bcf446e6993399677564a  packages/workbench/src/workbench.ts
 91b817979d4192f356d661df610e71a58cae011f  packages/workbench/src/ptyd.ts
 4933785a96c4d8d4205feb8379bba9b9510ea842  packages/workbench/src/layout.ts
 5201f8de03e169c30c3140187ca82493222fe2d6  packages/workbench/src/pin.ts

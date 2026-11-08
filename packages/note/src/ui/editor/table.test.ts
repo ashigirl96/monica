@@ -9,6 +9,8 @@ import {
   tableHardBreak,
   tableNextCell,
   tablePrevCell,
+  tableSelectToLineEnd,
+  tableSelectToLineStart,
 } from './table.ts'
 import {
   block,
@@ -152,5 +154,17 @@ describe('exitDocEnd / exitDocStart', () => {
     const { state, handled } = run(stateInCell(doc, 2), exitDocStart)
     expect(handled).toBe(false)
     expect(state.doc).toBe(doc)
+  })
+})
+
+describe('tableSelectToLineStart / tableSelectToLineEnd', () => {
+  test('セルの中だけで、カーソル位置から先頭・末尾まで選択を伸ばす', () => {
+    const doc = docOf(block('T', tableOf([['abc', 'd']])))
+    const cell = cellPositions(doc)[0]!
+    const state = stateInCell(doc, 0, 1)
+    const end = run(state, tableSelectToLineEnd).state.selection
+    expect([end.anchor, end.head]).toEqual([cell + 2, cell + 4])
+    const start = run(state, tableSelectToLineStart).state.selection
+    expect([start.anchor, start.head]).toEqual([cell + 2, cell + 1])
   })
 })

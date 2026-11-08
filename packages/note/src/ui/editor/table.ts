@@ -135,24 +135,25 @@ export const tableHardBreak: Command = (state, dispatch) => {
   return true
 }
 
-/** Ctrl-a: セル内の先頭へ（cursorToLineStart は table 内で非 textblock 位置に飛ぶ）。 */
-export const tableLineStart: Command = (state, dispatch) => {
-  const ctx = getTableCellContext(state.selection.$from)
-  if (!ctx) return false
-  dispatch?.(
-    state.tr.setSelection(TextSelection.create(state.doc, ctx.cellPos + 1)).scrollIntoView(),
-  )
-  return true
+// Ctrl-a / Ctrl-e: セル内の先頭・末尾へ（cursorToLineStart は table 内で非 textblock 位置に飛ぶ）。
+// Shift 付きは選択を伸ばす。
+function moveToCellEdge(edge: 'start' | 'end', extend: boolean): Command {
+  return (state, dispatch) => {
+    const ctx = getTableCellContext(state.selection.$head)
+    if (!ctx) return false
+    const target = ctx.cellPos + 1 + (edge === 'start' ? 0 : ctx.cellNode.content.size)
+    const anchor = extend ? state.selection.anchor : target
+    dispatch?.(
+      state.tr.setSelection(TextSelection.create(state.doc, anchor, target)).scrollIntoView(),
+    )
+    return true
+  }
 }
 
-/** Ctrl-e: セル内の末尾へ。 */
-export const tableLineEnd: Command = (state, dispatch) => {
-  const ctx = getTableCellContext(state.selection.$from)
-  if (!ctx) return false
-  const target = ctx.cellPos + 1 + ctx.cellNode.content.size
-  dispatch?.(state.tr.setSelection(TextSelection.create(state.doc, target)).scrollIntoView())
-  return true
-}
+export const tableLineStart = moveToCellEdge('start', false)
+export const tableLineEnd = moveToCellEdge('end', false)
+export const tableSelectToLineStart = moveToCellEdge('start', true)
+export const tableSelectToLineEnd = moveToCellEdge('end', true)
 
 const headerCell = (content?: Fragment) =>
   nodes.tableCell.create({ header: true }, content && content.size > 0 ? content : undefined)

@@ -4,6 +4,7 @@ import { describe, expect, test } from 'bun:test'
 import type { Node as PMNode } from 'prosemirror-model'
 import { EditorState, TextSelection } from 'prosemirror-state'
 import type { Command, Transaction } from 'prosemirror-state'
+import type { EditorView } from 'prosemirror-view'
 
 import { blockSelectionPlugin } from './block-selection.ts'
 import {
@@ -31,6 +32,7 @@ import {
 } from './commands.ts'
 import { containerById, getBlockContext, parentContainerId, rangeFromIds } from './context.ts'
 import { editorInputRuleList } from './input-rules.ts'
+import { editorKeymap } from './keymap.ts'
 import { linkHrefAt } from './link-click.ts'
 import { normalizerPlugin } from './normalizer.ts'
 import { nodes, schema } from './schema.ts'
@@ -684,6 +686,57 @@ describe('cursorToLineStart / cursorToLineEnd', () => {
     expect(start.state.selection.head).toBe(base + 3)
     const end = run(state, cursorToLineEnd)!
     expect(end.state.selection.head).toBe(base + 5)
+  })
+})
+
+// native の選択拡張は contenteditable=false の linkMention で止まるので、keymap で握る必要がある
+function pressCtrlShift(state: EditorState, key: 'A' | 'E'): EditorState {
+  let next = state
+  const view = {
+    state,
+    dispatch: (tr: Transaction) => (next = state.apply(tr)),
+  } as unknown as EditorView
+  const event = {
+    key,
+    keyCode: key.charCodeAt(0),
+    ctrlKey: true,
+    shiftKey: true,
+    altKey: false,
+    metaKey: false,
+  }
+  const plugin = editorKeymap()[0]!
+  expect(plugin.props.handleKeyDown!.call(plugin, view, event as KeyboardEvent)).toBe(true)
+  return next
+}
+const withMention = () =>
+  docOf(
+    block(
+      'A',
+      nodes.paragraph.create(null, [
+        schema.text('json render（'),
+        nodes.linkMention.create({ href: 'https://example.com', title: 'Example' }),
+        schema.text('）を使う'),
+      ]),
+    ),
+  )
+
+describe('Ctrl-Shift-a / Ctrl-Shift-e', () => {
+  test('linkMention を越えて行末まで選択を伸ばす', () => {
+    const doc = withMention()
+    const { selection } = pressCtrlShift(stateWithCursor(doc, 'A', 2), 'E')
+    expect([selection.anchor, selection.head]).toEqual([
+      contentPos(doc, 'A', 2),
+      contentPos(doc, 'A', 'end'),
+    ])
+  })
+
+  test('linkMention を越えて行頭まで選択を伸ばす', () => {
+    const doc = withMention()
+    const { selection } = pressCtrlShift(stateWithCursor(doc, 'A', 'end'), 'A')
+    expect([selection.anchor, selection.head]).toEqual([
+      contentPos(doc, 'A', 'end'),
+      contentPos(doc, 'A', 0),
+    ])
   })
 })
 
