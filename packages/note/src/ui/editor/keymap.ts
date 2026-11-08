@@ -25,6 +25,8 @@ import {
   insertHardBreak,
   moveUpFromBlockStart,
   outdentBlock,
+  selectToLineEnd,
+  selectToLineStart,
   splitBlock,
   toggleCollapse,
 } from './commands.ts'
@@ -37,6 +39,8 @@ import {
   tableLineStart,
   tableNextCell,
   tablePrevCell,
+  tableSelectToLineEnd,
+  tableSelectToLineStart,
 } from './table.ts'
 
 // composition・menu・block selection はここへ届く前に処理される。composition は
@@ -62,6 +66,8 @@ export function editorKeymap(): Plugin[] {
       // macOS 流のカーソル移動
       'Ctrl-a': chainCommands(tableLineStart, cursorToLineStart),
       'Ctrl-e': chainCommands(tableLineEnd, cursorToLineEnd),
+      'Shift-Ctrl-a': chainCommands(tableSelectToLineStart, selectToLineStart),
+      'Shift-Ctrl-e': chainCommands(tableSelectToLineEnd, selectToLineEnd),
       // 空行のみ行ごと削除。非空行は false でネイティブの前方 1 文字削除に落とす
       'Ctrl-d': deleteEmptyBlock,
       // ↓と同義だが、最下 block から先へ進めないときだけ末尾に空行を確保する

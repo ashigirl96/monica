@@ -821,34 +821,32 @@ export const codeNewline: Command = (state, dispatch) => {
 }
 
 // Ctrl-a / Ctrl-e（macOS 流の行頭・行末移動）。code block は現在行、text block は content 端。
-export const cursorToLineStart: Command = (state, dispatch) => {
-  const ctx = getBlockContext(state.selection.$from)
-  if (!ctx) return false
-  const content = ctx.contentNode
-  if (content.type === nodes.divider) return false
-  let target = ctx.contentPos + 1
-  if (content.type === nodes.codeBlock) {
-    const offset = state.selection.head - (ctx.contentPos + 1)
-    target = ctx.contentPos + 1 + content.textContent.lastIndexOf('\n', offset - 1) + 1
+// Shift 付きは選択を伸ばす。native の伸ばし方は contenteditable=false の linkMention で止まる。
+function moveToLineEdge(edge: 'start' | 'end', extend: boolean): Command {
+  return (state, dispatch) => {
+    const { $head, anchor, head } = state.selection
+    const ctx = getBlockContext($head)
+    if (!ctx) return false
+    const content = ctx.contentNode
+    if (content.type === nodes.divider) return false
+    const base = ctx.contentPos + 1
+    let target = edge === 'start' ? base : base + content.content.size
+    if (content.type === nodes.codeBlock) {
+      const offset = head - base
+      const text = content.textContent
+      if (edge === 'start') target = base + text.lastIndexOf('\n', offset - 1) + 1
+      else if (text.indexOf('\n', offset) !== -1) target = base + text.indexOf('\n', offset)
+    }
+    const selection = TextSelection.create(state.doc, extend ? anchor : target, target)
+    dispatch?.(state.tr.setSelection(selection).scrollIntoView())
+    return true
   }
-  dispatch?.(state.tr.setSelection(TextSelection.create(state.doc, target)).scrollIntoView())
-  return true
 }
 
-export const cursorToLineEnd: Command = (state, dispatch) => {
-  const ctx = getBlockContext(state.selection.$from)
-  if (!ctx) return false
-  const content = ctx.contentNode
-  if (content.type === nodes.divider) return false
-  let target = ctx.contentPos + 1 + content.content.size
-  if (content.type === nodes.codeBlock) {
-    const offset = state.selection.head - (ctx.contentPos + 1)
-    const nl = content.textContent.indexOf('\n', offset)
-    if (nl !== -1) target = ctx.contentPos + 1 + nl
-  }
-  dispatch?.(state.tr.setSelection(TextSelection.create(state.doc, target)).scrollIntoView())
-  return true
-}
+export const cursorToLineStart = moveToLineEdge('start', false)
+export const cursorToLineEnd = moveToLineEdge('end', false)
+export const selectToLineStart = moveToLineEdge('start', true)
+export const selectToLineEnd = moveToLineEdge('end', true)
 
 // 行末で inline code の右境界に立っているカーソルと、そこでの実効 mark（storedMarks
 // 優先）。exitInlineCode / enterInlineCode / codeExitPos が同じ境界判定を共有する。
