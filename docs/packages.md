@@ -18,7 +18,7 @@ monica/
 
 - apps は packages を組み立てるだけでロジックを持たない。apps どうしは互いを import しない。
 - `packages/ui` には、domain の語を持たない部品と、CLI の整形が使う `@monica/ui/table`・`@monica/ui/local-time` を置く。cli entry は apps/cli だけが import するので、domain の cli entry どうしでは共有できないため。domain の UI は各 domain の `ui` entry に置く。
-- `packages/block-editor` には、block editor と、その本文の JSON を読む関数と markdown との変換を置く。monica の外の repo でも使うので、`@monica/*` を import しない。monica 固有の値（自分の Note と見なす host 名など）は props で受ける。
+- `packages/block-editor` には、block editor と、その本文の JSON を読む関数と markdown との変換を置く。monica の外の repo でも使うので、`@monica/*` を import しない。monica 固有の値（自分の Note と見なす host 名など）は props で受ける。ただし本文に保存される形（Note への link の `/notes/<id>` と、画像の `/api/assets/`）は本文の形式の一部なので block-editor が持つ。
 
 ### ドメイン package の中
 

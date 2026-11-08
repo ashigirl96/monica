@@ -229,7 +229,7 @@ export function BlockEditor({
 
   return (
     <div ref={rootRef} className={className ? `jb-root ${className}` : 'jb-root'}>
-      <div ref={hostRef} className="relative" />
+      <div ref={hostRef} className="jb-host" />
     </div>
   )
 }

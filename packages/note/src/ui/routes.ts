@@ -2,8 +2,6 @@ import { noteIdOfPath } from '@monica/block-editor/body'
 
 import { logicalDate, type Note, sameRepo } from '../contract.ts'
 
-export { notePath } from '@monica/block-editor/body'
-
 export const DAILY_PATH = '/daily'
 export const ESSAYS_PATH = '/essays'
 export const REPOS_PATH = '/repos'

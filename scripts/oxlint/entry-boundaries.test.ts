@@ -68,3 +68,12 @@ test('every cli, ui, body and schema entry of a package refuses the imports its 
   expect(probed.length).toBeGreaterThan(0)
   expect(letThrough).toEqual({})
 })
+
+test('block-editor refuses every monica package, since other repos use it without them', async () => {
+  const path = 'packages/block-editor/src/inner.ts'
+  const specifiers = ['@monica/note/contract', '@monica/ui']
+
+  const refused = await refusedImports([{ path, specifiers }])
+
+  expect(refused.get(path)).toEqual(new Set(specifiers))
+})

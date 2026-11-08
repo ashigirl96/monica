@@ -1,4 +1,5 @@
 export { BlockEditor, type BlockEditorHandle } from './block-editor.tsx'
+export type { ParseMarkdown, RenderMarkdown } from './clipboard.ts'
 export { docFromJSON, type DocRead } from './create-editor.ts'
 export { type ImportExternalImage, stripPendingImages, type UploadImage } from './image-upload.ts'
 export type { FetchLinkMetadata } from './link-menu.ts'

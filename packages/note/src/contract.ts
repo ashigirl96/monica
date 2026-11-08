@@ -1,3 +1,4 @@
+import type { LinkMetadata } from '@monica/block-editor'
 import { IMAGE_URL_PREFIX } from '@monica/block-editor/body'
 import { oc } from '@orpc/contract'
 import { createSchemaFactory } from 'drizzle-zod'
@@ -129,7 +130,7 @@ export const LinkMetadataSchema = z.object({
   image: z.string().nullable().describe('an absolute URL'),
   favicon: z.string().nullable().describe('an absolute URL'),
   siteName: z.string().nullable(),
-})
+}) satisfies z.ZodType<LinkMetadata>
 
 export const saveErrors = {
   CONFLICT: {
@@ -147,7 +148,7 @@ export type RepoNoteSummary = z.infer<typeof RepoNoteSummarySchema>
 export type RepoNotesCursor = z.infer<typeof RepoNotesCursorSchema>
 export type RepoNotesPage = z.infer<typeof RepoNotesPageSchema>
 export type NoteMentionCandidate = z.infer<typeof NoteMentionCandidateSchema>
-export type LinkMetadata = z.infer<typeof LinkMetadataSchema>
+export type { LinkMetadata }
 
 export type Named =
   | { kind: 'daily'; date: string }

@@ -1,12 +1,11 @@
 import { BlockEditor, type BlockEditorHandle } from '@monica/block-editor'
-import { fromMarkdown, toMarkdown } from '@monica/block-editor/body'
+import { fromMarkdown, notePath, toMarkdown } from '@monica/block-editor/body'
 import type { Node as PMNode } from 'prosemirror-model'
 import { type RefObject, useCallback, useEffect, useState } from 'react'
 
 import { type Note, NOTES_HOSTNAMES } from '../../contract.ts'
 import { reach, useNoteClient } from '../client.ts'
 import { navigate } from '../router.ts'
-import { notePath } from '../routes.ts'
 import { useAutosaveContext } from './autosave-context.tsx'
 import { arrivalAt, jumpToBlock } from './block-jump.ts'
 import { imageCallbacks } from './editor-support.ts'

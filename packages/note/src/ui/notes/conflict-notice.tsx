@@ -1,5 +1,6 @@
+import { notePath } from '@monica/block-editor/body'
+
 import { navigate } from '../router.ts'
-import { notePath } from '../routes.ts'
 import { useAutosaveContext } from './autosave-context.tsx'
 import { visibleConflicts } from './save-state.ts'
 
