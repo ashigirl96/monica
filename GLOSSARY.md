@@ -222,6 +222,14 @@ _Avoid_: Note（Note と紛れる）, log（経過の記録と紛れる）
 全 Study に効く、ユーザーの教わり方の好み（説明の長さ、クイズの出し方、手を動かす順など）。ユーザーが会話で好みを言うと agent が書き足し、ユーザーも直せる。ある Study だけの希望は Mission に書く。
 _Avoid_: NOTES（teach の、学ぶ題ごとのメモと紛れる）, Setting（monica の設定と紛れる）
 
+**Playground（試し場）**:
+Study ごとにある、道具を入れて試す場所。Tutor が道具を選んで入れ、ユーザーも中に入って手を動かす。後でまとめて消せるように置き場所が決まっていて、3 ヶ月触らなかった Study の Playground は自動で消える。
+_Avoid_: Sandbox（書き込みや通信を囲う仕組みと紛れる）, 隔離環境（囲われていると誤解される）
+
+**Prototype（試作）**:
+Study の中で、学習対象を確かめるために作るコード。Playground が消えても、作り直すための定義と一緒に残る。
+_Avoid_: Demo
+
 ### Browser
 
 **Browser Tab（ブラウザのタブ）**:
