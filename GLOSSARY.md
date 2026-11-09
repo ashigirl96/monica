@@ -200,6 +200,20 @@ _Avoid_: Mention（単独で使わない）, wiki link, Note Link, backlink
 ある Note の block の並びを、別の場所に読み取り専用で映す block。映した側は元の今の中身を表示し、編集は元の Note でだけ行う。同じ Note の block も映せる。元の block が消えると、消えたと出る。
 _Avoid_: transclusion, mirror, embed
 
+### Study
+
+**Study（学習）**:
+1 つの Mission について、agent を先生にして学ぶ一続きの取り組み。学んだことを使う Repo を紐付けると、その Repo から引ける。紐付けた Repo は学習対象とは別で、学習対象は Mission に書く。
+_Avoid_: Learning Bench（Bench と紛れる）, Course（決まった順路を連想させる）, Lesson
+
+**Tutor（先生）**:
+学習対象の種類ごとにある、先生としての振る舞い（教え方と学習対象への近づき方）。Study の agent は、Mission と会話の流れに合う Tutor を選んで演じ、話が逸れれば別の Tutor に移り、複数を重ねることもある。どれも合わなければ、Tutor を使わずに共通の教え方だけで教える。例えばリポジトリの Tutor は、ツールやライブラリを入れて一緒に使ってみる。
+_Avoid_: persona, agent（単独で使わない。Agent Session と紛れる）
+
+**Mission（学ぶ理由）**:
+Study ごとに 1 つある、何をなぜ学ぶかを書いた文。学習対象（リポジトリの URL など）もここに書く。複数の学習対象を比べる学びも 1 つの Mission にできる。
+_Avoid_: goal
+
 ### Browser
 
 **Browser Tab（ブラウザのタブ）**:
