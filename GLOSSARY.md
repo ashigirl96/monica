@@ -218,6 +218,10 @@ _Avoid_: goal
 Study の中で、ユーザーが何を分かったか、前から何を知っていたか、どの誤解が直ったか、学んだ結果 Mission がどう変わったかを、その証拠が出たときに 1〜3 文で残す記録。触れただけのことや毎回の活動は書かない。
 _Avoid_: Note（Note と紛れる）, log（経過の記録と紛れる）
 
+**Learning Preference（学び方の好み）**:
+全 Study に効く、ユーザーの教わり方の好み（説明の長さ、クイズの出し方、手を動かす順など）。ユーザーが会話で好みを言うと agent が書き足し、ユーザーも直せる。ある Study だけの希望は Mission に書く。
+_Avoid_: NOTES（teach の、学ぶ題ごとのメモと紛れる）, Setting（monica の設定と紛れる）
+
 ### Browser
 
 **Browser Tab（ブラウザのタブ）**:
