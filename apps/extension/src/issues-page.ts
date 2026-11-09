@@ -126,32 +126,40 @@ let backendOutOfReach = false
 
 async function scan() {
   if (backendOutOfReach || monicaReloaded) return
-  const asked = new Map<string, Slot[]>()
-  for (const slot of slotsOnPage()) {
-    const { host, ref } = slot
-    // GitHub が要素を使い回して別の Issue を描いたら、前のボタンを外して決め直す。
-    if (host.dataset.monicaRef === ref) continue
-    for (const element of buttons.get(host) ?? []) element.remove()
-    host.dataset.monicaRef = ref
-    asked.set(ref, [...(asked.get(ref) ?? []), slot])
-  }
+  const asked = Map.groupBy(claimChangedSlots(), (slot) => slot.ref)
   if (asked.size === 0) return
   const reply = await send<RunButtonsReply>({ type: 'monica.runButtons', refs: [...asked.keys()] })
   if (reply === RELOADED) return
   if (!reply) backendOutOfReach = true
   // Backend が error を返した回は、次の DOM の変化で送り直す。error の多くは一時のもので、ページの読み込み直しを待たせないため。
   if (!reply || 'failed' in reply) {
-    for (const [ref, slots] of asked) {
-      for (const { host } of slots)
-        if (host.dataset.monicaRef === ref) delete host.dataset.monicaRef
+    for (const { host } of [...asked.values()].flat().filter(stillClaimed)) {
+      delete host.dataset.monicaRef
     }
     return
   }
   for (const row of reply.buttons) {
-    for (const slot of asked.get(row.ref) ?? []) {
-      if (slot.host.dataset.monicaRef === row.ref && slot.host.isConnected) draw(slot, row)
+    for (const slot of (asked.get(row.ref) ?? []).filter(stillClaimed)) {
+      if (slot.host.isConnected) draw(slot, row)
     }
   }
+}
+
+// GitHub が要素を使い回して別の Issue を描いたら、前のボタンを外して決め直す。
+function claimChangedSlots(): Slot[] {
+  const changed: Slot[] = []
+  for (const slot of slotsOnPage()) {
+    if (stillClaimed(slot)) continue
+    for (const element of buttons.get(slot.host) ?? []) element.remove()
+    slot.host.dataset.monicaRef = slot.ref
+    changed.push(slot)
+  }
+  return changed
+}
+
+// 返事を待つあいだに、GitHub が host を別の Issue に使い回したかもしれない。
+function stillClaimed({ host, ref }: Slot): boolean {
+  return host.dataset.monicaRef === ref
 }
 
 // ボタンも reason も無い行（読めなかった Issue）には何も出さない。

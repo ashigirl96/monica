@@ -25,27 +25,34 @@ export function App() {
     <>
       {/* 今日への replace の間も外さない。外すと zen が解ける。 */}
       <AppShell active={sectionOf(route)}>
-        <RemovalsContext value={removals}>
-          {toToday ? null : route.page === 'daily' || route.page === 'pad' ? (
-            <DailyPage date={route.page === 'daily' ? route.date : null} />
-          ) : route.page === 'essays' ? (
-            <EssaysListPage />
-          ) : route.page === 'essay' ? (
-            <EssayEditorPage id={route.id} />
-          ) : route.page === 'note' ? (
-            <NoteRedirect id={route.id} />
-          ) : route.page === 'repos' ? (
-            <ReposPage repo={null} noteId={null} />
-          ) : route.page === 'repo' ? (
-            <ReposPage repo={route.repo} noteId={route.noteId} />
-          ) : (
-            <NotFound />
-          )}
-        </RemovalsContext>
+        <RemovalsContext value={removals}>{pageOf(route)}</RemovalsContext>
       </AppShell>
       <NoteConflictNotice />
     </>
   )
+}
+
+function pageOf(route: Route) {
+  switch (route.page) {
+    case 'today':
+      return null
+    case 'daily':
+      return <DailyPage date={route.date} />
+    case 'pad':
+      return <DailyPage date={null} />
+    case 'essays':
+      return <EssaysListPage />
+    case 'essay':
+      return <EssayEditorPage id={route.id} />
+    case 'note':
+      return <NoteRedirect id={route.id} />
+    case 'repos':
+      return <ReposPage repo={null} noteId={null} />
+    case 'repo':
+      return <ReposPage repo={route.repo} noteId={route.noteId} />
+    case 'not-found':
+      return <NotFound />
+  }
 }
 
 function sectionOf(route: Route): Section | null {

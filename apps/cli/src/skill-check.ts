@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs'
 import { basename, dirname, join } from 'node:path'
 
-import type { Command } from 'commander'
+import type { Command, Option } from 'commander'
 
 import { createProgram } from './program.ts'
 
@@ -110,20 +110,9 @@ function checkCommand(program: Command, { text, inShell }: MonicaCommand): strin
     if (arg.startsWith('-')) {
       const [flag] = arg.split('=')
       const option = options.find((o) => o.long === flag || o.short === flag)
-      if (!option) {
-        if (inShell) return `unknown option '${flag}'`
-        continue
-      }
-      if (arg.includes('=')) continue
-      if (option.required) {
-        i++
-        continue
-      }
-      // commander は `[value]` の option の後ろの語も、`-` で始まらなければ値として食う。
-      const next = args[i + 1]
-      if (option.optional && inShell && next !== undefined && !next.startsWith('-')) {
-        return `option '${flag}' takes '${next}' as its value`
-      }
+      const problem = inShell ? optionProblem(option, arg, args[i + 1]) : null
+      if (problem) return problem
+      if (option?.required && !arg.includes('=')) i++
       continue
     }
     if (command.commands.length === 0) continue
@@ -135,6 +124,16 @@ function checkCommand(program: Command, { text, inShell }: MonicaCommand): strin
   }
   if (inShell && command.commands.length > 0) {
     return `missing a command under '${path.join(' ')}'`
+  }
+  return null
+}
+
+function optionProblem(option: Option | undefined, arg: string, next: string | undefined) {
+  const [flag] = arg.split('=')
+  if (!option) return `unknown option '${flag}'`
+  // commander は `[value]` の option の後ろの語も、`-` で始まらなければ値として食う。
+  if (option.optional && !arg.includes('=') && next !== undefined && !next.startsWith('-')) {
+    return `option '${flag}' takes '${next}' as its value`
   }
   return null
 }

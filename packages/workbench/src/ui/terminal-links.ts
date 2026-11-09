@@ -1,5 +1,5 @@
 import { openUrl } from '@tauri-apps/plugin-opener'
-import type { IBufferCell, IBufferRange, ILink, Terminal } from '@xterm/xterm'
+import type { IBuffer, IBufferCell, IBufferLine, IBufferRange, ILink, Terminal } from '@xterm/xterm'
 
 // ghostty の src/config/url.zig 由来の URL と path の検出で、lookbehind を含むため WebKit 16.4+ (現行 WKWebView) が前提。
 // path に空白を許すと prompt の `~/repo feature/branch` が branch 名まで取り込んで実在しない path になるので、空白で止める。
@@ -89,26 +89,29 @@ function mapStrIdx(
     const line = buffer.getLine(lineIndex)
     if (!line) return [-1, -1]
     for (let i = start; i < line.length; i++) {
-      line.getCell(i, cell)
-      const chars = cell.getChars()
-      const width = cell.getWidth()
-      if (width) {
-        stringIndex -= chars.length || 1
-        // trimRight で末尾セルが空のまま次行へ折り返した全角文字のずれを +1 補正する。
-        if (i === line.length - 1 && chars === '') {
-          const next = buffer.getLine(lineIndex + 1)
-          if (next?.isWrapped) {
-            next.getCell(0, cell)
-            if (cell.getWidth() === 2) stringIndex += 1
-          }
-        }
-      }
+      stringIndex -= charsInCell(buffer, line, lineIndex, i, cell)
       if (stringIndex < 0) return [lineIndex, i]
     }
     lineIndex++
     start = 0
   }
   return [lineIndex, start]
+}
+
+function charsInCell(
+  buffer: IBuffer,
+  line: IBufferLine,
+  lineIndex: number,
+  i: number,
+  cell: IBufferCell,
+): number {
+  line.getCell(i, cell)
+  if (!cell.getWidth()) return 0
+  const chars = cell.getChars()
+  if (chars !== '' || i !== line.length - 1) return chars.length || 1
+  // trimRight で末尾セルが空のまま次行へ折り返した全角文字は、文字列に現れないので数えない。
+  const next = buffer.getLine(lineIndex + 1)
+  return next?.isWrapped && next.getCell(0, cell)?.getWidth() === 2 ? 0 : 1
 }
 
 function computeRange(
