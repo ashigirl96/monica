@@ -214,6 +214,10 @@ _Avoid_: persona, agent（単独で使わない。Agent Session と紛れる）
 Study ごとに 1 つある、何をなぜ学ぶかを書いた文。学習対象（リポジトリの URL など）もここに書く。複数の学習対象を比べる学びも 1 つの Mission にできる。
 _Avoid_: goal
 
+**Learning Record（学習記録）**:
+Study の中で、ユーザーが何を分かったか、前から何を知っていたか、どの誤解が直ったか、学んだ結果 Mission がどう変わったかを、その証拠が出たときに 1〜3 文で残す記録。触れただけのことや毎回の活動は書かない。
+_Avoid_: Note（Note と紛れる）, log（経過の記録と紛れる）
+
 ### Browser
 
 **Browser Tab（ブラウザのタブ）**:
