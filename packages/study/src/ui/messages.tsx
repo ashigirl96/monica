@@ -110,7 +110,7 @@ export function MessageView({
         <p className="flex items-center gap-2 text-[13px] text-muted-foreground">
           <ShieldAlert className="size-3.5 shrink-0" strokeWidth={1.8} />
           <span className="min-w-0 truncate">
-            <code>{message.text.split('\n')[0]}</code> を
+            <code>{commandLine(message.text)}</code> を
             {message.state === 'allowed' ? '許した' : '断った'}
           </span>
         </p>
@@ -126,16 +126,32 @@ export function MessageView({
   }
 }
 
+// 見た目を偽る bidi の制御・幅ゼロの文字と、改行と tab 以外の制御文字。
+const HIDDEN_CHARS = /[\u202A-\u202E\u2066-\u2069\u200B-\u200F\u2060\uFEFF\0-\x08\x0B-\x1F\x7F-\x9F]/g
+
+/** 許す前に command の本当の中身が見えるよう、見えない文字を \u{…} の表記にする。 */
+export const visibleCommand = (command: string) =>
+  command.replace(HIDDEN_CHARS, (char) => `\\u{${char.codePointAt(0)!.toString(16)}}`)
+
+export function commandLine(command: string): string {
+  const [first = '', ...rest] = command.split('\n')
+  return rest.length > 0 ? `${visibleCommand(first)} …（複数行）` : visibleCommand(first)
+}
+
 export type KeyboardEventLike = Pick<
   KeyboardEvent,
-  'key' | 'metaKey' | 'ctrlKey' | 'altKey' | 'shiftKey' | 'isComposing'
+  'key' | 'repeat' | 'metaKey' | 'ctrlKey' | 'altKey' | 'shiftKey' | 'isComposing'
 >
 
-/** 1 は許す、2 は断る。修飾キー付きと変換中は答えにしない。 */
-export function permissionAnswerOf(event: KeyboardEventLike): boolean | null {
+// 欄は出た時に focus を取るので、入力欄で打っていた続きの打鍵を答えにしない。
+const ANSWER_AFTER_MS = 500
+
+/** 1 は許す、2 は断る。修飾キー付き・変換中・押しっぱなし・出てすぐは答えにしない。 */
+export function permissionAnswerOf(event: KeyboardEventLike, shownForMs: number): boolean | null {
   if (event.metaKey || event.ctrlKey || event.altKey || event.shiftKey || event.isComposing) {
     return null
   }
+  if (event.repeat || shownForMs < ANSWER_AFTER_MS) return null
   return event.key === '1' ? true : event.key === '2' ? false : null
 }
 
@@ -147,7 +163,11 @@ export function PermissionPrompt({
   onAnswer: (allow: boolean) => void
 }) {
   const panel = useRef<HTMLDivElement>(null)
-  useEffect(() => panel.current?.focus(), [])
+  const shownAt = useRef(0)
+  useEffect(() => {
+    shownAt.current = performance.now()
+    panel.current?.focus()
+  }, [])
   return (
     <div
       ref={panel}
@@ -155,7 +175,10 @@ export function PermissionPrompt({
       role="group"
       aria-label="箱の外で走らせてよいか"
       onKeyDown={(event) => {
-        const allow = permissionAnswerOf({ ...event, isComposing: event.nativeEvent.isComposing })
+        const allow = permissionAnswerOf(
+          { ...event, isComposing: event.nativeEvent.isComposing },
+          performance.now() - shownAt.current,
+        )
         if (allow === null) return
         event.preventDefault()
         onAnswer(allow)
@@ -167,7 +190,7 @@ export function PermissionPrompt({
         箱の外で走らせてよいか
       </p>
       <pre className="rounded-lg bg-muted px-3 py-2 font-mono text-[13px] break-all whitespace-pre-wrap">
-        {permission.text}
+        {visibleCommand(permission.text)}
       </pre>
       <p className="text-[13px] text-muted-foreground">
         {permission.reason ?? '理由は書かれていない'}

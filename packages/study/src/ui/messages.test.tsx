@@ -4,11 +4,13 @@ import { renderToStaticMarkup } from 'react-dom/server'
 
 import type { StudyMessage } from '../contract.ts'
 import {
+  commandLine,
   currentTutor,
   type KeyboardEventLike,
   MessageView,
   permissionAnswerOf,
   PermissionPrompt,
+  visibleCommand,
 } from './messages.tsx'
 
 const DIR = '/home/u/.monica/studies/study-1'
@@ -91,8 +93,8 @@ test('a tutor_switch row reads that the Tutor changed', () => {
 })
 
 test.each<['allowed' | 'denied', string]>([
-  ['allowed', '<code>docker ps &lt;b&gt;</code> を許した'],
-  ['denied', '<code>docker ps &lt;b&gt;</code> を断った'],
+  ['allowed', '<code>docker ps &lt;b&gt; …（複数行）</code> を許した'],
+  ['denied', '<code>docker ps &lt;b&gt; …（複数行）</code> を断った'],
 ])(
   'an %s permission row reads as one line with the first line of the command as text',
   (state, line) => {
@@ -115,6 +117,14 @@ test('the prompt shows the whole command and the reason as text, not HTML', () =
   expect(html).toContain('断る')
 })
 
+test('the prompt shows a bidi control in the command visibly', () => {
+  const html = renderToStaticMarkup(
+    <PermissionPrompt permission={permission('pending', 'cat a\u202Eb')} onAnswer={() => {}} />,
+  )
+
+  expect(html).toContain('cat a\\u{202e}b</pre>')
+})
+
 test('the prompt without a reason says that none was given', () => {
   const html = renderToStaticMarkup(
     <PermissionPrompt permission={permission('pending', 'ls', null)} onAnswer={() => {}} />,
@@ -132,12 +142,31 @@ test.each<[string, Partial<KeyboardEventLike>, boolean | null]>([
   ['⌥1', { key: '1', altKey: true }, null],
   ['⇧1', { key: '1', shiftKey: true }, null],
   ['1 while composing', { key: '1', isComposing: true }, null],
+  ['1 held down', { key: '1', repeat: true }, null],
 ])('the key %s answers the prompt with %p', (_name, event, answer) => {
-  expect(permissionAnswerOf({ ...noKeys, ...event })).toBe(answer)
+  expect(permissionAnswerOf({ ...noKeys, ...event }, 500)).toBe(answer)
+})
+
+test('a key within 500ms of the prompt showing is not an answer, so a 1 typed into the input does not allow', () => {
+  expect(permissionAnswerOf({ ...noKeys, key: '1' }, 499)).toBeNull()
+  expect(permissionAnswerOf({ ...noKeys, key: '1' }, 500)).toBe(true)
+})
+
+test('bidi controls, zero-width characters, CR and other control characters in a command show as \\u{…}', () => {
+  expect(visibleCommand('rm -rf /tmp/\u202Egnp.sh\u2066x\u200By\uFEFF\r\x07z\x7F')).toBe(
+    'rm -rf /tmp/\\u{202e}gnp.sh\\u{2066}x\\u{200b}y\\u{feff}\\u{d}\\u{7}z\\u{7f}',
+  )
+  expect(visibleCommand('ls\n\t-la')).toBe('ls\n\t-la')
+})
+
+test('the history line of a command is its first line shown visibly, marked when more lines follow', () => {
+  expect(commandLine('docker ps')).toBe('docker ps')
+  expect(commandLine('echo a\u202E\necho b')).toBe('echo a\\u{202e} …（複数行）')
 })
 
 const noKeys: KeyboardEventLike = {
   key: '',
+  repeat: false,
   metaKey: false,
   ctrlKey: false,
   altKey: false,
