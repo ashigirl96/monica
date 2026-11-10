@@ -3,13 +3,16 @@ import {
   chmodSync,
   existsSync,
   mkdirSync,
+  mkdtempSync,
   readdirSync,
   readFileSync,
+  realpathSync,
   renameSync,
   rmSync,
   symlinkSync,
   writeFileSync,
 } from 'node:fs'
+import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
 import { eq, sql } from 'drizzle-orm'
@@ -42,6 +45,7 @@ test('remove moves the Study dir to trash/studies/<id>/tree, deletes the Study w
   await until(() => fake.claudes.length === 1)
   fake.claudes[0]!.emit(init('session-a'), said('hi'), result())
   await watch.ended()
+  const realDir = realpathSync(dir)
 
   await client.remove({ id })
 
@@ -56,8 +60,28 @@ test('remove moves the Study dir to trash/studies/<id>/tree, deletes the Study w
   expect((await client.list({})).studies.map((s) => s.id)).toEqual([other.id])
   expect(readFileSync(preference, 'utf8')).toBe('short answers\n')
   await until(() => deletedSessions.length === 1)
-  expect(deletedSessions).toEqual([{ sessionId: 'session-a', dir }])
+  expect(deletedSessions).toEqual([{ sessionId: 'session-a', dir: realDir }])
   await expect(client.remove({ id })).rejects.toMatchObject({ code: 'NOT_FOUND' })
+})
+
+test('remove deletes the claude session under the real path of the Study dir when the home is reached through a symlink', async () => {
+  const real = realpathSync(mkdtempSync(join(tmpdir(), 'monica-study-real-')))
+  const link = join(realpathSync(tmpdir()), `monica-study-link-${crypto.randomUUID()}`)
+  symlinkSync(real, link)
+  cleanups.push(() => rmSync(real, { recursive: true, force: true }))
+  cleanups.push(() => rmSync(link, { force: true }))
+  const { client, fake, deletedSessions } = setup({ home: link })
+  const { id } = await client.start({})
+  const watch = await watching(client, id)
+  await client.send({ id, text: 'hello' })
+  await until(() => fake.claudes.length === 1)
+  fake.claudes[0]!.emit(init('session-a'), said('hi'), result())
+  await watch.ended()
+
+  await client.remove({ id })
+
+  await until(() => deletedSessions.length === 1)
+  expect(deletedSessions).toEqual([{ sessionId: 'session-a', dir: join(real, 'studies', id) }])
 })
 
 test('remove of a Study without its dir deletes the row', async () => {

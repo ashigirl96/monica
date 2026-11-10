@@ -7,6 +7,7 @@ import {
   openSync,
   readdirSync,
   readSync,
+  realpathSync,
   renameSync,
   rmSync,
   writeSync,
@@ -781,6 +782,8 @@ function makeLedger(deps: {
         const tree = join(trashed, 'tree')
         mkdirSync(trashed, { recursive: true })
         const moved = existsSync(dir)
+        // claude は記録の dir 名を cwd の realpath から作るので、symlink を通る path では消せない。
+        const sessionDir = moved ? realpathSync(dir) : dir
         try {
           if (moved) renameSync(dir, tree)
         } catch (error) {
@@ -797,7 +800,7 @@ function makeLedger(deps: {
         events.publish(id, null)
         const deleteSession = deps.deleteSession ?? sdkDeleteSession
         for (const sessionId of sessionIds) {
-          deleteSession(sessionId, { dir }).catch((error: unknown) =>
+          deleteSession(sessionId, { dir: sessionDir }).catch((error: unknown) =>
             console.error(
               `[study] could not delete the claude session ${sessionId} of ${id}: ${(error as Error).message}`,
             ),
