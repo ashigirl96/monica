@@ -22,13 +22,33 @@ export const VARIANTS = [
   { key: 'A', name: '会話が真ん中' },
   { key: 'B', name: '成果物が本、会話は脇' },
   { key: 'C', name: '1 本の流れ' },
+  { key: 'D', name: '組み合わせ：左に木、右に中身' },
+  { key: 'E', name: 'Study は左、成果物は右' },
+  { key: 'F', name: '表紙と会話' },
 ] as const
 export type VariantKey = (typeof VARIANTS)[number]['key']
 
-export function useVariant(): VariantKey {
-  const search = useSyncExternalStore(subscribe, () => window.location.search)
+export function variantOf(search: string): VariantKey {
   const v = new URLSearchParams(search).get('variant')
   return VARIANTS.some((x) => x.key === v) ? (v as VariantKey) : 'A'
+}
+
+export function useVariant(): VariantKey {
+  return variantOf(useSyncExternalStore(subscribe, () => window.location.search))
+}
+
+/** ⌥N で新しい会話（新しい Study）の画面に移る。⌘N は Chrome の tab では page に届かないので、note の「作る」と同じ ⌥N にする。 */
+export function useNewStudyKey(variant: VariantKey) {
+  useEffect(() => {
+    if (!['D', 'E', 'F'].includes(variant)) return
+    const onKey = (e: KeyboardEvent) => {
+      if (!e.altKey || e.metaKey || e.ctrlKey || e.shiftKey || e.code !== 'KeyN') return
+      e.preventDefault()
+      go(studyHref('/studies', variant))
+    }
+    window.addEventListener('keydown', onKey, true)
+    return () => window.removeEventListener('keydown', onKey, true)
+  }, [variant])
 }
 
 export function studyHref(path: string, variant: VariantKey): string {

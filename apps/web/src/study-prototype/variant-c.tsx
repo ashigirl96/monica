@@ -6,7 +6,7 @@ import { useEffect, useState } from 'react'
 
 import { Button } from '../../../../packages/chat/src/ui/fluid/button.tsx'
 import { InputMessage } from '../../../../packages/chat/src/ui/fluid/input-message.tsx'
-import { actions, activeConversation, type Message, missionLine, type Study, useStudies } from './data.ts'
+import { actions, activeConversation, type Conversation, type Message, missionLine, type Study, useStudies } from './data.ts'
 import {
   artifactLabel,
   artifactPaths,
@@ -18,36 +18,47 @@ import {
   Prose,
   ShellCommand,
   studyHref,
+  type VariantKey,
 } from './parts.tsx'
 
-function bucket(s: Study): string {
+export const BUCKETS = ['今日', 'この 1 週間', 'それより前', 'しばらく触っていない']
+
+export function bucket(s: Study): string {
   if (s.lastActivity >= '2026-11-10') return '今日'
   if (s.lastActivity >= '2026-11-03') return 'この 1 週間'
   if (s.lastActivity >= '2026-08-10') return 'それより前'
   return 'しばらく触っていない'
 }
 
-export function ListC() {
-  const studies = [...useStudies()].sort((a, b) => b.lastActivity.localeCompare(a.lastActivity))
+export function ListC({ variant = 'C' }: { variant?: VariantKey }) {
   const [mission, setMission] = useState('')
-  const groups = ['今日', 'この 1 週間', 'それより前', 'しばらく触っていない']
   return (
     <div className="mx-auto w-full max-w-2xl px-6 pt-20 pb-24">
       <form
         onSubmit={(e) => {
           e.preventDefault()
-          if (mission.trim()) go(studyHref(`/studies/${actions.start(mission.trim())}`, 'C'))
+          if (mission.trim()) go(studyHref(`/studies/${actions.start(mission.trim())}`, variant))
         }}
         className="mb-12"
       >
         <input
+          autoFocus
           value={mission}
           onChange={(e) => setMission(e.target.value)}
           placeholder="何を学ぶ？"
           className="w-full rounded-2xl bg-surface-3 px-5 py-4 text-title shadow-surface-4 outline-none"
         />
       </form>
-      {groups.map((g) => {
+      <RecencyList variant={variant} />
+    </div>
+  )
+}
+
+export function RecencyList({ variant }: { variant: VariantKey }) {
+  const studies = [...useStudies()].sort((a, b) => b.lastActivity.localeCompare(a.lastActivity))
+  return (
+    <>
+      {BUCKETS.map((g) => {
         const items = studies.filter((s) => bucket(s) === g)
         if (items.length === 0) return null
         const sunk = g === 'しばらく触っていない'
@@ -59,7 +70,7 @@ export function ListC() {
                 <button
                   key={s.id}
                   type="button"
-                  onClick={() => go(studyHref(`/studies/${s.short}`, 'C'))}
+                  onClick={() => go(studyHref(`/studies/${s.short}`, variant))}
                   className="flex flex-col gap-0.5 rounded-lg px-2 py-2 text-left hover:bg-hover"
                 >
                   <span className="text-subtitle">{missionLine(s)}</span>
@@ -80,11 +91,11 @@ export function ListC() {
           </section>
         )
       })}
-    </div>
+    </>
   )
 }
 
-function PermissionPrompt({ study, m }: { study: Study; m: Extract<Message, { kind: 'permission' }> }) {
+export function PermissionPrompt({ study, m }: { study: Study; m: Extract<Message, { kind: 'permission' }> }) {
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key === '1') actions.answer(study.id, m.id, true)
@@ -113,7 +124,7 @@ function PermissionPrompt({ study, m }: { study: Study; m: Extract<Message, { ki
   )
 }
 
-function PermissionDone({ m }: { m: Extract<Message, { kind: 'permission' }> }) {
+export function PermissionDone({ m }: { m: Extract<Message, { kind: 'permission' }> }) {
   if (m.state === 'pending') return null
   return (
     <div className="flex items-center gap-1.5 text-caption text-muted-foreground">
@@ -124,7 +135,7 @@ function PermissionDone({ m }: { m: Extract<Message, { kind: 'permission' }> }) 
   )
 }
 
-function Drawer({ study, path, onOpen, onClose }: { study: Study; path: string; onOpen: (p: string) => void; onClose: () => void }) {
+export function Drawer({ study, path, onOpen, onClose }: { study: Study; path: string; onOpen: (p: string) => void; onClose: () => void }) {
   return (
     <div className="fixed inset-y-0 right-0 z-30 flex w-[34rem] flex-col bg-surface-5 shadow-surface-7">
       <div className="flex items-center gap-1 border-b border-border px-3 py-2">
@@ -150,10 +161,57 @@ function Drawer({ study, path, onOpen, onClose }: { study: Study; path: string; 
   )
 }
 
+export function ConversationPicker({ study, selected, onSelect }: { study: Study; selected: Conversation; onSelect: (id: string) => void }) {
+  const [picker, setPicker] = useState(false)
+  const conversation = selected
+  const setSelected = onSelect
+  return (
+    <div className="relative">
+      <button type="button" onClick={() => setPicker((p) => !p)} className="flex items-center gap-1 rounded-md px-2 py-1 text-caption text-muted-foreground hover:bg-hover">
+        会話 {conversation.n}
+        {conversation.endedAt ? '（終わり）' : '（続いている）'}
+        <ChevronDown className="size-3" />
+      </button>
+      {picker && (
+        <div className="absolute top-full left-0 z-30 mt-1 w-72 rounded-xl bg-surface-4 p-1 shadow-surface-4">
+          {[...study.conversations].reverse().map((c) => (
+            <button
+              key={c.id}
+              type="button"
+              onClick={() => {
+                setSelected(c.id)
+                setPicker(false)
+              }}
+              className="flex w-full flex-col rounded-lg px-2.5 py-1.5 text-left hover:bg-hover"
+            >
+              <span className="text-caption">
+                会話 {c.n}・{c.startedAt}
+                {!c.endedAt && '（続いている）'}
+              </span>
+              {c.reflection && <span className="line-clamp-1 text-micro text-muted-foreground">{c.reflection.replace(/`/g, '')}</span>}
+            </button>
+          ))}
+          <button
+            type="button"
+            onClick={() => {
+              actions.newConversation(study.id)
+              setSelected(`c${study.conversations.length + 1}`)
+              setPicker(false)
+            }}
+            className="mt-1 flex w-full items-center gap-1.5 rounded-lg border-t border-border px-2.5 py-1.5 text-caption hover:bg-hover"
+          >
+            <Plus className="size-3.5" />
+            新しい会話を始める（今の会話は終わる）
+          </button>
+        </div>
+      )}
+    </div>
+  )
+}
+
 export function ScreenC({ study }: { study: Study }) {
   const active = activeConversation(study)
   const [selected, setSelected] = useState(active?.id ?? study.conversations.at(-1)!.id)
-  const [picker, setPicker] = useState(false)
   const [info, setInfo] = useState(false)
   const [drawer, setDrawer] = useState<string | null>(null)
   const [draft, setDraft] = useState('')
@@ -169,46 +227,7 @@ export function ScreenC({ study }: { study: Study }) {
           <ArrowLeft />
         </Button>
         <span className="min-w-0 truncate text-subtitle font-medium">{missionLine(study)}</span>
-        <div className="relative">
-          <button type="button" onClick={() => setPicker((p) => !p)} className="flex items-center gap-1 rounded-md px-2 py-1 text-caption text-muted-foreground hover:bg-hover">
-            会話 {conversation.n}
-            {conversation.endedAt ? '（終わり）' : '（続いている）'}
-            <ChevronDown className="size-3" />
-          </button>
-          {picker && (
-            <div className="absolute top-full left-0 z-30 mt-1 w-72 rounded-xl bg-surface-4 p-1 shadow-surface-4">
-              {[...study.conversations].reverse().map((c) => (
-                <button
-                  key={c.id}
-                  type="button"
-                  onClick={() => {
-                    setSelected(c.id)
-                    setPicker(false)
-                  }}
-                  className="flex w-full flex-col rounded-lg px-2.5 py-1.5 text-left hover:bg-hover"
-                >
-                  <span className="text-caption">
-                    会話 {c.n}・{c.startedAt}
-                    {!c.endedAt && '（続いている）'}
-                  </span>
-                  {c.reflection && <span className="line-clamp-1 text-micro text-muted-foreground">{c.reflection.replace(/`/g, '')}</span>}
-                </button>
-              ))}
-              <button
-                type="button"
-                onClick={() => {
-                  actions.newConversation(study.id)
-                  setSelected(`c${study.conversations.length + 1}`)
-                  setPicker(false)
-                }}
-                className="mt-1 flex w-full items-center gap-1.5 rounded-lg border-t border-border px-2.5 py-1.5 text-caption hover:bg-hover"
-              >
-                <Plus className="size-3.5" />
-                新しい会話を始める（今の会話は終わる）
-              </button>
-            </div>
-          )}
-        </div>
+        <ConversationPicker study={study} selected={conversation} onSelect={setSelected} />
         <div className="ml-auto flex items-center gap-1">
           <Button size="compact" variant="ghost" leadingIcon={Library} onClick={() => setDrawer(drawer ? null : 'MISSION.md')}>
             成果物

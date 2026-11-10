@@ -1,18 +1,22 @@
-// PROTOTYPE（Study の画面の試作、捨てる）: note の画面に Study の試作を差し込む。案は ?variant=A|B|C で切り替える。
+// PROTOTYPE（Study の画面の試作、捨てる）: note の画面に Study の試作を差し込む。案は ?variant=A〜F で切り替える。
 import { studyPrototypeSlots } from '@monica/note/ui'
 import { GraduationCap } from 'lucide-react'
 
 import { missionLine, useStudies, useStudy } from './data.ts'
-import { go, PrototypeSwitcher, studyHref, useVariant } from './parts.tsx'
+import { go, PrototypeSwitcher, studyHref, useNewStudyKey, useVariant, variantOf } from './parts.tsx'
 import { ListA, ScreenA } from './variant-a.tsx'
 import { ListB, ScreenB } from './variant-b.tsx'
 import { ListC, ScreenC } from './variant-c.tsx'
+import { NewChatD, ScreenD } from './variant-d.tsx'
+import { NewE, ScreenE } from './variant-e.tsx'
+import { ScreenF } from './variant-f.tsx'
 
-const LISTS = { A: ListA, B: ListB, C: ListC }
-const SCREENS = { A: ScreenA, B: ScreenB, C: ScreenC }
+const LISTS = { A: ListA, B: ListB, C: ListC, D: NewChatD, E: NewE, F: () => <ListC variant="F" /> }
+const SCREENS = { A: ScreenA, B: ScreenB, C: ScreenC, D: ScreenD, E: ScreenE, F: ScreenF }
 
 function StudyPage({ pathname }: { pathname: string }) {
   const variant = useVariant()
+  useNewStudyKey(variant)
   const id = /^\/studies\/([^/]+)/.exec(pathname)?.[1]
   const study = useStudy(id ?? '')
   const List = LISTS[variant]
@@ -66,7 +70,7 @@ studyPrototypeSlots.rail = (active) => (
     aria-current={active ? 'page' : undefined}
     onClick={(e) => {
       e.preventDefault()
-      go(studyHref('/studies', new URLSearchParams(location.search).get('variant') === 'B' ? 'B' : new URLSearchParams(location.search).get('variant') === 'C' ? 'C' : 'A'))
+      go(studyHref('/studies', variantOf(location.search)))
     }}
     className={`flex size-9 items-center justify-center rounded-lg transition-colors ${
       active ? 'bg-muted text-foreground' : 'text-muted-foreground/60 hover:bg-muted/60 hover:text-muted-foreground'

@@ -218,13 +218,7 @@ function PermissionLine({ m }: { m: Extract<Message, { kind: 'permission' }> }) 
   )
 }
 
-function Index({ study, path, onOpen }: { study: Study; path: string; onOpen: (p: string) => void }) {
-  const [armed, setArmed] = useState(false)
-  useEffect(() => {
-    if (!armed) return
-    const t = setTimeout(() => setArmed(false), 3000)
-    return () => clearTimeout(t)
-  }, [armed])
+export function ArtifactTree({ study, path, onOpen }: { study: Study; path: string | null; onOpen: (p: string) => void }) {
   const paths = artifactPaths(study)
   const top = paths.filter((p) => !p.includes('/'))
   const records = paths.filter((p) => p.startsWith('learning-records/'))
@@ -240,20 +234,32 @@ function Index({ study, path, onOpen }: { study: Study; path: string; onOpen: (p
     </button>
   )
   return (
-    <nav className="flex min-h-0 flex-col overflow-y-auto border-r border-border p-3">
-      <button type="button" onClick={() => go(studyHref('/studies', 'B'))} className="mb-3 self-start text-micro text-muted-foreground hover:text-foreground">
-        ← Study の一覧
-      </button>
-      <span className="mb-3 text-title font-semibold">{study.title}</span>
-      <div className="flex flex-col gap-0.5">
+    <div className="flex flex-col gap-0.5">
         {top.slice(0, 2).map((p) => item(p, artifactLabel(p)))}
         <span className="mt-1 flex items-center gap-1.5 px-2 py-1 text-caption text-muted-foreground">
           <Folder className="size-3.5" />
           学習記録
         </span>
         <div className="flex flex-col gap-0.5 pl-3">{records.map((p) => item(p, p.slice(17, 21) + ' ' + (study.artifacts[p]?.split('\n')[0]?.replace(/^# \d+ /, '') ?? '')))}</div>
-        {top.slice(2).map((p) => item(p, artifactLabel(p)))}
-      </div>
+      {top.slice(2).map((p) => item(p, artifactLabel(p)))}
+    </div>
+  )
+}
+
+function Index({ study, path, onOpen }: { study: Study; path: string; onOpen: (p: string) => void }) {
+  const [armed, setArmed] = useState(false)
+  useEffect(() => {
+    if (!armed) return
+    const t = setTimeout(() => setArmed(false), 3000)
+    return () => clearTimeout(t)
+  }, [armed])
+  return (
+    <nav className="flex min-h-0 flex-col overflow-y-auto border-r border-border p-3">
+      <button type="button" onClick={() => go(studyHref('/studies', 'B'))} className="mb-3 self-start text-micro text-muted-foreground hover:text-foreground">
+        ← Study の一覧
+      </button>
+      <span className="mb-3 text-title font-semibold">{study.title}</span>
+      <ArtifactTree study={study} path={path} onOpen={onOpen} />
 
       <div className="mt-auto flex flex-col gap-3 border-t border-border pt-3">
         <div className="flex flex-col gap-1.5">

@@ -5,7 +5,7 @@ import { useState } from 'react'
 
 import { Button } from '../../../../packages/chat/src/ui/fluid/button.tsx'
 import { InputMessage } from '../../../../packages/chat/src/ui/fluid/input-message.tsx'
-import { actions, activeConversation, type Message, missionLine, pendingPermission, type Study, useStudies } from './data.ts'
+import { actions, activeConversation, type Conversation, type Message, missionLine, pendingPermission, type Study, useStudies } from './data.ts'
 import {
   artifactLabel,
   artifactPaths,
@@ -112,6 +112,22 @@ function PermissionCard({ study, m }: { study: Study; m: Extract<Message, { kind
   )
 }
 
+export function ArtifactView({ study, path, onOpen }: { study: Study; path: string; onOpen: (p: string) => void }) {
+  return (
+    <>
+      <div className="min-h-0 flex-1 overflow-y-auto px-5 py-4">
+        <Prose text={study.artifacts[path] ?? '（無い）'} from={path} onOpen={onOpen} />
+      </div>
+      <div className="flex items-center justify-between border-t border-border px-3 py-2">
+        <span className="truncate font-mono text-micro text-muted-foreground">~/.monica/studies/{study.id.slice(0, 14)}…/{path}</span>
+        <Button size="compact" variant="ghost" leadingIcon={ExternalLink} className="shrink-0">
+          エディタで開く
+        </Button>
+      </div>
+    </>
+  )
+}
+
 function ArtifactPane({ study, path, onOpen }: { study: Study; path: string; onOpen: (p: string) => void }) {
   const paths = artifactPaths(study)
   return (
@@ -128,16 +144,118 @@ function ArtifactPane({ study, path, onOpen }: { study: Study; path: string; onO
           </button>
         ))}
       </div>
-      <div className="min-h-0 flex-1 overflow-y-auto px-5 py-4">
-        <Prose text={study.artifacts[path] ?? '（無い）'} from={path} onOpen={onOpen} />
-      </div>
-      <div className="flex items-center justify-between border-t border-border px-3 py-2">
-        <span className="truncate font-mono text-micro text-muted-foreground">~/.monica/studies/{study.id.slice(0, 14)}…/{path}</span>
-        <Button size="compact" variant="ghost" leadingIcon={ExternalLink}>
-          エディタで開く
-        </Button>
-      </div>
+      <ArtifactView study={study} path={path} onOpen={onOpen} />
     </aside>
+  )
+}
+
+export function ChatColumn({ study, conversation, onOpen }: { study: Study; conversation: Conversation; onOpen: (p: string) => void }) {
+  const [draft, setDraft] = useState('')
+  const pending = conversation.messages.some((m) => m.kind === 'permission' && m.state === 'pending')
+  return (
+    <section className="flex min-h-0 flex-col">
+      <div className="min-h-0 flex-1 overflow-y-auto">
+        <div className="mx-auto flex max-w-2xl flex-col gap-4 px-6 py-6">
+          <MessageList
+            messages={conversation.messages}
+            thinking={conversation.thinking}
+            onOpen={onOpen}
+            permission={(m) => <PermissionCard study={study} m={m} />}
+          />
+          {conversation.reflection && (
+            <div className="mt-2 rounded-xl border border-dashed border-border p-3">
+              <div className="mb-1 text-micro text-muted-foreground">振り返り（会話の終わりに Tutor が書いた）</div>
+              <Prose text={conversation.reflection} />
+            </div>
+          )}
+        </div>
+      </div>
+      <div className="mx-auto w-full max-w-2xl px-6 pb-4">
+        {conversation.endedAt ? (
+          <p className="py-3 text-center text-caption text-muted-foreground">この会話は終わっている。読めるが、続けられない。</p>
+        ) : (
+          <>
+            {pending && <p className="pb-1.5 text-caption text-muted-foreground">許可に答えるまで、Tutor は止まっている。</p>}
+            <InputMessage
+              value={draft}
+              onValueChange={setDraft}
+              disabled={pending}
+              onSend={(t) => {
+                actions.send(study.id, t)
+                setDraft('')
+              }}
+              placeholder="Tutor に話す"
+              sendLabel="送る"
+            />
+          </>
+        )}
+      </div>
+    </section>
+  )
+}
+
+export function MoreMenu({ study, after }: { study: Study; after: string }) {
+  const [menu, setMenu] = useState(false)
+  const [confirming, setConfirming] = useState(false)
+  const [typed, setTyped] = useState('')
+  return (
+    <div className="relative">
+      <Button size="icon-sm" variant="ghost" aria-label="その他" onClick={() => setMenu((m) => !m)}>
+        <MoreHorizontal />
+      </Button>
+      {menu && (
+        <div className="absolute top-full right-0 z-30 mt-1 w-40 rounded-xl bg-surface-4 p-1 shadow-surface-4">
+          <button
+            type="button"
+            onClick={() => {
+              setMenu(false)
+              setConfirming(true)
+            }}
+            className="flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-caption text-destructive hover:bg-hover"
+          >
+            <Trash2 className="size-3.5" />
+            Study を消す
+          </button>
+        </div>
+      )}
+      {confirming && (
+        <Dialog onClose={() => setConfirming(false)}>
+          <h2 className="mb-2 text-title font-semibold">Study を消す</h2>
+          <p className="mb-2 text-body">次のものを取り消せない形で消す。Learning Preference は残る。</p>
+          <ul className="mb-3 list-disc pl-5 text-caption text-muted-foreground">
+            {DELETED_THINGS.map((t) => (
+              <li key={t}>{t}</li>
+            ))}
+          </ul>
+          <p className="mb-1.5 text-caption">
+            確かめるため <code>{study.short}</code> と打つ
+          </p>
+          <input
+            autoFocus
+            value={typed}
+            onChange={(e) => setTyped(e.target.value)}
+            className="mb-4 w-full rounded-lg bg-muted px-2 py-1.5 font-mono text-body outline-none"
+          />
+          <div className="flex justify-end gap-2">
+            <Button variant="secondary" size="compact" onClick={() => setConfirming(false)}>
+              やめる
+            </Button>
+            <Button
+              variant="primary"
+              size="compact"
+              disabled={typed !== study.short}
+              className="bg-destructive!"
+              onClick={() => {
+                actions.remove(study.id)
+                go(after)
+              }}
+            >
+              消す
+            </Button>
+          </div>
+        </Dialog>
+      )}
+    </div>
   )
 }
 
@@ -145,12 +263,7 @@ export function ScreenA({ study }: { study: Study }) {
   const active = activeConversation(study)
   const [selected, setSelected] = useState<string>(active?.id ?? study.conversations.at(-1)!.id)
   const [path, setPath] = useState('MISSION.md')
-  const [draft, setDraft] = useState('')
-  const [menu, setMenu] = useState(false)
-  const [confirming, setConfirming] = useState(false)
-  const [typed, setTyped] = useState('')
   const conversation = study.conversations.find((c) => c.id === selected) ?? study.conversations.at(-1)!
-  const pending = conversation.messages.some((m) => m.kind === 'permission' && m.state === 'pending')
 
   return (
     <div className="grid h-dvh grid-rows-[auto_1fr]">
@@ -168,26 +281,7 @@ export function ScreenA({ study }: { study: Study }) {
         <div className="w-80">
           <ShellCommand study={study} />
         </div>
-        <div className="relative">
-          <Button size="icon-sm" variant="ghost" aria-label="その他" onClick={() => setMenu((m) => !m)}>
-            <MoreHorizontal />
-          </Button>
-          {menu && (
-            <div className="absolute top-full right-0 z-30 mt-1 w-40 rounded-xl bg-surface-4 p-1 shadow-surface-4">
-              <button
-                type="button"
-                onClick={() => {
-                  setMenu(false)
-                  setConfirming(true)
-                }}
-                className="flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-caption text-destructive hover:bg-hover"
-              >
-                <Trash2 className="size-3.5" />
-                Study を消す
-              </button>
-            </div>
-          )}
-        </div>
+        <MoreMenu study={study} after={studyHref('/studies', 'A')} />
       </header>
 
       <div className="grid min-h-0 grid-cols-[13rem_1fr_26rem]">
@@ -222,85 +316,10 @@ export function ScreenA({ study }: { study: Study }) {
           ))}
         </nav>
 
-        <section className="flex min-h-0 flex-col">
-          <div className="min-h-0 flex-1 overflow-y-auto">
-            <div className="mx-auto flex max-w-2xl flex-col gap-4 px-6 py-6">
-              <MessageList
-                messages={conversation.messages}
-                thinking={conversation.thinking}
-                onOpen={setPath}
-                permission={(m) => <PermissionCard study={study} m={m} />}
-              />
-              {conversation.reflection && (
-                <div className="mt-2 rounded-xl border border-dashed border-border p-3">
-                  <div className="mb-1 text-micro text-muted-foreground">振り返り（会話の終わりに Tutor が書いた）</div>
-                  <Prose text={conversation.reflection} />
-                </div>
-              )}
-            </div>
-          </div>
-          <div className="mx-auto w-full max-w-2xl px-6 pb-4">
-            {conversation.endedAt ? (
-              <p className="py-3 text-center text-caption text-muted-foreground">この会話は終わっている。読めるが、続けられない。</p>
-            ) : (
-              <>
-                {pending && <p className="pb-1.5 text-caption text-muted-foreground">許可に答えるまで、Tutor は止まっている。</p>}
-                <InputMessage
-                  value={draft}
-                  onValueChange={setDraft}
-                  disabled={pending}
-                  onSend={(t) => {
-                    actions.send(study.id, t)
-                    setDraft('')
-                  }}
-                  placeholder="Tutor に話す"
-                  sendLabel="送る"
-                />
-              </>
-            )}
-          </div>
-        </section>
+        <ChatColumn study={study} conversation={conversation} onOpen={setPath} />
 
         <ArtifactPane study={study} path={path} onOpen={setPath} />
       </div>
-
-      {confirming && (
-        <Dialog onClose={() => setConfirming(false)}>
-          <h2 className="mb-2 text-title font-semibold">Study を消す</h2>
-          <p className="mb-2 text-body">次のものを取り消せない形で消す。Learning Preference は残る。</p>
-          <ul className="mb-3 list-disc pl-5 text-caption text-muted-foreground">
-            {DELETED_THINGS.map((t) => (
-              <li key={t}>{t}</li>
-            ))}
-          </ul>
-          <p className="mb-1.5 text-caption">
-            確かめるため <code>{study.short}</code> と打つ
-          </p>
-          <input
-            autoFocus
-            value={typed}
-            onChange={(e) => setTyped(e.target.value)}
-            className="mb-4 w-full rounded-lg bg-muted px-2 py-1.5 font-mono text-body outline-none"
-          />
-          <div className="flex justify-end gap-2">
-            <Button variant="secondary" size="compact" onClick={() => setConfirming(false)}>
-              やめる
-            </Button>
-            <Button
-              variant="primary"
-              size="compact"
-              disabled={typed !== study.short}
-              className="bg-destructive!"
-              onClick={() => {
-                actions.remove(study.id)
-                go(studyHref('/studies', 'A'))
-              }}
-            >
-              消す
-            </Button>
-          </div>
-        </Dialog>
-      )}
     </div>
   )
 }
