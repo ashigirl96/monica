@@ -1,5 +1,5 @@
 import { sql } from 'drizzle-orm'
-import { check, integer, sqliteTable, text, uniqueIndex } from 'drizzle-orm/sqlite-core'
+import { check, index, integer, sqliteTable, text, uniqueIndex } from 'drizzle-orm/sqlite-core'
 
 const timestamp = (name: string) => integer(name, { mode: 'timestamp_ms' })
 
@@ -51,5 +51,21 @@ export const studyMessage = sqliteTable(
       sql`permission_state IS NULL OR permission_state IN ('pending', 'allowed', 'denied')`,
     ),
     check('study_message_permission', sql`(kind = 'permission') = (permission_state IS NOT NULL)`),
+  ],
+)
+
+// repo は紐付けた時の綴りのまま持つ。GitHub の repo 名は大文字と小文字を区別しない。
+export const studyRepo = sqliteTable(
+  'study_repo',
+  {
+    studyId: text('study_id')
+      .notNull()
+      .references(() => study.id, { onDelete: 'cascade' }),
+    repo: text('repo').notNull(),
+    createdAt: timestamp('created_at').notNull(),
+  },
+  (t) => [
+    uniqueIndex('study_repo_per_study_idx').on(t.studyId, sql`lower(repo)`),
+    index('study_repo_repo_idx').on(sql`lower(repo)`),
   ],
 )

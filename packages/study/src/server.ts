@@ -22,6 +22,17 @@ export const router = os.router({
       internals(context.studyLedger).answerPermission(input.id, input.allow),
     ),
   },
+  repo: {
+    link: os.repo.link.handler(({ context, input }) =>
+      internals(context.studyLedger).linkRepo(input.id, input.repo),
+    ),
+    unlink: os.repo.unlink.handler(({ context, input }) =>
+      internals(context.studyLedger).unlinkRepo(input.id, input.repo),
+    ),
+    studies: os.repo.studies.handler(({ context, input }) =>
+      internals(context.studyLedger).studiesOfRepo(input.repo),
+    ),
+  },
   // NOT_FOUND を呼び出しの reject にするため、Study を確かめてから generator を返す。
   watch: os.watch.handler(async ({ context, input, signal }) =>
     internals(context.studyLedger).watch(input.id, signal),

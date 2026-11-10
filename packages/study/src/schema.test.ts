@@ -7,7 +7,7 @@ import { migrate } from 'drizzle-orm/bun-sqlite/migrator'
 import { readMigrationFiles } from 'drizzle-orm/migrator'
 
 import { migrations } from '../migrations/index.ts'
-import { study, studyConversation, studyMessage } from './schema.ts'
+import { study, studyConversation, studyMessage, studyRepo } from './schema.ts'
 
 function inMemoryDb() {
   const sqlite = new Database(':memory:')
@@ -111,4 +111,22 @@ test('adding the permission columns keeps the rows already stored', () => {
   expect(drizzle(sqlite).select().from(studyMessage).all()).toMatchObject([
     { id: 1, kind: 'user', text: 'hi', reason: null, permissionState: null },
   ])
+})
+
+test('removing a Study removes its links to Repos', () => {
+  const db = withStudy()
+  db.insert(studyRepo).values({ studyId: 'study-1', repo: 'acme/alpha', createdAt: at }).run()
+
+  db.delete(study).where(eq(study.id, 'study-1')).run()
+
+  expect(db.select().from(studyRepo).all()).toEqual([])
+})
+
+test('a Study links a Repo once whatever its case', () => {
+  const db = withStudy()
+  db.insert(studyRepo).values({ studyId: 'study-1', repo: 'acme/alpha', createdAt: at }).run()
+
+  expect(() =>
+    db.insert(studyRepo).values({ studyId: 'study-1', repo: 'Acme/Alpha', createdAt: at }).run(),
+  ).toThrow()
 })

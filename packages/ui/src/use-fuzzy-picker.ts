@@ -9,6 +9,8 @@ export type FuzzyPickerModalProps = {
   onClose: () => void
   placeholder?: string
   footer?: string
+  /** 打った文から、並びの最後に足す項目。 */
+  extraItem?: (query: string) => FuzzyPickerItem | null
 }
 
 export function fuzzyMatch(label: string, query: string): boolean {
@@ -28,11 +30,8 @@ export function useFuzzyPicker({
   items,
   onSelect,
   onClose,
-}: {
-  items: FuzzyPickerItem[]
-  onSelect: (key: string | null) => void
-  onClose: () => void
-}) {
+  extraItem,
+}: Pick<FuzzyPickerModalProps, 'items' | 'onSelect' | 'onClose' | 'extraItem'>) {
   const [query, setQueryState] = useState('')
   const [highlightIndex, setHighlightIndex] = useState(0)
   const listRef = useRef<HTMLDivElement>(null)
@@ -42,7 +41,9 @@ export function useFuzzyPicker({
     requestAnimationFrame(() => inputRef.current?.focus())
   }, [])
 
+  const extra = extraItem?.(query) ?? null
   const filtered = items.filter((item) => fuzzyMatch(item.label, query))
+  if (extra !== null) filtered.push(extra)
 
   function setQuery(next: string) {
     setQueryState(next)

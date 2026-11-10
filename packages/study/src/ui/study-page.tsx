@@ -13,6 +13,7 @@ import {
 import { createConversationStore } from './conversation-store.ts'
 import { currentTutor, MessageView, PermissionPrompt, TutorText } from './messages.tsx'
 import { studiesKey } from './new-conversation.tsx'
+import { LinkedRepos } from './repo-links.tsx'
 import {
   FailureLine,
   nameOf,
@@ -52,6 +53,7 @@ export function StudyPage({ id }: { id: string }) {
         <span className="shrink-0 text-[12px] text-muted-foreground">
           Tutor: {currentTutor(messages)}
         </span>
+        <LinkedRepos id={id} />
       </StudyHeader>
       {/* column-reverse で、伸びる会話の下端に scroll が留まる。 */}
       <div className="flex min-h-0 flex-1 flex-col-reverse overflow-y-auto">

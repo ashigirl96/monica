@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "3fc9944f-13f0-4d79-90d9-06fd84a8215c",
+  "id": "e6a586f0-5f00-4306-a7a4-494d4bffee84",
   "prevId": "513bb241-ad27-427c-b9b6-e394c2adac01",
   "tables": {
     "study": {
@@ -147,20 +147,6 @@
           "primaryKey": false,
           "notNull": false,
           "autoincrement": false
-        },
-        "reason": {
-          "name": "reason",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "permission_state": {
-          "name": "permission_state",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
         }
       },
       "indexes": {},
@@ -185,16 +171,69 @@
         "study_message_tool": {
           "name": "study_message_tool",
           "value": "(kind = 'tool') = (tool IS NOT NULL)"
-        },
-        "study_message_permission_state": {
-          "name": "study_message_permission_state",
-          "value": "permission_state IS NULL OR permission_state IN ('pending', 'allowed', 'denied')"
-        },
-        "study_message_permission": {
-          "name": "study_message_permission",
-          "value": "(kind = 'permission') = (permission_state IS NOT NULL)"
         }
       }
+    },
+    "study_repo": {
+      "name": "study_repo",
+      "columns": {
+        "study_id": {
+          "name": "study_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "repo": {
+          "name": "repo",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        }
+      },
+      "indexes": {
+        "study_repo_per_study_idx": {
+          "name": "study_repo_per_study_idx",
+          "columns": [
+            "study_id",
+            "lower(repo)"
+          ],
+          "isUnique": true
+        },
+        "study_repo_repo_idx": {
+          "name": "study_repo_repo_idx",
+          "columns": [
+            "lower(repo)"
+          ],
+          "isUnique": false
+        }
+      },
+      "foreignKeys": {
+        "study_repo_study_id_study_id_fk": {
+          "name": "study_repo_study_id_study_id_fk",
+          "tableFrom": "study_repo",
+          "tableTo": "study",
+          "columnsFrom": [
+            "study_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "checkConstraints": {}
     }
   },
   "views": {},
@@ -205,6 +244,21 @@
     "columns": {}
   },
   "internal": {
-    "indexes": {}
+    "indexes": {
+      "study_repo_per_study_idx": {
+        "columns": {
+          "lower(repo)": {
+            "isExpression": true
+          }
+        }
+      },
+      "study_repo_repo_idx": {
+        "columns": {
+          "lower(repo)": {
+            "isExpression": true
+          }
+        }
+      }
+    }
   }
 }
