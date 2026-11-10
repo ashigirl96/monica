@@ -6,8 +6,9 @@ import type { StudyClient } from './client.ts'
 import { createStudySlots } from './slots.tsx'
 
 // 描くだけで effect も query の取得も走らないので、client は呼ばれない。
-const { slotPage, railItem } = createStudySlots({
+const { slotPage, railItem, repoPanel } = createStudySlots({
   client: {} as StudyClient,
+  repoCandidates: async () => [],
   navigate: () => {},
   spaLinkClick: () => () => {},
 })
@@ -39,4 +40,8 @@ test('a path outside /studies is not drawn', () => {
 
 test('the rail item goes to /studies', () => {
   expect(railItem).toMatchObject({ to: '/studies', label: 'Study' })
+})
+
+test('the Repo panel draws nothing while the Studies of the Repo are loading', () => {
+  expect(renderToStaticMarkup(<>{repoPanel('acme/alpha')}</>)).toBe('')
 })

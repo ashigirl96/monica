@@ -9,6 +9,14 @@ export const StudyIdSchema = z
   .regex(/^study-[0-9a-f-]+$/)
   .describe('study-<uuidv7>')
 
+// note と同じ形。study は note を import しないので写す。
+export const RepoSchema = z
+  .string()
+  .regex(/^[A-Za-z0-9-]+\/[A-Za-z0-9._-]+$/)
+  .describe('owner/repo')
+
+const repos = z.array(RepoSchema).describe('the linked Repos as spelled when linked, in link order')
+
 export const StudyMessageSchema = z.object({
   id: z.number().int().describe('the row number; rows are ordered by it'),
   conversationId: z.string(),
@@ -36,6 +44,13 @@ const firstMessage = z
   .string()
   .nullable()
   .describe('the first line of the first utterance of the first Study Conversation; null before it')
+
+const StudySummarySchema = z.object({
+  id: StudyIdSchema,
+  missionLine,
+  firstMessage,
+  lastActivityAt: z.date(),
+})
 
 export const StudyWatchEventSchema = z.discriminatedUnion('type', [
   z.object({
@@ -75,17 +90,14 @@ export const contract = {
     .output(
       z.object({
         studies: z.array(
-          z.object({
-            id: StudyIdSchema,
-            missionLine,
-            firstMessage,
-            lastActivityAt: z.date(),
+          StudySummarySchema.extend({
             lastLogLine: z
               .string()
               .nullable()
               .describe(
                 'the last non-empty line of log.md that is not a heading, without its leading "- "',
               ),
+            repos,
           }),
         ),
       }),
@@ -103,6 +115,7 @@ export const contract = {
         missionLine,
         firstMessage,
         running: z.boolean().describe('a turn of this Study is running'),
+        repos,
         conversations: z.array(
           z.object({
             id: z.string(),
@@ -127,4 +140,26 @@ export const contract = {
     })
     .input(z.object({ id: StudyIdSchema }))
     .output(eventIterator(StudyWatchEventSchema)),
+  repo: {
+    link: meta
+      .meta({
+        description:
+          'Link a Repo to a Study; a Repo already linked in any case is left as first spelled',
+      })
+      .input(z.object({ id: StudyIdSchema, repo: RepoSchema }))
+      .output(z.object({})),
+    unlink: meta
+      .meta({
+        description: 'Unlink a Repo from a Study in any case; a Repo not linked is no error',
+      })
+      .input(z.object({ id: StudyIdSchema, repo: RepoSchema }))
+      .output(z.object({})),
+    studies: meta
+      .meta({
+        description:
+          'List the Studies linked to a Repo in any case, the most recently active first',
+      })
+      .input(z.object({ repo: RepoSchema }))
+      .output(z.object({ studies: z.array(StudySummarySchema) })),
+  },
 }

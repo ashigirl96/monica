@@ -200,6 +200,7 @@ test('start makes the Study dir under studies with mode 0700, and list shows the
       firstMessage: null,
       lastActivityAt: expect.any(Date),
       lastLogLine: null,
+      repos: [],
     },
   ])
   expect((await client.get({ id })).dir).toBe(join(home, 'studies', id))

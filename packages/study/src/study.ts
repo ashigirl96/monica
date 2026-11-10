@@ -3,13 +3,13 @@ import { join } from 'node:path'
 
 import { query as sdkQuery, type SDKMessage } from '@anthropic-ai/claude-agent-sdk'
 import { EventPublisher, ORPCError } from '@orpc/server'
-import { and, asc, desc, eq, isNull, max } from 'drizzle-orm'
+import { and, asc, desc, eq, isNull, max, sql } from 'drizzle-orm'
 import type { BunSQLiteDatabase } from 'drizzle-orm/bun-sqlite'
 
 import type { AskUser } from './box.ts'
 import { type Claude, type ClaudeDeps, type Query, wakeClaude } from './claude.ts'
 import type { StudyMessage, StudyWatchEvent } from './contract.ts'
-import { study, studyConversation, studyMessage } from './schema.ts'
+import { study, studyConversation, studyMessage, studyRepo } from './schema.ts'
 
 export type Db = BunSQLiteDatabase
 
@@ -100,6 +100,9 @@ function toolText(name: string, input: Record<string, unknown>): string {
   }
 }
 
+// GitHub の repo 名は大文字と小文字を区別しない。
+const isRepo = (repo: string) => eq(sql`lower(${studyRepo.repo})`, repo.toLowerCase())
+
 function makeLedger(deps: {
   db: Db
   home: string
@@ -151,6 +154,25 @@ function makeLedger(deps: {
       .limit(1)
       .get()
     return row ? (row.text.split('\n')[0] ?? null) : null
+  }
+
+  function summary(row: typeof study.$inferSelect) {
+    return {
+      id: row.id,
+      missionLine: missionLine(dirOf(row.id)),
+      firstMessage: firstMessage(row.id),
+      lastActivityAt: row.lastActiveAt,
+    }
+  }
+
+  function reposOf(id: string): string[] {
+    return db
+      .select({ repo: studyRepo.repo })
+      .from(studyRepo)
+      .where(eq(studyRepo.studyId, id))
+      .orderBy(asc(studyRepo.createdAt), asc(sql`rowid`))
+      .all()
+      .map((row) => row.repo)
   }
 
   function insertMessage(
@@ -367,11 +389,9 @@ function makeLedger(deps: {
       const rows = db.select().from(study).orderBy(desc(study.lastActiveAt)).all()
       return {
         studies: rows.map((row) => ({
-          id: row.id,
-          missionLine: missionLine(dirOf(row.id)),
-          firstMessage: firstMessage(row.id),
-          lastActivityAt: row.lastActiveAt,
+          ...summary(row),
           lastLogLine: lastLogLine(dirOf(row.id)),
+          repos: reposOf(row.id),
         })),
       }
     },
@@ -390,6 +410,7 @@ function makeLedger(deps: {
         missionLine: missionLine(dirOf(id)),
         firstMessage: firstMessage(id),
         running: turns.has(id),
+        repos: reposOf(id),
         conversations: conversations.map((conversation) => ({
           id: conversation.id,
           startedAt: conversation.startedAt,
@@ -403,6 +424,33 @@ function makeLedger(deps: {
             .map(toMessage),
         })),
       }
+    },
+
+    linkRepo(id: string, repo: string): Record<string, never> {
+      mustExist(id)
+      db.insert(studyRepo)
+        .values({ studyId: id, repo, createdAt: new Date() })
+        .onConflictDoNothing()
+        .run()
+      return {}
+    },
+
+    unlinkRepo(id: string, repo: string): Record<string, never> {
+      db.delete(studyRepo)
+        .where(and(eq(studyRepo.studyId, id), isRepo(repo)))
+        .run()
+      return {}
+    },
+
+    studiesOfRepo(repo: string) {
+      const rows = db
+        .select({ study })
+        .from(study)
+        .innerJoin(studyRepo, eq(studyRepo.studyId, study.id))
+        .where(isRepo(repo))
+        .orderBy(desc(study.lastActiveAt))
+        .all()
+      return { studies: rows.map((row) => summary(row.study)) }
     },
 
     send(id: string, text: string) {

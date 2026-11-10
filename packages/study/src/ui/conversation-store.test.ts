@@ -71,6 +71,7 @@ class FakeClient implements ConversationClient {
       missionLine: 'Understand ky',
       firstMessage: 'learn ky',
       running: false,
+      repos: [],
       conversations: [
         { id: CONVERSATION, startedAt: new Date(), endedAt: null, messages: [...this.rows] },
       ],
