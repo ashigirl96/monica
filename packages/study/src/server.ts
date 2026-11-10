@@ -22,6 +22,9 @@ export const router = os.router({
       internals(context.studyLedger).endConversation(input.id),
     ),
   },
+  remove: os.remove.handler(({ context, input }) =>
+    internals(context.studyLedger).remove(input.id),
+  ),
   permission: {
     answer: os.permission.answer.handler(({ context, input }) =>
       internals(context.studyLedger).answerPermission(input.id, input.allow),

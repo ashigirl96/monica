@@ -40,6 +40,8 @@ export type Claude = {
   toolUses: Map<string, { name: string; input: Record<string, unknown> }>
   stderrTail(): Promise<string>
   kill(): void
+  /** process が居なくなると解ける。起こす前なら解けている。 */
+  exited(): Promise<void>
 }
 
 export type ClaudeDeps = {
@@ -129,6 +131,7 @@ export function wakeClaude(
   let child: ChildProcessByStdio<Writable, Readable, Readable> | null = null
   let tail = ''
   let stderrClosed: Promise<void> = Promise.resolve()
+  let exited: Promise<void> = Promise.resolve()
   const options: Options = {
     ...box,
     // 渡さないと CLI が最初の発言を丸ごと入れた title 生成の request を別に出す。
@@ -152,6 +155,7 @@ export function wakeClaude(
         detached: true,
       })
       child = spawned
+      exited = new Promise((resolve) => spawned.once('exit', () => resolve()))
       stderrClosed = new Promise((resolve) => spawned.stderr.once('close', resolve))
       spawned.stderr.setEncoding('utf8')
       // 読まずに放った stderr の pipe は詰まって claude が止まる。
@@ -193,5 +197,6 @@ export function wakeClaude(
         // 既に居ない。
       }
     },
+    exited: () => exited,
   }
 }

@@ -141,6 +141,7 @@ export function studyFixture(cleanups: (() => unknown)[]) {
     const home = given?.home ?? mkdtempSync(join(tmpdir(), 'monica-study-'))
     const db = given?.db ?? inMemoryDb()
     const fake = fakeQuery()
+    const deletedSessions: { sessionId: string; dir: string | undefined }[] = []
     const studyLedger = createStudyLedger({
       db,
       home,
@@ -148,6 +149,10 @@ export function studyFixture(cleanups: (() => unknown)[]) {
       tutorsDir: given?.tutorsDir,
       // 既定の tools は手元の本物の docker と nix-store を呼ぶ。
       tools: given?.tools ?? { docker: null, nixStore: null },
+      // 既定は手元の ~/.claude/projects/ の記録を消す。
+      deleteSession: async (sessionId, options) => {
+        deletedSessions.push({ sessionId, dir: options?.dir })
+      },
     })
     const client = createRouterClient(router, { context: { db, studyLedger } })
     cleanups.push(async () => {
@@ -155,7 +160,7 @@ export function studyFixture(cleanups: (() => unknown)[]) {
       await Promise.all(fake.claudes.map((claude) => claude.exited))
       if (!given?.home) rmSync(home, { recursive: true, force: true })
     })
-    return { home, db, fake, client, studyLedger }
+    return { home, db, fake, client, studyLedger, deletedSessions }
   }
 
   async function watching(client: ReturnType<typeof setup>['client'], id: string) {

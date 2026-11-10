@@ -20,6 +20,7 @@
 - `study-artifacts`: 左の成果物の木の項目か、会話の「を書いた」の行を押すと右の欄に中身が出る。成果物の中の相対 link で別の成果物に移る。Tutor が書くと木と開いている欄が読み直される。
 - `study-artifact-editor`: 右の欄の「エディタで開く」で、Zed にその file だけが開く。
 - `study-conversation-end`: 上の欄の会話の選択の「新しい会話を始める」で、Tutor が振り返り（Read・Write・Edit だけ）、報告の 1 行目が選択の終わった会話に添えられる。終わった会話を選ぶと入力欄の代わりに「続いている会話に戻る」が出る。SDK の記録が消えた会話は振り返らずに終わる。1 時間の無発言で終わるのは system の Job `study.conversation-end` で、実機では待たない（`packages/study/src/conversation-end.test.ts`）。
+- `study-remove`: Study の画面の上の欄の ⋯ の「Study を消す」で確かめの窓が開き、短い id を打つと「消す」が押せる。消すと一覧に戻り、Study の dir は `$H/trash/studies/<id>/tree` に移る。捨て場は system の Job `study.trash-sweep`（10 分ごと）が Playground ごと消す。
 
 ## How to get to it (user POV)
 
@@ -64,6 +65,14 @@ Preconditions: 「Driving it with headless の Backend・Vite・agent-browser」
 - **重なる頭と無い頭**: 近い時刻に Study を 2 つ始めると頭 8 文字が重なる。その頭を打つと stderr の 1 行目が `BAD_REQUEST: <頭> matches 2 Studies: …` で exit 1、無い頭は `NOT_FOUND: …` で exit 1、Backend を止めると `BACKEND_NOT_RUNNING: …` で exit 2。
 - **一覧の印**: `sqlite3 $H/monica.db "UPDATE study SET playground_removed_at = <今の ms> WHERE id = '<id>'"` の後に一覧を開き直すと、その行に「Playground は消えた」が出る（Backend は DB を EXCLUSIVE で開くので、止めてから書いて起こし直す）。`monica study shell` で入ると印が消える。
 - **証拠**: 各段の `screenshot` と CLI の stderr・exit code を `$E/study-shell-*` に残す。
+
+## Study を消す
+
+Preconditions: 「Playground と monica study shell」と同じ。docker が動いている。
+
+- **study-remove.** Study を始め、Tutor に Prototype（`prototypes/check`）と label `monica.study=<id>` の付いた container を作らせる（許可の欄で許す）。上の欄の ⋯（aria-label「Study の操作」）から「Study を消す」を押すと確かめの窓が開き、消すもの・「Learning Preference は残る」・「取り消せない」が出る。違う文字を打つと「消す」が押せず、Escape と「やめる」で閉じる。短い id（前後に空白を付けてもよい）を打って「消す」を押すと一覧に戻り、一覧にその Study が無い。`$H/studies/<id>` が無く、`$H/trash/studies/<id>/tree` がある。
+- **捨て場の Job.** `MONICA_HOME=$H bun apps/cli/src/main.ts job run study.trash-sweep` の後に `$H/trash/studies/<id>` が無く、`docker ps -a --filter label=monica.study=<id>` が空。`~/.claude/projects/` の下にその Study の session の `<session id>.jsonl` が無い。`$H/learning-preference/LEARNING-PREFERENCE.md` は残る。
+- **証拠.** 窓と一覧の `screenshot` を `$E/study-remove-*.png` に、`ls` と `docker ps` の出力を `$E/study-remove.txt` に残す。
 
 ## release の build で Tutor の定義を書き出す
 

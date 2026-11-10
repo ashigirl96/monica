@@ -21,6 +21,7 @@ import {
 import { createConversationStore } from './conversation-store.ts'
 import { currentTutor, MessageView, PermissionPrompt, TutorText } from './messages.tsx'
 import { studiesKey } from './new-conversation.tsx'
+import { StudyMenu } from './remove-study.tsx'
 import { LinkedRepos } from './repo-links.tsx'
 import {
   FailureLine,
@@ -85,6 +86,7 @@ export function StudyPage({ id }: { id: string }) {
           }}
         />
         <LinkedRepos id={id} />
+        <StudyMenu id={id} />
       </StudyHeader>
       <div className="flex min-h-0 flex-1">
         <ArtifactTree id={id} selected={openPath} onSelect={setOpenPath} />

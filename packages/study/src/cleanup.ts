@@ -84,8 +84,9 @@ async function nixRootsIn(dir: string, nixStore: Tool, run: Run): Promise<string
   return roots.filter((root) => !invalid.has(root))
 }
 
-async function removeDocker(docker: Tool, studyId: string, failures: string[]) {
-  if ((await docker(['info'])).code !== 0) return
+/** docker に届かず飛ばしたら false。 */
+async function removeDocker(docker: Tool, studyId: string, failures: string[]): Promise<boolean> {
+  if ((await docker(['info'])).code !== 0) return false
   for (const label of LABELS) {
     const filter = ['--filter', `label=${label}=${studyId}`]
     for (const step of DOCKER_STEPS) {
@@ -97,6 +98,7 @@ async function removeDocker(docker: Tool, studyId: string, failures: string[]) {
       }
     }
   }
+  return true
 }
 
 // 1 つでも root から届く path を渡すと nix-store --delete は全体を断るので、死んでいて候補の外から参照されない path だけを渡す。
@@ -120,11 +122,12 @@ async function removeNixPaths(nixStore: Tool, roots: string[]) {
 /**
  * rootsDir の nix の root を集めてから removeDir を消し、Study の docker の物と、root から届く死んだ nix の path を消す。
  * 1 つの手順が失敗しても残りを続け、理由を failures に返す。removed は removeDir があって消せたか。
+ * dockerSkipped は docker が在るのに `docker info` が通らず、docker の物を消せなかったか。
  */
 export async function removePlayground(
   { rootsDir, removeDir, studyId }: { rootsDir: string; removeDir: string; studyId: string },
   { tools, run }: { tools: Tools; run: Run },
-): Promise<{ removed: boolean; failures: string[] }> {
+): Promise<{ removed: boolean; failures: string[]; dockerSkipped: boolean }> {
   const failures: string[] = []
   let roots: string[] = []
   if (tools.nixStore && existsSync(rootsDir)) {
@@ -145,7 +148,9 @@ export async function removePlayground(
       failures.push(reasonOf(argv, result))
     }
   }
-  if (tools.docker) await removeDocker(tools.docker, studyId, failures)
+  const dockerSkipped = tools.docker
+    ? !(await removeDocker(tools.docker, studyId, failures))
+    : false
   // root が消えずに残っているので、消そうとしても nix は断る。
   if (tools.nixStore && roots.length > 0 && !rmFailed) {
     try {
@@ -154,7 +159,7 @@ export async function removePlayground(
       failures.push((error as Error).message)
     }
   }
-  return { removed, failures }
+  return { removed, failures, dockerSkipped }
 }
 
 /** .git を持つ Prototype ごとに、.gitignore が無視する物だけを消す。 */

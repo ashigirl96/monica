@@ -1,7 +1,22 @@
-import { closeSync, constants, mkdirSync, openSync, readFileSync, writeSync } from 'node:fs'
+import {
+  closeSync,
+  constants,
+  existsSync,
+  mkdirSync,
+  openSync,
+  readdirSync,
+  readFileSync,
+  renameSync,
+  rmSync,
+  writeSync,
+} from 'node:fs'
 import { join } from 'node:path'
 
-import { query as sdkQuery, type SDKMessage } from '@anthropic-ai/claude-agent-sdk'
+import {
+  deleteSession as sdkDeleteSession,
+  query as sdkQuery,
+  type SDKMessage,
+} from '@anthropic-ai/claude-agent-sdk'
 import { EventPublisher, ORPCError } from '@orpc/server'
 import { and, asc, desc, eq, isNull, like, lt, max, sql } from 'drizzle-orm'
 import type { BunSQLiteDatabase } from 'drizzle-orm/bun-sqlite'
@@ -28,6 +43,8 @@ export type StudyLedger = {
   cleanPlaygrounds(): Promise<void>
   /** 最後の行から 1 時間たった続いている会話と、振り返りの途中で止まった会話を、振り返らせて終える。 */
   endIdleConversations(): Promise<void>
+  /** 捨て場の Study のうち行の無いものを、Playground ごと消す。 */
+  sweepTrash(): Promise<void>
 }
 
 // 1 つ 270〜290MB あるので、同時に持つ claude はここまで。
@@ -155,9 +172,11 @@ function makeLedger(deps: {
   tutorsDir?: string | undefined
   openInEditor?: (path: string) => Promise<void>
   tools?: Tools
+  deleteSession?: typeof sdkDeleteSession
 }) {
   const { db, home } = deps
   const studiesDir = join(home, 'studies')
+  const trashDir = join(home, 'trash', 'studies')
   const learningPreferenceDir = join(home, 'learning-preference')
   // tutorBox が realpath を取るので、Learning Preference の file より先に dir を置く。
   mkdirSync(learningPreferenceDir, { recursive: true, mode: 0o700 })
@@ -168,12 +187,14 @@ function makeLedger(deps: {
     claudePath: deps.claudePath,
     query: deps.query ?? sdkQuery,
   }
-  const events = new EventPublisher<Record<string, StudyWatchEvent>>()
+  // null は Study が消えた印で、watch はそれまでの event を流し終えてから閉じる。
+  const events = new EventPublisher<Record<string, StudyWatchEvent | null>>()
   const turns = new Map<string, Turn>()
   const claudes = new Map<string, Claude>()
   const waiting = new Map<number, (allowed: boolean) => void>()
   let stopped = false
-  const cleaning = new Set<string>()
+  const cleaning = new Map<string, Promise<void>>()
+  const removing = new Set<string>()
   const runner = createRunner()
   const dirOf = (id: string) => join(studiesDir, id)
   const shellZdotdir = shellZdotdirOf(home)
@@ -498,6 +519,9 @@ function makeLedger(deps: {
     if (turns.has(studyId)) {
       throw new ORPCError('CONFLICT', { message: `a turn is already running in ${studyId}` })
     }
+    if (removing.has(studyId)) {
+      throw new ORPCError('CONFLICT', { message: `${studyId} is being removed` })
+    }
     if (cleaning.has(studyId)) {
       throw new ORPCError('CONFLICT', {
         message: `the Playground of ${studyId} is being cleaned up`,
@@ -724,6 +748,64 @@ function makeLedger(deps: {
       return { message: startTurn(id, text) }
     },
 
+    async remove(id: string): Promise<Record<string, never>> {
+      mustExist(id)
+      if (removing.has(id)) throw new ORPCError('CONFLICT', { message: `${id} is being removed` })
+      removing.add(id)
+      try {
+        const pending = db
+          .select({ id: studyMessage.id })
+          .from(studyMessage)
+          .innerJoin(studyConversation, eq(studyMessage.conversationId, studyConversation.id))
+          .where(
+            and(eq(studyConversation.studyId, id), eq(studyMessage.permissionState, 'pending')),
+          )
+          .all()
+        for (const row of pending) settle(row.id, false)
+        const claude = claudes.get(id)
+        claudes.delete(id)
+        claude?.kill()
+        // 止めた claude が消した dir に書き戻さず、turn-ended が行の消えた後に流れないようにする。
+        await Promise.all([claude?.exited(), turns.get(id)?.ended, cleaning.get(id)])
+        const sessionIds = db
+          .select({ sessionId: studyConversation.sessionId })
+          .from(studyConversation)
+          .where(eq(studyConversation.studyId, id))
+          .all()
+          .flatMap((row) => (row.sessionId ? [row.sessionId] : []))
+        const dir = dirOf(id)
+        const trashed = join(trashDir, id)
+        const tree = join(trashed, 'tree')
+        mkdirSync(trashed, { recursive: true })
+        const moved = existsSync(dir)
+        try {
+          if (moved) renameSync(dir, tree)
+        } catch (error) {
+          rmSync(trashed, { recursive: true, force: true })
+          throw error
+        }
+        try {
+          db.transaction((tx) => tx.delete(study).where(eq(study.id, id)).run())
+        } catch (error) {
+          if (moved) renameSync(tree, dir)
+          rmSync(trashed, { recursive: true, force: true })
+          throw error
+        }
+        events.publish(id, null)
+        const deleteSession = deps.deleteSession ?? sdkDeleteSession
+        for (const sessionId of sessionIds) {
+          deleteSession(sessionId, { dir }).catch((error: unknown) =>
+            console.error(
+              `[study] could not delete the claude session ${sessionId} of ${id}: ${(error as Error).message}`,
+            ),
+          )
+        }
+        return {}
+      } finally {
+        removing.delete(id)
+      }
+    },
+
     async endConversation(id: string): Promise<{ conversationId: string }> {
       mustExist(id)
       const ongoing = ongoingOf(id)
@@ -783,7 +865,10 @@ function makeLedger(deps: {
       }
       return (async function* () {
         yield snapshot
-        yield* subscribed
+        for await (const event of subscribed) {
+          if (event === null) return
+          yield event
+        }
       })()
     },
 
@@ -822,6 +907,17 @@ function makeLedger(deps: {
   const ledger: StudyLedger = {
     start() {
       writeShellFiles(home)
+      // 捨て場へ移してから行を消すまでの間に、前の Backend が止まった Study を戻す。
+      for (const name of existsSync(trashDir) ? readdirSync(trashDir) : []) {
+        if (!exists(name)) continue
+        const trashed = join(trashDir, name)
+        try {
+          if (existsSync(join(trashed, 'tree'))) renameSync(join(trashed, 'tree'), dirOf(name))
+          rmSync(trashed, { recursive: true, force: true })
+        } catch (error) {
+          console.error(`[study] could not put ${trashed} back: ${(error as Error).message}`)
+        }
+      }
     },
     stop() {
       stopped = true
@@ -839,8 +935,9 @@ function makeLedger(deps: {
       const failures: string[] = []
       for (const { id } of stale) {
         // turn の claude が Playground を使っているので、次の日に回す。
-        if (turns.has(id)) continue
-        cleaning.add(id)
+        if (turns.has(id) || removing.has(id)) continue
+        const { promise: cleaned, resolve: endCleaning } = Promise.withResolvers<void>()
+        cleaning.set(id, cleaned)
         try {
           // 前の Study を消す await の間に、発言や shell で動いたかもしれない。
           if (!isStale(db.select().from(study).where(eq(study.id, id)).get())) continue
@@ -856,6 +953,7 @@ function makeLedger(deps: {
           if (failed.length > 0) failures.push(`${id}: ${failed.join(', ')}`)
         } finally {
           cleaning.delete(id)
+          endCleaning()
         }
       }
       if (failures.length > 0) {
@@ -875,14 +973,37 @@ function makeLedger(deps: {
           if (!isIdle(conversation)) continue
           await endConversation(conversation.studyId, conversation.id, true)
         } catch (error) {
-          // 走っている turn と Playground の掃除の間と、claude が 4 つとも turn の中の時は、次の回に回す。
-          if (error instanceof ORPCError && (running || error.code === 'TOO_MANY_REQUESTS'))
-            continue
+          // 走っている turn と Playground の掃除と Study を消している間と、claude が 4 つとも turn の中の時は、次の回に回す。
+          const busy = running || removing.has(conversation.studyId)
+          if (error instanceof ORPCError && (busy || error.code === 'TOO_MANY_REQUESTS')) continue
           failures.push(`${conversation.id}: ${(error as Error).message}`)
         }
       }
       if (failures.length > 0) {
         throw new Error(`could not end the idle Study Conversations: ${failures.join('; ')}`)
+      }
+    },
+    async sweepTrash() {
+      const failures: string[] = []
+      for (const name of existsSync(trashDir) ? readdirSync(trashDir).toSorted() : []) {
+        // 消している途中か、start() で戻す前の Study。
+        if (exists(name)) continue
+        const trashed = join(trashDir, name)
+        const tree = join(trashed, 'tree')
+        try {
+          const { failures: failed, dockerSkipped } = await removePlayground(
+            { rootsDir: join(tree, 'env'), removeDir: tree, studyId: name },
+            { tools: deps.tools ?? runner.tools(), run: runner.run },
+          )
+          if (failed.length > 0) failures.push(`${name}: ${failed.join(', ')}`)
+          // docker に届かなかった時は、次の回に docker の物を消す印として残す。
+          else if (!dockerSkipped) rmSync(trashed, { recursive: true, force: true })
+        } catch (error) {
+          failures.push(`${name}: ${(error as Error).message}`)
+        }
+      }
+      if (failures.length > 0) {
+        throw new Error(`could not delete the trashed Studies: ${failures.join('; ')}`)
       }
     },
   }
@@ -902,6 +1023,7 @@ export function systemJobs(studyLedger: StudyLedger) {
       every: 5 * 60_000,
       run: () => studyLedger.endIdleConversations(),
     },
+    { name: 'study.trash-sweep', every: 10 * 60_000, run: () => studyLedger.sweepTrash() },
   ]
 }
 

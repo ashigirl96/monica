@@ -412,6 +412,7 @@ test('the Backend hands the Job Ledger the system Jobs of task, note and study',
     'note.image-cleanup',
     'study.env-cleanup',
     'study.conversation-end',
+    'study.trash-sweep',
   ])
 })
 

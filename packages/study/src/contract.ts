@@ -171,6 +171,13 @@ export const contract = {
       .input(z.object({ id: StudyIdSchema }))
       .output(z.object({ conversationId: z.string() })),
   },
+  remove: meta
+    .meta({
+      description:
+        'Remove a Study for good: stop its turn, move its dir to the trash, delete its row with its Study Conversations and Repo links, and its claude sessions; the Learning Preference stays',
+    })
+    .input(z.object({ id: StudyIdSchema }))
+    .output(z.object({})),
   permission: {
     answer: meta
       .meta({
