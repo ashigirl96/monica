@@ -338,7 +338,9 @@
                   "@monica/note",
                   "@monica/note/*",
                   "@monica/chat",
-                  "@monica/chat/*"
+                  "@monica/chat/*",
+                  "@monica/study",
+                  "@monica/study/*"
                 ],
                 "message": "usage は他の domain を import しない（docs/packages.md の「依存の向き」）"
               }
@@ -375,7 +377,9 @@
                   "@monica/note",
                   "@monica/note/*",
                   "@monica/chat",
-                  "@monica/chat/*"
+                  "@monica/chat/*",
+                  "@monica/study",
+                  "@monica/study/*"
                 ],
                 "message": "usage は他の domain を import しない（docs/packages.md の「依存の向き」）"
               },
@@ -550,9 +554,44 @@
                   "@monica/note",
                   "@monica/note/*",
                   "@monica/usage",
-                  "@monica/usage/*"
+                  "@monica/usage/*",
+                  "@monica/study",
+                  "@monica/study/*"
                 ],
                 "message": "chat は他の domain を import しない（docs/packages.md の「依存の向き」）"
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "files": ["packages/study/**"],
+      "rules": {
+        "no-restricted-imports": [
+          "error",
+          {
+            "patterns": [
+              {
+                "group": ["@monica/*/cli"],
+                "message": "cli entry を import するのは apps/cli だけ（docs/packages.md の entry）"
+              },
+              {
+                "group": [
+                  "@monica/task",
+                  "@monica/task/*",
+                  "@monica/workbench",
+                  "@monica/workbench/*",
+                  "@monica/job",
+                  "@monica/job/*",
+                  "@monica/note",
+                  "@monica/note/*",
+                  "@monica/chat",
+                  "@monica/chat/*",
+                  "@monica/usage",
+                  "@monica/usage/*"
+                ],
+                "message": "study は他の domain を import しない（docs/packages.md の「依存の向き」）"
               }
             ]
           }
@@ -582,7 +621,9 @@
                   "@monica/note",
                   "@monica/note/*",
                   "@monica/usage",
-                  "@monica/usage/*"
+                  "@monica/usage/*",
+                  "@monica/study",
+                  "@monica/study/*"
                 ],
                 "message": "chat は他の domain を import しない（docs/packages.md の「依存の向き」）"
               },

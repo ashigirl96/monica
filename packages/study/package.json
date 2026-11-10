@@ -1,0 +1,11 @@
+{
+  "name": "@monica/study",
+  "private": true,
+  "type": "module",
+  "exports": {
+    "./server": "./src/server.ts"
+  },
+  "dependencies": {
+    "@anthropic-ai/claude-agent-sdk": "catalog:"
+  }
+}
