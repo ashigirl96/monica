@@ -1,8 +1,8 @@
+import { docFromJSON, type DocRead } from '@monica/block-editor'
+import { toMarkdown } from '@monica/block-editor/body'
 import { useEffect, useMemo } from 'react'
 
-import { toMarkdown } from '../../body/index.ts'
 import type { Doc } from '../../contract.ts'
-import { docFromJSON, type DocRead } from '../editor/create-editor.ts'
 
 const reads = new WeakMap<Doc, DocRead>()
 

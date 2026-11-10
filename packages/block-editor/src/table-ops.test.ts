@@ -5,7 +5,7 @@ import type { Node as PMNode } from 'prosemirror-model'
 import { EditorState, TextSelection } from 'prosemirror-state'
 import type { Command } from 'prosemirror-state'
 
-import { toMarkdown } from '../../body/index.ts'
+import { toMarkdown } from './body/index.ts'
 import { nodes } from './schema.ts'
 import {
   tableDeleteColumn,

@@ -4,7 +4,7 @@ import { describe, expect, test } from 'bun:test'
 import { Node as PMNode } from 'prosemirror-model'
 import { EditorState, Selection } from 'prosemirror-state'
 
-import { toMarkdown } from '../../body/index.ts'
+import { toMarkdown } from './body/index.ts'
 import { BLOCKS_MIME, clipboardPlugin, serializeBlocksPayload } from './clipboard.ts'
 import { pasteMenuKey } from './menu-keys.ts'
 import type { PasteMenuActiveState } from './menu-keys.ts'

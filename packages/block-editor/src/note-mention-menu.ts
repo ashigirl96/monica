@@ -2,8 +2,7 @@ import { Plugin, TextSelection } from 'prosemirror-state'
 import type { EditorState, Transaction } from 'prosemirror-state'
 import type { EditorView } from 'prosemirror-view'
 
-import { NOTES_HOSTNAMES } from '../../contract.ts'
-import { noteIdOfPath } from '../routes.ts'
+import { noteIdOfPath } from './body/index.ts'
 import { BLOCKS_MIME, pastedUrl } from './clipboard.ts'
 import { getBlockContext } from './context.ts'
 import { noteMentionMenuKey, slashKey } from './menu-keys.ts'
@@ -29,20 +28,26 @@ type NoteMentionMenuMeta =
   | { type: 'nav'; index: number }
   | { type: 'results'; query: string; items: NoteMentionItem[] }
 
-function isNotesOrigin(url: URL, base: URL): boolean {
+type NoteIdOf = (text: string) => string | null
+
+function isNotesOrigin(url: URL, base: URL, hostnames: readonly string[]): boolean {
   if (url.origin === base.origin) return true
   return (
     url.protocol === base.protocol &&
     url.port === base.port &&
-    NOTES_HOSTNAMES.includes(url.hostname) &&
-    NOTES_HOSTNAMES.includes(base.hostname)
+    hostnames.includes(url.hostname) &&
+    hostnames.includes(base.hostname)
   )
 }
 
-/** 自分の Note の URL（相対 `/notes/<id>`、または origin が同じか、同じ port の NOTES_HOSTNAMES の絶対 URL）
+/** 自分の Note の URL（相対 `/notes/<id>`、または origin が同じか、同じ port の hostnames の絶対 URL）
     から id セグメントを緩く抜き出す。id の正規形検証はここでは行わず Backend の resolve に委ねる
     （存在しない id は 404 → dangling 表示に落ちるだけ）。 */
-export function internalNoteId(text: string, origin: string): string | null {
+export function internalNoteId(
+  text: string,
+  origin: string,
+  hostnames: readonly string[] = [],
+): string | null {
   const trimmed = text.trim()
   if (!trimmed || /\s/.test(trimmed)) return null
   let url: URL
@@ -54,7 +59,7 @@ export function internalNoteId(text: string, origin: string): string | null {
   } catch {
     return null
   }
-  if (!isNotesOrigin(url, base)) return null
+  if (!isNotesOrigin(url, base, hostnames)) return null
   return noteIdOfPath(url.pathname)
 }
 
@@ -84,13 +89,13 @@ export function freshItems(state: NoteMentionMenuActiveState): NoteMentionItem[]
 }
 
 /** 表示・選択の対象リスト。query が内部ノート URL なら先頭に直接リンク候補を合成する */
-function displayItems(state: NoteMentionMenuActiveState): DisplayItem[] {
+function displayItems(state: NoteMentionMenuActiveState, noteIdOf: NoteIdOf): DisplayItem[] {
   const items: DisplayItem[] = freshItems(state).map((item) => ({
     noteId: item.id,
     label: item.displayName,
     hint: item.preview,
   }))
-  const urlNoteId = internalNoteId(state.query, window.location.origin)
+  const urlNoteId = noteIdOf(state.query)
   if (urlNoteId) items.unshift({ noteId: urlNoteId, label: 'Link to note', hint: urlNoteId })
   return items
 }
@@ -105,12 +110,14 @@ function applyItem(view: EditorView, noteId: string): void {
 class NoteMentionMenuView {
   private view: EditorView
   private search: SearchNoteMentions
+  private noteIdOf: NoteIdOf
   private menu: HTMLElement
   private requestedQuery: string | null = null
 
-  constructor(view: EditorView, search: SearchNoteMentions) {
+  constructor(view: EditorView, search: SearchNoteMentions, noteIdOf: NoteIdOf) {
     this.view = view
     this.search = search
+    this.noteIdOf = noteIdOf
     this.menu = createMenuOverlay(view)
   }
 
@@ -145,7 +152,7 @@ class NoteMentionMenuView {
   }
 
   private render(state: NoteMentionMenuActiveState): void {
-    const items = displayItems(state)
+    const items = displayItems(state, this.noteIdOf)
     this.menu.replaceChildren()
     if (items.length === 0) {
       const empty = document.createElement('div')
@@ -180,7 +187,11 @@ class NoteMentionMenuView {
   }
 }
 
-export function noteMentionMenuPlugin(search: SearchNoteMentions): Plugin<NoteMentionMenuState> {
+export function noteMentionMenuPlugin(
+  search: SearchNoteMentions,
+  notesHostnames: readonly string[] = [],
+): Plugin<NoteMentionMenuState> {
+  const noteIdOf: NoteIdOf = (text) => internalNoteId(text, window.location.origin, notesHostnames)
   return new Plugin<NoteMentionMenuState>({
     key: noteMentionMenuKey,
     state: {
@@ -215,7 +226,7 @@ export function noteMentionMenuPlugin(search: SearchNoteMentions): Plugin<NoteMe
     appendTransaction(_trs, _old, newState) {
       const state = noteMentionMenuKey.getState(newState)
       if (!state?.active || !state.query.endsWith(']]')) return null
-      const noteId = internalNoteId(state.query.slice(0, -2), window.location.origin)
+      const noteId = noteIdOf(state.query.slice(0, -2))
       if (!noteId) return null
       return insertNoteMentionTransaction(newState, state, noteId)
     },
@@ -250,7 +261,7 @@ export function noteMentionMenuPlugin(search: SearchNoteMentions): Plugin<NoteMe
               type: 'close',
             } satisfies NoteMentionMenuMeta),
           )
-        const items = displayItems(state)
+        const items = displayItems(state, noteIdOf)
         return handleMenuNavKey(event, state.index, {
           itemCount: items.length,
           onClose: close,
@@ -284,7 +295,7 @@ export function noteMentionMenuPlugin(search: SearchNoteMentions): Plugin<NoteMe
         if (!sel.empty) return false
         const ctx = getBlockContext(sel.$from)
         if (!ctx || ctx.contentNode.type === nodes.codeBlock) return false
-        const noteId = internalNoteId(url, window.location.origin)
+        const noteId = noteIdOf(url)
         if (!noteId) return false
         view.dispatch(
           insertNoteMentionTransaction(view.state, { pos: sel.from }, noteId).scrollIntoView(),
@@ -292,6 +303,6 @@ export function noteMentionMenuPlugin(search: SearchNoteMentions): Plugin<NoteMe
         return true
       },
     },
-    view: (view) => new NoteMentionMenuView(view, search),
+    view: (view) => new NoteMentionMenuView(view, search, noteIdOf),
   })
 }

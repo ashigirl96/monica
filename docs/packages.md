@@ -12,12 +12,13 @@ monica/
 ├── .claude-plugin/     plugin.json・marketplace.json
 ├── scripts/
 ├── apps/               @monica/<dir>。backend・cli（bin は monica）・desktop（src/ が webview、src-tauri/ が Shell）・extension・web
-├── packages/           @monica/<dir>。domain の workbench・task・job・note・chat・usage と、domain を持たない ui
+├── packages/           @monica/<dir>。domain の workbench・task・job・note・chat・usage と、domain を持たない ui・block-editor
 └── crates/             Rust の crate。crate 名は monica-<dir>
 ```
 
 - apps は packages を組み立てるだけでロジックを持たない。apps どうしは互いを import しない。
 - `packages/ui` には、domain の語を持たない部品と、CLI の整形が使う `@monica/ui/table`・`@monica/ui/local-time` を置く。cli entry は apps/cli だけが import するので、domain の cli entry どうしでは共有できないため。domain の UI は各 domain の `ui` entry に置く。
+- `packages/block-editor` には、block editor と、その本文の JSON を読む関数と markdown との変換を置く。monica の外の repo でも使うので、`@monica/*` を import しない。monica 固有の値（自分の Note と見なす host 名など）は props で受ける。ただし本文に保存される形（Note への link の `/notes/<id>` と、画像の `/api/assets/`）は本文の形式の一部なので block-editor が持つ。
 
 ### ドメイン package の中
 
@@ -42,7 +43,8 @@ entry は層ではなく、import してよい実行環境で切る。domain の
 | `@monica/<d>/server` | router、`create<D>Ledger()`（chat は `createChatAgent()`）、migrations の re-export | Bun | apps/backend、他 package の server、テスト |
 | `@monica/<d>/ui` | React の component と atom | browser | apps/desktop、apps/web、apps/extension、他 package の ui |
 | `@monica/<d>/cli` | 出力の整形関数、補完の候補を返す関数、手で書く command | Bun | apps/cli |
-| `@monica/<d>/body` | Note の本文の JSON を読む関数と、本文と markdown の変換 | どこでも | 自分の contract と server と ui |
+| `@monica/block-editor` | block editor の React の component と、それに渡す callback の型 | browser | `@monica/note/ui` |
+| `@monica/block-editor/body` | 本文の JSON を読む関数と、本文と markdown の変換 | どこでも | `@monica/block-editor`、note の contract と server と ui |
 | `@monica/chat/native-host` | React と CSS を引かずに使えるよう、ui の index と分ける | browser（Chrome Extension） | `@monica/chat/ui`、apps/extension の service worker |
 | `@monica/<d>/testing` | 他の package のテストに出す fake | Bun | 他 package のテストと `testing.ts` |
 | `@monica/chat/html-worker`・`@monica/chat/pdf-worker` | HTML と PDF を本文にする Bun の Worker の module | Bun の Worker | apps/backend の Worker の entrypoint だけ |
@@ -51,6 +53,7 @@ entry は層ではなく、import してよい実行環境で切る。domain の
 
 - 依存の向きは task → workbench だけで、workbench は task を import しない。
 - job は task も workbench も import しない。note・chat・usage は他の domain を import せず、他の domain からも import されない。
+- block-editor を import するのは note だけで、block-editor は `@monica/*` を import しない。
 - task の schema は workbench の table を FK のために import するが、re-export しない。
 - import できない向きに値を渡すときは、出す側の server entry が関数を出し、Backend の組み立てが受ける側の deps に渡す。workbench の Notification（通知）の呼び名は、task の `nameAgentSession` をこの形で受ける。usage が数える処理と全 Feature の一覧も、Backend の組み立てが渡す。
 

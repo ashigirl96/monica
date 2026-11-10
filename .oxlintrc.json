@@ -474,7 +474,7 @@
       }
     },
     {
-      "files": ["packages/note/src/body/**"],
+      "files": ["packages/block-editor/**"],
       "rules": {
         "no-restricted-imports": [
           "error",
@@ -482,40 +482,17 @@
             "paths": [
               {
                 "name": "bun:sqlite",
-                "message": "body は server と ui の両方が import するので、どこでも動くものだけを import する"
+                "message": "block-editor は server と browser の両方で import されるので、どこでも動くものだけを import する"
               }
             ],
             "patterns": [
               {
-                "group": ["@monica/*/cli"],
-                "message": "cli entry を import するのは apps/cli だけ（docs/packages.md の entry）"
+                "group": ["@monica/*", "@monica/*/*"],
+                "message": "block-editor は monica の外の repo でも使うので、monica の package を import しない（docs/packages.md の「依存の向き」）"
               },
               {
-                "group": [
-                  "@monica/task",
-                  "@monica/task/*",
-                  "@monica/workbench",
-                  "@monica/workbench/*",
-                  "@monica/job",
-                  "@monica/job/*",
-                  "@monica/usage",
-                  "@monica/usage/*"
-                ],
-                "message": "note は他の domain を import しない（docs/packages.md の「依存の向き」）"
-              },
-              {
-                "group": [
-                  "@monica/*/server",
-                  "@monica/*/schema",
-                  "../server",
-                  "../server.ts",
-                  "../schema",
-                  "../schema.ts",
-                  "drizzle-orm",
-                  "drizzle-orm/**"
-                ],
-                "allowTypeImports": true,
-                "message": "body は server と ui の両方が import するので、どこでも動くものだけを import する"
+                "group": ["drizzle-orm", "drizzle-orm/**"],
+                "message": "block-editor は server と browser の両方で import されるので、どこでも動くものだけを import する"
               }
             ]
           }

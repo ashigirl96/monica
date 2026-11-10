@@ -2,9 +2,9 @@ import { describe, expect, test } from 'bun:test'
 
 import type { Node as PMNode } from 'prosemirror-model'
 
-import fullDoc from '../../body/fixtures/full-doc.json'
-import unknownNodes from '../../body/fixtures/unknown-nodes.json'
-import { EMPTY_DOC } from '../../body/index.ts'
+import fullDoc from './body/fixtures/full-doc.json'
+import unknownNodes from './body/fixtures/unknown-nodes.json'
+import { EMPTY_DOC } from './body/index.ts'
 import { docFromJSON } from './create-editor.ts'
 import { readDoc } from './test-fixtures.ts'
 

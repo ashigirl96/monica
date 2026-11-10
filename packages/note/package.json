@@ -6,29 +6,22 @@
     "./schema": "./src/schema.ts",
     "./contract": "./src/contract.ts",
     "./server": "./src/server.ts",
-    "./body": "./src/body/index.ts",
     "./ui": "./src/ui/index.ts"
   },
   "scripts": {
     "generate": "drizzle-kit generate"
   },
   "dependencies": {
+    "@monica/block-editor": "workspace:*",
     "@monica/ui": "workspace:*",
     "@orpc/client": "catalog:",
     "@orpc/contract": "catalog:",
     "@orpc/server": "catalog:",
     "@tanstack/react-query": "catalog:",
-    "beautiful-mermaid": "catalog:",
     "drizzle-orm": "catalog:",
     "drizzle-zod": "catalog:",
     "entities": "catalog:",
-    "prosemirror-commands": "catalog:",
-    "prosemirror-history": "catalog:",
-    "prosemirror-inputrules": "catalog:",
-    "prosemirror-keymap": "catalog:",
     "prosemirror-model": "catalog:",
-    "prosemirror-state": "catalog:",
-    "prosemirror-view": "catalog:",
     "react": "catalog:",
     "zod": "catalog:"
   },

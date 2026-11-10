@@ -2,9 +2,9 @@ import { readdirSync, statSync, unlinkSync } from 'node:fs'
 import { mkdir } from 'node:fs/promises'
 import { join } from 'node:path'
 
+import { imageReferences } from '@monica/block-editor/body'
 import { ORPCError } from '@orpc/server'
 
-import { imageReferences } from './body/index.ts'
 import { IMAGE_URL_PREFIX } from './contract.ts'
 import type { Db } from './db.ts'
 import { note } from './schema.ts'

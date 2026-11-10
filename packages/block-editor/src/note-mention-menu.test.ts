@@ -52,32 +52,37 @@ describe('internalNoteId', () => {
 
 describe('internalNoteId の host 名と port', () => {
   const MONICA = 'http://monica.localhost:19380'
+  const HOSTNAMES = ['monica.localhost', 'localhost', '127.0.0.1']
 
   test.each(['monica.localhost', 'localhost', '127.0.0.1'])(
     '同じ port の %s の URL は内部のリンクになる',
     (host) => {
-      expect(internalNoteId(`http://${host}:19380/notes/note-5`, MONICA)).toBe('note-5')
+      expect(internalNoteId(`http://${host}:19380/notes/note-5`, MONICA, HOSTNAMES)).toBe('note-5')
     },
   )
 
   test('localhost で開いていても、monica.localhost で書かれた link は内部のリンクになる', () => {
     const origin = 'http://localhost:19380'
-    expect(internalNoteId('http://monica.localhost:19380/notes/note-5', origin)).toBe('note-5')
+    expect(internalNoteId('http://monica.localhost:19380/notes/note-5', origin, HOSTNAMES)).toBe(
+      'note-5',
+    )
   })
 
   test('port が違えば、3 つの host 名でも外部のリンクになる', () => {
-    expect(internalNoteId('http://monica.localhost:19280/notes/note-5', MONICA)).toBeNull()
-    expect(internalNoteId('http://localhost:5173/notes/note-5', MONICA)).toBeNull()
-    expect(internalNoteId('http://127.0.0.1:19381/notes/note-5', MONICA)).toBeNull()
+    expect(
+      internalNoteId('http://monica.localhost:19280/notes/note-5', MONICA, HOSTNAMES),
+    ).toBeNull()
+    expect(internalNoteId('http://localhost:5173/notes/note-5', MONICA, HOSTNAMES)).toBeNull()
+    expect(internalNoteId('http://127.0.0.1:19381/notes/note-5', MONICA, HOSTNAMES)).toBeNull()
   })
 
   test('percent encoding が壊れた path は内部のリンクにならない', () => {
-    expect(internalNoteId('/notes/%', MONICA)).toBeNull()
-    expect(internalNoteId('/notes/%E0%A4%A', MONICA)).toBeNull()
+    expect(internalNoteId('/notes/%', MONICA, HOSTNAMES)).toBeNull()
+    expect(internalNoteId('/notes/%E0%A4%A', MONICA, HOSTNAMES)).toBeNull()
   })
 
   test('同じ port でも、3 つ以外の host 名は外部のリンクになる', () => {
-    expect(internalNoteId('http://example.com:19380/notes/note-5', MONICA)).toBeNull()
+    expect(internalNoteId('http://example.com:19380/notes/note-5', MONICA, HOSTNAMES)).toBeNull()
   })
 })
 

@@ -1,4 +1,5 @@
-import { preview } from '../../body/index.ts'
+import { preview } from '@monica/block-editor/body'
+
 import type { Doc, Note, NoteSummary } from '../../contract.ts'
 
 /** 保存した本文の preview を一覧に写す。Backend が保存のたびに作り直すものと同じ関数で作る。 */

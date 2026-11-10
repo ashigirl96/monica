@@ -60,6 +60,10 @@
 
 /* ---- editor base ---- */
 
+.jb-host {
+  position: relative;
+}
+
 .jb-editor {
   outline: none;
   font-size: 16px;

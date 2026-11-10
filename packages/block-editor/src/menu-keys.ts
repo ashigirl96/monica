@@ -1,7 +1,13 @@
 import type { Node as PMNode } from 'prosemirror-model'
 import { PluginKey } from 'prosemirror-state'
 
-import type { LinkMetadata } from '../../contract.ts'
+export type LinkMetadata = {
+  title: string | null
+  description: string | null
+  image: string | null
+  favicon: string | null
+  siteName: string | null
+}
 
 export type PreviewKind = 'url' | 'mention' | 'bookmark'
 
