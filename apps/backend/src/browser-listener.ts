@@ -3,6 +3,7 @@ import { join } from 'node:path'
 
 import { IMAGE_URL_PREFIX, NOTES_HOSTNAMES } from '@monica/note/contract'
 import { router as noteRouter } from '@monica/note/server'
+import { router as studyRouter } from '@monica/study/server'
 import type { UsageLedger } from '@monica/usage/server'
 import { type InferRouterInitialContext, os } from '@orpc/server'
 import { RPCHandler } from '@orpc/server/fetch'
@@ -12,9 +13,10 @@ const IMMUTABLE = 'public, max-age=31536000, immutable'
 
 // openTab の input は shell に打鍵されるので、token の無い口に workbench・task・job を載せると任意のコマンドになる。
 // chat は Current Page を送るので、port を先に握った別の process に渡さないよう token の口に載せる。
-export const browserRouter = { note: noteRouter }
+export const browserRouter = { note: noteRouter, study: studyRouter }
 
-type BrowserContext = InferRouterInitialContext<typeof noteRouter>
+type BrowserContext = InferRouterInitialContext<typeof noteRouter> &
+  InferRouterInitialContext<typeof studyRouter>
 
 type Deps = {
   context: BrowserContext
@@ -37,7 +39,7 @@ export function listenBrowser(
   const app = new Hono()
   app.use('*', async (c, next) => {
     if (!hosts.has(c.req.header('host') ?? '')) return c.text('Forbidden', 403)
-    if (c.req.method !== 'GET' && !fromSameOriginOrExtension(c)) return c.text('Forbidden', 403)
+    if (c.req.method !== 'GET' && !fromSameOrigin(c)) return c.text('Forbidden', 403)
     return next()
   })
   app.use('/rpc/*', async (c) => {
@@ -81,10 +83,9 @@ export function listenBrowser(
 }
 
 // token の代わりに CSRF を止める。port を見ない same-site は localhost の別の app からも付き、
-// none は user の navigation にも付くので、Chrome Extension の fetch が作る cors との組だけを通す。
-function fromSameOriginOrExtension(c: Context): boolean {
-  const site = c.req.header('sec-fetch-site')
-  return site === 'same-origin' || (site === 'none' && c.req.header('sec-fetch-mode') === 'cors')
+// none は user の navigation と Chrome に入れた他の拡張の fetch にも付くので、same-origin だけを通す。
+function fromSameOrigin(c: Context): boolean {
+  return c.req.header('sec-fetch-site') === 'same-origin'
 }
 
 // 配るのは build の出力に在る file だけなので、path を file system の path として解かない。

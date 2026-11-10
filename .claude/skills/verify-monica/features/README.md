@@ -50,3 +50,4 @@ H1 の title と、ユーザーに見える振る舞いの 1 段落で始め、�
 - [Ambient](./note-ambient.md): notes の画面の背景を選び、⌥; で巡り、読み直しても残る。
 - [Tab の dot と Unread](./desktop-agent-dot.md): desktop の Tab の dot、Unread、Dock の数（`surfaces/desktop.md`）。
 - [side panel の Chat](./extension-chat.md): Brave の side panel で質問し、答えを受ける（`surfaces/extension.md`）。
+- [Study](./study.md): Study を始め、Tutor と会話し、Backend を起こし直して続ける。箱と Bash の HOME（RPC）。

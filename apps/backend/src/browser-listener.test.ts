@@ -6,6 +6,7 @@ import { dirname, join } from 'node:path'
 
 import type { contract } from '@monica/note/contract'
 import { createNoteLedger, migrations, router as noteRouter } from '@monica/note/server'
+import { createStudyLedger, migrations as studyMigrations } from '@monica/study/server'
 import {
   createUsageLedger,
   featuresOf,
@@ -41,13 +42,15 @@ function listen(port: number | undefined, dist = webDist({ 'index.html': '<p>not
   const home = mkdtempSync(join(tmpdir(), 'monica-home-'))
   cleanups.push(() => rmSync(home, { recursive: true, force: true }))
   const db = drizzle(new Database(':memory:'))
-  for (const m of [migrations, usageMigrations]) {
+  for (const m of [migrations, studyMigrations, usageMigrations]) {
     migrate(db, { migrationsFolder: m.folder, migrationsTable: m.table })
   }
   const noteLedger = createNoteLedger({ db, home })
+  const studyLedger = createStudyLedger({ db, home })
+  cleanups.push(() => studyLedger.stop())
   const usageLedger = createUsageLedger({ db, features: featuresOf(browserRouter) })
   const listener = listenBrowser(port?.toString(), {
-    context: { db, noteLedger },
+    context: { db, noteLedger, studyLedger },
     usageLedger,
     webDist: dist,
   })
@@ -75,7 +78,7 @@ test('the browser listener answers on both loopbacks to the three names of its p
 })
 
 // 外の site からの top-level の form POST は loopback まで届き、user が起こす navigation には none が付く。
-test('a request other than GET runs a note procedure only from the same origin or from a Chrome Extension', async () => {
+test('a request other than GET runs a procedure only from the same origin', async () => {
   const port = freePort()
   listen(port)
 
@@ -94,7 +97,7 @@ test('a request other than GET runs a note procedure only from the same origin o
   const cases: [site: string | undefined, mode: string | undefined, status: number][] = [
     ['same-origin', undefined, 200],
     ['same-origin', 'cors', 200],
-    ['none', 'cors', 200],
+    ['none', 'cors', 403],
     ['none', undefined, 403],
     ['none', 'navigate', 403],
     ['none', 'no-cors', 403],

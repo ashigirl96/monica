@@ -18,6 +18,7 @@
         "@monica/chat": "workspace:*",
         "@monica/job": "workspace:*",
         "@monica/note": "workspace:*",
+        "@monica/study": "workspace:*",
         "@monica/task": "workspace:*",
         "@monica/usage": "workspace:*",
         "@monica/workbench": "workspace:*",
@@ -189,6 +190,13 @@
       "name": "@monica/study",
       "dependencies": {
         "@anthropic-ai/claude-agent-sdk": "catalog:",
+        "@orpc/contract": "catalog:",
+        "@orpc/server": "catalog:",
+        "drizzle-orm": "catalog:",
+        "zod": "catalog:",
+      },
+      "devDependencies": {
+        "drizzle-kit": "catalog:",
       },
     },
     "packages/task": {

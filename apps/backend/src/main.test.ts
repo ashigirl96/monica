@@ -187,19 +187,19 @@ const fakeClaude = (scenario: FakeScenario) => (home: string) => ({
 
 // 不正な input の chat.ask は handler の前で 400 で断られるので、claude を起こさずに口に載っているかを見られる。
 const INVALID_QUESTION = { question: '' }
+const INVALID_SEND = { id: '', text: '' }
 
-test('the token listener carries workbench, task, job and chat but not note, and the browser listener note but none of those four', async () => {
+test('the token listener carries workbench, task, job and chat but not note or study, and the browser listener note and study but none of those four', async () => {
   const browserPort = freePort()
   const backend = await startBackend(browserPort)
 
-  // 19380 を他の process が先に握っても Current Page を渡さないよう、Chrome Extension の fetch が通る組でも chat は無い。
+  // 19380 を他の process が先に握っても Current Page を渡さないよう、同じ origin の request でも chat は無い。
   const viaBrowser = (path: string, input: object = {}) =>
     fetch(`http://127.0.0.1:${browserPort}/rpc/${path}`, {
       method: 'POST',
       headers: {
         host: `127.0.0.1:${browserPort}`,
-        'sec-fetch-site': 'none',
-        'sec-fetch-mode': 'cors',
+        'sec-fetch-site': 'same-origin',
         'content-type': 'application/json',
       },
       body: JSON.stringify({ json: input }),
@@ -213,6 +213,8 @@ test('the token listener carries workbench, task, job and chat but not note, and
   expect((await viaBrowser('chat/ask', INVALID_QUESTION)).status).toBe(404)
   expect((await viaBrowser('note/essay/create')).status).toBe(200)
   expect((await viaToken(backend, 'note/essay/create')).status).toBe(404)
+  expect((await viaBrowser('study/send', INVALID_SEND)).status).toBe(400)
+  expect((await viaToken(backend, 'study/send', INVALID_SEND)).status).toBe(404)
 })
 
 // Chrome Extension で script が動いても、任意の prompt を打つ task.run や shell に打鍵する workbench.openTab には届かせない。

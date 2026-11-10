@@ -1,0 +1,8 @@
+{
+  "repository": "https://github.com/mattpocock/skills",
+  "commit": "ad5400b930b297b0c0cb231ff1ffe42a7da666aa",
+  "files": {
+    "packages/study/tutors/LICENSE": "LICENSE",
+    "packages/study/tutors/TEACHING.md": "skills/productivity/teach/LEARNING-RECORD-FORMAT.md, skills/productivity/teach/RESOURCES-FORMAT.md"
+  }
+}

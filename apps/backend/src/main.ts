@@ -19,6 +19,7 @@ import {
   migrations as noteMigrations,
   systemJobs as noteSystemJobs,
 } from '@monica/note/server'
+import { createStudyLedger, migrations as studyMigrations } from '@monica/study/server'
 import {
   createTaskLedger,
   migrations as taskMigrations,
@@ -94,6 +95,7 @@ for (const m of [
   taskMigrations,
   jobMigrations,
   noteMigrations,
+  studyMigrations,
   chatMigrations,
   usageMigrations,
 ]) {
@@ -111,6 +113,7 @@ const workbenchLedger = createWorkbenchLedger({
 })
 const taskLedger = createTaskLedger({ db, workbenchLedger, home })
 const noteLedger = createNoteLedger({ db, home })
+const studyLedger = createStudyLedger({ db, home, claudePath: process.env.MONICA_CLAUDE_PATH })
 const jobLedger = createJobLedger({
   db,
   home,
@@ -135,7 +138,7 @@ const tokenRouter = {
   chat: chatRouter,
   usage: usageRouter,
 }
-// ブラウザの口を立てない起動でも、note の Feature を 0 回として出す。
+// ブラウザの口を立てない起動でも、note と study の Feature を 0 回として出す。
 const usageLedger = createUsageLedger({
   db,
   features: [...featuresOf(tokenRouter), ...featuresOf(browserRouter)],
@@ -212,7 +215,7 @@ jobLedger.start()
 noteLedger.start()
 // compiled binary の --asset は entry の隣に置かれ、bun run の Backend には無い。
 const browserListener = listenBrowser(process.env.MONICA_BROWSER_PORT, {
-  context: { db, noteLedger },
+  context: { db, noteLedger, studyLedger },
   usageLedger,
   webDist: join(import.meta.dir, 'dist'),
 })
@@ -238,6 +241,7 @@ function exit() {
   stopRereading()
   browserListener?.stop()
   chatAgent.stop()
+  studyLedger.stop()
   noteLedger.stop()
   jobLedger.stop()
   taskLedger.stop()

@@ -746,6 +746,22 @@
       }
     },
     {
+      "files": ["packages/study/src/schema.ts"],
+      "rules": {
+        "no-restricted-imports": [
+          "error",
+          {
+            "patterns": [
+              {
+                "group": ["*", "!drizzle-orm", "!drizzle-orm/sqlite-core"],
+                "message": "schema entry はどこでも import されるので drizzle-orm（CHECK と部分 index の sql）と drizzle-orm/sqlite-core だけを import する"
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
       "files": ["apps/backend/**"],
       "rules": {
         "no-restricted-imports": [
