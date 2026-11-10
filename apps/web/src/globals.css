@@ -1,8 +1,25 @@
 @import "tailwindcss";
 @import "tw-animate-css";
+@import "../../../packages/ui/src/fluid/tokens.css";
 /* 画面は packages の ui entry にあり、vite の root の外なので自動では走査されない。 */
 @source "../../../packages/note/src/ui/**/*.{ts,tsx}";
+@source "../../../packages/study/src/ui/**/*.{ts,tsx}";
 @source "../../../packages/ui/src";
+
+/* --overlay と影の組は light-dark() で書けないので、note が <html> に付ける data-theme で切り替える。 */
+:root[data-theme="dark"] .fluid {
+  --overlay: 255 255 255;
+  --shadow-1: var(--shadow-dark-1);
+  --shadow-2: var(--shadow-dark-2);
+  --shadow-3: var(--shadow-dark-3);
+  --shadow-4: var(--shadow-dark-4);
+  --shadow-5: var(--shadow-dark-5);
+  --shadow-6: var(--shadow-dark-6);
+  --shadow-7: var(--shadow-dark-7);
+  --shadow-8: var(--shadow-dark-8);
+  --shadow-2-inset: var(--shadow-dark-2);
+  --shadow-3-inset: var(--shadow-dark-3);
+}
 
 @custom-variant dark (&:where([data-theme="dark"], [data-theme="dark"] *));
 

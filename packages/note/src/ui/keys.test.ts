@@ -48,6 +48,7 @@ test.each<[string, Parameters<typeof commandOf>[0], Partial<KeyFacts>, NoteComma
   ['Repo の ⌥⌫', 'repos', { alt: true, code: 'Backspace' }, 'remove'],
   ['Repo の ⌥H', 'repos', { alt: true, code: 'KeyH' }, undefined],
   ['Daily の ⌥N', 'daily', { alt: true, code: 'KeyN' }, undefined],
+  ['区分の無い画面の ⌥N', null, { alt: true, code: 'KeyN' }, undefined],
   ['⌘⌥J', 'daily', { alt: true, meta: true, code: 'KeyJ' }, undefined],
   ['⌃⌥J', 'daily', { alt: true, ctrl: true, code: 'KeyJ' }, undefined],
   ['⇧⌥J', 'daily', { alt: true, shift: true, code: 'KeyJ' }, undefined],

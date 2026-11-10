@@ -387,6 +387,7 @@ function makeLedger(deps: {
         .all()
       return {
         id,
+        dir: dirOf(id),
         missionLine: missionLine(dirOf(id)),
         firstMessage: firstMessage(id),
         running: turns.has(id),

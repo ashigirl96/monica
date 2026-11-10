@@ -8,6 +8,7 @@
   },
   "dependencies": {
     "@monica/note": "workspace:*",
+    "@monica/study": "workspace:*",
     "@orpc/client": "catalog:",
     "@orpc/contract": "catalog:",
     "react": "catalog:",

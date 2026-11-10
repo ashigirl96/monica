@@ -196,6 +196,7 @@ test('start makes the Study dir under studies with mode 0700, and list shows the
       lastLogLine: null,
     },
   ])
+  expect((await client.get({ id })).dir).toBe(join(home, 'studies', id))
 })
 
 test('list names a Study by the first line of MISSION.md without its #, shows the last line of log.md, and puts the newest activity first', async () => {

@@ -99,6 +99,7 @@ export const contract = {
     .output(
       z.object({
         id: StudyIdSchema,
+        dir: z.string().describe('the absolute path of the Study dir'),
         missionLine,
         firstMessage,
         running: z.boolean().describe('a turn of this Study is running'),

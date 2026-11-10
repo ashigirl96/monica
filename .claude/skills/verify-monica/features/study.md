@@ -8,10 +8,25 @@
 - `converse`: `send` の発言に Tutor が答え、`watch` に turn の始まり・行・文の続き・終わりが流れる。途中で開いた `watch` も続きから受ける。
 - `resume`: Backend を起こし直した後の `send` に、前の turn の話を覚えて答える。
 - `box`: Tutor の Bash の `HOME` は `<Study の dir>/env/home` で、本物の HOME と手元の口は断られる。
+- `study-screen-start`: rail の Study で `/studies` に移り、打って始めると Study の画面に移って Tutor の文が流れる。
+- `study-screen-list`: 新しい会話の画面の一覧に Study が区分ごとに出て、名前は Mission の 1 行目になる。行を押すと同じ会話に戻る。
+- `study-screen-converse`: turn の途中で読み込み直しても、2 つ目の Browser Tab でも、途中の文から続きが流れる。
+- `study-new-key`: Study の画面で ⌥N を押すと `/studies` に戻る。
 
 ## How to get to it (user POV)
 
-- 画面はまだ無い（web に Study の一覧と会話の画面を出す issue が足す）。ブラウザの口（`MONICA_BROWSER_PORT`）の `study.*` の RPC を呼ぶ。
+- web の rail の Study（`/studies`）。新しい会話の画面で打つと Study が始まり、`/studies/<Study の id>` の画面で Tutor と話す。
+- 画面を通さずに確かめるときは、ブラウザの口（`MONICA_BROWSER_PORT`）の `study.*` の RPC を呼ぶ。
+
+## Driving it with headless の Backend・Vite・agent-browser
+
+Preconditions: `note-daily.md` の「Driving it with headless の Backend・Vite・agent-browser」と同じ（ブラウザの口と Vite を起こし、agent-browser は `--session verify-<name>`）。claude は本物を使う。
+
+- **study-screen-start.** `open http://localhost:<Vite の port>/` の後、rail の Study を `click` して URL が `/studies` になる。入力欄に「https://github.com/sindresorhus/ky のコードを読んで分かりたい」を打って「始める」を押すと、URL が `/studies/study-*` になり、Tutor の文が流れる（`ThinkingIndicator` の後に文が伸びる）。
+- **study-screen-list.** Tutor が `MISSION.md` を書いた後、上の欄の名前が Mission の 1 行目になる。⌥N で `/studies` に戻ると、一覧の「今日」に同じ名前で出る。行を押すと同じ会話に戻る。
+- **study-screen-converse.** turn の途中で `open` で読み込み直すと、途中の文から続きが流れる。2 つ目の Browser Tab で同じ URL を開くと同じ文が流れる。Vite の proxy 越しでも流れが途切れない。
+- **見た目.** Study の画面に背景写真と右下の pill が無い。theme を dark にすると面と影も dark になる。⌘+ で会話の字が大きくなる。
+- **証拠.** 各段の `screenshot` を `$E/study-screen-*.png` に残す。
 
 ## Driving it with RPC
 
