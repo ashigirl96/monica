@@ -230,6 +230,10 @@ _Avoid_: Sandbox（書き込みや通信を囲う仕組みと紛れる）, 隔�
 Study の中で、学習対象を確かめるために作るコード。Playground が消えても、作り直すための定義と一緒に残る。
 _Avoid_: Demo
 
+**Study Conversation（学習の会話）**:
+Study の中で、Tutor と続けて交わす会話のひと続き。1 つの Study は何本も持ち、続いているのは 1 本だけ。ユーザーが新しい会話を始めるか、しばらく発言が無いと終わり、終わる時に Tutor が会話を振り返って学習記録の書き漏れを拾い、その会話のまとめを残す。新しい会話の Tutor は前の会話を覚えておらず、Mission や学習記録などの成果物から始める。終わった会話は読めるが、続けられない。
+_Avoid_: Session（Agent Session と紛れる）, Chat（Chrome Extension の問答）, Lesson, Thread
+
 ### Browser
 
 **Browser Tab（ブラウザのタブ）**:
