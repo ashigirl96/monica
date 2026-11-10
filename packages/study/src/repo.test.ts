@@ -25,7 +25,7 @@ function setup() {
   migrate(db, { migrationsFolder: migrations.folder, migrationsTable: migrations.table })
   const home = mkdtempSync(join(tmpdir(), 'monica-study-repo-'))
   homes.push(home)
-  const studyLedger = createStudyLedger({ db, home })
+  const studyLedger = createStudyLedger({ db, home, openInEditor: async () => {} })
   return createRouterClient(router, { context: { db, studyLedger } })
 }
 

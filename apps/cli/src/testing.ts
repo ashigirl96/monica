@@ -17,6 +17,7 @@ import {
   createStudyLedger,
   migrations as studyMigrations,
   router as studyRouter,
+  systemJobs as studySystemJobs,
 } from '@monica/study/server'
 import { issue, issueBlocker, task as taskTable } from '@monica/task/schema'
 import {
@@ -130,15 +131,23 @@ export function inMemoryBackend({ home, ghq = noGhq }: { home?: string; ghq?: Gh
   })
   const noteLedger = createNoteLedger({ db, home: home ?? ptydHome })
   onCleanup(() => noteLedger.stop())
+  const studyLedger = createStudyLedger({
+    db,
+    home: home ?? ptydHome,
+    openInEditor: () => Promise.reject(new Error('no editor in the CLI tests')),
+  })
+  studyLedger.start()
+  onCleanup(() => studyLedger.stop())
   const jobLedger = createJobLedger({
     db,
     home: home ?? ptydHome,
-    systemJobs: [...taskSystemJobs(taskLedger), ...noteSystemJobs(noteLedger)],
+    systemJobs: [
+      ...taskSystemJobs(taskLedger),
+      ...noteSystemJobs(noteLedger),
+      ...studySystemJobs(studyLedger),
+    ],
   })
   onCleanup(() => jobLedger.stop())
-  const studyLedger = createStudyLedger({ db, home: home ?? ptydHome })
-  studyLedger.start()
-  onCleanup(() => studyLedger.stop())
   const tokenRouter = {
     workbench: workbenchRouter,
     task: taskRouter,

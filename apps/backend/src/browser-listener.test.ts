@@ -46,7 +46,7 @@ function listen(port: number | undefined, dist = webDist({ 'index.html': '<p>not
     migrate(db, { migrationsFolder: m.folder, migrationsTable: m.table })
   }
   const noteLedger = createNoteLedger({ db, home })
-  const studyLedger = createStudyLedger({ db, home })
+  const studyLedger = createStudyLedger({ db, home, openInEditor: async () => {} })
   cleanups.push(() => studyLedger.stop())
   const usageLedger = createUsageLedger({ db, features: featuresOf(browserRouter) })
   const listener = listenBrowser(port?.toString(), {

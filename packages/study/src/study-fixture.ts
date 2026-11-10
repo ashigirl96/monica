@@ -147,6 +147,7 @@ export function studyFixture(cleanups: (() => unknown)[]) {
       home,
       query: fake.query,
       tutorsDir: given?.tutorsDir,
+      openInEditor: async () => {},
       // 既定の tools は手元の本物の docker と nix-store を呼ぶ。
       tools: given?.tools ?? { docker: null, nixStore: null },
       // 既定は手元の ~/.claude/projects/ の記録を消す。

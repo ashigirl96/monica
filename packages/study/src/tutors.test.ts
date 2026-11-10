@@ -3,7 +3,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
-import { writeTutors } from './server.ts'
+import { writeTutors } from './tutors.ts'
 
 const cleanups: (() => unknown)[] = []
 afterEach(() => {

@@ -183,7 +183,7 @@ function makeLedger(deps: {
   claudePath?: string | undefined
   query?: Query
   tutorsDir?: string | undefined
-  openInEditor?: (path: string) => Promise<void>
+  openInEditor: (path: string) => Promise<void>
   tools?: Tools
   deleteSession?: typeof sdkDeleteSession
 }) {
@@ -844,7 +844,6 @@ function makeLedger(deps: {
     async openArtifact(id: string, path: string): Promise<void> {
       mustExist(id)
       const real = resolveArtifact(dirOf(id), path)
-      if (!deps.openInEditor) throw new Error('no editor to open artifacts in')
       try {
         await deps.openInEditor(real)
       } catch (error) {

@@ -33,7 +33,7 @@ function startedHome(home = scratchDir('monica-study-')) {
   const sqlite = new Database(':memory:')
   const db = drizzle(sqlite)
   migrate(db, { migrationsFolder: migrations.folder, migrationsTable: migrations.table })
-  const studyLedger = createStudyLedger({ db, home })
+  const studyLedger = createStudyLedger({ db, home, openInEditor: async () => {} })
   studyLedger.start()
   studyLedger.stop()
   return home
