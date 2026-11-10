@@ -26,6 +26,7 @@ export type FakeClaude = {
   pid: number
   emit(...messages: object[]): void
   exited: Promise<void>
+  interrupts: number
 }
 
 // 本物の process を持ち、台本の SDK の message を返す。テストが emit で続きを流し、process が居なくなると message が尽きる。
@@ -52,6 +53,7 @@ function fakeQuery() {
           queued.push(...messages)
           wake()
         },
+        interrupts: 0,
         exited: new Promise((resolve) =>
           child.once('exit', () => {
             gone = true
@@ -64,7 +66,7 @@ function fakeQuery() {
         for await (const message of prompt) claude.prompts.push(message.message.content as string)
       })()
       fake.claudes.push(claude)
-      return (async function* () {
+      const messages = (async function* () {
         for (;;) {
           const next = queued.shift()
           if (next) yield next
@@ -72,6 +74,13 @@ function fakeQuery() {
           else await new Promise<void>((resolve) => (wake = resolve))
         }
       })()
+      // 本物の interrupt() も、止めた turn を result で閉じる。
+      return Object.assign(messages, {
+        interrupt: async () => {
+          claude.interrupts++
+          claude.emit(result('interrupted'))
+        },
+      })
     }) as unknown as Query,
   }
   return fake

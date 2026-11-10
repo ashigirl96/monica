@@ -1,4 +1,4 @@
-import { mkdirSync, readFileSync } from 'node:fs'
+import { closeSync, constants, mkdirSync, openSync, readFileSync, writeSync } from 'node:fs'
 import { join } from 'node:path'
 
 import { query as sdkQuery, type SDKMessage } from '@anthropic-ai/claude-agent-sdk'
@@ -10,6 +10,7 @@ import { listArtifacts, readArtifact, resolveArtifact } from './artifact.ts'
 import type { AskUser } from './box.ts'
 import { type Claude, type ClaudeDeps, type Query, wakeClaude } from './claude.ts'
 import type { StudyMessage, StudyWatchEvent } from './contract.ts'
+import reflectionRequest from './reflection.md' with { type: 'text' }
 import { study, studyConversation, studyMessage, studyRepo } from './schema.ts'
 
 export type Db = BunSQLiteDatabase
@@ -17,13 +18,38 @@ export type Db = BunSQLiteDatabase
 export type StudyLedger = {
   /** 持っている claude すべての group を同期に止める。 */
   stop(): void
+  /** 最後の行から 1 時間たった続いている会話と、振り返りの途中で止まった会話を、振り返らせて終える。 */
+  endIdleConversations(): Promise<void>
+}
+
+// study は job を import しないので、createJobLedger の systemJobs と同じ構造の素のオブジェクトで返す。
+export function systemJobs(studyLedger: StudyLedger) {
+  return [
+    {
+      name: 'study.conversation-end',
+      every: 5 * 60_000,
+      run: () => studyLedger.endIdleConversations(),
+    },
+  ]
 }
 
 // 1 つ 270〜290MB あるので、同時に持つ claude はここまで。
 const MAX_CLAUDES = 4
 const BASH_COMMAND_CHARS = 200
 
-type Turn = { partialText: string }
+const IDLE_MS = 60 * 60_000
+// claude は resume の session が無いと、この文を stderr に出して exit 1 する。
+const NO_SDK_RECORD = 'No conversation found with session ID'
+const NO_SDK_RECORD_SUMMARY = 'SDK の記録が消えていたので、振り返らずに終えた'
+
+type Turn = {
+  partialText: string
+  /** この turn の最後の Tutor の文。振り返りの報告になる。 */
+  lastTutorText: string
+  reflection: boolean
+  ended: Promise<void>
+  end(): void
+}
 type MessageRow = typeof studyMessage.$inferSelect
 
 const REFUSED = 'The user refused to run this command outside the box.'
@@ -50,6 +76,17 @@ const toMessage = ({
 
 function firstNonEmptyLine(text: string): string | null {
   return text.split('\n').find((line) => line.trim() !== '') ?? null
+}
+
+// Tutor が置いた symlink や FIFO を辿って箱の外へ書かないよう、通常の file にだけ足す。
+function appendLine(path: string, line: string) {
+  const { O_WRONLY, O_APPEND, O_CREAT, O_NOFOLLOW, O_NONBLOCK } = constants
+  const fd = openSync(path, O_WRONLY | O_APPEND | O_CREAT | O_NOFOLLOW | O_NONBLOCK, 0o600)
+  try {
+    writeSync(fd, `\n${line}\n`)
+  } finally {
+    closeSync(fd)
+  }
 }
 
 function readOrEmpty(path: string): string {
@@ -123,7 +160,7 @@ function makeLedger(deps: {
   const learningPreferenceDir = join(home, 'learning-preference')
   // tutorBox が realpath を取るので、Learning Preference の file より先に dir を置く。
   mkdirSync(learningPreferenceDir, { recursive: true, mode: 0o700 })
-  const claudeDeps: Omit<ClaudeDeps, 'askUser'> = {
+  const claudeDeps: Omit<ClaudeDeps, 'askUser' | 'reflecting'> = {
     home,
     tutorDir: deps.tutorsDir ?? join(import.meta.dir, '../tutors'),
     learningPreferenceDir,
@@ -134,6 +171,7 @@ function makeLedger(deps: {
   const turns = new Map<string, Turn>()
   const claudes = new Map<string, Claude>()
   const waiting = new Map<number, (allowed: boolean) => void>()
+  let stopped = false
   const dirOf = (id: string) => join(studiesDir, id)
 
   // claude は Backend と一緒に居なくなったので、前の Backend で待っていた許可には答える相手が無い。
@@ -145,7 +183,10 @@ function makeLedger(deps: {
   function publish(studyId: string, event: StudyWatchEvent) {
     const turn = turns.get(studyId)
     if (turn && event.type === 'delta') turn.partialText += event.text
-    if (turn && event.type === 'message' && event.message.kind === 'tutor') turn.partialText = ''
+    if (turn && event.type === 'message' && event.message.kind === 'tutor') {
+      turn.partialText = ''
+      turn.lastTutorText = event.message.text
+    }
     events.publish(studyId, event)
   }
 
@@ -361,7 +402,11 @@ function makeLedger(deps: {
       }
     }
     const claude = wakeClaude(
-      { ...claudeDeps, askUser: askUserFor(studyId) },
+      {
+        ...claudeDeps,
+        askUser: askUserFor(studyId),
+        reflecting: () => turns.get(studyId)?.reflection === true,
+      },
       {
         id: studyId,
         dir: dirOf(studyId),
@@ -372,10 +417,42 @@ function makeLedger(deps: {
     return claude
   }
 
+  /** 会話を終え、claude を閉じる。振り返らずに終えた時は、その理由を log.md の末尾にも書く。 */
+  function finish(studyId: string, conversationId: string, ending: string | null, logged: boolean) {
+    db.update(studyConversation)
+      .set({ endedAt: new Date(), summary: ending })
+      .where(and(eq(studyConversation.id, conversationId), isNull(studyConversation.endedAt)))
+      .run()
+    claudes.get(studyId)?.kill()
+    claudes.delete(studyId)
+    if (!logged || ending === null) return
+    try {
+      appendLine(join(dirOf(studyId), 'log.md'), `- ${localIso(new Date())} ${ending}`)
+    } catch (error) {
+      console.error(`[study] could not write log.md of ${studyId}: ${(error as Error).message}`)
+    }
+  }
+
+  function finishAfter(studyId: string, conversationId: string, turn: Turn, error: string | null) {
+    if (error?.includes(NO_SDK_RECORD)) {
+      finish(studyId, conversationId, NO_SDK_RECORD_SUMMARY, true)
+    } else if (turn.reflection && error !== null) {
+      finish(
+        studyId,
+        conversationId,
+        `振り返りの turn が失敗した: ${firstNonEmptyLine(error)}`,
+        true,
+      )
+    } else if (turn.reflection) {
+      finish(studyId, conversationId, firstNonEmptyLine(turn.lastTutorText), false)
+    }
+  }
+
   async function runTurn(
     studyId: string,
     conversation: { id: string; startedAt: Date; sessionId: string | null },
     text: string,
+    turn: Turn,
   ) {
     let error: string | null
     try {
@@ -392,17 +469,15 @@ function makeLedger(deps: {
     } catch (thrown) {
       error = (thrown as Error).message
     }
+    // stop() が殺した claude の turn では会話を終えず、次の Backend の Job が振り返らせる。
+    if (!stopped) finishAfter(studyId, conversation.id, turn, error)
     touch(db, studyId, new Date())
     turns.delete(studyId)
     publish(studyId, { type: 'turn-ended', error })
+    turn.end()
   }
 
-  /** ユーザーの発言を書いて turn を始め、turn の終わりを待たずに書いた行を返す。 */
-  function startTurn(studyId: string, text: string): StudyMessage {
-    mustExist(studyId)
-    if (turns.has(studyId)) {
-      throw new ORPCError('CONFLICT', { message: `a turn is already running in ${studyId}` })
-    }
+  function refuseWhenFull(studyId: string) {
     if (
       !claudes.has(studyId) &&
       claudes.size >= MAX_CLAUDES &&
@@ -412,7 +487,24 @@ function makeLedger(deps: {
         message: `${MAX_CLAUDES} Studies are in a turn; try again when one ends`,
       })
     }
-    turns.set(studyId, { partialText: '' })
+  }
+
+  /** turn の印を await の前に確かめて付ける。 */
+  function takeTurn(studyId: string, reflection: boolean): Turn {
+    if (turns.has(studyId)) {
+      throw new ORPCError('CONFLICT', { message: `a turn is already running in ${studyId}` })
+    }
+    refuseWhenFull(studyId)
+    const { promise, resolve } = Promise.withResolvers<void>()
+    const turn = { partialText: '', lastTutorText: '', reflection, ended: promise, end: resolve }
+    turns.set(studyId, turn)
+    return turn
+  }
+
+  /** ユーザーの発言を書いて turn を始め、turn の終わりを待たずに書いた行を返す。 */
+  function startTurn(studyId: string, text: string): StudyMessage {
+    mustExist(studyId)
+    const turn = takeTurn(studyId, false)
     const now = new Date()
     const written = db.transaction((tx) => {
       const ongoing = tx
@@ -438,8 +530,93 @@ function makeLedger(deps: {
     publish(studyId, { type: 'turn-started', conversationId: written.conversation.id })
     const message = toMessage(written.row)
     publish(studyId, { type: 'message', message })
-    void runTurn(studyId, written.conversation, text)
+    void runTurn(studyId, written.conversation, text, turn)
     return message
+  }
+
+  const hasReflection = (conversationId: string) =>
+    db
+      .select({ id: studyMessage.id })
+      .from(studyMessage)
+      .where(
+        and(eq(studyMessage.conversationId, conversationId), eq(studyMessage.kind, 'reflection')),
+      )
+      .get() !== undefined
+
+  /** 最後の行の時刻。行の無い会話は始めた時刻。 */
+  function lastRowAt(conversation: { id: string; startedAt: Date }): number {
+    const last = db
+      .select({ at: max(studyMessage.createdAt) })
+      .from(studyMessage)
+      .where(eq(studyMessage.conversationId, conversation.id))
+      .get()
+    return (last?.at ?? conversation.startedAt).getTime()
+  }
+
+  const isIdle = (conversation: { id: string; startedAt: Date }) =>
+    hasReflection(conversation.id) || lastRowAt(conversation) <= Date.now() - IDLE_MS
+
+  /** 振り返りの turn を始める。印を取った後に見直し、もう終わっていたか、idle を求めて話が続いていれば何もしない。 */
+  function startReflection(studyId: string, conversationId: string, idle: boolean) {
+    const turn = takeTurn(studyId, true)
+    const conversation = db
+      .select()
+      .from(studyConversation)
+      .where(eq(studyConversation.id, conversationId))
+      .get()
+    if (!conversation || conversation.endedAt !== null || (idle && !isIdle(conversation))) {
+      turns.delete(studyId)
+      return
+    }
+    // 振り返りの途中で Backend が止まった会話は、区切りを 2 つ描かないよう行を足さずに始め直す。
+    const row = hasReflection(conversationId)
+      ? null
+      : db
+          .insert(studyMessage)
+          .values({ conversationId, createdAt: new Date(), kind: 'reflection', text: '' })
+          .returning()
+          .get()
+    publish(studyId, { type: 'turn-started', conversationId })
+    if (row) publish(studyId, { type: 'message', message: toMessage(row) })
+    void runTurn(studyId, conversation, reflectionRequest, turn)
+  }
+
+  /** pending の許可を断って turn を止め、その終わりを待ってから振り返りの turn を始める。 */
+  async function endConversation(studyId: string, conversationId: string, idle: boolean) {
+    const pending = db
+      .select({ id: studyMessage.id })
+      .from(studyMessage)
+      .where(
+        and(
+          eq(studyMessage.conversationId, conversationId),
+          eq(studyMessage.permissionState, 'pending'),
+        ),
+      )
+      .all()
+    const turn = turns.get(studyId)
+    if (turn && pending.length === 0) {
+      throw new ORPCError('CONFLICT', { message: `a turn is already running in ${studyId}` })
+    }
+    refuseWhenFull(studyId)
+    if (turn) {
+      for (const row of pending) settle(row.id, false)
+      try {
+        await claudes.get(studyId)?.interrupt()
+      } catch {
+        // claude が先に居なくなっても、turn は readTurn が閉じる。
+      }
+      await turn.ended
+    }
+    // 止めた turn の Tutor の行で最後の行が新しくなるので、止めた後は無発言を見直さない。
+    startReflection(studyId, conversationId, idle && !turn)
+  }
+
+  function ongoingOf(studyId: string) {
+    return db
+      .select()
+      .from(studyConversation)
+      .where(and(eq(studyConversation.studyId, studyId), isNull(studyConversation.endedAt)))
+      .get()
   }
 
   const procedures = {
@@ -493,6 +670,7 @@ function makeLedger(deps: {
           id: conversation.id,
           startedAt: conversation.startedAt,
           endedAt: conversation.endedAt,
+          summary: conversation.summary,
           messages: db
             .select()
             .from(studyMessage)
@@ -533,6 +711,15 @@ function makeLedger(deps: {
 
     send(id: string, text: string) {
       return { message: startTurn(id, text) }
+    },
+
+    async endConversation(id: string): Promise<{ conversationId: string }> {
+      mustExist(id)
+      const ongoing = ongoingOf(id)
+      if (!ongoing)
+        throw new ORPCError('NOT_FOUND', { message: `no ongoing Study Conversation in ${id}` })
+      await endConversation(id, ongoing.id, false)
+      return { conversationId: ongoing.id }
     },
 
     listArtifacts(id: string) {
@@ -592,8 +779,32 @@ function makeLedger(deps: {
 
   const ledger: StudyLedger = {
     stop() {
+      stopped = true
       for (const claude of claudes.values()) claude.kill()
       claudes.clear()
+    },
+    async endIdleConversations() {
+      const failures: string[] = []
+      const ongoing = db
+        .select()
+        .from(studyConversation)
+        .where(isNull(studyConversation.endedAt))
+        .all()
+      for (const conversation of ongoing) {
+        const running = turns.has(conversation.studyId)
+        try {
+          if (!isIdle(conversation)) continue
+          await endConversation(conversation.studyId, conversation.id, true)
+        } catch (error) {
+          // 走っている turn と、claude が 4 つとも turn の中の時は、次の回に回す。
+          if (error instanceof ORPCError && (running || error.code === 'TOO_MANY_REQUESTS'))
+            continue
+          failures.push(`${conversation.id}: ${(error as Error).message}`)
+        }
+      }
+      if (failures.length > 0) {
+        throw new Error(`could not end the idle Study Conversations: ${failures.join('; ')}`)
+      }
     },
   }
   return { ledger, procedures }

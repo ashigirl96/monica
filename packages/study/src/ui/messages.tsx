@@ -115,6 +115,14 @@ export function MessageView({
           </span>
         </p>
       )
+    case 'reflection':
+      return (
+        <div role="separator" className="flex items-center gap-3 text-[12px] text-muted-foreground">
+          <span className="h-px flex-1 bg-border" />
+          振り返り
+          <span className="h-px flex-1 bg-border" />
+        </div>
+      )
   }
 }
 

@@ -11,6 +11,11 @@ import {
 } from 'react'
 
 import { ArtifactPanel, artifactKey, artifactsKey, ArtifactTree } from './artifact-view.tsx'
+import {
+  ConversationPicker,
+  conversationPath,
+  useSelectedConversation,
+} from './conversation-picker.tsx'
 import { createConversationStore } from './conversation-store.ts'
 import { currentTutor, MessageView, PermissionPrompt, TutorText } from './messages.tsx'
 import { studiesKey } from './new-conversation.tsx'
@@ -45,7 +50,12 @@ export function StudyPage({ id }: { id: string }) {
   useEffect(() => store.open(), [store])
   const snapshot = useSyncExternalStore(store.subscribe, store.getSnapshot, store.getSnapshot)
   const { study, messages, permission, running, partialText, turnError, sendError } = snapshot
+  const { conversations, shown, ongoingId } = snapshot
   const [draft, setDraft] = useState('')
+  const selected = useSelectedConversation()
+  useEffect(() => store.select(selected), [store, selected])
+  // 続いている会話があるのに終わった会話を開いた時は、送ると別の会話に入るので入力欄を出さない。
+  const viewingPast = shown !== null && shown.endedAt !== null && ongoingId !== null
 
   useDocumentTitle(study ? nameOf(study).text : null)
   useNewConversationKey(useCallback(() => navigate('/studies'), [navigate]))
@@ -59,6 +69,18 @@ export function StudyPage({ id }: { id: string }) {
         <span className="shrink-0 text-[12px] text-muted-foreground">
           Tutor: {currentTutor(messages)}
         </span>
+        <ConversationPicker
+          conversations={conversations}
+          shown={shown}
+          canEnd={!running || permission !== null}
+          onPick={(conversation) =>
+            navigate(conversationPath(id, conversation.id === ongoingId ? null : conversation.id))
+          }
+          onNew={() => {
+            navigate(conversationPath(id, null))
+            void store.end()
+          }}
+        />
         <LinkedRepos id={id} />
       </StudyHeader>
       <div className="flex min-h-0 flex-1">
@@ -93,12 +115,25 @@ export function StudyPage({ id }: { id: string }) {
                 permission={permission}
                 onAnswer={(allow) => void store.answer(permission.id, allow)}
               />
+            ) : viewingPast ? (
+              <button
+                type="button"
+                onClick={() => navigate(conversationPath(id, null))}
+                className="self-center rounded-lg px-3 py-1.5 text-[14px] text-muted-foreground hover:bg-muted hover:text-foreground"
+              >
+                続いている会話に戻る
+              </button>
             ) : (
               <InputMessage
                 value={draft}
                 onValueChange={setDraft}
+                disabled={running}
                 onSend={(text) => {
-                  void store.send(text).then((sent) => sent && setDraft(''))
+                  void store.send(text).then((sent) => {
+                    if (!sent) return
+                    setDraft('')
+                    if (selected !== null) navigate(conversationPath(id, null))
+                  })
                 }}
                 placeholder="Tutor に話す"
                 sendLabel="送る"

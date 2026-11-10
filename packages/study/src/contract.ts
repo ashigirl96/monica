@@ -21,9 +21,9 @@ export const StudyMessageSchema = z.object({
   id: z.number().int().describe('the row number; rows are ordered by it'),
   conversationId: z.string(),
   kind: z
-    .enum(['user', 'tutor', 'tool', 'tutor_switch', 'permission'])
+    .enum(['user', 'tutor', 'tool', 'tutor_switch', 'permission', 'reflection'])
     .describe(
-      'user: what the user said; tutor: what the Tutor said; tool: a tool the Tutor ran; tutor_switch: the Tutor changed; permission: the Tutor asked to run a command outside the box',
+      'user: what the user said; tutor: what the Tutor said; tool: a tool the Tutor ran; tutor_switch: the Tutor changed; permission: the Tutor asked to run a command outside the box; reflection: monica asked the Tutor to reflect on the ending Study Conversation, with empty text',
     ),
   text: z
     .string()
@@ -134,6 +134,12 @@ export const contract = {
             id: z.string(),
             startedAt: z.date(),
             endedAt: z.date().nullable(),
+            summary: z
+              .string()
+              .nullable()
+              .describe(
+                'on an ended Study Conversation, the first line of the Tutor report, or why it ended without a reflection; null on the others',
+              ),
             messages: z.array(StudyMessageSchema),
           }),
         ),
@@ -153,6 +159,15 @@ export const contract = {
     })
     .input(z.object({ id: StudyIdSchema }))
     .output(eventIterator(StudyWatchEventSchema)),
+  conversation: {
+    end: meta
+      .meta({
+        description:
+          'End the ongoing Study Conversation of a Study: deny its pending permission, then start the reflection turn and return without waiting for it, whose rows come through watch',
+      })
+      .input(z.object({ id: StudyIdSchema }))
+      .output(z.object({ conversationId: z.string() })),
+  },
   permission: {
     answer: meta
       .meta({

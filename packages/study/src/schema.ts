@@ -19,6 +19,7 @@ export const studyConversation = sqliteTable(
     startedAt: timestamp('started_at').notNull(),
     endedAt: timestamp('ended_at'),
     sessionId: text('session_id'),
+    summary: text('summary'),
   },
   (t) => [
     uniqueIndex('study_conversation_ongoing_idx')
@@ -37,7 +38,7 @@ export const studyMessage = sqliteTable(
       .references(() => studyConversation.id, { onDelete: 'cascade' }),
     createdAt: timestamp('created_at').notNull(),
     kind: text('kind', {
-      enum: ['user', 'tutor', 'tool', 'tutor_switch', 'permission'],
+      enum: ['user', 'tutor', 'tool', 'tutor_switch', 'permission', 'reflection'],
     }).notNull(),
     text: text('text').notNull(),
     tool: text('tool'),

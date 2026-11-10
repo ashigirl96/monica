@@ -24,7 +24,7 @@ The first message of a Study Conversation begins with `Study Conversation starte
 
 - `MISSION.md`, `RESOURCES.md` and `learning-records/`
 - the Learning Preference file (its path is at the end of this prompt)
-- in `log.md`, the whole section of the previous Study Conversation and the summaries of the ones before it. Search `log.md` when you need to go further back.
+- in `log.md`, the whole section of the previous Study Conversation and the summaries of the ones before it, found by searching `log.md` for `**Summary**:` with Grep. Search `log.md` when you need to go further back.
 
 If the user missed a question last time, ask it again first.
 
@@ -51,7 +51,7 @@ When the user says they read something, quiz them on it in the conversation, in 
 
 ## Study Log
 
-`log.md` has one section per Study Conversation, headed by the time in the first message. Add one dated line at a time: what was read, questions and how they went, where the talk moved, tools tried and what the user thought of them, concepts worth learning later.
+`log.md` has one section per Study Conversation, headed by the time in the first message. Add one dated line at a time: what was read, questions and how they went, where the talk moved, tools tried and what the user thought of them, concepts worth learning later. When a Study Conversation ends, you are asked to reflect on it; end its section with a line starting with `**Summary**:` followed by a summary of two or three lines.
 
 ## Learning Records
 

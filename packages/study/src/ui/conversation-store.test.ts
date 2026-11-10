@@ -61,8 +61,13 @@ const permission = (id: number, state: 'pending' | 'allowed' | 'denied'): StudyM
   state,
 })
 
+type FakeConversation = { id: string; endedAt: Date | null; summary: string | null }
+
 class FakeClient implements ConversationClient {
   rows: StudyMessage[] = []
+  /** 新しい順。rows は conversationId で振り分ける。 */
+  conversationRows: FakeConversation[] = [{ id: CONVERSATION, endedAt: null, summary: null }]
+  readonly ends: string[] = []
   getError: unknown
   sendError: unknown
   readonly gets: number[] = []
@@ -77,6 +82,13 @@ class FakeClient implements ConversationClient {
     },
   }
 
+  readonly conversation = {
+    end: async ({ id }: { id: string }) => {
+      this.ends.push(id)
+      return { conversationId: CONVERSATION }
+    },
+  }
+
   async get() {
     this.gets.push(this.watches.length)
     if (this.getError) throw this.getError
@@ -87,9 +99,11 @@ class FakeClient implements ConversationClient {
       firstMessage: 'learn ky',
       running: false,
       repos: [],
-      conversations: [
-        { id: CONVERSATION, startedAt: new Date(), endedAt: null, messages: [...this.rows] },
-      ],
+      conversations: this.conversationRows.map((conversation) => ({
+        ...conversation,
+        startedAt: new Date(),
+        messages: this.rows.filter((r) => r.conversationId === conversation.id),
+      })),
     }
   }
 
@@ -324,4 +338,63 @@ test('a Write or Edit row from watch in the Study dir asks to reread that artifa
 
   await until(store, (s) => s.messages.length === 5)
   expect(written).toEqual(['learning-records/0001-x.md', 'log.md'])
+})
+
+const inConversation = (message: StudyMessage, conversationId: string): StudyMessage => ({
+  ...message,
+  conversationId,
+})
+
+test('a reflection turn that ends the Study Conversation leaves an empty new conversation after turn-ended', async () => {
+  const client = new FakeClient()
+  client.rows = [row(1, 'user', 'learn ky'), row(2, 'tutor', 'why ky?')]
+  const store = open(client)
+  const stream = await watching(client)
+  stream.push({ type: 'snapshot', running: false, lastMessageId: 2, partialText: '' })
+  await until(store, (s) => s.messages.length === 2)
+
+  await store.end()
+  expect(client.ends).toEqual([ID])
+  stream.push({ type: 'turn-started', conversationId: CONVERSATION })
+  stream.push({ type: 'message', message: row(3, 'reflection', '') })
+  stream.push({ type: 'message', message: row(4, 'tutor', 'Wrote LR-0001.') })
+  const reflecting = await until(store, (s) => s.messages.length === 4)
+  expect(reflecting).toMatchObject({ running: true, shown: { id: CONVERSATION } })
+
+  client.conversationRows = [{ id: CONVERSATION, endedAt: new Date(), summary: 'Wrote LR-0001.' }]
+  stream.push({ type: 'turn-ended', error: null })
+
+  const ended = await until(store, (s) => !s.running && s.shown === null)
+  expect(ended).toMatchObject({ messages: [], ongoingId: null })
+  expect(ended.conversations).toEqual([
+    {
+      id: CONVERSATION,
+      startedAt: expect.any(Date),
+      endedAt: expect.any(Date),
+      summary: 'Wrote LR-0001.',
+    },
+  ])
+})
+
+test('a Study without an ongoing Study Conversation opens on the newest ended one, and selecting another shows its rows', async () => {
+  const client = new FakeClient()
+  client.conversationRows = [
+    { id: 'newer', endedAt: new Date(), summary: 'newer summary' },
+    { id: 'older', endedAt: new Date(), summary: 'older summary' },
+  ]
+  client.rows = [
+    inConversation(row(1, 'user', 'first'), 'older'),
+    inConversation(row(2, 'user', 'second'), 'newer'),
+  ]
+  const store = open(client)
+  const stream = await watching(client)
+  stream.push({ type: 'snapshot', running: false, lastMessageId: 2, partialText: '' })
+
+  const opened = await until(store, (s) => s.study !== undefined)
+  expect(opened).toMatchObject({ ongoingId: null, shown: { id: 'newer' } })
+  expect(texts(opened)).toEqual(['second'])
+
+  store.select('older')
+  expect(store.getSnapshot().shown).toMatchObject({ id: 'older', summary: 'older summary' })
+  expect(texts(store.getSnapshot())).toEqual(['first'])
 })

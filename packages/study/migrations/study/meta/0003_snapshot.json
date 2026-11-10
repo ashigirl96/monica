@@ -1,0 +1,293 @@
+{
+  "version": "6",
+  "dialect": "sqlite",
+  "id": "a2aca35b-9932-4edf-8464-119ea0623ca5",
+  "prevId": "e849e7fa-16df-4721-a1e3-1797ed5f13b3",
+  "tables": {
+    "study": {
+      "name": "study",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "last_active_at": {
+          "name": "last_active_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "checkConstraints": {}
+    },
+    "study_conversation": {
+      "name": "study_conversation",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "study_id": {
+          "name": "study_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "started_at": {
+          "name": "started_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "ended_at": {
+          "name": "ended_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "session_id": {
+          "name": "session_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "summary": {
+          "name": "summary",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        }
+      },
+      "indexes": {
+        "study_conversation_ongoing_idx": {
+          "name": "study_conversation_ongoing_idx",
+          "columns": [
+            "study_id"
+          ],
+          "isUnique": true,
+          "where": "ended_at IS NULL"
+        }
+      },
+      "foreignKeys": {
+        "study_conversation_study_id_study_id_fk": {
+          "name": "study_conversation_study_id_study_id_fk",
+          "tableFrom": "study_conversation",
+          "tableTo": "study",
+          "columnsFrom": [
+            "study_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "checkConstraints": {}
+    },
+    "study_message": {
+      "name": "study_message",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "integer",
+          "primaryKey": true,
+          "notNull": true,
+          "autoincrement": true
+        },
+        "conversation_id": {
+          "name": "conversation_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "kind": {
+          "name": "kind",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "text": {
+          "name": "text",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "tool": {
+          "name": "tool",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "reason": {
+          "name": "reason",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "permission_state": {
+          "name": "permission_state",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "study_message_conversation_id_study_conversation_id_fk": {
+          "name": "study_message_conversation_id_study_conversation_id_fk",
+          "tableFrom": "study_message",
+          "tableTo": "study_conversation",
+          "columnsFrom": [
+            "conversation_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "checkConstraints": {
+        "study_message_tool": {
+          "name": "study_message_tool",
+          "value": "(kind = 'tool') = (tool IS NOT NULL)"
+        },
+        "study_message_permission_state": {
+          "name": "study_message_permission_state",
+          "value": "permission_state IS NULL OR permission_state IN ('pending', 'allowed', 'denied')"
+        },
+        "study_message_permission": {
+          "name": "study_message_permission",
+          "value": "(kind = 'permission') = (permission_state IS NOT NULL)"
+        }
+      }
+    },
+    "study_repo": {
+      "name": "study_repo",
+      "columns": {
+        "study_id": {
+          "name": "study_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "repo": {
+          "name": "repo",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        }
+      },
+      "indexes": {
+        "study_repo_per_study_idx": {
+          "name": "study_repo_per_study_idx",
+          "columns": [
+            "study_id",
+            "lower(repo)"
+          ],
+          "isUnique": true
+        },
+        "study_repo_repo_idx": {
+          "name": "study_repo_repo_idx",
+          "columns": [
+            "lower(repo)"
+          ],
+          "isUnique": false
+        }
+      },
+      "foreignKeys": {
+        "study_repo_study_id_study_id_fk": {
+          "name": "study_repo_study_id_study_id_fk",
+          "tableFrom": "study_repo",
+          "tableTo": "study",
+          "columnsFrom": [
+            "study_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "checkConstraints": {}
+    }
+  },
+  "views": {},
+  "enums": {},
+  "_meta": {
+    "schemas": {},
+    "tables": {},
+    "columns": {}
+  },
+  "internal": {
+    "indexes": {
+      "study_repo_per_study_idx": {
+        "columns": {
+          "lower(repo)": {
+            "isExpression": true
+          }
+        }
+      },
+      "study_repo_repo_idx": {
+        "columns": {
+          "lower(repo)": {
+            "isExpression": true
+          }
+        }
+      }
+    }
+  }
+}

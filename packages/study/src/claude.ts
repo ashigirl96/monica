@@ -31,6 +31,8 @@ const ADDED_ENV = {
 export type Claude = {
   messages: AsyncIterator<SDKMessage>
   say(text: string): void
+  /** 走っている turn を止める。止めた turn も result で閉じる。 */
+  interrupt(): Promise<void>
   /** まだ発言を 1 つも流していない新しい session か。 */
   fresh: boolean
   lastTurnAt: number
@@ -45,6 +47,7 @@ export type ClaudeDeps = {
   learningPreferenceDir: string
   claudePath: string | undefined
   askUser: AskUser | undefined
+  reflecting: (() => boolean) | undefined
   query: Query
 }
 
@@ -119,6 +122,7 @@ export function wakeClaude(
     learningPreferenceDir: deps.learningPreferenceDir,
     monicaHome: deps.home,
     ...(deps.askUser && { askUser: deps.askUser }),
+    ...(deps.reflecting && { reflecting: deps.reflecting }),
   })
 
   let child: ChildProcessByStdio<Writable, Readable, Readable> | null = null
@@ -168,6 +172,9 @@ export function wakeClaude(
         message: { role: 'user', content: text },
         parent_tool_use_id: null,
       })
+    },
+    interrupt: async () => {
+      await messages.interrupt()
     },
     fresh: !study.sessionId,
     lastTurnAt: Date.now(),

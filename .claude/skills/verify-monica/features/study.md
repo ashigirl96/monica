@@ -17,6 +17,7 @@
 - `study-repo-panel`: 紐付けた Repo の画面の左の欄の時系列の下に「Study」の欄が出て、行を押すとその Study の画面に移る。
 - `study-artifacts`: 左の成果物の木の項目か、会話の「を書いた」の行を押すと右の欄に中身が出る。成果物の中の相対 link で別の成果物に移る。Tutor が書くと木と開いている欄が読み直される。
 - `study-artifact-editor`: 右の欄の「エディタで開く」で、Zed にその file だけが開く。
+- `study-conversation-end`: 上の欄の会話の選択の「新しい会話を始める」で、Tutor が振り返り（Read・Write・Edit だけ）、報告の 1 行目が選択の終わった会話に添えられる。終わった会話を選ぶと入力欄の代わりに「続いている会話に戻る」が出る。SDK の記録が消えた会話は振り返らずに終わる。1 時間の無発言で終わるのは system の Job `study.conversation-end` で、実機では待たない（`packages/study/src/conversation-end.test.ts`）。
 
 ## How to get to it (user POV)
 
@@ -35,6 +36,7 @@ Preconditions: `note-daily.md` の「Driving it with headless の Backend・Vite
 - **study-repo-panel.** `acme/alpha` を紐付けたまま `/repos/acme/alpha` を開くと、左の欄の時系列の下に「Study」の欄と Study の行が出る。行を押すと `/studies/<id>` に移る。`/repos/acme/gamma` には欄が無い。
 - **study-artifacts.** 木の項目を押すと右の欄に中身が出て、×（「閉じる」）で閉じると会話が広がる。成果物の中の相対 link（`[用語集](GLOSSARY.md)` など）を押すと、右の欄がその成果物になる。Tutor が学習記録を書くと、木の「学習記録」に「<番号> <題>」が増え、会話の「を書いた」の行を押すとその記録が開く。開いている成果物を Tutor が直すと、欄の中身が変わる。
 - **study-artifact-editor.** Study の dir に `.zed/settings.json`（`{"buffer_font_size": 30}`）を置いてから「エディタで開く」を押す。Zed にその file だけが開き、字が大きくならない。ブラウザの口に `POST /rpc/study/artifact/read` で `../../backend.json` を送ると 403 で断られる。
+- **study-conversation-end.** Study で 2 往復話し、上の欄の「… の会話」（aria-label「会話を選ぶ」）から「新しい会話を始める（今の会話は終わる）」を押す。「振り返り」の区切りが出て、tool の行が Read・Write・Edit だけで、最後に報告が出る。その間は入力欄が止まり、終わると空の新しい会話になる。選択に終わった会話と報告の 1 行が出て、選ぶと URL に `?conversation=` が付き、入力欄の代わりに「続いている会話に戻る」が出る（続いている会話がある時）。`log.md` の 1 つ目の節の最後に `**Summary**:` のまとめがある。新しい会話の最初の turn で、Tutor が `log.md` を読む tool の行が出る。次に Backend を止め、`~/.claude/projects/` の下のその会話の `<session id>.jsonl` を消してから起こし直し、「新しい会話を始める」を押す。振り返らずに終わり、選択の 1 行が「SDK の記録が消えていたので、振り返らずに終えた」になり、`log.md` の末尾に同じ 1 行が足される。
 - **見た目.** Study の画面に背景写真と右下の pill が無い。theme を dark にすると面と影も dark になる。⌘+ で会話の字が大きくなる。
 - **証拠.** 各段の `screenshot` を `$E/study-screen-*.png` に残す。
 
@@ -79,6 +81,7 @@ Study の箱の効き目は、確かめた版のものしか分からない。`@
   - WebFetch の `http://127.0.0.1:<port>/`・`http://monica.localhost:<port>/`・`http://127.0.0.1.nip.io:<port>/` が hook で断られ、server の log に何も届かない。`https://example.com/` は通る。
   - 箱の中の `echo $TMPDIR` が `/tmp/monica-tutors` の下になる。`/tmp/claude-<uid>` の実 path の `ls` と、そこに置いた canary の `cat` が断られる。`mktemp`・heredoc・`run_in_background` の Bash が動き、Tutor が background の出力を読める。
 - 終わったら `$HOME/.monica-box-check.*` と server を消す。
+- SDK の記録を消した会話の終わり方: 箱の script とは別に、`resume` に無い session id を渡した `query()` が、stderr に `No conversation found with session ID: <id>` を出して exit 1 することを確かめる。文が変わっていたら、`packages/study/src/study.ts` の `NO_SDK_RECORD` と `conversation-end.test.ts` の `NO_RECORD_SHELL` を直す。
 
 ## Gotchas
 

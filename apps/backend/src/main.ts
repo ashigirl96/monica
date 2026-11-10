@@ -19,7 +19,12 @@ import {
   migrations as noteMigrations,
   systemJobs as noteSystemJobs,
 } from '@monica/note/server'
-import { createStudyLedger, migrations as studyMigrations, writeTutors } from '@monica/study/server'
+import {
+  createStudyLedger,
+  migrations as studyMigrations,
+  systemJobs as studySystemJobs,
+  writeTutors,
+} from '@monica/study/server'
 import {
   createTaskLedger,
   migrations as taskMigrations,
@@ -135,7 +140,11 @@ const studyLedger = createStudyLedger({
 const jobLedger = createJobLedger({
   db,
   home,
-  systemJobs: [...taskSystemJobs(taskLedger), ...noteSystemJobs(noteLedger)],
+  systemJobs: [
+    ...taskSystemJobs(taskLedger),
+    ...noteSystemJobs(noteLedger),
+    ...studySystemJobs(studyLedger),
+  ],
 })
 // compiled binary は --asset の cmaps を entry の隣に持ち、bun run の Backend は packages/chat が node_modules から解く。
 const cMaps = join(import.meta.dir, 'cmaps')

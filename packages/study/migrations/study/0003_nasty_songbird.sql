@@ -1,0 +1,1 @@
+ALTER TABLE `study_conversation` ADD `summary` text;

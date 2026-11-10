@@ -43,6 +43,13 @@ test('what the user said stays text, not HTML or markdown', () => {
   expect(html).toContain('&lt;b&gt;bold&lt;/b&gt; **not bold**')
 })
 
+test('a reflection row is drawn as a divider named 振り返り', () => {
+  const html = render(message('reflection', ''))
+
+  expect(html).toContain('role="separator"')
+  expect(html).toContain('振り返り')
+})
+
 test('the Tutor text is markdown without HTML or images', () => {
   const html = render(message('tutor', '**why** ky? <img src=x onerror=alert(1)>'))
 
