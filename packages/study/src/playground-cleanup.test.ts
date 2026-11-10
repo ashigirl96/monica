@@ -139,6 +139,47 @@ test('a Study whose turn is running is left for the next run, and a send during 
   expect(watch.events[0]).toMatchObject({ running: false })
 })
 
+test('shell during Playground cleanup is refused without touching the Study, and can enter after cleanup', async () => {
+  const { promise: reached, resolve: markReached } = Promise.withResolvers<void>()
+  const { promise: held, resolve: release } = Promise.withResolvers<void>()
+  const nix = fakeNixStore({ refs: { [ROOT]: [] }, live: [] })
+  const fixture = setup({
+    tools: {
+      docker: null,
+      nixStore: async (argv) => {
+        markReached()
+        await held
+        return nix.nixStore(argv)
+      },
+    },
+  })
+  const { id } = await fixture.client.start({})
+  const env = envOf(fixture, id)
+  symlinkSync(ROOT, join(env, 'result'))
+  const stale = staleAgo()
+  lastActiveAt(fixture, id, stale)
+  const cleaned = fixture.studyLedger.cleanPlaygrounds()
+  cleanups.push(async () => {
+    release()
+    await cleaned
+  })
+  await reached
+
+  const entered = await fixture.client.shell({ prefix: id }).then(
+    () => 'entered',
+    (error: { code: string }) => error.code,
+  )
+  const { studies } = await fixture.client.list({})
+  expect(existsSync(env)).toBe(true)
+  release()
+  await cleaned
+
+  expect(existsSync(env)).toBe(false)
+  expect(entered).toBe('CONFLICT')
+  expect(studies[0]!.lastActivityAt.getTime()).toBe(stale)
+  expect((await fixture.client.shell({ prefix: id })).studyId).toBe(id)
+})
+
 test('the cleanup removes only what the .gitignore of each prototype ignores, and leaves a prototype without .git alone', async () => {
   const fixture = setup()
   const { id } = await fixture.client.start({})

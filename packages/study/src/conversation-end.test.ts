@@ -104,6 +104,18 @@ test('a send that takes the turn before the Job keeps the Study Conversation goi
   expect((await client.get({ id })).conversations[0]!.endedAt).toBeNull()
 })
 
+test('the idle conversation Job skips a removal that finishes before its refusal is caught', async () => {
+  clock(T0)
+  const fixture = await talked()
+  setSystemTime(at(61))
+  const ended = fixture.claude.exited.then(() => fixture.studyLedger.endIdleConversations())
+
+  await Promise.all([fixture.client.remove({ id: fixture.id }), ended])
+
+  expect((await fixture.client.list({})).studies).toEqual([])
+  expect(fixture.fake.claudes).toHaveLength(1)
+})
+
 test('a reflection left by a stopped Backend is started again', async () => {
   const before = await talked()
   await before.client.conversation.end({ id: before.id })

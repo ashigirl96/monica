@@ -518,11 +518,7 @@ function makeLedger(deps: {
     }
   }
 
-  /** turn の印を await の前に確かめて付ける。 */
-  function takeTurn(studyId: string, reflection: boolean): Turn {
-    if (turns.has(studyId)) {
-      throw new ORPCError('CONFLICT', { message: `a turn is already running in ${studyId}` })
-    }
+  function refuseWhileChangingPlayground(studyId: string) {
     if (removing.has(studyId)) {
       throw new ORPCError('CONFLICT', { message: `${studyId} is being removed` })
     }
@@ -531,6 +527,14 @@ function makeLedger(deps: {
         message: `the Playground of ${studyId} is being cleaned up`,
       })
     }
+  }
+
+  /** turn の印を await の前に確かめて付ける。 */
+  function takeTurn(studyId: string, reflection: boolean): Turn {
+    if (turns.has(studyId)) {
+      throw new ORPCError('CONFLICT', { message: `a turn is already running in ${studyId}` })
+    }
+    refuseWhileChangingPlayground(studyId)
     refuseWhenFull(studyId)
     const { promise, resolve } = Promise.withResolvers<void>()
     const turn = { partialText: '', lastTutorText: '', reflection, ended: promise, end: resolve }
@@ -897,6 +901,7 @@ function makeLedger(deps: {
           })
         }
         const { id } = found[0]!
+        refuseWhileChangingPlayground(id)
         touch(tx, id, new Date())
         return id
       })
@@ -973,14 +978,16 @@ function makeLedger(deps: {
         .where(isNull(studyConversation.endedAt))
         .all()
       for (const conversation of ongoing) {
-        const running = turns.has(conversation.studyId) || cleaning.has(conversation.studyId)
         try {
           if (!isIdle(conversation)) continue
           await endConversation(conversation.studyId, conversation.id, true)
         } catch (error) {
-          // 走っている turn と Playground の掃除と Study を消している間と、claude が 4 つとも turn の中の時は、次の回に回す。
-          const busy = running || removing.has(conversation.studyId)
-          if (error instanceof ORPCError && (busy || error.code === 'TOO_MANY_REQUESTS')) continue
+          if (
+            error instanceof ORPCError &&
+            (error.code === 'CONFLICT' || error.code === 'TOO_MANY_REQUESTS')
+          ) {
+            continue
+          }
           failures.push(`${conversation.id}: ${(error as Error).message}`)
         }
       }
