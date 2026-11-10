@@ -414,7 +414,10 @@ test('a send turn that ends the Study Conversation without reflecting keeps it s
   client.conversationRows = [{ id: CONVERSATION, endedAt: new Date(), summary: 'no SDK record' }]
   stream.push({ type: 'turn-ended', error: 'No conversation found with session ID x' })
 
-  const ended = await until(store, (s) => s.ongoingId === null && s.conversations[0]?.endedAt !== null)
+  const ended = await until(
+    store,
+    (s) => s.ongoingId === null && s.conversations[0]?.endedAt !== null,
+  )
   expect(ended.shown).toMatchObject({ id: CONVERSATION, summary: 'no SDK record' })
   expect(texts(ended)).toEqual(['learn ky', 'why ky?', 'again'])
   expect(ended.turnError).toBe('No conversation found with session ID x')

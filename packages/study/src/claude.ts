@@ -209,8 +209,7 @@ export function wakeClaude(
       if (!pid) return
       try {
         process.kill(-pid, 'SIGKILL')
-      } catch {
-      }
+      } catch {}
     },
     exited: () => exited,
   }

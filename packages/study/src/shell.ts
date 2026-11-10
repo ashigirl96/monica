@@ -16,8 +16,7 @@ function writeIfChanged(path: string, content: string) {
   let current: string | null = null
   try {
     current = readFileSync(path, 'utf8')
-  } catch {
-  }
+  } catch {}
   if (current !== content) writeFileSync(path, content)
 }
 

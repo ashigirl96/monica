@@ -85,7 +85,7 @@ export function StudyPage({ id }: { id: string }) {
             void store.end()
           }}
         />
-        {study && <LinkedRepos id={id} linked={snapshot.repos} onChanged={store.reload} />}
+        {study && <LinkedRepos id={id} linked={snapshot.repos} onChanged={() => store.reload()} />}
         <StudyMenu id={id} />
       </StudyHeader>
       <div className="flex min-h-0 flex-1">

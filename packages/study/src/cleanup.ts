@@ -46,8 +46,7 @@ export function createRunner() {
     for (const child of children) {
       try {
         process.kill(-child.pid, 'SIGKILL')
-      } catch {
-      }
+      } catch {}
     }
   }
   function found(name: string): Tool | null {

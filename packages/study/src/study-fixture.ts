@@ -171,8 +171,7 @@ export function studyFixture(cleanups: (() => unknown)[]) {
     void (async () => {
       try {
         for await (const event of iterator) events.push(event)
-      } catch {
-      }
+      } catch {}
     })()
     cleanups.push(() => closed.abort())
     return {

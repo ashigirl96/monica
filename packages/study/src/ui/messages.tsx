@@ -126,8 +126,8 @@ export function MessageView({
   }
 }
 
-// 見た目を偽る bidi の制御・幅ゼロの文字と、改行と tab 以外の制御文字。
-const HIDDEN_CHARS = /[\u202A-\u202E\u2066-\u2069\u200B-\u200F\u2060\uFEFF\0-\x08\x0B-\x1F\x7F-\x9F]/g
+// 見た目を偽る bidi の制御・幅ゼロの文字（Cf）と、改行と tab 以外の制御文字（Cc）。
+const HIDDEN_CHARS = /(?![\n\t])[\p{Cc}\p{Cf}]/gu
 
 /** 許す前に command の本当の中身が見えるよう、見えない文字を \u{…} の表記にする。 */
 export const visibleCommand = (command: string) =>
