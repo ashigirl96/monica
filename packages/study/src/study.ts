@@ -22,8 +22,6 @@ export type StudyLedger = {
 const MAX_CLAUDES = 4
 const BASH_COMMAND_CHARS = 200
 
-const TUTOR_DIR = join(import.meta.dir, '../tutors')
-
 type Turn = { partialText: string }
 type MessageRow = typeof studyMessage.$inferSelect
 
@@ -108,6 +106,7 @@ function makeLedger(deps: {
   claudePath?: string | undefined
   askUser?: AskUser
   query?: Query
+  tutorsDir?: string | undefined
 }) {
   const { db, home } = deps
   const studiesDir = join(home, 'studies')
@@ -116,7 +115,7 @@ function makeLedger(deps: {
   mkdirSync(learningPreferenceDir, { recursive: true, mode: 0o700 })
   const claudeDeps: ClaudeDeps = {
     home,
-    tutorDir: TUTOR_DIR,
+    tutorDir: deps.tutorsDir ?? join(import.meta.dir, '../tutors'),
     learningPreferenceDir,
     claudePath: deps.claudePath,
     askUser: deps.askUser,

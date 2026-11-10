@@ -40,6 +40,16 @@ Preconditions: `launch.sh <name> MONICA_BROWSER_PORT=<port>` で dev の Backend
 - **断られるもの**: Tutor に `ls <本物の HOME>/.ssh`（箱の中の `~` は `env/home` を指すので絶対 path で書く）と `curl --noproxy '' http://127.0.0.1:<port>/` を走らせ、どちらも断られる。
 - **resume**: Backend に SIGTERM を送ると claude とその子が居なくなる（`ps -A -o pid=,ppid=,pgid=,command=`）。起こし直して `send` すると、前の turn の話を覚えて答える。
 
+## release の build で Tutor の定義を書き出す
+
+release の Backend は同梱の `packages/study/tutors` を、起動のたびに `$H/tutors` へ消してから写し、Study の claude にはそちらを渡す。
+
+- 起こす: `bun run install-app --stage <dir>` で置いた `<dir>/Monica.app` の Backend を、`VERIFY_BACKEND=<dir>/Monica.app/Contents/MacOS/monica-backend .claude/skills/verify-monica/scripts/launch.sh <name> MONICA_CLAUDE_PATH=<dir>/Monica.app/Contents/MacOS/claude MONICA_BROWSER_PORT=<port>` で起こす（`surfaces/headless.md` の「起こす」の 1）。
+- `diff -r packages/study/tutors $H/tutors` が何も出さない。
+- `$H/tutors/stale.md` を置いて起こし直すと消えている。
+- `watch` を開いて Study を始めて `send` すると、`turn-ended` の `error` が null で、init の `skills` に `tutors:repository` があり、`get` に `tutor_switch` の `repository` の行がある。
+- `bun run` の Backend（`launch.sh <name>`）では `$H/tutors` ができない。
+
 ## Agent SDK の版を上げたとき
 
 Study の箱の効き目は、確かめた版のものしか分からない。`@anthropic-ai/claude-agent-sdk` の版を変えたら、新しい版と同梱の claude で次を確かめる。`tutorBox` の options を `query()` に渡す使い捨ての Bun の script を `packages/study/` の下に置き、終わったら消す。
@@ -64,4 +74,4 @@ Study の箱の効き目は、確かめた版のものしか分からない。`@
 
 - 答えは本物の claude が返し、`send` の 1 回ごとに課金される。確かめる発言は少なくする。
 - Study の dir は `$H/studies/` にあり、`cleanup.sh` で消える。証拠にする file は `$E` へ写す。
-- release の Backend は Tutor の定義を同梱しないので、turn は `turn-ended` の `error` で終わる。dev の Backend で確かめる。
+- release の Backend が Tutor の定義を書き出せないと、stderr に `[backend] could not write the Tutors:` が出て、turn は `turn-ended` の `error` で終わる。
