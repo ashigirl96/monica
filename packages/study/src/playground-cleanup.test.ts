@@ -207,6 +207,24 @@ test('the cleanup skips a prototype whose .git is a file pointing elsewhere', as
   expect(existsSync(join(outside, 'secret'))).toBe(true)
 })
 
+test('the cleanup does not follow a prototypes symlink out of the Study', async () => {
+  const fixture = setup()
+  const { id } = await fixture.client.start({})
+  const outside = mkdtempSync(join(tmpdir(), 'study-outside-'))
+  cleanups.push(() => rmSync(outside, { recursive: true, force: true }))
+  const repo = join(outside, 'a')
+  mkdirSync(repo)
+  Bun.spawnSync(['git', 'init', '-q', repo], { env: process.env })
+  writeFileSync(join(repo, '.gitignore'), 'secret\n')
+  writeFileSync(join(repo, 'secret'), 'keep')
+  symlinkSync(outside, join(fixture.home, 'studies', id, 'prototypes'))
+  lastActiveAt(fixture, id, staleAgo())
+
+  await cleanUp(fixture).catch(() => {})
+
+  expect(existsSync(join(repo, 'secret'))).toBe(true)
+})
+
 test('playground_removed_at is written when the env is removed, not when there was none, and the list marks the Study', async () => {
   const fixture = setup()
   const withEnv = await fixture.client.start({})

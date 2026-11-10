@@ -1,5 +1,5 @@
-import { existsSync, lstatSync, readdirSync, readlinkSync } from 'node:fs'
-import { join } from 'node:path'
+import { existsSync, lstatSync, readdirSync, readlinkSync, realpathSync } from 'node:fs'
+import { join, sep } from 'node:path'
 
 import type { Subprocess } from 'bun'
 
@@ -47,7 +47,6 @@ export function createRunner() {
       try {
         process.kill(-child.pid, 'SIGKILL')
       } catch {
-        // 既に居ない。
       }
     }
   }
@@ -180,15 +179,26 @@ const isRealDir = (path: string) => {
   }
 }
 
+const realOrEmpty = (path: string) => {
+  try {
+    return realpathSync(path)
+  } catch {
+    return ''
+  }
+}
+
 /** 本物の .git の dir を持つ Prototype ごとに、.gitignore が無視する物だけを消す。 */
 export async function cleanPrototypes(studyDir: string, run: Run): Promise<string[]> {
   const prototypes = join(studyDir, 'prototypes')
-  if (!existsSync(prototypes)) return []
+  if (!isRealDir(prototypes)) return []
+  const inside = `${realpathSync(studyDir)}${sep}`
   const failures: string[] = []
   for (const entry of readdirSync(prototypes, { withFileTypes: true })) {
-    const dir = join(prototypes, entry.name)
+    if (!entry.isDirectory()) continue
+    // Tutor が途中で親の dir を symlink に差し替えても外へ出ないよう、git の直前に解いた path で確かめて渡す。
+    const dir = realOrEmpty(join(prototypes, entry.name))
     // .git が file なら gitdir: で箱の外の repo を指せる。
-    if (!entry.isDirectory() || !isRealDir(join(dir, '.git'))) continue
+    if (!dir.startsWith(inside) || !isRealDir(join(dir, '.git'))) continue
     const argv = [
       'git',
       ...SAFE_GIT_CONFIG,
