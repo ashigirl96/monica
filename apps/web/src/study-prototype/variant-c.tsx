@@ -6,7 +6,7 @@ import { useEffect, useState } from 'react'
 
 import { Button } from '../../../../packages/chat/src/ui/fluid/button.tsx'
 import { InputMessage } from '../../../../packages/chat/src/ui/fluid/input-message.tsx'
-import { actions, activeConversation, type Conversation, type Message, missionLine, type Study, useStudies } from './data.ts'
+import { actions, activeConversation, type Conversation, type Message, missionLine, pendingPermission, type Study, useStudies } from './data.ts'
 import {
   artifactLabel,
   artifactPaths,
@@ -73,7 +73,15 @@ export function RecencyList({ variant }: { variant: VariantKey }) {
                   onClick={() => go(studyHref(`/studies/${s.short}`, variant))}
                   className="flex flex-col gap-0.5 rounded-lg px-2 py-2 text-left hover:bg-hover"
                 >
-                  <span className="text-subtitle">{missionLine(s)}</span>
+                  <span className="flex items-center gap-2 text-subtitle">
+                    {missionLine(s)}
+                    {pendingPermission(s) && (
+                      <span className="flex shrink-0 items-center gap-1 rounded-md bg-[color-mix(in_oklab,var(--warning)_18%,transparent)] px-1.5 text-micro">
+                        <ShieldAlert className="size-3" />
+                        許可を待っている
+                      </span>
+                    )}
+                  </span>
                   <span className="line-clamp-1 text-caption text-muted-foreground">
                     {s.lastActivityLabel}・{(s.artifacts['log.md'] ?? '').split('\n').filter((l) => l.startsWith('- ')).at(-1)?.slice(2).replace(/[`[\]]|\(.*?\)/g, '')}
                   </span>
