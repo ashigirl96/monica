@@ -1,6 +1,6 @@
+import { Button, useIcons } from '@monica/ui/fluid'
+
 import type { CurrentPage } from './current-page.ts'
-import { Button } from './fluid/button.tsx'
-import { useIcons } from './fluid/lib/icon-context.tsx'
 
 // file: のように host の無い URL は、URL をそのまま出す。
 function hostOf(url: string): string {

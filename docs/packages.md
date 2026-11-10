@@ -17,7 +17,7 @@ monica/
 ```
 
 - apps は packages を組み立てるだけでロジックを持たない。apps どうしは互いを import しない。
-- `packages/ui` には、domain の語を持たない部品と、CLI の整形が使う `@monica/ui/table`・`@monica/ui/local-time` を置く。cli entry は apps/cli だけが import するので、domain の cli entry どうしでは共有できないため。domain の UI は各 domain の `ui` entry に置く。
+- `packages/ui` には、domain の語を持たない部品と、CLI の整形が使う `@monica/ui/table`・`@monica/ui/local-time`、fluid-functionalism を写した部品の `@monica/ui/fluid`（色の定義は `.fluid` の内側でだけ効く）、agent が書いた markdown を描く `@monica/ui/markdown` を置く。cli entry は apps/cli だけが import するので、domain の cli entry どうしでは共有できないため。domain の UI は各 domain の `ui` entry に置く。
 
 ### ドメイン package の中
 
