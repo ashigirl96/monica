@@ -52,7 +52,7 @@ Chat の claude の options の効き目は、確かめた版のものしか分�
 - 書くのと送るのは別の `eval` にする。同じ式で続けて click すると、React が draft を書き換える前に押され、空の質問になる。
 - textarea の `value` を代入するだけでは React に届かない。prototype の setter を呼んでから `input` を送る。
 - `requests` は有効にする前の request を拾わない。送る前に起こしておく。
-- `packages/chat/src/ui` を編集した後は、HMR の後も前の module の listener が残る。`close` と `open` で開き直してから確かめる。
+- `packages/chat/src/ui` と `packages/ui/src/fluid` を編集した後は、HMR の後も前の module の listener が残る。`close` と `open` で開き直してから確かめる。
 - `monica の desktop が起動していません` が出たら、side panel が同じ home の Backend を見つけていない。Brave と Backend の home の名前が揃っているかと、`doctor.sh` を見る。
 - 答えは本物の claude が返す。1 回ごとに課金されるので、質問は短くする。
 - worktree の session では guard が `eval` の語を見て止める。止められたら言い換えずに、確かめられなかったと報告する。

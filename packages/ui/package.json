@@ -5,13 +5,21 @@
   "exports": {
     ".": "./src/index.ts",
     "./table": "./src/table.ts",
-    "./local-time": "./src/local-time.ts"
+    "./local-time": "./src/local-time.ts",
+    "./fluid": "./src/fluid/index.ts",
+    "./markdown": "./src/markdown.tsx"
   },
   "dependencies": {
+    "@base-ui/react": "catalog:",
+    "class-variance-authority": "catalog:",
     "clsx": "catalog:",
+    "framer-motion": "catalog:",
     "jotai": "catalog:",
+    "lucide-react": "catalog:",
     "react": "catalog:",
     "react-dom": "catalog:",
+    "react-markdown": "catalog:",
+    "remark-gfm": "catalog:",
     "tailwind-merge": "catalog:"
   },
   "devDependencies": {

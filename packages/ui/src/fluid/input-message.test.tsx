@@ -2,7 +2,7 @@ import { expect, test } from 'bun:test'
 
 import { renderToStaticMarkup } from 'react-dom/server'
 
-import { InputMessage } from './fluid/input-message.tsx'
+import { InputMessage } from './input-message.tsx'
 
 test('while an answer is coming, the input offers 止める in place of 送る, even with a question typed', () => {
   const html = renderToStaticMarkup(

@@ -29,7 +29,8 @@ MONICA_HOME=${TMPDIR%/}/monica-<名前> bun scripts/extension-panel.ts requests 
 
 - `open`: toolbar の action のクリックと同じ経路（CDP の `Extensions.triggerAction`）で side panel を開き、その target の id を出す。action は開閉を切り替えるので、開いていれば押さずに id だけを出す。
 - `eval '<js>'`: side panel で式を評価し、値を JSON で出す。user gesture 付きで評価し、Promise は待つ。例外は stderr に出して exit 1 する。worktree に隔離した agent では、worktree の guard が `eval` の語を見て command ごと止める。止められたら言い換えずに、確かめられなかったと報告する。
-- `screenshot <path>`: side panel を png で撮る。Read で見る。
+- `screenshot <path> [light|dark]`: side panel を png で撮る。Read で見る。`light`・`dark` を付けると、その撮影の間だけ `prefers-color-scheme` を CDP で切り替える。
+- 変更の前後で見た目が同じことを確かめるときは、`git worktree add --detach <scratch>/<名前> origin/main` に `bun install` し、その dir から別の名前の home で `bun run extension --headless` と `launch.sh` を起こして、両方で同じ操作をして撮り、`cmp` で比べる。片付けは、その dir から `cleanup.sh <名前>` を流してから `git worktree remove --force`。
 - `close`: 開いている side panel を、action を押して閉じる。× と同じく side panel の view を捨てる経路で、閉じたときの abort を確かめるのに使う。`open` と同じく最初の Browser Tab で押すので、window が 1 つのときに使う。
 - `requests <path>`: side panel の CDP の Network を有効にし、URL に path を含む request の url・method・body を 1 行の JSON で出す。side panel が閉じるか、Brave が止まって CDP の接続が切れる（`dev:kill` を含む）か、SIGINT・SIGTERM を受けるまで動くので、Bash の `run_in_background` で起こしてから side panel を操作する。有効にする前の request（開いた時の `chat.prepare`）は拾わない。
 - `apps/extension/src/sidepanel/` の編集は、開いたままの side panel に HMR で届く。`src/background.ts` を編集すると、CRXJS が Chrome Extension を reload する。reload の後に side panel を見るときは、もう一度 `open` を打つ。

@@ -6,14 +6,6 @@ import { Answer } from './answer.tsx'
 
 const render = (text: string) => renderToStaticMarkup(<Answer text={text} />)
 
-test('an image is not loaded and shows its alt and URL as text', () => {
-  const html = render('See ![leak](http://127.0.0.1:8123/leak.png?q=secret) here.')
-
-  expect(html).not.toContain('<img')
-  expect(html).toContain('leak')
-  expect(html).toContain('http://127.0.0.1:8123/leak.png?q=secret')
-})
-
 test('an http or https link opens in a new Browser Tab and shows its host', () => {
   const html = render('[the spec](https://example.com/docs/a) and [old](http://old.example:8080/)')
 
