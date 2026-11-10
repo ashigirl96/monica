@@ -216,7 +216,15 @@ _Avoid_: goal
 
 **Learning Record（学習記録）**:
 Study の中で、ユーザーが何を分かったか、前から何を知っていたか、どの誤解が直ったか、学んだ結果 Mission がどう変わったかを、その証拠が出たときに 1〜3 文で残す記録。触れただけのことや毎回の活動は書かない。
-_Avoid_: Note（Note と紛れる）, log（経過の記録と紛れる）
+_Avoid_: Note（Note と紛れる）, log（Study Log と紛れる）
+
+**Primary Source（一次資料）**:
+学習対象について、元の書き手が書いた資料（公式の docs、仕様、論文、source など）。Tutor が教える前に探して Study の一覧に足し、ユーザーが読んだかをその一覧に印で持つ。
+_Avoid_: Resource（意味が広い）, Reference
+
+**Study Log（経過の記録）**:
+Study の中で何をしたかを、日付を付けて書き足していく記録。Study Conversation ごとに節を立て、会話の終わりにまとめを置く。学習記録と違い、読んだもの、問いと答え、試した道具など、毎回の活動を書く。
+_Avoid_: Journal, Learning Record, log（単独で使わない）
 
 **Learning Preference（学び方の好み）**:
 全 Study に効く、ユーザーの教わり方の好み（説明の長さ、クイズの出し方、手を動かす順など）。ユーザーが会話で好みを言うと agent が書き足し、ユーザーも直せる。ある Study だけの希望は Mission に書く。
@@ -231,7 +239,7 @@ Study の中で、学習対象を確かめるために作るコード。Playgrou
 _Avoid_: Demo
 
 **Study Conversation（学習の会話）**:
-Study の中で、Tutor と続けて交わす会話のひと続き。1 つの Study は何本も持ち、続いているのは 1 本だけ。ユーザーが新しい会話を始めるか、しばらく発言が無いと終わり、終わる時に Tutor が会話を振り返って学習記録の書き漏れを拾い、その会話のまとめを残す。新しい会話の Tutor は前の会話を覚えておらず、Mission や学習記録などの成果物から始める。終わった会話は読めるが、続けられない。
+Study の中で、Tutor と続けて交わす会話のひと続き。1 つの Study は何本も持ち、続いているのは 1 本だけ。ユーザーが新しい会話を始めるか、しばらく発言が無いと終わり、終わる時に Tutor が会話を振り返って学習記録の書き漏れを拾い、Study Log にその会話のまとめを残す。新しい会話の Tutor は前の会話を覚えておらず、Mission や学習記録などの成果物から始める。終わった会話は読めるが、続けられない。
 _Avoid_: Session（Agent Session と紛れる）, Chat（Chrome Extension の問答）, Lesson, Thread
 
 ### Browser
