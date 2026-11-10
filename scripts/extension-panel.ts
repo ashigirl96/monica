@@ -135,8 +135,8 @@ async function printRequests(cdp: Cdp, id: string, path: string): Promise<void> 
   await ended
 }
 
-const usage = `使い方: MONICA_HOME=<home> bun scripts/extension-panel.ts open | close | eval '<js>' | screenshot <path> | requests <path>`
-const [command, arg] = process.argv.slice(2)
+const usage = `使い方: MONICA_HOME=<home> bun scripts/extension-panel.ts open | close | eval '<js>' | screenshot <path> [light|dark] | requests <path>`
+const [command, arg, scheme] = process.argv.slice(2)
 const home = resolve(process.env.MONICA_HOME || DEFAULT_HOME)
 const endpoint = browserEndpoint(braveProfile(home))
 if (!endpoint) {
@@ -159,6 +159,15 @@ try {
     console.log(JSON.stringify(await evaluate(cdp, sessionId, arg, { userGesture: true })))
   } else if (command === 'screenshot' && arg) {
     const sessionId = await openedSidePanel(cdp, id)
+    if (scheme) {
+      // emulation は attach した session の間だけ効くので、同じ session で撮る。
+      await cdp.send(
+        'Emulation.setEmulatedMedia',
+        { features: [{ name: 'prefers-color-scheme', value: scheme }] },
+        sessionId,
+      )
+      await Bun.sleep(300)
+    }
     const { data } = await cdp.send<{ data: string }>(
       'Page.captureScreenshot',
       { format: 'png' },
