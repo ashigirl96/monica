@@ -64,12 +64,11 @@ export type ClaudeDeps = {
 
 const quote = (value: string) => `'${value.replaceAll("'", `'\\''`)}'`
 
-// claude は CLAUDE_ENV_FILE を session ごとに 1 度だけ読み、中身は箱の中で走るので、Study ごとに変わらない固定の文にする。
+// claude は CLAUDE_ENV_FILE を session ごとに 1 度読み、Bash の command ごとに先に流す。箱の外の command では流す中身も箱の外で走るので、
+// Tutor が書ける env/env.sh と env/home は、claude が箱の中の command にだけ付ける SANDBOX_RUNTIME=1 の時に限って使う。
 export function writeEnvFile(studyDir: string): string {
   const path = join(studyDir, '.claude-env.sh')
   const envSh = quote(join(studyDir, 'env', 'env.sh'))
-  // 箱の外で走る docker も HOME を env/home に替えられるので、ユーザーの context と認証を本物の home から読ませる。
-  const dockerConfig = quote(process.env.DOCKER_CONFIG || join(homedir(), '.docker'))
   // Tutor が置いた symlink を辿って箱の外の file を上書きしないよう、消してから新しく作る。
   rmSync(path, { force: true })
   const { O_WRONLY, O_CREAT, O_EXCL, O_NOFOLLOW } = constants
@@ -77,7 +76,7 @@ export function writeEnvFile(studyDir: string): string {
   try {
     writeSync(
       fd,
-      `export HOME=${quote(join(studyDir, 'env', 'home'))}\nexport DOCKER_CONFIG=${dockerConfig}\nif [ -f ${envSh} ]; then . ${envSh}; fi\n`,
+      `if [ "\${SANDBOX_RUNTIME:-}" = 1 ]; then\n  export HOME=${quote(join(studyDir, 'env', 'home'))}\n  if [ -f ${envSh} ]; then . ${envSh}; fi\nfi\n`,
     )
   } finally {
     closeSync(fd)

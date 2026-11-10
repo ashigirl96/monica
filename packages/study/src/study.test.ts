@@ -499,25 +499,43 @@ test('the claude env carries the allowlisted keys, the PATH without dirs under H
   expect(env.NPM_CONFIG_PREFIX).toBe(join(home, 'studies', id, 'env/npm'))
 })
 
-test('the env file of a Study points HOME under env, DOCKER_CONFIG at the real .docker, and sources env/env.sh, and is written again with the same content before each claude starts', async () => {
+const readEnvFile = (envFile: string, sandboxed: boolean) =>
+  Bun.spawnSync(['/bin/sh', '-c', `. "$1"; printf '%s\\n%s' "$HOME" "$PATH"`, 'sh', envFile], {
+    env: {
+      HOME: homedir(),
+      PATH: '/usr/bin:/bin',
+      ...(sandboxed && { SANDBOX_RUNTIME: '1' }),
+    },
+  })
+    .stdout.toString()
+    .split('\n')
+
+test('inside the box the env file points HOME under env and runs env/env.sh, and outside it leaves HOME and never runs env/env.sh', async () => {
   const { home, client, fake } = setup()
   const { id } = await client.start({})
   const dir = join(home, 'studies', id)
-  const watch = await watching(client, id)
-  const dockerConfig = process.env.DOCKER_CONFIG
-  delete process.env.DOCKER_CONFIG
-  try {
-    await client.send({ id, text: 'hello' })
-    await until(() => fake.claudes.length === 1)
-  } finally {
-    if (dockerConfig !== undefined) process.env.DOCKER_CONFIG = dockerConfig
-  }
-
+  await client.send({ id, text: 'hello' })
+  await until(() => fake.claudes.length === 1)
+  const marker = join(dir, 'marker')
+  mkdirSync(join(dir, 'env'), { recursive: true })
+  writeFileSync(join(dir, 'env', 'env.sh'), `touch '${marker}'\nexport PATH="/study/bin:$PATH"\n`)
   const envFile = join(dir, '.claude-env.sh')
+
+  expect(readEnvFile(envFile, false)).toEqual([homedir(), '/usr/bin:/bin'])
+  expect(existsSync(marker)).toBe(false)
+
+  expect(readEnvFile(envFile, true)).toEqual([join(dir, 'env', 'home'), '/study/bin:/usr/bin:/bin'])
+  expect(existsSync(marker)).toBe(true)
+})
+
+test('the env file is written again with the same content before each claude starts', async () => {
+  const { home, client, fake } = setup()
+  const { id } = await client.start({})
+  const watch = await watching(client, id)
+  await client.send({ id, text: 'hello' })
+  await until(() => fake.claudes.length === 1)
+  const envFile = join(home, 'studies', id, '.claude-env.sh')
   const written = readFileSync(envFile, 'utf8')
-  expect(written).toBe(
-    `export HOME='${dir}/env/home'\nexport DOCKER_CONFIG='${homedir()}/.docker'\nif [ -f '${dir}/env/env.sh' ]; then . '${dir}/env/env.sh'; fi\n`,
-  )
 
   writeFileSync(envFile, 'export HOME=/\n')
   process.kill(-fake.claudes[0]!.pid, 'SIGKILL')
@@ -525,24 +543,6 @@ test('the env file of a Study points HOME under env, DOCKER_CONFIG at the real .
   await client.send({ id, text: 'again' })
   await until(() => fake.claudes.length === 2)
   expect(readFileSync(envFile, 'utf8')).toBe(written)
-})
-
-test('the env file keeps the DOCKER_CONFIG the Backend was started with', async () => {
-  const { home, client, fake } = setup()
-  const { id } = await client.start({})
-  const dockerConfig = process.env.DOCKER_CONFIG
-  process.env.DOCKER_CONFIG = "/opt/it's docker"
-  try {
-    await client.send({ id, text: 'hello' })
-    await until(() => fake.claudes.length === 1)
-  } finally {
-    if (dockerConfig === undefined) delete process.env.DOCKER_CONFIG
-    else process.env.DOCKER_CONFIG = dockerConfig
-  }
-
-  expect(readFileSync(join(home, 'studies', id, '.claude-env.sh'), 'utf8')).toContain(
-    `export DOCKER_CONFIG='/opt/it'\\''s docker'\n`,
-  )
 })
 
 test('a symlink a Tutor put at the env file is replaced, and the file it pointed to is left as it was', async () => {

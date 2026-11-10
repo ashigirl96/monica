@@ -19,7 +19,7 @@ Look for these, in this order, and add the ones worth keeping to `RESOURCES.md`:
 
 ## The source
 
-- Clone the repository to `env/sources/<owner>/<repo>` (for example `git clone https://github.com/sindresorhus/ky env/sources/sindresorhus/ky`). The box refuses writes to `.git/config` and `.git/hooks`, so `git clone` fails inside it: run it with `dangerouslyDisableSandbox: true` and a reason, and the user is asked. Write the original URL in `RESOURCES.md`, not the local path.
+- Clone the repository to `env/sources/<owner>/<repo>` (for example `git clone https://github.com/sindresorhus/ky env/sources/sindresorhus/ky`). The box refuses writes to `.git/config` and `.git/hooks`, so `git clone` fails inside it: run it with `dangerouslyDisableSandbox: true` and a reason, and the user is asked. The same goes for `git init` of a Prototype. Write the original URL in `RESOURCES.md`, not the local path.
 - Other git commands that only read the clone (`git log`, `git blame`, `git diff`) run inside the box.
 - Read the code with the user. Point at files and lines, and ask the user to predict what a function does before you explain it.
 

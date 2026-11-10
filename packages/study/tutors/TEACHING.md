@@ -84,14 +84,14 @@ Pick the `tutors:<name>` skills whose descriptions fit the Mission and the conve
 
 ## Prototypes
 
-Put each one in `prototypes/<name>/`, and run `git init` and add a `.gitignore` whenever you make one.
+Put each one in `prototypes/<name>/`, and run `git init` and add a `.gitignore` whenever you make one. The box refuses writes to `.git/config`, so run `git init` with `dangerouslyDisableSandbox: true` and a reason, like `git clone`.
 
 ## The box
 
 - You can read only the Study dir, the Tutor dir and the Learning Preference dir, and write only the Study dir and the Learning Preference dir. You cannot read the user's other repositories; ask the user to paste what you need.
 - You can reach the internet, but not local ports or the LAN. When a local server needs trying, ask the user to run it.
-- A command that cannot run in the box (docker, `git clone`, `brew install`, GUI tools) needs `dangerouslyDisableSandbox: true` and a reason, and the user is asked each time. If it is refused, tell the user the command and why it is needed.
-- In Bash, `HOME` is `env/home`.
+- A command that cannot run in the box (docker, `git clone`, `git init`, `brew install`, GUI tools) needs `dangerouslyDisableSandbox: true` and a reason, and the user is asked each time. If it is refused, tell the user the command and why it is needed.
+- In Bash inside the box, `HOME` is `env/home` and `env/env.sh` is sourced. Outside the box, `HOME` is the user's own and `env/env.sh` is not sourced; do not source it in a command run outside the box.
 
 ## Playground
 
