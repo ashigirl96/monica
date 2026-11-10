@@ -20,7 +20,12 @@ test('the header shows the shell command with the short id in a button', () => {
 const row = (playgroundRemoved: boolean) =>
   renderToStaticMarkup(
     <ScreenContext.Provider
-      value={{ client: {} as StudyClient, navigate: () => {}, spaLinkClick: () => () => {} }}
+      value={{
+        client: {} as StudyClient,
+        navigate: () => {},
+        spaLinkClick: () => () => {},
+        repoCandidates: async () => [],
+      }}
     >
       <StudyRow
         study={{
@@ -30,6 +35,7 @@ const row = (playgroundRemoved: boolean) =>
           lastActivityAt: new Date(0),
           lastLogLine: null,
           playgroundRemoved,
+          repos: [],
         }}
         now={new Date(0)}
       />

@@ -10,7 +10,11 @@ export type Navigation = {
   spaLinkClick: (to: string) => (e: MouseEvent) => void
 }
 
-export type ScreenDeps = Navigation & { client: StudyClient }
+export type ScreenDeps = Navigation & {
+  client: StudyClient
+  /** note の repo.candidates。study は note を import しないので組み立て側から受ける。 */
+  repoCandidates: () => Promise<string[]>
+}
 
 export const ScreenContext = createContext<ScreenDeps | null>(null)
 

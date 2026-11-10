@@ -25,7 +25,12 @@ const client: Client = createORPCClient(
   new RPCLink({ url: `${location.origin}/rpc`, ...noteLinkOptions }),
 )
 
-const studySlots = createStudySlots({ client: client.study, navigate, spaLinkClick })
+const studySlots = createStudySlots({
+  client: client.study,
+  repoCandidates: () => client.note.repo.candidates(),
+  navigate,
+  spaLinkClick,
+})
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>

@@ -110,6 +110,13 @@ export function StudyRow({ study, now }: { study: ListedStudy; now: Date }) {
           {study.playgroundRemoved && <span className="shrink-0">Playground は消えた</span>}
           {study.lastLogLine !== null && <span className="truncate">{study.lastLogLine}</span>}
         </span>
+        {study.repos.length > 0 && (
+          <span className="flex gap-2 truncate font-mono text-[12px] text-muted-foreground">
+            {study.repos.map((repo) => (
+              <span key={repo}>{repo}</span>
+            ))}
+          </span>
+        )}
       </a>
     </li>
   )

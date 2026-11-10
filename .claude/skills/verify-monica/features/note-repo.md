@@ -11,6 +11,7 @@
 
 - notes の画面の Repo（⌃3）。
 - URL は `/repos`（前回の Repo があればそこへ移る）と `/repos/<owner>/<name>`。`github.com/` は付けない。
+- Repo の画面の左の欄の「Study」の欄は [Study](./study.md) の `study-repo-panel` で確かめる。
 
 ## Driving it with headless の Backend・Vite・agent-browser
 

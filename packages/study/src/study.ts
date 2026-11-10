@@ -3,14 +3,15 @@ import { join } from 'node:path'
 
 import { query as sdkQuery, type SDKMessage } from '@anthropic-ai/claude-agent-sdk'
 import { EventPublisher, ORPCError } from '@orpc/server'
-import { and, asc, desc, eq, isNull, like, max } from 'drizzle-orm'
+import { and, asc, desc, eq, isNull, like, max, sql } from 'drizzle-orm'
 import type { BunSQLiteDatabase } from 'drizzle-orm/bun-sqlite'
 
+import { listArtifacts, readArtifact, resolveArtifact } from './artifact.ts'
 import type { AskUser } from './box.ts'
 import { type Claude, type ClaudeDeps, type Query, wakeClaude } from './claude.ts'
 import type { StudyMessage, StudyWatchEvent } from './contract.ts'
 import { playgroundEnv } from './playground.ts'
-import { study, studyConversation, studyMessage } from './schema.ts'
+import { study, studyConversation, studyMessage, studyRepo } from './schema.ts'
 import { shellZdotdirOf, writeShellFiles } from './shell.ts'
 
 export type Db = BunSQLiteDatabase
@@ -104,6 +105,9 @@ function toolText(name: string, input: Record<string, unknown>): string {
   }
 }
 
+// GitHub の repo 名は大文字と小文字を区別しない。
+const isRepo = (repo: string) => eq(sql`lower(${studyRepo.repo})`, repo.toLowerCase())
+
 function makeLedger(deps: {
   db: Db
   home: string
@@ -111,6 +115,7 @@ function makeLedger(deps: {
   askUser?: AskUser
   query?: Query
   tutorsDir?: string | undefined
+  openInEditor?: (path: string) => Promise<void>
 }) {
   const { db, home } = deps
   const studiesDir = join(home, 'studies')
@@ -156,6 +161,25 @@ function makeLedger(deps: {
       .limit(1)
       .get()
     return row ? (row.text.split('\n')[0] ?? null) : null
+  }
+
+  function summary(row: typeof study.$inferSelect) {
+    return {
+      id: row.id,
+      missionLine: missionLine(dirOf(row.id)),
+      firstMessage: firstMessage(row.id),
+      lastActivityAt: row.lastActiveAt,
+    }
+  }
+
+  function reposOf(id: string): string[] {
+    return db
+      .select({ repo: studyRepo.repo })
+      .from(studyRepo)
+      .where(eq(studyRepo.studyId, id))
+      .orderBy(asc(studyRepo.createdAt), asc(sql`rowid`))
+      .all()
+      .map((row) => row.repo)
   }
 
   function insertMessage(
@@ -372,13 +396,11 @@ function makeLedger(deps: {
       const rows = db.select().from(study).orderBy(desc(study.lastActiveAt)).all()
       return {
         studies: rows.map((row) => ({
-          id: row.id,
-          missionLine: missionLine(dirOf(row.id)),
-          firstMessage: firstMessage(row.id),
-          lastActivityAt: row.lastActiveAt,
+          ...summary(row),
           lastLogLine: lastLogLine(dirOf(row.id)),
           playgroundRemoved:
             row.playgroundRemovedAt !== null && row.playgroundRemovedAt > row.lastActiveAt,
+          repos: reposOf(row.id),
         })),
       }
     },
@@ -397,6 +419,7 @@ function makeLedger(deps: {
         missionLine: missionLine(dirOf(id)),
         firstMessage: firstMessage(id),
         running: turns.has(id),
+        repos: reposOf(id),
         conversations: conversations.map((conversation) => ({
           id: conversation.id,
           startedAt: conversation.startedAt,
@@ -412,8 +435,57 @@ function makeLedger(deps: {
       }
     },
 
+    linkRepo(id: string, repo: string): Record<string, never> {
+      mustExist(id)
+      db.insert(studyRepo)
+        .values({ studyId: id, repo, createdAt: new Date() })
+        .onConflictDoNothing()
+        .run()
+      return {}
+    },
+
+    unlinkRepo(id: string, repo: string): Record<string, never> {
+      db.delete(studyRepo)
+        .where(and(eq(studyRepo.studyId, id), isRepo(repo)))
+        .run()
+      return {}
+    },
+
+    studiesOfRepo(repo: string) {
+      const rows = db
+        .select({ study })
+        .from(study)
+        .innerJoin(studyRepo, eq(studyRepo.studyId, study.id))
+        .where(isRepo(repo))
+        .orderBy(desc(study.lastActiveAt))
+        .all()
+      return { studies: rows.map((row) => summary(row.study)) }
+    },
+
     send(id: string, text: string) {
       return { message: startTurn(id, text) }
+    },
+
+    listArtifacts(id: string) {
+      mustExist(id)
+      return { artifacts: listArtifacts(dirOf(id)) }
+    },
+
+    readArtifact(id: string, path: string) {
+      mustExist(id)
+      return { path, content: readArtifact(dirOf(id), path) }
+    },
+
+    async openArtifact(id: string, path: string): Promise<void> {
+      mustExist(id)
+      const real = resolveArtifact(dirOf(id), path)
+      if (!deps.openInEditor) throw new Error('no editor to open artifacts in')
+      try {
+        await deps.openInEditor(real)
+      } catch (error) {
+        // ORPCError でない Error は、ブラウザに message を伏せて届く。
+        throw new ORPCError('INTERNAL_SERVER_ERROR', { message: (error as Error).message })
+      }
     },
 
     watch(id: string, signal: AbortSignal | undefined): AsyncGenerator<StudyWatchEvent> {

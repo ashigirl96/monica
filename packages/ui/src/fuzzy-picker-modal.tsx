@@ -8,9 +8,10 @@ export function FuzzyPickerModal({
   onClose,
   placeholder = 'Filter...',
   footer = '↑↓ move · ⏎ select · esc/^c close',
+  extraItem,
 }: FuzzyPickerModalProps) {
   const { query, setQuery, highlightIndex, filtered, listRef, inputRef, onKeyDown } =
-    useFuzzyPicker({ items, onSelect, onClose })
+    useFuzzyPicker({ items, onSelect, onClose, extraItem })
 
   return createPortal(
     <div

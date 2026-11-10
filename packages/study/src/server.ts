@@ -17,6 +17,17 @@ export const router = os.router({
   send: os.send.handler(({ context, input }) =>
     internals(context.studyLedger).send(input.id, input.text),
   ),
+  repo: {
+    link: os.repo.link.handler(({ context, input }) =>
+      internals(context.studyLedger).linkRepo(input.id, input.repo),
+    ),
+    unlink: os.repo.unlink.handler(({ context, input }) =>
+      internals(context.studyLedger).unlinkRepo(input.id, input.repo),
+    ),
+    studies: os.repo.studies.handler(({ context, input }) =>
+      internals(context.studyLedger).studiesOfRepo(input.repo),
+    ),
+  },
   // NOT_FOUND を呼び出しの reject にするため、Study を確かめてから generator を返す。
   watch: os.watch.handler(async ({ context, input, signal }) =>
     internals(context.studyLedger).watch(input.id, signal),
@@ -24,4 +35,15 @@ export const router = os.router({
   shell: os.shell.handler(({ context, input }) =>
     internals(context.studyLedger).shell(input.prefix),
   ),
+  artifact: {
+    list: os.artifact.list.handler(({ context, input }) =>
+      internals(context.studyLedger).listArtifacts(input.id),
+    ),
+    read: os.artifact.read.handler(({ context, input }) =>
+      internals(context.studyLedger).readArtifact(input.id, input.path),
+    ),
+    open: os.artifact.open.handler(({ context, input }) =>
+      internals(context.studyLedger).openArtifact(input.id, input.path),
+    ),
+  },
 })
