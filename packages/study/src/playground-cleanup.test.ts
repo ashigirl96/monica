@@ -1,4 +1,4 @@
-import { afterEach, expect, setDefaultTimeout, setSystemTime, test } from 'bun:test'
+import { afterEach, expect, setDefaultTimeout, setSystemTime, spyOn, test } from 'bun:test'
 import {
   chmodSync,
   existsSync,
@@ -264,6 +264,86 @@ test('the cleanup does not follow a prototypes symlink out of the Study', async 
   await cleanUp(fixture).catch(() => {})
 
   expect(existsSync(join(repo, 'secret'))).toBe(true)
+})
+
+test('the cleanup skips a prototype whose .git/config is not a regular file without letting git read it', async () => {
+  const fixture = setup()
+  const { id } = await fixture.client.start({})
+  const prototype = join(fixture.home, 'studies', id, 'prototypes', 'a')
+  mkdirSync(prototype, { recursive: true })
+  Bun.spawnSync(['git', 'init', '-q', prototype], { env: process.env })
+  rmSync(join(prototype, '.git', 'config'))
+  Bun.spawnSync(['mkfifo', join(prototype, '.git', 'config')], { env: process.env })
+  lastActiveAt(fixture, id, staleAgo())
+
+  const outcome = await Promise.race([
+    cleanUp(fixture).then(() => 'done'),
+    Bun.sleep(5000).then(() => 'still waiting'),
+  ])
+
+  expect(outcome).toBe('done')
+})
+
+test('a git that does not return in time is killed with its group, fails the cleanup on one line, and the next prototype is still cleaned', async () => {
+  const fixture = setup()
+  const { id } = await fixture.client.start({})
+  const prototypes = join(fixture.home, 'studies', id, 'prototypes')
+  for (const name of ['a', 'b']) {
+    mkdirSync(join(prototypes, name, 'node_modules'), { recursive: true })
+    writeFileSync(join(prototypes, name, '.gitignore'), 'node_modules\n')
+    writeFileSync(join(prototypes, name, 'node_modules', 'x'), 'x')
+    Bun.spawnSync(['git', 'init', '-q', join(prototypes, name)], { env: process.env })
+  }
+  // git は .git/info/exclude の FIFO を開いたまま、書き手を待ち続ける。
+  rmSync(join(prototypes, 'a', '.git', 'info', 'exclude'))
+  Bun.spawnSync(['mkfifo', join(prototypes, 'a', '.git', 'info', 'exclude')], { env: process.env })
+  lastActiveAt(fixture, id, staleAgo())
+  const realSetTimeout = globalThis.setTimeout
+  const expiries: (() => void)[] = []
+  const spy = spyOn(globalThis, 'setTimeout').mockImplementation(((
+    callback: () => void,
+    ms?: number,
+  ) => {
+    if (ms === 60_000) expiries.push(callback)
+    return realSetTimeout(callback, ms)
+  }) as typeof setTimeout)
+  cleanups.push(() => spy.mockRestore())
+
+  const failed = cleanUp(fixture).then(
+    () => null,
+    (error: Error) => error.message,
+  )
+  await until(() => expiries.length === 1)
+  expiries[0]!()
+
+  const message = await failed
+  expect(message).toStartWith(`could not clean up the Playgrounds: ${id}: `)
+  expect(message).toContain('timed out')
+  expect(message).not.toContain('\n')
+  expect(existsSync(join(prototypes, 'b', 'node_modules', 'x'))).toBe(false)
+})
+
+test('a Study whose prototypes cannot be read fails the cleanup on one line after the later Studies are cleaned', async () => {
+  const fixture = setup()
+  const older = await fixture.client.start({})
+  const later = await fixture.client.start({})
+  const unreadable = join(fixture.home, 'studies', older.id, 'prototypes')
+  mkdirSync(unreadable)
+  chmodSync(unreadable, 0o000)
+  cleanups.push(() => chmodSync(unreadable, 0o755))
+  const laterEnv = envOf(fixture, later.id)
+  lastActiveAt(fixture, older.id, staleAgo() - 1)
+  lastActiveAt(fixture, later.id, staleAgo())
+
+  const failed = await cleanUp(fixture).then(
+    () => null,
+    (error: Error) => error.message,
+  )
+
+  expect(failed).toStartWith(`could not clean up the Playgrounds: ${older.id}: `)
+  expect(failed).toContain('EACCES')
+  expect(failed).not.toContain('\n')
+  expect(existsSync(laterEnv)).toBe(false)
 })
 
 test('playground_removed_at is written when the env is removed, not when there was none, and the list marks the Study', async () => {

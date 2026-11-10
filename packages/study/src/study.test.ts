@@ -456,7 +456,7 @@ test('a Ledger given a Tutor dir passes it as the plugin and reads the teaching 
   )
 })
 
-test('the claude env carries the allowlisted keys, the PATH without dirs under HOME, CLAUDE_ENV_FILE and the Playground env, and no other key of the Backend env', async () => {
+test('the claude env carries the allowlisted keys, the PATH without dirs under HOME and CLAUDE_ENV_FILE outside the Study dir, and no Playground key or other key of the Backend env', async () => {
   const { home, client, fake } = setup()
   const { id } = await client.start({})
   const path = process.env.PATH
@@ -477,40 +477,40 @@ test('the claude env carries the allowlisted keys, the PATH without dirs under H
       'CLAUDE_CODE_MAX_RETRIES',
       'CLAUDE_CODE_RESTRICTED',
       'CLAUDE_CODE_TMPDIR',
-      'CARGO_HOME',
       'CLAUDE_ENV_FILE',
-      'COMPOSE_PROJECT_NAME',
       'DISABLE_AUTOUPDATER',
       'ENABLE_CLAUDEAI_MCP_SERVERS',
       'HOME',
-      'MISE_DATA_DIR',
-      'MONICA_STUDY_DIR',
-      'MONICA_STUDY_ID',
-      'NPM_CONFIG_PREFIX',
       'PATH',
-      'npm_config_cache',
       ...(process.env.USER ? ['USER'] : []),
     ].toSorted(),
   )
   expect(env.PATH).toBe('/usr/bin:/bin')
   expect(env.HOME).toBe(process.env.HOME)
-  expect(env.CLAUDE_ENV_FILE).toBe(join(home, 'studies', id, '.claude-env.sh'))
-  expect(env.MONICA_STUDY_ID).toBe(id)
-  expect(env.NPM_CONFIG_PREFIX).toBe(join(home, 'studies', id, 'env/npm'))
+  expect(env.CLAUDE_ENV_FILE).toBe(join(home, 'study-env', `${id}.sh`))
 })
 
 const readEnvFile = (envFile: string, sandboxed: boolean) =>
-  Bun.spawnSync(['/bin/sh', '-c', `. "$1"; printf '%s\\n%s' "$HOME" "$PATH"`, 'sh', envFile], {
-    env: {
-      HOME: homedir(),
-      PATH: '/usr/bin:/bin',
-      ...(sandboxed && { SANDBOX_RUNTIME: '1' }),
+  Bun.spawnSync(
+    [
+      '/bin/sh',
+      '-c',
+      `. "$1"; printf '%s\\n%s\\n%s\\n%s' "$HOME" "$PATH" "\${CARGO_HOME:-}" "\${COMPOSE_PROJECT_NAME:-}"`,
+      'sh',
+      envFile,
+    ],
+    {
+      env: {
+        HOME: homedir(),
+        PATH: '/usr/bin:/bin',
+        ...(sandboxed && { SANDBOX_RUNTIME: '1' }),
+      },
     },
-  })
+  )
     .stdout.toString()
     .split('\n')
 
-test('inside the box the env file points HOME under env and runs env/env.sh, and outside it leaves HOME and never runs env/env.sh', async () => {
+test('inside the box the env file points HOME and the tool dirs under env and runs env/env.sh, and outside it leaves HOME and the tool dirs and never runs env/env.sh', async () => {
   const { home, client, fake } = setup()
   const { id } = await client.start({})
   const dir = join(home, 'studies', id)
@@ -519,12 +519,17 @@ test('inside the box the env file points HOME under env and runs env/env.sh, and
   const marker = join(dir, 'marker')
   mkdirSync(join(dir, 'env'), { recursive: true })
   writeFileSync(join(dir, 'env', 'env.sh'), `touch '${marker}'\nexport PATH="/study/bin:$PATH"\n`)
-  const envFile = join(dir, '.claude-env.sh')
+  const envFile = join(home, 'study-env', `${id}.sh`)
 
-  expect(readEnvFile(envFile, false)).toEqual([homedir(), '/usr/bin:/bin'])
+  expect(readEnvFile(envFile, false)).toEqual([homedir(), '/usr/bin:/bin', '', id])
   expect(existsSync(marker)).toBe(false)
 
-  expect(readEnvFile(envFile, true)).toEqual([join(dir, 'env', 'home'), '/study/bin:/usr/bin:/bin'])
+  expect(readEnvFile(envFile, true)).toEqual([
+    join(dir, 'env', 'home'),
+    '/study/bin:/usr/bin:/bin',
+    join(dir, 'env', 'cargo'),
+    id,
+  ])
   expect(existsSync(marker)).toBe(true)
 })
 
@@ -534,7 +539,7 @@ test('the env file is written again with the same content before each claude sta
   const watch = await watching(client, id)
   await client.send({ id, text: 'hello' })
   await until(() => fake.claudes.length === 1)
-  const envFile = join(home, 'studies', id, '.claude-env.sh')
+  const envFile = join(home, 'study-env', `${id}.sh`)
   const written = readFileSync(envFile, 'utf8')
 
   writeFileSync(envFile, 'export HOME=/\n')
@@ -545,20 +550,42 @@ test('the env file is written again with the same content before each claude sta
   expect(readFileSync(envFile, 'utf8')).toBe(written)
 })
 
-test('a symlink a Tutor put at the env file is replaced, and the file it pointed to is left as it was', async () => {
+test('a symlink at the env file is replaced, and the file it pointed to is left as it was', async () => {
   const { home, client, fake } = setup()
   const { id } = await client.start({})
-  const dir = join(home, 'studies', id)
+  const envFile = join(home, 'study-env', `${id}.sh`)
   const outside = join(home, 'outside-zshrc')
   writeFileSync(outside, 'keep\n')
-  symlinkSync(outside, join(dir, '.claude-env.sh'))
+  mkdirSync(join(home, 'study-env'))
+  symlinkSync(outside, envFile)
 
   await client.send({ id, text: 'hello' })
   await until(() => fake.claudes.length === 1)
 
   expect(readFileSync(outside, 'utf8')).toBe('keep\n')
-  expect(lstatSync(join(dir, '.claude-env.sh')).isFile()).toBe(true)
-  expect(statSync(join(dir, '.claude-env.sh')).mode & 0o777).toBe(0o600)
+  expect(lstatSync(envFile).isFile()).toBe(true)
+  expect(statSync(envFile).mode & 0o777).toBe(0o600)
+})
+
+test('the Tutor can write the env file neither with Write or Edit nor from Bash in the box', async () => {
+  const { home, client, fake } = setup()
+  const { id } = await client.start({})
+  await client.send({ id, text: 'hello' })
+  await until(() => fake.claudes.length === 1)
+  const { options } = fake.claudes[0]!
+  const envFile = realpathSync(join(home, 'study-env', `${id}.sh`))
+  const context = { signal: new AbortController().signal, toolUseID: 't', requestId: 'r' }
+
+  const write = await options.canUseTool!('Write', { file_path: envFile, content: 'x' }, context)
+  const edit = await options.canUseTool!(
+    'Edit',
+    { file_path: envFile, old_string: 'a', new_string: 'b' },
+    context,
+  )
+
+  expect([write?.behavior, edit?.behavior]).toEqual(['deny', 'deny'])
+  const writableInBox = [options.cwd!, ...options.sandbox!.filesystem!.allowWrite!]
+  expect(writableInBox.filter((dir) => envFile.startsWith(`${dir}/`))).toEqual([])
 })
 
 test('list returns when a Tutor put a FIFO at MISSION.md and log.md', async () => {

@@ -52,7 +52,7 @@ Preconditions: `launch.sh <name> MONICA_BROWSER_PORT=<port>` で dev の Backend
 - **Tutor の切り替え**: Backend の stderr に plugin の error が無い。`get` に `tutor_switch` の `repository` の行がある。
 - **init の skills**: 最初の turn と、Backend を起こし直した後の resume の turn の両方で、init の `skills` に `tutors:repository` がある。init は DB にも記録にも残らないので、`packages/study/src/study.ts` の `translate` の init の枝に `console.error('[study] init skills', message.skills)` を一時的に足して Backend の stderr で見て、見終えたら戻す。
 - **箱と Bash の HOME**: Tutor に `echo $HOME` を走らせると `<Study の dir>/env/home`。`git clone https://github.com/sindresorhus/ky env/sources/sindresorhus/ky` は箱が `.git/config` と `.git/hooks` への書き込みを断るので、Tutor が `dangerouslyDisableSandbox` で箱の外で走らせ、会話で許可を求めてくる。許すと clone が通り、続く `git -C env/sources/sindresorhus/ky log -1` は箱の中で通る。`env/env.sh` に `export STUDY_ENV_CHECK=1` を書かせた後の `echo $STUDY_ENV_CHECK` が同じ session で出るかを記録する（`packages/study/tutors/TEACHING.md` の「The box」の書き方はこの結果に合わせる）。
-- **env**: Tutor に `env | sort` を走らせ、出た key が allowlist と claude が足すものと `.claude-env.sh` の `HOME` だけで、login shell の rc が export した key が無い。
+- **env**: Tutor に `env | sort` を走らせ、出た key が allowlist と claude が足すものと env file（`<home>/study-env/<id>.sh`）が export する `HOME` と Playground の変数だけで、login shell の rc が export した key が無い。
 - **断られるもの**: Tutor に `ls <本物の HOME>/.ssh`（箱の中の `~` は `env/home` を指すので絶対 path で書く）と `curl --noproxy '' http://127.0.0.1:<port>/` を走らせ、どちらも断られる。
 - **resume**: Backend に SIGTERM を送ると claude とその子が居なくなる（`ps -A -o pid=,ppid=,pgid=,command=`）。起こし直して `send` すると、前の turn の話を覚えて答える。
 
@@ -61,7 +61,7 @@ Preconditions: `launch.sh <name> MONICA_BROWSER_PORT=<port>` で dev の Backend
 Preconditions: 「Driving it with headless の Backend・Vite・agent-browser」と同じ。CLI は `MONICA_HOME=$H bun apps/cli/src/main.ts study shell …` で dev の Backend に繋ぐ。
 
 - **道具を入れる**: Tutor に「jq を npm で `-g` で入れて使って」と頼む（`npm i -g node-jq` などでよい）。`$H/studies/<id>/env/npm` の下に入り、`env/env.sh` に PATH の行が書かれ、同じ会話の次の Bash でその道具が見える。
-- **docker の label**: Tutor に label 付きの container を起こさせ、許可の欄で許す。`docker ps -a --filter label=monica.study=<id>` に出て、`docker compose` の物には `com.docker.compose.project=<id>` が付く。箱の外の command では `.claude-env.sh` が `HOME` を替えず `env/env.sh` も読まないので、docker はユーザーの context をそのまま使う。
+- **docker の label**: Tutor に label 付きの container を起こさせ、許可の欄で許す。`docker ps -a --filter label=monica.study=<id>` に出て、`docker compose` の物には `com.docker.compose.project=<id>` が付く。箱の外の command では env file が `HOME` と install 先の変数を替えず `env/env.sh` も読まないので、docker はユーザーの context をそのまま使う。
 - **上の欄の command**: Study の画面の上の欄の `monica study shell <短い id>` を押すと「写した」の toast が出る。Tab に貼って打つ（`features/workbench-tab.md` の手順）と、Study の dir に移り、入れた道具が PATH にあり、`echo $HOME` はユーザーの HOME。`exit` で元の shell に戻り、CLI は exit 0。
 - **重なる頭と無い頭**: 近い時刻に Study を 2 つ始めると頭 8 文字が重なる。その頭を打つと stderr の 1 行目が `BAD_REQUEST: <頭> matches 2 Studies: …` で exit 1、無い頭は `NOT_FOUND: …` で exit 1、Backend を止めると `BACKEND_NOT_RUNNING: …` で exit 2。
 - **一覧の印**: `sqlite3 $H/monica.db "UPDATE study SET playground_removed_at = <今の ms> WHERE id = '<id>'"` の後に一覧を開き直すと、その行に「Playground は消えた」が出る（Backend は DB を EXCLUSIVE で開くので、止めてから書いて起こし直す）。`monica study shell` で入ると印が消える。

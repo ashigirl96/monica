@@ -27,7 +27,7 @@ import type { BunSQLiteDatabase } from 'drizzle-orm/bun-sqlite'
 import { STALE_MS } from './activity.ts'
 import { listArtifacts, readArtifact, resolveArtifact } from './artifact.ts'
 import type { AskUser } from './box.ts'
-import { type Claude, type ClaudeDeps, type Query, wakeClaude } from './claude.ts'
+import { type Claude, type ClaudeDeps, envFileOf, type Query, wakeClaude } from './claude.ts'
 import { cleanPrototypes, createRunner, removePlayground, type Tools } from './cleanup.ts'
 import { repoKey, type StudyMessage, type StudyWatchEvent } from './contract.ts'
 import { playgroundEnv } from './playground.ts'
@@ -801,6 +801,7 @@ function makeLedger(deps: {
           rmSync(trashed, { recursive: true, force: true })
           throw error
         }
+        rmSync(envFileOf(home, id), { force: true })
         events.publish(id, null)
         const deleteSession = deps.deleteSession ?? sdkDeleteSession
         for (const sessionId of sessionIds) {
@@ -961,6 +962,8 @@ function makeLedger(deps: {
           }
           failed.push(...(await cleanPrototypes(dirOf(id), runner.run)))
           if (failed.length > 0) failures.push(`${id}: ${failed.join(', ')}`)
+        } catch (error) {
+          failures.push(`${id}: ${(error as Error).message}`)
         } finally {
           cleaning.delete(id)
           endCleaning()

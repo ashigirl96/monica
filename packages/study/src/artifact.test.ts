@@ -76,6 +76,22 @@ test('artifact.list of a Study with no artifacts is empty, and of no Study is NO
   expect(await codeOf(client.artifact.list({ id: 'study-0000' }))).toBe('NOT_FOUND')
 })
 
+test('artifact.list leaves out a learning-records that is a symlink, even to a dir inside the Study', async () => {
+  const { home, client, id, dir, write } = await setup()
+  const outside = join(home, 'outside')
+  mkdirSync(outside)
+  writeFileSync(join(outside, '0001-private.md'), '# Private\n')
+  write('records/0001-inside.md', '# Inside\n')
+
+  symlinkSync(outside, join(dir, 'learning-records'))
+  const toOutside = (await client.artifact.list({ id })).artifacts
+  rmSync(join(dir, 'learning-records'))
+  symlinkSync(join(dir, 'records'), join(dir, 'learning-records'))
+  const toInside = (await client.artifact.list({ id })).artifacts
+
+  expect([toOutside, toInside]).toEqual([[], []])
+})
+
 test('artifact.read returns the content, and reads a symlink that points inside the Study dir', async () => {
   const { client, id, dir, write } = await setup()
   write('GLOSSARY.md', '# Glossary\n')

@@ -1,4 +1,4 @@
-import { existsSync, readdirSync, readFileSync, realpathSync, statSync } from 'node:fs'
+import { existsSync, lstatSync, readdirSync, readFileSync, realpathSync, statSync } from 'node:fs'
 import { isAbsolute, join, normalize, sep } from 'node:path'
 
 import { ORPCError } from '@orpc/server'
@@ -52,18 +52,24 @@ export function listArtifacts(dir: string): Artifact[] {
     path,
     title: null,
   }))
+  const records = join(dir, LEARNING_RECORDS)
   let names: string[] = []
   try {
-    names = readdirSync(join(dir, LEARNING_RECORDS), { withFileTypes: true })
+    // Tutor が learning-records を symlink にすると、Study の外の file 名まで一覧に出る。
+    const real = realpathSync(records)
+    if (!lstatSync(records).isDirectory() || real !== join(realpathSync(dir), LEARNING_RECORDS)) {
+      return top
+    }
+    names = readdirSync(real, { withFileTypes: true })
       .filter((entry) => entry.isFile() && entry.name.endsWith('.md'))
       .map((entry) => entry.name)
       .toSorted()
   } catch {
     names = []
   }
-  const records = names.map((name) => {
+  const recordArtifacts = names.map((name) => {
     const path = `${LEARNING_RECORDS}/${name}`
     return { path, title: titleOf(dir, path, name) }
   })
-  return [...top, ...records]
+  return [...top, ...recordArtifacts]
 }

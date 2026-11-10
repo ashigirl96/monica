@@ -31,7 +31,7 @@ afterEach(async () => {
 
 const { setup, watching } = studyFixture(cleanups)
 
-test('remove moves the Study dir to trash/studies/<id>/tree, deletes the Study with its conversations, messages and Repo links, and keeps the Learning Preference', async () => {
+test('remove moves the Study dir to trash/studies/<id>/tree, deletes the Study with its conversations, messages, Repo links and env file, and keeps the Learning Preference', async () => {
   const { client, db, fake, home, deletedSessions } = setup()
   const { id } = await client.start({})
   const other = await client.start({})
@@ -46,10 +46,13 @@ test('remove moves the Study dir to trash/studies/<id>/tree, deletes the Study w
   fake.claudes[0]!.emit(init('session-a'), said('hi'), result())
   await watch.ended()
   const realDir = realpathSync(dir)
+  const envFile = join(home, 'study-env', `${id}.sh`)
+  expect(existsSync(envFile)).toBe(true)
 
   await client.remove({ id })
 
   expect(existsSync(dir)).toBe(false)
+  expect(existsSync(envFile)).toBe(false)
   expect(readFileSync(join(home, 'trash/studies', id, 'tree', 'MISSION.md'), 'utf8')).toBe(
     '# Learn Rust\n',
   )

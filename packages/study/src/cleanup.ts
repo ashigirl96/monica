@@ -19,10 +19,21 @@ const linesOf = (text: string) => [...new Set(text.split('\n').filter((line) => 
 const reasonOf = (argv: string[], { code, stderr }: ToolResult) =>
   stderr.trim().split('\n').at(-1) || `${argv.join(' ')}: exit ${code}`
 
+const killGroup = (child: Subprocess) => {
+  try {
+    process.kill(-child.pid, 'SIGKILL')
+  } catch {}
+}
+
 /** Playground の掃除が起こす子 process。stop() で group ごと止めるため、detached で起こして持つ。 */
 export function createRunner() {
   const children = new Set<Subprocess>()
-  async function run(argv: string[], env: NodeJS.ProcessEnv = process.env): Promise<ToolResult> {
+  /** timeoutMs を過ぎたら group ごと止め、code 1 と timed out の stderr で返す。 */
+  async function run(
+    argv: string[],
+    env: NodeJS.ProcessEnv = process.env,
+    timeoutMs?: number,
+  ): Promise<ToolResult> {
     const child = Bun.spawn(argv, {
       env,
       stdin: 'ignore',
@@ -31,23 +42,30 @@ export function createRunner() {
       detached: true,
     })
     children.add(child)
+    let timedOut = false
+    const timer =
+      timeoutMs === undefined
+        ? undefined
+        : setTimeout(() => {
+            timedOut = true
+            killGroup(child)
+          }, timeoutMs)
     try {
       const [stdout, stderr, code] = await Promise.all([
         new Response(child.stdout).text(),
         new Response(child.stderr).text(),
         child.exited,
       ])
+      if (timedOut)
+        return { code: 1, stdout, stderr: `${argv.join(' ')}: timed out after ${timeoutMs}ms` }
       return { code, stdout, stderr }
     } finally {
+      clearTimeout(timer)
       children.delete(child)
     }
   }
   function killAll() {
-    for (const child of children) {
-      try {
-        process.kill(-child.pid, 'SIGKILL')
-      } catch {}
-    }
+    for (const child of children) killGroup(child)
   }
   function found(name: string): Tool | null {
     const path = Bun.which(name)
@@ -170,9 +188,13 @@ function gitEnv(): NodeJS.ProcessEnv {
   return { ...env, GIT_CONFIG_NOSYSTEM: '1', GIT_CONFIG_GLOBAL: '/dev/null' }
 }
 
-const isRealDir = (path: string) => {
+// git が読む file を Tutor が FIFO にすると git は戻らず、掃除の印を待つ Study の削除まで止まる。
+const GIT_TIMEOUT_MS = 60_000
+
+const isReal = (path: string, kind: 'file' | 'dir') => {
   try {
-    return lstatSync(path).isDirectory()
+    const stat = lstatSync(path)
+    return kind === 'file' ? stat.isFile() : stat.isDirectory()
   } catch {
     return false
   }
@@ -189,15 +211,21 @@ const realOrEmpty = (path: string) => {
 /** 本物の .git の dir を持つ Prototype ごとに、.gitignore が無視する物だけを消す。 */
 export async function cleanPrototypes(studyDir: string, run: Run): Promise<string[]> {
   const prototypes = join(studyDir, 'prototypes')
-  if (!isRealDir(prototypes)) return []
+  if (!isReal(prototypes, 'dir')) return []
   const inside = `${realpathSync(studyDir)}${sep}`
   const failures: string[] = []
   for (const entry of readdirSync(prototypes, { withFileTypes: true })) {
     if (!entry.isDirectory()) continue
     // Tutor が途中で親の dir を symlink に差し替えても外へ出ないよう、git の直前に解いた path で確かめて渡す。
     const dir = realOrEmpty(join(prototypes, entry.name))
-    // .git が file なら gitdir: で箱の外の repo を指せる。
-    if (!dir.startsWith(inside) || !isRealDir(join(dir, '.git'))) continue
+    // .git が file なら gitdir: で箱の外の repo を指せる。config は git が最初に読むので、FIFO なら上限を待たずに飛ばす。
+    if (
+      !dir.startsWith(inside) ||
+      !isReal(join(dir, '.git'), 'dir') ||
+      !isReal(join(dir, '.git', 'config'), 'file')
+    ) {
+      continue
+    }
     const argv = [
       'git',
       ...SAFE_GIT_CONFIG,
@@ -206,7 +234,7 @@ export async function cleanPrototypes(studyDir: string, run: Run): Promise<strin
       'clean',
       '-fdX',
     ]
-    const result = await run(argv, gitEnv())
+    const result = await run(argv, gitEnv(), GIT_TIMEOUT_MS)
     if (result.code !== 0) failures.push(reasonOf(argv, result))
   }
   return failures

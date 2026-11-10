@@ -2,6 +2,7 @@ import { type ChildProcessByStdio, spawn } from 'node:child_process'
 import {
   closeSync,
   constants,
+  mkdirSync,
   openSync,
   readdirSync,
   readFileSync,
@@ -9,7 +10,7 @@ import {
   writeSync,
 } from 'node:fs'
 import { homedir } from 'node:os'
-import { join } from 'node:path'
+import { dirname, join } from 'node:path'
 import type { Readable, Writable } from 'node:stream'
 
 import type {
@@ -64,19 +65,30 @@ export type ClaudeDeps = {
 
 const quote = (value: string) => `'${value.replaceAll("'", `'\\''`)}'`
 
-// claude は CLAUDE_ENV_FILE を session ごとに 1 度読み、Bash の command ごとに先に流す。箱の外の command では流す中身も箱の外で走るので、
-// Tutor が書ける env/env.sh と env/home は、claude が箱の中の command にだけ付ける SANDBOX_RUNTIME=1 の時に限って使う。
-export function writeEnvFile(studyDir: string): string {
-  const path = join(studyDir, '.claude-env.sh')
-  const envSh = quote(join(studyDir, 'env', 'env.sh'))
-  // Tutor が置いた symlink を辿って箱の外の file を上書きしないよう、消してから新しく作る。
+export const envFileOf = (home: string, studyId: string) => join(home, 'study-env', `${studyId}.sh`)
+
+// 箱の外でも走ってよい、Tutor が書ける file を読ませない名前だけの変数。docker の label と compose の project に要る。
+const NAME_ONLY_KEYS = ['MONICA_STUDY_DIR', 'MONICA_STUDY_ID', 'COMPOSE_PROJECT_NAME']
+
+// claude は CLAUDE_ENV_FILE を読み、Bash の command ごとに先に流す。箱の外の command では流す中身も箱の外で走るので、
+// Tutor が書ける env/ の下を指す変数と env/env.sh は、claude が箱の中の command にだけ付ける SANDBOX_RUNTIME=1 の時に限って使う。
+// file は Tutor が書き換えられないよう、Study の dir の外に置く。
+export function writeEnvFile(home: string, study: { id: string; dir: string }): string {
+  const path = envFileOf(home, study.id)
+  const envSh = quote(join(study.dir, 'env', 'env.sh'))
+  const playground = playgroundEnv(study.dir, study.id)
+  const exports = (keys: string[], indent: string) =>
+    keys.map((key) => `${indent}export ${key}=${quote(playground[key]!)}\n`).join('')
+  const toolKeys = Object.keys(playground).filter((key) => !NAME_ONLY_KEYS.includes(key))
+  mkdirSync(dirname(path), { recursive: true, mode: 0o700 })
+  // symlink を辿って他の file を上書きしないよう、消してから新しく作る。
   rmSync(path, { force: true })
   const { O_WRONLY, O_CREAT, O_EXCL, O_NOFOLLOW } = constants
   const fd = openSync(path, O_WRONLY | O_CREAT | O_EXCL | O_NOFOLLOW, 0o600)
   try {
     writeSync(
       fd,
-      `if [ "\${SANDBOX_RUNTIME:-}" = 1 ]; then\n  export HOME=${quote(join(studyDir, 'env', 'home'))}\n  if [ -f ${envSh} ]; then . ${envSh}; fi\nfi\n`,
+      `${exports(NAME_ONLY_KEYS, '')}if [ "\${SANDBOX_RUNTIME:-}" = 1 ]; then\n  export HOME=${quote(join(study.dir, 'env', 'home'))}\n${exports(toolKeys, '  ')}  if [ -f ${envSh} ]; then . ${envSh}; fi\nfi\n`,
     )
   } finally {
     closeSync(fd)
@@ -135,7 +147,7 @@ export function wakeClaude(
   const skills = readdirSync(join(deps.tutorDir, 'skills'), { withFileTypes: true })
     .filter((entry) => entry.isDirectory())
     .map((entry) => `tutors:${entry.name}`)
-  const envFile = writeEnvFile(study.dir)
+  const envFile = writeEnvFile(deps.home, study)
   const box = tutorBox({
     studyDir: study.dir,
     tutorDir: deps.tutorDir,
@@ -161,7 +173,7 @@ export function wakeClaude(
     includePartialMessages: true,
     ...(deps.claudePath && { pathToClaudeCodeExecutable: deps.claudePath }),
     ...(study.sessionId && { resume: study.sessionId }),
-    env: { ...claudeEnv(envFile), ...playgroundEnv(study.dir, study.id), ...box.env },
+    env: { ...claudeEnv(envFile), ...box.env },
     spawnClaudeCodeProcess: ({ command, args, cwd, env, signal }) => {
       // detached にして group ごと止め、Tutor の Bash が起こした server も残さない。
       const spawned = spawn(command, args, {
