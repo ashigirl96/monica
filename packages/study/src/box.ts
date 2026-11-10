@@ -92,6 +92,11 @@ async function nearestRealPath(path: string, hops = 0): Promise<string | null> {
 const toResult = (verdict: Verdict): PermissionResult =>
   verdict.allow ? { behavior: 'allow' } : { behavior: 'deny', message: verdict.message }
 
+// glob の escape・文字の組・brace は、.. の字面を含まずに親を指せるので、それらしい区切りも断る。
+const climbsOut = (pattern: string) =>
+  /^[/~]|\.\.|\\/.test(pattern) ||
+  pattern.split('/').some((segment) => /[[\]{}]/.test(segment) && /\..*\./.test(segment))
+
 const inside = (path: string, dir: string) => path === dir || path.startsWith(`${dir}/`)
 
 export function tutorBox(deps: TutorBoxDeps): TutorBox {
@@ -144,8 +149,7 @@ export function tutorBox(deps: TutorBoxDeps): TutorBox {
       case 'Edit':
         return judgePath(input.file_path, 'write')
       case 'Glob':
-        // brace の {..,x} も親に上がるので、.. は区切りに関わらず断る。
-        if (typeof input.pattern === 'string' && /^[/~]|\.\./.test(input.pattern)) {
+        if (typeof input.pattern === 'string' && climbsOut(input.pattern)) {
           return deny(
             'A Glob with an absolute pattern or .. is refused; give a relative pattern and a path inside the box.',
           )

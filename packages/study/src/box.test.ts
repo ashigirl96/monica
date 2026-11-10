@@ -269,6 +269,12 @@ test('a Glob with an absolute pattern or .. is refused', async () => {
   expect(await decision(b, 'Glob', { pattern: '../**', path: studyDir })).toBe('deny')
   expect(await decision(b, 'Glob', { pattern: 'a/../../*' })).toBe('deny')
   expect(await decision(b, 'Glob', { pattern: '{..,x}/*' })).toBe('deny')
+  for (const pattern of ['\\.\\./*', '[.][.]/*', '.[.]/*', '{.,x}{.,y}/*', 'a/[.].']) {
+    expect([pattern, await decision(b, 'Glob', { pattern })]).toEqual([pattern, 'deny'])
+  }
+  expect(await decision(b, 'Glob', { pattern: '.*/*.md' })).toBe('allow')
+  expect(await decision(b, 'Glob', { pattern: 'a.b.md' })).toBe('allow')
+  expect(await decision(b, 'Glob', { pattern: 'src/*.{ts,md}' })).toBe('allow')
   expect(await decision(b, 'Glob', { pattern: 'src/**', path: studyDir })).toBe('allow')
 })
 
