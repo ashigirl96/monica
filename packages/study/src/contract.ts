@@ -13,16 +13,24 @@ export const StudyMessageSchema = z.object({
   id: z.number().int().describe('the row number; rows are ordered by it'),
   conversationId: z.string(),
   kind: z
-    .enum(['user', 'tutor', 'tool', 'tutor_switch'])
+    .enum(['user', 'tutor', 'tool', 'tutor_switch', 'permission'])
     .describe(
-      'user: what the user said; tutor: what the Tutor said; tool: a tool the Tutor ran; tutor_switch: the Tutor changed',
+      'user: what the user said; tutor: what the Tutor said; tool: a tool the Tutor ran; tutor_switch: the Tutor changed; permission: the Tutor asked to run a command outside the box',
     ),
   text: z
     .string()
     .describe(
-      'the utterance, the Tutor text, what the tool ran on, or the name of the Tutor switched to',
+      'the utterance, the Tutor text, what the tool ran on, the name of the Tutor switched to, or the whole command asked for',
     ),
   tool: z.string().nullable().describe('the tool name on a tool row, null on the others'),
+  reason: z
+    .string()
+    .nullable()
+    .describe('why the Tutor asked, on a permission row; null without one and on the others'),
+  state: z
+    .enum(['pending', 'allowed', 'denied'])
+    .nullable()
+    .describe('the answer on a permission row, null on the others'),
   createdAt: z.date(),
 })
 
@@ -86,6 +94,9 @@ export const contract = {
               .describe(
                 'the last non-empty line of log.md that is not a heading, without its leading "- "',
               ),
+            waitingPermission: z
+              .boolean()
+              .describe('a permission row of the Study waits for the answer'),
           }),
         ),
       }),
@@ -127,4 +138,13 @@ export const contract = {
     })
     .input(z.object({ id: StudyIdSchema }))
     .output(eventIterator(StudyWatchEventSchema)),
+  permission: {
+    answer: meta
+      .meta({
+        description:
+          'Answer a permission row: allow or deny running its command outside the box; a row already answered stays as it is',
+      })
+      .input(z.object({ id: z.number().int(), allow: z.boolean() }))
+      .output(StudyMessageSchema),
+  },
 }

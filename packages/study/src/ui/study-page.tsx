@@ -11,7 +11,7 @@ import {
 } from 'react'
 
 import { createConversationStore } from './conversation-store.ts'
-import { currentTutor, MessageView, TutorText } from './messages.tsx'
+import { currentTutor, MessageView, PermissionPrompt, TutorText } from './messages.tsx'
 import { studiesKey } from './new-conversation.tsx'
 import {
   FailureLine,
@@ -37,7 +37,7 @@ export function StudyPage({ id }: { id: string }) {
   )
   useEffect(() => store.open(), [store])
   const snapshot = useSyncExternalStore(store.subscribe, store.getSnapshot, store.getSnapshot)
-  const { study, messages, running, partialText, turnError, sendError } = snapshot
+  const { study, messages, permission, running, partialText, turnError, sendError } = snapshot
   const [draft, setDraft] = useState('')
 
   useDocumentTitle(study ? nameOf(study).text : null)
@@ -61,22 +61,34 @@ export function StudyPage({ id }: { id: string }) {
               <MessageView key={message.id} message={message} dir={study.dir} />
             ))}
           {running &&
-            (partialText === '' ? <ThinkingIndicator /> : <TutorText text={partialText} />)}
+            (partialText !== '' ? (
+              <TutorText text={partialText} />
+            ) : (
+              permission === null && <ThinkingIndicator />
+            ))}
           <FailureLine>{turnError}</FailureLine>
         </div>
       </div>
       <div className="mx-auto flex w-full max-w-2xl flex-col gap-1.5 px-4 pb-4">
         <FailureLine>{sendError}</FailureLine>
-        <InputMessage
-          value={draft}
-          onValueChange={setDraft}
-          onSend={(text) => {
-            void store.send(text).then((sent) => sent && setDraft(''))
-          }}
-          placeholder="Tutor に話す"
-          sendLabel="送る"
-          textareaProps={{ autoFocus: true, 'aria-label': 'Tutor に話す' }}
-        />
+        {permission ? (
+          <PermissionPrompt
+            key={permission.id}
+            permission={permission}
+            onAnswer={(allow) => void store.answer(permission.id, allow)}
+          />
+        ) : (
+          <InputMessage
+            value={draft}
+            onValueChange={setDraft}
+            onSend={(text) => {
+              void store.send(text).then((sent) => sent && setDraft(''))
+            }}
+            placeholder="Tutor に話す"
+            sendLabel="送る"
+            textareaProps={{ autoFocus: true, 'aria-label': 'Tutor に話す' }}
+          />
+        )}
       </div>
     </Screen>
   )

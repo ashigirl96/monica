@@ -17,6 +17,11 @@ export const router = os.router({
   send: os.send.handler(({ context, input }) =>
     internals(context.studyLedger).send(input.id, input.text),
   ),
+  permission: {
+    answer: os.permission.answer.handler(({ context, input }) =>
+      internals(context.studyLedger).answerPermission(input.id, input.allow),
+    ),
+  },
   // NOT_FOUND を呼び出しの reject にするため、Study を確かめてから generator を返す。
   watch: os.watch.handler(async ({ context, input, signal }) =>
     internals(context.studyLedger).watch(input.id, signal),

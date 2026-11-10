@@ -25,12 +25,16 @@ const BASH_COMMAND_CHARS = 200
 type Turn = { partialText: string }
 type MessageRow = typeof studyMessage.$inferSelect
 
+const REFUSED = 'The user refused to run this command outside the box.'
+
 const toMessage = ({
   id,
   conversationId,
   kind,
   text,
   tool,
+  reason,
+  permissionState,
   createdAt,
 }: MessageRow): StudyMessage => ({
   id,
@@ -38,6 +42,8 @@ const toMessage = ({
   kind,
   text,
   tool,
+  reason,
+  state: permissionState,
   createdAt,
 })
 
@@ -104,7 +110,6 @@ function makeLedger(deps: {
   db: Db
   home: string
   claudePath?: string | undefined
-  askUser?: AskUser
   query?: Query
   tutorsDir?: string | undefined
 }) {
@@ -113,18 +118,24 @@ function makeLedger(deps: {
   const learningPreferenceDir = join(home, 'learning-preference')
   // tutorBox が realpath を取るので、Learning Preference の file より先に dir を置く。
   mkdirSync(learningPreferenceDir, { recursive: true, mode: 0o700 })
-  const claudeDeps: ClaudeDeps = {
+  const claudeDeps: Omit<ClaudeDeps, 'askUser'> = {
     home,
     tutorDir: deps.tutorsDir ?? join(import.meta.dir, '../tutors'),
     learningPreferenceDir,
     claudePath: deps.claudePath,
-    askUser: deps.askUser,
     query: deps.query ?? sdkQuery,
   }
   const events = new EventPublisher<Record<string, StudyWatchEvent>>()
   const turns = new Map<string, Turn>()
   const claudes = new Map<string, Claude>()
+  const waiting = new Map<number, (allowed: boolean) => void>()
   const dirOf = (id: string) => join(studiesDir, id)
+
+  // claude は Backend と一緒に居なくなったので、前の Backend で待っていた許可には答える相手が無い。
+  db.update(studyMessage)
+    .set({ permissionState: 'denied' })
+    .where(eq(studyMessage.permissionState, 'pending'))
+    .run()
 
   function publish(studyId: string, event: StudyWatchEvent) {
     const turn = turns.get(studyId)
@@ -165,6 +176,56 @@ function makeLedger(deps: {
     const message = toMessage(row)
     publish(studyId, { type: 'message', message })
     return message
+  }
+
+  function permissionRow(id: number) {
+    return db
+      .select({ row: studyMessage, studyId: studyConversation.studyId })
+      .from(studyMessage)
+      .innerJoin(studyConversation, eq(studyMessage.conversationId, studyConversation.id))
+      .where(and(eq(studyMessage.id, id), eq(studyMessage.kind, 'permission')))
+      .get()
+  }
+
+  /** pending の行だけを答えの状態にし、流し、待っていれば解く。pending でなければ今の行を返す。 */
+  function settle(id: number, allowed: boolean): StudyMessage | undefined {
+    const found = permissionRow(id)
+    if (!found) return undefined
+    const updated = db
+      .update(studyMessage)
+      .set({ permissionState: allowed ? 'allowed' : 'denied' })
+      .where(and(eq(studyMessage.id, id), eq(studyMessage.permissionState, 'pending')))
+      .returning()
+      .get()
+    if (!updated) return toMessage(found.row)
+    const message = toMessage(updated)
+    publish(found.studyId, { type: 'message', message })
+    waiting.get(id)?.(allowed)
+    waiting.delete(id)
+    return message
+  }
+
+  function askUserFor(studyId: string): AskUser {
+    return async (request, signal) => {
+      const ongoing = db
+        .select({ id: studyConversation.id })
+        .from(studyConversation)
+        .where(and(eq(studyConversation.studyId, studyId), isNull(studyConversation.endedAt)))
+        .get()
+      if (!ongoing || signal.aborted) return { allow: false, message: REFUSED }
+      const { id } = insertMessage(studyId, {
+        conversationId: ongoing.id,
+        kind: 'permission',
+        text: request.command,
+        reason: request.description,
+        permissionState: 'pending',
+      })
+      const allowed = await new Promise<boolean>((resolve) => {
+        waiting.set(id, resolve)
+        signal.addEventListener('abort', () => settle(id, false), { once: true })
+      })
+      return allowed ? { allow: true } : { allow: false, message: REFUSED }
+    }
   }
 
   function touch(tx: Pick<Db, 'update'>, studyId: string, at: Date) {
@@ -275,11 +336,14 @@ function makeLedger(deps: {
         claudes.delete(oldest[0])
       }
     }
-    const claude = wakeClaude(claudeDeps, {
-      id: studyId,
-      dir: dirOf(studyId),
-      sessionId: conversation.sessionId,
-    })
+    const claude = wakeClaude(
+      { ...claudeDeps, askUser: askUserFor(studyId) },
+      {
+        id: studyId,
+        dir: dirOf(studyId),
+        sessionId: conversation.sessionId,
+      },
+    )
     claudes.set(studyId, claude)
     return claude
   }
@@ -372,6 +436,18 @@ function makeLedger(deps: {
           firstMessage: firstMessage(row.id),
           lastActivityAt: row.lastActiveAt,
           lastLogLine: lastLogLine(dirOf(row.id)),
+          waitingPermission:
+            db
+              .select({ id: studyMessage.id })
+              .from(studyMessage)
+              .innerJoin(studyConversation, eq(studyMessage.conversationId, studyConversation.id))
+              .where(
+                and(
+                  eq(studyConversation.studyId, row.id),
+                  eq(studyMessage.permissionState, 'pending'),
+                ),
+              )
+              .get() !== undefined,
         })),
       }
     },
@@ -407,6 +483,12 @@ function makeLedger(deps: {
 
     send(id: string, text: string) {
       return { message: startTurn(id, text) }
+    },
+
+    answerPermission(id: number, allow: boolean): StudyMessage {
+      const message = settle(id, allow)
+      if (!message) throw new ORPCError('NOT_FOUND', { message: `no permission row ${id}` })
+      return message
     },
 
     watch(id: string, signal: AbortSignal | undefined): AsyncGenerator<StudyWatchEvent> {

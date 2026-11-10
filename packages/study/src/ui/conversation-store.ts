@@ -5,14 +5,16 @@ import { failureLine, type StudyClient } from './client.ts'
 
 const REOPEN_MS = 1000
 
-export type ConversationClient = Pick<StudyClient, 'get' | 'send' | 'watch'>
+export type ConversationClient = Pick<StudyClient, 'get' | 'send' | 'watch' | 'permission'>
 
 export type ConversationSnapshot = {
   /** get を読むまでは無い。 */
   study: { dir: string; missionLine: string | null; firstMessage: string | null } | undefined
   missing: boolean
-  /** 続いている Study Conversation の行。 */
+  /** 続いている Study Conversation の行。pending の許可の行は除く。 */
   messages: readonly StudyMessage[]
+  /** 入力欄の代わりに出す許可の行。pending の行のうち id の最も小さいもの。 */
+  permission: StudyMessage | null
   running: boolean
   partialText: string
   /** turn が失敗した時の 1 行。DB に無いので、次に送るか開き直すと消える。 */
@@ -43,6 +45,7 @@ export function createConversationStore(
     study: undefined,
     missing: false,
     messages: [],
+    permission: null,
     running: false,
     partialText: '',
     turnError: null,
@@ -51,10 +54,12 @@ export function createConversationStore(
   const listeners = new Set<() => void>()
 
   function set(next: Partial<ConversationSnapshot>) {
-    const messages = [...rows.values()]
+    const current = [...rows.values()]
       .filter((message) => message.conversationId === conversationId)
       .toSorted((a, b) => a.id - b.id)
-    snapshot = { ...snapshot, messages, ...next }
+    const messages = current.filter((message) => message.state !== 'pending')
+    const permission = current.find((message) => message.state === 'pending') ?? null
+    snapshot = { ...snapshot, messages, permission, ...next }
     for (const listener of listeners) listener()
   }
 
@@ -121,6 +126,14 @@ export function createConversationStore(
       const controller = new AbortController()
       void run(controller.signal)
       return () => controller.abort()
+    },
+    async answer(rowId: number, allow: boolean): Promise<void> {
+      try {
+        put(await client.permission.answer({ id: rowId, allow }))
+        set({ sendError: null })
+      } catch (error) {
+        set({ sendError: failureLine(error) })
+      }
     },
     /** 走っている turn の間や送っている途中は送らずに false を返す。 */
     async send(text: string): Promise<boolean> {

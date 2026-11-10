@@ -12,6 +12,7 @@
 - `study-screen-list`: 新しい会話の画面の一覧に Study が区分ごとに出て、名前は Mission の 1 行目になる。行を押すと同じ会話に戻る。
 - `study-screen-converse`: turn の途中で読み込み直しても、2 つ目の Browser Tab でも、途中の文から続きが流れる。
 - `study-new-key`: Study の画面で ⌥N を押すと `/studies` に戻る。
+- `study-permission`: Tutor が箱の外で command を走らせたいと、入力欄が許可の欄に替わる。`1` で許し `2` で断ると、会話に 1 行残る。待つ間は一覧に「許可を待っている」が出て、Backend を起こし直すと断ったことになる。
 
 ## How to get to it (user POV)
 
@@ -25,6 +26,7 @@ Preconditions: `note-daily.md` の「Driving it with headless の Backend・Vite
 - **study-screen-start.** `open http://localhost:<Vite の port>/` の後、rail の Study を `click` して URL が `/studies` になる。入力欄に「https://github.com/sindresorhus/ky のコードを読んで分かりたい」を打って「始める」を押すと、URL が `/studies/study-*` になり、Tutor の文が流れる（`ThinkingIndicator` の後に文が伸びる）。
 - **study-screen-list.** Tutor が `MISSION.md` を書いた後、上の欄の名前が Mission の 1 行目になる。⌥N で `/studies` に戻ると、一覧の「今日」に同じ名前で出る。行を押すと同じ会話に戻る。
 - **study-screen-converse.** turn の途中で `open` で読み込み直すと、途中の文から続きが流れる。2 つ目の Browser Tab で同じ URL を開くと同じ文が流れる。Vite の proxy 越しでも流れが途切れない。
+- **study-permission.** Tutor に「`docker ps` を箱の外で走らせて」と頼むと、入力欄が「箱の外で走らせてよいか」の欄に替わり、`eval 'document.activeElement.getAttribute("aria-label")'` がその欄の名前を返す。⌥N で一覧に戻ると行に「許可を待っている」が出る。戻って `press 2` で断ると「`docker ps` を断った」の 1 行が残り、Tutor が断られたことを伝えて続ける。もう一度頼み、会話の文を `click` してから `press 1` しても欄は残る。欄を `click` して `press 1` で許すと command が走る。欄が出ている間に `open` で読み込み直しても欄が出る。2 つ目の Browser Tab で答えると 1 つ目の欄も消える。Backend を止めて起こし直すと、欄が消えて「… を断った」になる。
 - **見た目.** Study の画面に背景写真と右下の pill が無い。theme を dark にすると面と影も dark になる。⌘+ で会話の字が大きくなる。
 - **証拠.** 各段の `screenshot` を `$E/study-screen-*.png` に残す。
 

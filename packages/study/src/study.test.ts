@@ -1,6 +1,4 @@
-import { Database } from 'bun:sqlite'
 import { afterEach, expect, setSystemTime, test } from 'bun:test'
-import type { ChildProcess } from 'node:child_process'
 import {
   existsSync,
   mkdirSync,
@@ -14,26 +12,24 @@ import {
 import { homedir, tmpdir } from 'node:os'
 import { join } from 'node:path'
 
-import type { Options, SDKUserMessage } from '@anthropic-ai/claude-agent-sdk'
-import { createRouterClient } from '@orpc/server'
-import { drizzle } from 'drizzle-orm/bun-sqlite'
-import { migrate } from 'drizzle-orm/bun-sqlite/migrator'
-
-import { migrations } from '../migrations/index.ts'
-import type { Query } from './claude.ts'
-import type { StudyWatchEvent } from './contract.ts'
-import { createStudyLedger, router } from './server.ts'
+import {
+  delta,
+  init,
+  result,
+  said,
+  shape,
+  studyFixture,
+  toolResult,
+  toolUse,
+  until,
+} from './study-fixture.ts'
 
 const cleanups: (() => unknown)[] = []
 afterEach(async () => {
   for (const cleanup of cleanups.splice(0).toReversed()) await cleanup()
 })
 
-const noop = () => {}
-
-async function until(condition: () => boolean): Promise<void> {
-  while (!condition()) await Bun.sleep(5)
-}
+const { setup, watching } = studyFixture(cleanups)
 
 const groupGone = (pid: number) => {
   try {
@@ -42,147 +38,6 @@ const groupGone = (pid: number) => {
   } catch {
     return true
   }
-}
-
-type FakeClaude = {
-  options: Options
-  prompts: string[]
-  pid: number
-  emit(...messages: object[]): void
-  exited: Promise<void>
-}
-
-// 本物の process を持ち、台本の SDK の message を返す。テストが emit で続きを流し、process が居なくなると message が尽きる。
-function fakeQuery() {
-  const fake = {
-    shell: 'sleep 60 & wait',
-    claudes: [] as FakeClaude[],
-    query: (({ prompt, options }: { prompt: AsyncIterable<SDKUserMessage>; options: Options }) => {
-      const queued: object[] = []
-      let wake: () => void = noop
-      let gone = false
-      const child = options.spawnClaudeCodeProcess!({
-        command: '/bin/sh',
-        args: ['-c', fake.shell],
-        cwd: options.cwd!,
-        env: options.env!,
-        signal: new AbortController().signal,
-      }) as ChildProcess
-      const claude: FakeClaude = {
-        options,
-        prompts: [],
-        pid: child.pid!,
-        emit(...messages) {
-          queued.push(...messages)
-          wake()
-        },
-        exited: new Promise((resolve) =>
-          child.once('exit', () => {
-            gone = true
-            wake()
-            resolve()
-          }),
-        ),
-      }
-      void (async () => {
-        for await (const message of prompt) claude.prompts.push(message.message.content as string)
-      })()
-      fake.claudes.push(claude)
-      return (async function* () {
-        for (;;) {
-          const next = queued.shift()
-          if (next) yield next
-          else if (gone) return
-          else await new Promise<void>((resolve) => (wake = resolve))
-        }
-      })()
-    }) as unknown as Query,
-  }
-  return fake
-}
-
-const init = (sessionId = 'session-1') => ({
-  type: 'system',
-  subtype: 'init',
-  session_id: sessionId,
-})
-const delta = (text: string) => ({
-  type: 'stream_event',
-  event: { type: 'content_block_delta', index: 0, delta: { type: 'text_delta', text } },
-})
-const said = (text: string) => ({
-  type: 'assistant',
-  message: { content: [{ type: 'text', text }] },
-})
-const toolUse = (id: string, name: string, input: object) => ({
-  type: 'assistant',
-  message: { content: [{ type: 'tool_use', id, name, input }] },
-})
-const toolResult = (id: string) => ({
-  type: 'user',
-  message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: id, content: 'done' }] },
-})
-const result = (error?: string) => ({
-  type: 'result',
-  subtype: 'success',
-  is_error: error !== undefined,
-  result: error ?? '',
-})
-
-function inMemoryDb() {
-  const sqlite = new Database(':memory:')
-  sqlite.run('PRAGMA foreign_keys = ON')
-  const db = drizzle(sqlite)
-  migrate(db, { migrationsFolder: migrations.folder, migrationsTable: migrations.table })
-  return db
-}
-
-function setup(given?: { db?: ReturnType<typeof inMemoryDb>; home?: string; tutorsDir?: string }) {
-  const home = given?.home ?? mkdtempSync(join(tmpdir(), 'monica-study-'))
-  const db = given?.db ?? inMemoryDb()
-  const fake = fakeQuery()
-  const studyLedger = createStudyLedger({
-    db,
-    home,
-    query: fake.query,
-    tutorsDir: given?.tutorsDir,
-  })
-  const client = createRouterClient(router, { context: { db, studyLedger } })
-  cleanups.push(async () => {
-    studyLedger.stop()
-    await Promise.all(fake.claudes.map((claude) => claude.exited))
-    if (!given?.home) rmSync(home, { recursive: true, force: true })
-  })
-  return { home, db, fake, client, studyLedger }
-}
-
-type Client = ReturnType<typeof setup>['client']
-
-async function watching(client: Client, id: string) {
-  const closed = new AbortController()
-  const iterator = await client.watch({ id }, { signal: closed.signal })
-  const events: StudyWatchEvent[] = []
-  void (async () => {
-    try {
-      for await (const event of iterator) events.push(event)
-    } catch {
-      // 閉じた。
-    }
-  })()
-  cleanups.push(() => closed.abort())
-  return {
-    events,
-    close: () => closed.abort(),
-    until: (predicate: (event: StudyWatchEvent) => boolean) => until(() => events.some(predicate)),
-    ended: () => until(() => events.some((event) => event.type === 'turn-ended')),
-  }
-}
-
-const shape = (event: StudyWatchEvent) => {
-  if (event.type === 'message') return `${event.message.kind}:${event.message.text}`
-  if (event.type === 'delta') return `delta:${event.text}`
-  if (event.type === 'turn-ended') return `turn-ended:${event.error}`
-  return event.type
 }
 
 test('start makes the Study dir under studies with mode 0700, and list shows the Study with no Mission yet', async () => {
@@ -200,6 +55,7 @@ test('start makes the Study dir under studies with mode 0700, and list shows the
       firstMessage: null,
       lastActivityAt: expect.any(Date),
       lastLogLine: null,
+      waitingPermission: false,
     },
   ])
   expect((await client.get({ id })).dir).toBe(join(home, 'studies', id))

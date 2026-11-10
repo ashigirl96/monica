@@ -4,6 +4,7 @@ import { expect, test } from 'bun:test'
 import { eq } from 'drizzle-orm'
 import { drizzle } from 'drizzle-orm/bun-sqlite'
 import { migrate } from 'drizzle-orm/bun-sqlite/migrator'
+import { readMigrationFiles } from 'drizzle-orm/migrator'
 
 import { migrations } from '../migrations/index.ts'
 import { study, studyConversation, studyMessage } from './schema.ts'
@@ -63,4 +64,51 @@ test('removing a Study removes its conversations and messages', () => {
 
   expect(db.select().from(studyConversation).all()).toEqual([])
   expect(db.select().from(studyMessage).all()).toEqual([])
+})
+
+test('only a permission row has a permission state, one of pending, allowed or denied', () => {
+  const db = withStudy()
+  db.insert(studyConversation).values({ id: 'sc-1', studyId: 'study-1', startedAt: at }).run()
+  const message = (kind: 'user' | 'permission', permissionState: string | null) =>
+    db
+      .insert(studyMessage)
+      .values({
+        conversationId: 'sc-1',
+        createdAt: at,
+        kind,
+        text: 'docker ps',
+        permissionState: permissionState as 'pending' | null,
+      })
+      .run()
+
+  message('permission', 'pending')
+  message('permission', 'allowed')
+  message('permission', 'denied')
+  message('user', null)
+
+  expect(() => message('permission', null)).toThrow()
+  expect(() => message('user', 'pending')).toThrow()
+  expect(() => message('permission', 'maybe')).toThrow()
+})
+
+test('adding the permission columns keeps the rows already stored', () => {
+  const sqlite = new Database(':memory:')
+  const [first, ...rest] = readMigrationFiles({ migrationsFolder: migrations.folder })
+  const apply = (m: { sql: string[] }) => {
+    for (const statement of m.sql) sqlite.run(statement)
+  }
+  apply(first!)
+  sqlite.run(`INSERT INTO study VALUES ('study-1', 0, 0)`)
+  sqlite.run(
+    `INSERT INTO study_conversation (id, study_id, started_at) VALUES ('sc-1', 'study-1', 0)`,
+  )
+  sqlite.run(
+    `INSERT INTO study_message (conversation_id, created_at, kind, text) VALUES ('sc-1', 0, 'user', 'hi')`,
+  )
+
+  for (const m of rest) apply(m)
+
+  expect(drizzle(sqlite).select().from(studyMessage).all()).toMatchObject([
+    { id: 1, kind: 'user', text: 'hi', reason: null, permissionState: null },
+  ])
 })

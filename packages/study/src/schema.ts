@@ -36,9 +36,20 @@ export const studyMessage = sqliteTable(
       .notNull()
       .references(() => studyConversation.id, { onDelete: 'cascade' }),
     createdAt: timestamp('created_at').notNull(),
-    kind: text('kind', { enum: ['user', 'tutor', 'tool', 'tutor_switch'] }).notNull(),
+    kind: text('kind', {
+      enum: ['user', 'tutor', 'tool', 'tutor_switch', 'permission'],
+    }).notNull(),
     text: text('text').notNull(),
     tool: text('tool'),
+    reason: text('reason'),
+    permissionState: text('permission_state', { enum: ['pending', 'allowed', 'denied'] }),
   },
-  () => [check('study_message_tool', sql`(kind = 'tool') = (tool IS NOT NULL)`)],
+  () => [
+    check('study_message_tool', sql`(kind = 'tool') = (tool IS NOT NULL)`),
+    check(
+      'study_message_permission_state',
+      sql`permission_state IS NULL OR permission_state IN ('pending', 'allowed', 'denied')`,
+    ),
+    check('study_message_permission', sql`(kind = 'permission') = (permission_state IS NOT NULL)`),
+  ],
 )
