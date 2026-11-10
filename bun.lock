@@ -180,7 +180,9 @@
       },
       "devDependencies": {
         "@types/react": "catalog:",
+        "@types/react-dom": "catalog:",
         "drizzle-kit": "catalog:",
+        "react-dom": "catalog:",
       },
     },
     "packages/task": {

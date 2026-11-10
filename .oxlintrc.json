@@ -418,7 +418,9 @@
                   "@monica/job",
                   "@monica/job/*",
                   "@monica/usage",
-                  "@monica/usage/*"
+                  "@monica/usage/*",
+                  "@monica/study",
+                  "@monica/study/*"
                 ],
                 "message": "note は他の domain を import しない（docs/packages.md の「依存の向き」）"
               }
@@ -448,7 +450,9 @@
                   "@monica/job",
                   "@monica/job/*",
                   "@monica/usage",
-                  "@monica/usage/*"
+                  "@monica/usage/*",
+                  "@monica/study",
+                  "@monica/study/*"
                 ],
                 "message": "note は他の domain を import しない（docs/packages.md の「依存の向き」）"
               },
@@ -499,7 +503,9 @@
                   "@monica/job",
                   "@monica/job/*",
                   "@monica/usage",
-                  "@monica/usage/*"
+                  "@monica/usage/*",
+                  "@monica/study",
+                  "@monica/study/*"
                 ],
                 "message": "note は他の domain を import しない（docs/packages.md の「依存の向き」）"
               },

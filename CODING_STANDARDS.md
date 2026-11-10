@@ -84,6 +84,7 @@ review で差分に当てる規則。どれも判断が要るもので、理由�
 - 一時 directory は `finally` で消さず、hook（`afterAll` など）で消す。timeout で打ち切られた test は `finally` を飛ばすため。
 - hook は test file に書く。共有の module は片付けの関数を出し、呼び手の test file に登録させる（`scripts/oxlint/lint-probes.ts` の `cleanUpLintProbes`）。bun test は同じ process の test file どうしで module を使い回し、module の top level で登録した hook は最初に import した file にしか付かないため。
 - bun test に DOM の環境（happy-dom など）を入れない。
+- `renderToStaticMarkup` で描いた部品の位置の約束（並び、枠の内か外か）は、並び全体を `toEqual` で比べるか、包む枠の閉じタグとの位置で確かめる（`packages/note/src/ui/components/app-shell.test.tsx`・`pages/repos/sidebar.test.tsx`）。2 つの `indexOf` の前後だけだと、並びを入れ替える変異も、枠の中に入れる変異も通るため。
 - GFM に合わせる markdown の読み（表のセルの区切り、backslash の escape）は、同じ入力を `gh api markdown -f mode=gfm -f text='…'` に通し、cmark-gfm の描画と比べて決める。cmark-gfm の文法（`ext_scanners.re`）を読むだけだと、re2c の最長一致を見落として読み違えるため。
 - 相手が body を読みやめられたこと（stream の cancel）を確かめるテストは、cancel が 200ms のうちに届くことを見る。Bun は読みやめたまま捨てた body も GC で 1 秒ほど後に cancel するので、長く待つと cancel を呼ばない実装も通るため。
 - CLI が Backend の error をどう出すかと、接続を拒む Backend への retry は、router を `Bun.serve` に載せて HTTP で確かめる。in-process の client（`createRouterClient`）は handler の生の Error をそのまま投げ、HTTP のように `ORPCError` に包まないため（`apps/cli/src/backend.test.ts`）。

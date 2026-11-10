@@ -53,6 +53,7 @@ entry は層ではなく、import してよい実行環境で切る。domain の
 - job は task も workbench も import しない。note・chat・usage は他の domain を import せず、他の domain からも import されない。
 - task の schema は workbench の table を FK のために import するが、re-export しない。
 - import できない向きに値を渡すときは、出す側の server entry が関数を出し、Backend の組み立てが受ける側の deps に渡す。workbench の Notification（通知）の呼び名は、task の `nameAgentSession` をこの形で受ける。usage が数える処理と全 Feature の一覧も、Backend の組み立てが渡す。
+- UI で他の domain の画面や表示を差し込むときは、受ける側の ui の component が slot の props を出し、apps の組み立てが出す側の ui の部品を渡す。workbench の `Workbench` に task の表示を渡す `apps/desktop/src/App.tsx` と、note の `NotesApp` がこの形をとる。
 
 ## server entry の形
 

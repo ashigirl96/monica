@@ -34,6 +34,8 @@
   },
   "devDependencies": {
     "@types/react": "catalog:",
-    "drizzle-kit": "catalog:"
+    "@types/react-dom": "catalog:",
+    "drizzle-kit": "catalog:",
+    "react-dom": "catalog:"
   }
 }

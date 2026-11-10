@@ -1,4 +1,4 @@
-import { Fragment, useEffect, useRef } from 'react'
+import { Fragment, type ReactNode, useEffect, useRef } from 'react'
 
 import type { RepoNoteSummary } from '../../../contract.ts'
 import { StarButton, StarDivider, startsUnstarred } from '../../notes/star.tsx'
@@ -71,6 +71,7 @@ export function RepoSidebar({
   onSelect,
   onStar,
   onDelete,
+  panel,
 }: {
   repoName: string
   scratchSelected: boolean
@@ -82,6 +83,7 @@ export function RepoSidebar({
   onSelect: (id: string) => void
   onStar: (id: string) => void
   onDelete: (id: string) => void
+  panel?: ReactNode
 }) {
   const sentinelRef = useRef<HTMLDivElement>(null)
 
@@ -164,6 +166,7 @@ export function RepoSidebar({
           </div>
         )}
       </div>
+      {panel}
     </div>
   )
 }
