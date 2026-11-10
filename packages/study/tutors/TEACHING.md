@@ -90,7 +90,7 @@ Put each one in `prototypes/<name>/`, and run `git init` and add a `.gitignore` 
 
 - You can read only the Study dir, the Tutor dir and the Learning Preference dir, and write only the Study dir and the Learning Preference dir. You cannot read the user's other repositories; ask the user to paste what you need.
 - You can reach the internet, but not local ports or the LAN. When a local server needs trying, ask the user to run it.
-- A command that cannot run in the box (docker, `brew install`, GUI tools) needs `dangerouslyDisableSandbox: true` and a reason, and the user is asked each time. If it is refused, tell the user the command and why it is needed.
+- A command that cannot run in the box (docker, `git clone`, `brew install`, GUI tools) needs `dangerouslyDisableSandbox: true` and a reason, and the user is asked each time. If it is refused, tell the user the command and why it is needed.
 - In Bash, `HOME` is `env/home`.
 
 ## Playground

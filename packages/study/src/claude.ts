@@ -68,6 +68,8 @@ const quote = (value: string) => `'${value.replaceAll("'", `'\\''`)}'`
 export function writeEnvFile(studyDir: string): string {
   const path = join(studyDir, '.claude-env.sh')
   const envSh = quote(join(studyDir, 'env', 'env.sh'))
+  // 箱の外で走る docker も HOME を env/home に替えられるので、ユーザーの context と認証を本物の home から読ませる。
+  const dockerConfig = quote(process.env.DOCKER_CONFIG || join(homedir(), '.docker'))
   // Tutor が置いた symlink を辿って箱の外の file を上書きしないよう、消してから新しく作る。
   rmSync(path, { force: true })
   const { O_WRONLY, O_CREAT, O_EXCL, O_NOFOLLOW } = constants
@@ -75,7 +77,7 @@ export function writeEnvFile(studyDir: string): string {
   try {
     writeSync(
       fd,
-      `export HOME=${quote(join(studyDir, 'env', 'home'))}\nif [ -f ${envSh} ]; then . ${envSh}; fi\n`,
+      `export HOME=${quote(join(studyDir, 'env', 'home'))}\nexport DOCKER_CONFIG=${dockerConfig}\nif [ -f ${envSh} ]; then . ${envSh}; fi\n`,
     )
   } finally {
     closeSync(fd)
