@@ -261,11 +261,14 @@ test('a file not yet written is judged by the real path of its nearest existing 
   )
 })
 
-test('a Glob with an absolute pattern is refused', async () => {
+test('a Glob with an absolute pattern or .. is refused', async () => {
   const { box: b, studyDir } = box()
   expect(await decision(b, 'Glob', { pattern: `${studyDir}/**` })).toBe('deny')
   expect(await decision(b, 'Glob', { pattern: '/etc/*' })).toBe('deny')
   expect(await decision(b, 'Glob', { pattern: '~/.ssh/*' })).toBe('deny')
+  expect(await decision(b, 'Glob', { pattern: '../**', path: studyDir })).toBe('deny')
+  expect(await decision(b, 'Glob', { pattern: 'a/../../*' })).toBe('deny')
+  expect(await decision(b, 'Glob', { pattern: '{..,x}/*' })).toBe('deny')
   expect(await decision(b, 'Glob', { pattern: 'src/**', path: studyDir })).toBe('allow')
 })
 

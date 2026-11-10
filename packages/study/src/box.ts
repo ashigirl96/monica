@@ -144,9 +144,10 @@ export function tutorBox(deps: TutorBoxDeps): TutorBox {
       case 'Edit':
         return judgePath(input.file_path, 'write')
       case 'Glob':
-        if (typeof input.pattern === 'string' && /^[/~]/.test(input.pattern)) {
+        // brace の {..,x} も親に上がるので、.. は区切りに関わらず断る。
+        if (typeof input.pattern === 'string' && /^[/~]|\.\./.test(input.pattern)) {
           return deny(
-            'A Glob with an absolute pattern is refused; give a relative pattern and a path inside the box.',
+            'A Glob with an absolute pattern or .. is refused; give a relative pattern and a path inside the box.',
           )
         }
         return judgePath(input.path ?? studyDir, 'read')
