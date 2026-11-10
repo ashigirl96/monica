@@ -2,6 +2,7 @@
 import { homedir } from 'node:os'
 import { join } from 'node:path'
 
+import { commands as studyCommands } from '@monica/study/cli'
 import { commands as taskCommands } from '@monica/task/cli'
 import { commands as workbenchCommands } from '@monica/workbench/cli'
 
@@ -24,7 +25,7 @@ const deps: { connect: Connect } = { connect: (options) => connect(home, options
 if (argv[0]?.startsWith(CHROME_EXTENSION_ORIGIN)) process.exit(await answerChromeExtension(home))
 
 // trpc-cli と contract の実体の import だけで compiled の起動が約 30ms 延びるので、手書き command はその前に振り分ける。
-const commands: readonly Command[] = [...workbenchCommands, ...taskCommands]
+const commands: readonly Command[] = [...workbenchCommands, ...taskCommands, ...studyCommands]
 const command = commands.find((c) => c.path.every((part, i) => argv[i] === part))
 if (command) process.exit(await command.run(argv.slice(command.path.length), deps))
 

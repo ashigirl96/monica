@@ -13,6 +13,8 @@
 - `study-screen-converse`: turn の途中で読み込み直しても、2 つ目の Browser Tab でも、途中の文から続きが流れる。
 - `study-new-key`: Study の画面で ⌥N を押すと `/studies` に戻る。
 - `study-permission`: Tutor が箱の外で command を走らせたいと、入力欄が許可の欄に替わる。`1` で許し `2` で断ると、会話に 1 行残る。待つ間は一覧に「許可を待っている」が出て、Backend を起こし直すと断ったことになる。
+- `study-shell`: Study の画面の上の欄の `monica study shell <短い id>` を押すと写され、端末で打つと Study の dir に入る。shell の `HOME` はユーザーのままで、`env/env.sh` を読む。
+- `study-playground`: Tutor が入れた道具は `env/` の下に入り、`env/env.sh` に PATH の行が書かれる。docker の物には `monica.study=<Study の id>` の label が付く。一覧の行は Playground が消えた Study に「Playground は消えた」を出す。
 - `study-repo-link`: Study の画面の上の欄の「+ Repo」で Repo を紐付け、印の × で外す。紐付けた Repo は新しい会話の画面の一覧の行にも出る。
 - `study-repo-panel`: 紐付けた Repo の画面の左の欄の時系列の下に「Study」の欄が出て、行を押すとその Study の画面に移る。
 - `study-artifacts`: 左の成果物の木の項目か、会話の「を書いた」の行を押すと右の欄に中身が出る。成果物の中の相対 link で別の成果物に移る。Tutor が書くと木と開いている欄が読み直される。
@@ -49,6 +51,17 @@ Preconditions: `launch.sh <name> MONICA_BROWSER_PORT=<port>` で dev の Backend
 - **env**: Tutor に `env | sort` を走らせ、出た key が allowlist と claude が足すものと `.claude-env.sh` の `HOME` だけで、login shell の rc が export した key が無い。
 - **断られるもの**: Tutor に `ls <本物の HOME>/.ssh`（箱の中の `~` は `env/home` を指すので絶対 path で書く）と `curl --noproxy '' http://127.0.0.1:<port>/` を走らせ、どちらも断られる。
 - **resume**: Backend に SIGTERM を送ると claude とその子が居なくなる（`ps -A -o pid=,ppid=,pgid=,command=`）。起こし直して `send` すると、前の turn の話を覚えて答える。
+
+## Playground と monica study shell
+
+Preconditions: 「Driving it with headless の Backend・Vite・agent-browser」と同じ。CLI は `MONICA_HOME=$H bun apps/cli/src/main.ts study shell …` で dev の Backend に繋ぐ。
+
+- **道具を入れる**: Tutor に「jq を npm で `-g` で入れて使って」と頼む（`npm i -g node-jq` などでよい）。`$H/studies/<id>/env/npm` の下に入り、`env/env.sh` に PATH の行が書かれ、同じ会話の次の Bash でその道具が見える。
+- **docker の label**: Tutor に label 付きの container を起こさせ、許可の欄で許す。`docker ps -a --filter label=monica.study=<id>` に出て、`docker compose` の物には `com.docker.compose.project=<id>` が付く。箱の外の docker が、`.claude-env.sh` の `HOME`（`env/home`）のせいで Docker Desktop の context を見失わないかも見る。見失えば `.claude-env.sh` を直す。
+- **上の欄の command**: Study の画面の上の欄の `monica study shell <短い id>` を押すと「写した」の toast が出る。Tab に貼って打つ（`features/workbench-tab.md` の手順）と、Study の dir に移り、入れた道具が PATH にあり、`echo $HOME` はユーザーの HOME。`exit` で元の shell に戻り、CLI は exit 0。
+- **重なる頭と無い頭**: 近い時刻に Study を 2 つ始めると頭 8 文字が重なる。その頭を打つと stderr の 1 行目が `BAD_REQUEST: <頭> matches 2 Studies: …` で exit 1、無い頭は `NOT_FOUND: …` で exit 1、Backend を止めると `BACKEND_NOT_RUNNING: …` で exit 2。
+- **一覧の印**: `sqlite3 $H/monica.db "UPDATE study SET playground_removed_at = <今の ms> WHERE id = '<id>'"` の後に一覧を開き直すと、その行に「Playground は消えた」が出る（Backend は DB を EXCLUSIVE で開くので、止めてから書いて起こし直す）。`monica study shell` で入ると印が消える。
+- **証拠**: 各段の `screenshot` と CLI の stderr・exit code を `$E/study-shell-*` に残す。
 
 ## release の build で Tutor の定義を書き出す
 

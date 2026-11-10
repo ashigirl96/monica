@@ -1,3 +1,4 @@
+import { pushErrorToast, pushInfoToast } from '@monica/ui'
 import { InputMessage, ThinkingIndicator } from '@monica/ui/fluid'
 import { useQueryClient } from '@tanstack/react-query'
 import { ArrowLeft } from 'lucide-react'
@@ -10,6 +11,7 @@ import {
   useSyncExternalStore,
 } from 'react'
 
+import { shortIdOf } from '../contract.ts'
 import { ArtifactPanel, artifactKey, artifactsKey, ArtifactTree } from './artifact-view.tsx'
 import { createConversationStore } from './conversation-store.ts'
 import { currentTutor, MessageView, PermissionPrompt, TutorText } from './messages.tsx'
@@ -56,6 +58,7 @@ export function StudyPage({ id }: { id: string }) {
     <Screen>
       <StudyHeader>
         {study && <StudyName study={study} className="min-w-0 flex-1 text-[15px] font-medium" />}
+        <ShellCommand studyId={id} />
         <span className="shrink-0 text-[12px] text-muted-foreground">
           Tutor: {currentTutor(messages)}
         </span>
@@ -118,6 +121,25 @@ export function StudyPage({ id }: { id: string }) {
         )}
       </div>
     </Screen>
+  )
+}
+
+export function ShellCommand({ studyId }: { studyId: string }) {
+  const command = `monica study shell ${shortIdOf(studyId)}`
+  return (
+    <button
+      type="button"
+      title="写す"
+      onClick={() => {
+        void navigator.clipboard.writeText(command).then(
+          () => pushInfoToast(`写した: ${command}`),
+          (error: unknown) => pushErrorToast(`写せなかった: ${(error as Error).message}`),
+        )
+      }}
+      className="shrink-0 rounded-md px-1.5 py-0.5 text-[12px] text-muted-foreground hover:bg-muted hover:text-foreground"
+    >
+      <code className="font-mono">{command}</code>
+    </button>
   )
 }
 
