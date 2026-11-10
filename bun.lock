@@ -38,6 +38,7 @@
       },
       "dependencies": {
         "@monica/job": "workspace:*",
+        "@monica/study": "workspace:*",
         "@monica/task": "workspace:*",
         "@monica/usage": "workspace:*",
         "@monica/workbench": "workspace:*",

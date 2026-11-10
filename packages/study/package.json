@@ -6,7 +6,8 @@
     "./schema": "./src/schema.ts",
     "./contract": "./src/contract.ts",
     "./server": "./src/server.ts",
-    "./ui": "./src/ui/index.ts"
+    "./ui": "./src/ui/index.ts",
+    "./cli": "./src/cli.ts"
   },
   "scripts": {
     "generate": "drizzle-kit generate"

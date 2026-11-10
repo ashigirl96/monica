@@ -8,6 +8,13 @@
       "when": 1794337993224,
       "tag": "0000_spooky_jubilee",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "6",
+      "when": 1794339489057,
+      "tag": "0001_chilly_jack_murdock",
+      "breakpoints": true
     }
   ]
 }

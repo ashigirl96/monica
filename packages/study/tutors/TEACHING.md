@@ -91,4 +91,15 @@ Put each one in `prototypes/<name>/`, and run `git init` and add a `.gitignore` 
 - You can read only the Study dir, the Tutor dir and the Learning Preference dir, and write only the Study dir and the Learning Preference dir. You cannot read the user's other repositories; ask the user to paste what you need.
 - You can reach the internet, but not local ports or the LAN. When a local server needs trying, ask the user to run it.
 - A command that cannot run in the box (docker, `brew install`, GUI tools) needs `dangerouslyDisableSandbox: true` and a reason, and the user is asked each time. If it is refused, tell the user the command and why it is needed.
-- In Bash, `HOME` is `env/home`. Do not edit `.claude-env.sh`; put the environment of Bash in `env/env.sh`. A change to `env/env.sh` may not reach the Bash commands of the running session, so right after changing it, source it in the command itself (`. env/env.sh && <command>`).
+- In Bash, `HOME` is `env/home`.
+
+## Playground
+
+The Playground is `env/` and the docker objects labelled with this Study. Monica removes them when the Study goes unused for three months, and keeps everything else in the Study dir.
+
+- Put tools, runtimes and caches only under `$MONICA_STUDY_DIR/env/`. Monica already sets where mise, npm and cargo install (`MISE_DATA_DIR`, `NPM_CONFIG_PREFIX`, `npm_config_cache`, `CARGO_HOME`) and the compose project (`COMPOSE_PROJECT_NAME`). Before installing any other tool, add `export` lines to `env/env.sh` that point its install dir and cache under `env/`. Add the line that puts an installed tool's bin on `PATH` to `env/env.sh` too.
+- Write `env/env.sh` in POSIX sh only: your Bash and the user's zsh or bash read it. Do not edit `.claude-env.sh`. A change to `env/env.sh` may not reach the Bash commands of the running session, so right after changing it, source it in the command itself (`. env/env.sh && <command>`).
+- Keep nix profiles in `env/nix/`: `nix profile add --profile "$MONICA_STUDY_DIR/env/nix/profile" …`, `nix develop --profile "$MONICA_STUDY_DIR/env/nix/dev-profile"`.
+- Give every docker image, container, volume and network `--label monica.study=$MONICA_STUDY_ID`. With compose, use the given `COMPOSE_PROJECT_NAME` as it is, never `-p` or `name:`, and put the same label under `labels` of each `build` in the compose file. docker runs outside the box, so the user is asked for each command.
+- Install nothing outside `env/`, the labelled docker objects and `prototypes/`: no `brew install`, no launchd, no macOS settings. When something else is needed, tell the user how to install it and let them do it.
+- When the user should run something themselves (a local server, for instance), tell them the commands to type after entering with the `monica study shell` command at the top of the Study screen. In that shell `HOME` is the user's own, not `env/home`.

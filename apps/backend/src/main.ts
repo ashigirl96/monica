@@ -19,7 +19,12 @@ import {
   migrations as noteMigrations,
   systemJobs as noteSystemJobs,
 } from '@monica/note/server'
-import { createStudyLedger, migrations as studyMigrations, writeTutors } from '@monica/study/server'
+import {
+  createStudyLedger,
+  migrations as studyMigrations,
+  router as studyRouter,
+  writeTutors,
+} from '@monica/study/server'
 import {
   createTaskLedger,
   migrations as taskMigrations,
@@ -153,14 +158,15 @@ const tokenRouter = {
   job: jobRouter,
   chat: chatRouter,
   usage: usageRouter,
+  study: studyRouter,
 }
-// ブラウザの口を立てない起動でも、note と study の Feature を 0 回として出す。
+// ブラウザの口を立てない起動でも、note と study の Feature を 0 回として出す。両方の口に載る study は 1 度だけ数える。
 const usageLedger = createUsageLedger({
   db,
-  features: [...featuresOf(tokenRouter), ...featuresOf(browserRouter)],
+  features: [...new Set([...featuresOf(tokenRouter), ...featuresOf(browserRouter)])],
 })
 
-const context = { db, workbenchLedger, taskLedger, jobLedger, chatAgent, usageLedger }
+const context = { db, workbenchLedger, taskLedger, jobLedger, chatAgent, usageLedger, studyLedger }
 type TokenContext = typeof context & { caller: Caller }
 const clientInterceptors = [usageLedger.count]
 const handler = new RPCHandler(os.$context<TokenContext>().router(tokenRouter), {
@@ -229,6 +235,7 @@ const workbenchStarted = workbenchLedger.start().then(() => true)
 taskLedger.start()
 jobLedger.start()
 noteLedger.start()
+studyLedger.start()
 // compiled binary の --asset は entry の隣に置かれ、bun run の Backend には無い。
 const browserListener = listenBrowser(process.env.MONICA_BROWSER_PORT, {
   context: { db, noteLedger, studyLedger },

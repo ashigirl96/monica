@@ -16,12 +16,14 @@ import { join } from 'node:path'
 
 import type { Options, SDKUserMessage } from '@anthropic-ai/claude-agent-sdk'
 import { createRouterClient } from '@orpc/server'
+import { eq } from 'drizzle-orm'
 import { drizzle } from 'drizzle-orm/bun-sqlite'
 import { migrate } from 'drizzle-orm/bun-sqlite/migrator'
 
 import { migrations } from '../migrations/index.ts'
 import type { Query } from './claude.ts'
 import type { StudyWatchEvent } from './contract.ts'
+import { study as studyTable } from './schema.ts'
 import { createStudyLedger, router } from './server.ts'
 
 const cleanups: (() => unknown)[] = []
@@ -200,9 +202,92 @@ test('start makes the Study dir under studies with mode 0700, and list shows the
       firstMessage: null,
       lastActivityAt: expect.any(Date),
       lastLogLine: null,
+      playgroundRemoved: false,
     },
   ])
   expect((await client.get({ id })).dir).toBe(join(home, 'studies', id))
+})
+
+test('list marks a Study whose Playground was removed after its last activity, and only that one', async () => {
+  const { db, client } = setup()
+  const removedAfter = await client.start({})
+  const removedBefore = await client.start({})
+  const never = await client.start({})
+  const at = (id: string) =>
+    db.select().from(studyTable).where(eq(studyTable.id, id)).get()!.lastActiveAt.getTime()
+  const removedAt = (id: string, ms: number) =>
+    db
+      .update(studyTable)
+      .set({ playgroundRemovedAt: new Date(ms) })
+      .where(eq(studyTable.id, id))
+      .run()
+  removedAt(removedAfter.id, at(removedAfter.id) + 1)
+  removedAt(removedBefore.id, at(removedBefore.id) - 1)
+
+  const { studies } = await client.list({})
+
+  expect(Object.fromEntries(studies.map((s) => [s.id, s.playgroundRemoved]))).toEqual({
+    [removedAfter.id]: true,
+    [removedBefore.id]: false,
+    [never.id]: false,
+  })
+})
+
+test('shell finds a Study by the head of its id, with or without study- and in any case, and gives its dir, its Playground env and the study ZDOTDIR', async () => {
+  const { home, client } = setup()
+  const { id } = await client.start({})
+  const dir = join(home, 'studies', id)
+  const expected = {
+    studyId: id,
+    dir,
+    env: expect.objectContaining({
+      MONICA_STUDY_DIR: dir,
+      NPM_CONFIG_PREFIX: join(dir, 'env/npm'),
+    }),
+    zdotdir: join(home, 'shell/study/zdotdir'),
+  }
+
+  expect(await client.shell({ prefix: id.slice(6, 14) })).toEqual(expected)
+  expect(await client.shell({ prefix: id.slice(0, 15).toUpperCase() })).toEqual(expected)
+  expect(await client.shell({ prefix: id })).toEqual(expected)
+  await expect(client.shell({ prefix: 'xyz' })).rejects.toMatchObject({ code: 'BAD_REQUEST' })
+})
+
+test('shell to a prefix no Study has is NOT_FOUND, and to one two Studies share is BAD_REQUEST naming both with their Mission', async () => {
+  const { home, db, client } = setup()
+  const now = new Date()
+  for (const id of ['study-0190abcd-1111', 'study-0190abcd-2222']) {
+    db.insert(studyTable).values({ id, createdAt: now, lastActiveAt: now }).run()
+    mkdirSync(join(home, 'studies', id), { recursive: true })
+  }
+  writeFileSync(join(home, 'studies', 'study-0190abcd-1111', 'MISSION.md'), '# Understand ky\n')
+
+  await expect(client.shell({ prefix: '0190abce' })).rejects.toMatchObject({
+    code: 'NOT_FOUND',
+    message: "no Study's id starts with 0190abce",
+  })
+  await expect(client.shell({ prefix: '0190abcd' })).rejects.toMatchObject({
+    code: 'BAD_REQUEST',
+    message:
+      '0190abcd matches 2 Studies: study-0190abcd-1111 (Understand ky), study-0190abcd-2222 (no Mission yet); give more of the id',
+  })
+})
+
+test('shell into a Study moves it to the top of the list', async () => {
+  const { client } = setup()
+  try {
+    setSystemTime(new Date('2026-11-11T00:00:00Z'))
+    const older = await client.start({})
+    setSystemTime(new Date('2026-11-11T01:00:00Z'))
+    await client.start({})
+    setSystemTime(new Date('2026-11-11T02:00:00Z'))
+
+    await client.shell({ prefix: older.id })
+
+    expect((await client.list({})).studies[0]!.id).toBe(older.id)
+  } finally {
+    setSystemTime()
+  }
 })
 
 test('list names a Study by the first line of MISSION.md without its #, shows the last line of log.md, and puts the newest activity first', async () => {
@@ -511,7 +596,7 @@ test('a Ledger given a Tutor dir passes it as the plugin and reads the teaching 
   )
 })
 
-test('the claude env carries the allowlisted keys, the PATH without dirs under HOME and CLAUDE_ENV_FILE, and no other key of the Backend env', async () => {
+test('the claude env carries the allowlisted keys, the PATH without dirs under HOME, CLAUDE_ENV_FILE and the Playground env, and no other key of the Backend env', async () => {
   const { home, client, fake } = setup()
   const { id } = await client.start({})
   const path = process.env.PATH
@@ -532,17 +617,26 @@ test('the claude env carries the allowlisted keys, the PATH without dirs under H
       'CLAUDE_CODE_MAX_RETRIES',
       'CLAUDE_CODE_RESTRICTED',
       'CLAUDE_CODE_TMPDIR',
+      'CARGO_HOME',
       'CLAUDE_ENV_FILE',
+      'COMPOSE_PROJECT_NAME',
       'DISABLE_AUTOUPDATER',
       'ENABLE_CLAUDEAI_MCP_SERVERS',
       'HOME',
+      'MISE_DATA_DIR',
+      'MONICA_STUDY_DIR',
+      'MONICA_STUDY_ID',
+      'NPM_CONFIG_PREFIX',
       'PATH',
+      'npm_config_cache',
       ...(process.env.USER ? ['USER'] : []),
     ].toSorted(),
   )
   expect(env.PATH).toBe('/usr/bin:/bin')
   expect(env.HOME).toBe(process.env.HOME)
   expect(env.CLAUDE_ENV_FILE).toBe(join(home, 'studies', id, '.claude-env.sh'))
+  expect(env.MONICA_STUDY_ID).toBe(id)
+  expect(env.NPM_CONFIG_PREFIX).toBe(join(home, 'studies', id, 'env/npm'))
 })
 
 test('the env file of a Study points HOME under env and sources env/env.sh, and is written again with the same content before each claude starts', async () => {

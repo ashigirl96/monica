@@ -21,4 +21,7 @@ export const router = os.router({
   watch: os.watch.handler(async ({ context, input, signal }) =>
     internals(context.studyLedger).watch(input.id, signal),
   ),
+  shell: os.shell.handler(({ context, input }) =>
+    internals(context.studyLedger).shell(input.prefix),
+  ),
 })

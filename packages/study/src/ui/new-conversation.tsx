@@ -2,7 +2,7 @@ import { InputMessage } from '@monica/ui/fluid'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { useCallback, useRef, useState } from 'react'
 
-import { failureLine } from './client.ts'
+import { failureLine, type StudyClient } from './client.ts'
 import { createStudyStarter } from './new-study.ts'
 import { activityTime, groupByRecency } from './recency.ts'
 import {
@@ -67,7 +67,7 @@ export function NewConversation() {
 }
 
 function StudyList() {
-  const { client, spaLinkClick } = useScreen()
+  const { client } = useScreen()
   const { data, dataUpdatedAt } = useQuery({
     queryKey: studiesKey,
     queryFn: () => client.list({}),
@@ -84,27 +84,33 @@ function StudyList() {
           <h2 className="px-1 pb-1 text-[12px] font-medium text-muted-foreground">{label}</h2>
           <ul className="flex flex-col">
             {items.map((study) => (
-              <li key={study.id}>
-                <a
-                  href={`/studies/${study.id}`}
-                  onClick={spaLinkClick(`/studies/${study.id}`)}
-                  className="flex flex-col gap-0.5 rounded-lg px-2 py-2 hover:bg-muted"
-                >
-                  <StudyName study={study} className="text-[15px]" />
-                  <span className="flex gap-2 text-[12px] text-muted-foreground">
-                    <span className="shrink-0 tabular-nums">
-                      {activityTime(study.lastActivityAt, now)}
-                    </span>
-                    {study.lastLogLine !== null && (
-                      <span className="truncate">{study.lastLogLine}</span>
-                    )}
-                  </span>
-                </a>
-              </li>
+              <StudyRow key={study.id} study={study} now={now} />
             ))}
           </ul>
         </section>
       ))}
     </div>
+  )
+}
+
+type ListedStudy = Awaited<ReturnType<StudyClient['list']>>['studies'][number]
+
+export function StudyRow({ study, now }: { study: ListedStudy; now: Date }) {
+  const { spaLinkClick } = useScreen()
+  return (
+    <li>
+      <a
+        href={`/studies/${study.id}`}
+        onClick={spaLinkClick(`/studies/${study.id}`)}
+        className="flex flex-col gap-0.5 rounded-lg px-2 py-2 hover:bg-muted"
+      >
+        <StudyName study={study} className="text-[15px]" />
+        <span className="flex gap-2 text-[12px] text-muted-foreground">
+          <span className="shrink-0 tabular-nums">{activityTime(study.lastActivityAt, now)}</span>
+          {study.playgroundRemoved && <span className="shrink-0">Playground は消えた</span>}
+          {study.lastLogLine !== null && <span className="truncate">{study.lastLogLine}</span>}
+        </span>
+      </a>
+    </li>
   )
 }

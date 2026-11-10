@@ -12,6 +12,7 @@ import type {
 } from '@anthropic-ai/claude-agent-sdk'
 
 import { type AskUser, tutorBox } from './box.ts'
+import { playgroundEnv } from './playground.ts'
 
 export type Query = typeof sdkQuery
 
@@ -136,7 +137,7 @@ export function wakeClaude(
     includePartialMessages: true,
     ...(deps.claudePath && { pathToClaudeCodeExecutable: deps.claudePath }),
     ...(study.sessionId && { resume: study.sessionId }),
-    env: { ...claudeEnv(envFile), ...box.env },
+    env: { ...claudeEnv(envFile), ...playgroundEnv(study.dir, study.id), ...box.env },
     spawnClaudeCodeProcess: ({ command, args, cwd, env, signal }) => {
       // detached にして group ごと止め、Tutor の Bash が起こした server も残さない。
       const spawned = spawn(command, args, {

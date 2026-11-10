@@ -1,3 +1,4 @@
+import { Toaster } from '@monica/ui'
 import type { MouseEvent, ReactNode } from 'react'
 import { createContext, useContext, useEffect } from 'react'
 
@@ -36,6 +37,8 @@ export function Screen({ children }: { children: ReactNode }) {
   return (
     <div className="fluid flex h-[calc(100dvh/var(--note-zoom,1))] [zoom:var(--note-zoom,1)] flex-col bg-background text-foreground">
       {children}
+      {/* web の組み立ては Toaster を置かないので、Study の画面が自分で置く。 */}
+      <Toaster />
     </div>
   )
 }

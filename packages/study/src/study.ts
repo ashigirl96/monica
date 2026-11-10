@@ -3,17 +3,21 @@ import { join } from 'node:path'
 
 import { query as sdkQuery, type SDKMessage } from '@anthropic-ai/claude-agent-sdk'
 import { EventPublisher, ORPCError } from '@orpc/server'
-import { and, asc, desc, eq, isNull, max } from 'drizzle-orm'
+import { and, asc, desc, eq, isNull, like, max } from 'drizzle-orm'
 import type { BunSQLiteDatabase } from 'drizzle-orm/bun-sqlite'
 
 import type { AskUser } from './box.ts'
 import { type Claude, type ClaudeDeps, type Query, wakeClaude } from './claude.ts'
 import type { StudyMessage, StudyWatchEvent } from './contract.ts'
+import { playgroundEnv } from './playground.ts'
 import { study, studyConversation, studyMessage } from './schema.ts'
+import { shellZdotdirOf, writeShellFiles } from './shell.ts'
 
 export type Db = BunSQLiteDatabase
 
 export type StudyLedger = {
+  /** monica study shell の zsh が読む shim を書く。 */
+  start(): void
   /** 持っている claude すべての group を同期に止める。 */
   stop(): void
 }
@@ -125,6 +129,7 @@ function makeLedger(deps: {
   const turns = new Map<string, Turn>()
   const claudes = new Map<string, Claude>()
   const dirOf = (id: string) => join(studiesDir, id)
+  const shellZdotdir = shellZdotdirOf(home)
 
   function publish(studyId: string, event: StudyWatchEvent) {
     const turn = turns.get(studyId)
@@ -372,6 +377,8 @@ function makeLedger(deps: {
           firstMessage: firstMessage(row.id),
           lastActivityAt: row.lastActiveAt,
           lastLogLine: lastLogLine(dirOf(row.id)),
+          playgroundRemoved:
+            row.playgroundRemovedAt !== null && row.playgroundRemovedAt > row.lastActiveAt,
         })),
       }
     },
@@ -434,9 +441,43 @@ function makeLedger(deps: {
         yield* subscribed
       })()
     },
+
+    shell(prefix: string) {
+      const studyId = db.transaction((tx) => {
+        const found = tx
+          .select({ id: study.id })
+          .from(study)
+          .where(like(study.id, `study-${prefix}%`))
+          .orderBy(asc(study.id))
+          .all()
+        if (found.length === 0) {
+          throw new ORPCError('NOT_FOUND', { message: `no Study's id starts with ${prefix}` })
+        }
+        if (found.length > 1) {
+          const candidates = found
+            .map(({ id }) => `${id} (${missionLine(dirOf(id)) ?? 'no Mission yet'})`)
+            .join(', ')
+          throw new ORPCError('BAD_REQUEST', {
+            message: `${prefix} matches ${found.length} Studies: ${candidates}; give more of the id`,
+          })
+        }
+        const { id } = found[0]!
+        touch(tx, id, new Date())
+        return id
+      })
+      return {
+        studyId,
+        dir: dirOf(studyId),
+        env: playgroundEnv(dirOf(studyId), studyId),
+        zdotdir: shellZdotdir,
+      }
+    },
   }
 
   const ledger: StudyLedger = {
+    start() {
+      writeShellFiles(home)
+    },
     stop() {
       for (const claude of claudes.values()) claude.kill()
       claudes.clear()
