@@ -11,9 +11,13 @@ import { NotFound, NoteRedirect } from './pages/note-redirect.tsx'
 import { ReposPage } from './pages/repos/index.tsx'
 import { navigate, usePathname } from './router.ts'
 import { type Route, routeOf, todayPath } from './routes.ts'
+import { slotPageOf, useSlots } from './slots.ts'
 
 export function App() {
-  const route = routeOf(usePathname())
+  const pathname = usePathname()
+  const route = routeOf(pathname)
+  const { slotPage, railItem } = useSlots()
+  const slotScreen = slotPageOf(pathname, slotPage)
   const toToday = route.page === 'today'
   const removals = useScreenRemovals(route)
 
@@ -24,8 +28,8 @@ export function App() {
   return (
     <>
       {/* 今日への replace の間も外さない。外すと zen が解ける。 */}
-      <AppShell active={sectionOf(route)}>
-        <RemovalsContext value={removals}>{pageOf(route)}</RemovalsContext>
+      <AppShell active={sectionOf(route)} railItem={railItem} onSlotPage={slotScreen !== null}>
+        <RemovalsContext value={removals}>{slotScreen ?? pageOf(route)}</RemovalsContext>
       </AppShell>
       <NoteConflictNotice />
     </>

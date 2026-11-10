@@ -3,6 +3,7 @@ import { type ReactNode, useState } from 'react'
 import { NOTE_KEYS, type Section } from '../keys.ts'
 import { navigate, spaLinkClick } from '../router.ts'
 import { DAILY_PATH, ESSAYS_PATH, REPOS_PATH } from '../routes.ts'
+import type { RailItem } from '../slots.ts'
 import { setThemePref, themePref, type ThemePref } from '../theme.ts'
 import { AmbientSwitcher } from './ambient-switcher.tsx'
 import { NoteWidthControl } from './note-width-control.tsx'
@@ -116,7 +117,17 @@ function ThemeToggle() {
   )
 }
 
-export function AppShell({ active, children }: { active: Section | null; children: ReactNode }) {
+export function AppShell({
+  active,
+  railItem,
+  onSlotPage = false,
+  children,
+}: {
+  active: Section | null
+  railItem?: RailItem
+  onSlotPage?: boolean
+  children: ReactNode
+}) {
   // ⌥b の zen mode: nav rail と、group-data-[zen]/shell で反応する
   // ページ側 sidebar をまとめて隠し、editor だけにする
   const [zen, setZen] = useState(false)
@@ -172,15 +183,22 @@ export function AppShell({ active, children }: { active: Section | null; childre
             />
           </svg>
         </RailLink>
+        {railItem && (
+          <RailLink to={railItem.to} label={railItem.label} active={onSlotPage}>
+            {railItem.icon}
+          </RailLink>
+        )}
         <ThemeToggle />
       </nav>
       <div className="flex min-h-dvh min-w-0 flex-1 flex-col">{children}</div>
       {/* 右下常駐ピルのクラスタ。書いている手を止めずに触れることが存在理由なので
           zen mode でも隠さない */}
-      <div className="fixed right-4 bottom-4 z-40 flex items-center gap-2">
-        <AmbientSwitcher />
-        <NoteWidthControl />
-      </div>
+      {!onSlotPage && (
+        <div className="fixed right-4 bottom-4 z-40 flex items-center gap-2">
+          <AmbientSwitcher />
+          <NoteWidthControl />
+        </div>
+      )}
     </div>
   )
 }

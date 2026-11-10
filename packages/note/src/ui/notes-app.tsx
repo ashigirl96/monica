@@ -1,5 +1,5 @@
 import { QueryClientProvider } from '@tanstack/react-query'
-import { useEffect, useLayoutEffect, useState, useSyncExternalStore } from 'react'
+import { useEffect, useLayoutEffect, useMemo, useState, useSyncExternalStore } from 'react'
 
 import { initAmbient } from './ambient.ts'
 import { App } from './app.tsx'
@@ -9,10 +9,22 @@ import { initNoteWidth } from './note-width.ts'
 import { initNoteZoom } from './note-zoom.ts'
 import { AutosaveProvider } from './notes/autosave-context.tsx'
 import { createQueryClient } from './query.ts'
+import { type RailItem, type RepoPanel, type SlotPage, SlotsContext } from './slots.ts'
 import { initTheme } from './theme.ts'
 
-export function NotesApp({ client }: { client: NoteClient }) {
+export function NotesApp({
+  client,
+  slotPage,
+  railItem,
+  repoPanel,
+}: {
+  client: NoteClient
+  slotPage?: SlotPage
+  railItem?: RailItem
+  repoPanel?: RepoPanel
+}) {
   const [queryClient] = useState(createQueryClient)
+  const slots = useMemo(() => ({ slotPage, railItem, repoPanel }), [slotPage, railItem, repoPanel])
 
   // 背景写真と本文の幅・拡大率は CSS 変数で読むので、最初の描画の前に当てる。
   useLayoutEffect(() => {
@@ -43,10 +55,12 @@ export function NotesApp({ client }: { client: NoteClient }) {
   return (
     <QueryClientProvider client={queryClient}>
       <ClientContext value={client}>
-        <AutosaveProvider>
-          <ReconnectNotice />
-          <App />
-        </AutosaveProvider>
+        <SlotsContext value={slots}>
+          <AutosaveProvider>
+            <ReconnectNotice />
+            <App />
+          </AutosaveProvider>
+        </SlotsContext>
       </ClientContext>
     </QueryClientProvider>
   )

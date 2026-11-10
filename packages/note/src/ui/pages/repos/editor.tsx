@@ -26,6 +26,7 @@ import { useOpenNote } from '../../notes/use-open-note.ts'
 import { useRemovals } from '../../notes/use-removals.ts'
 import { navigate } from '../../router.ts'
 import { repoNotePath, repoNoteRedirect, repoPath } from '../../routes.ts'
+import { useSlots } from '../../slots.ts'
 import { RepoSidebar } from './sidebar.tsx'
 import { setLastRepo } from './support.ts'
 
@@ -35,6 +36,7 @@ import { setLastRepo } from './support.ts'
  */
 export function RepoEditor({ repo, noteId }: { repo: string; noteId: string | null }) {
   const client = useNoteClient()
+  const { repoPanel } = useSlots()
   const [pickerOpen, setPickerOpen] = useState(false)
 
   const { flush } = useAutosaveContext()
@@ -219,6 +221,7 @@ export function RepoEditor({ repo, noteId }: { repo: string; noteId: string | nu
           onSelect={selectNote}
           onStar={(id) => void toggleStar(id)}
           onDelete={(id) => void deleteById(id)}
+          panel={repoPanel?.(repo)}
         />
       }
     >
