@@ -169,12 +169,14 @@ async function cleaningStudy() {
 test('a send during remove is refused with CONFLICT', async () => {
   const { client, home, id, release, cleaned } = await cleaningStudy()
   const removed = client.remove({ id })
-  await Bun.sleep(10)
+  const refusal = () => client.send({ id, text: 'hello' }).catch((error: unknown) => error)
+  // 消し始めるまでの send は、掃除中の CONFLICT で断られるので turn を始めない。
+  let refused = await refusal()
+  while (refused instanceof Error && refused.message.endsWith('is being cleaned up')) {
+    refused = await refusal()
+  }
 
-  await expect(client.send({ id, text: 'hello' })).rejects.toMatchObject({
-    code: 'CONFLICT',
-    message: `${id} is being removed`,
-  })
+  expect(refused).toMatchObject({ code: 'CONFLICT', message: `${id} is being removed` })
   await expect(client.remove({ id })).rejects.toMatchObject({ code: 'CONFLICT' })
   expect(existsSync(join(home, 'studies', id))).toBe(true)
   release()

@@ -1,9 +1,8 @@
 import type { FuzzyPickerItem } from '@monica/ui'
 
-import { RepoSchema } from '../contract.ts'
+import { repoKey, RepoSchema } from '../contract.ts'
 
-// GitHub の repo 名は大文字と小文字を区別しない。
-const sameRepo = (a: string, b: string) => a.toLowerCase() === b.toLowerCase()
+const sameRepo = (a: string, b: string) => repoKey(a) === repoKey(b)
 
 export function unlinkedCandidates(candidates: readonly string[], linked: readonly string[]) {
   return candidates.filter((repo) => !linked.some((l) => sameRepo(l, repo)))

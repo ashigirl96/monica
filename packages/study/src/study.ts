@@ -18,6 +18,7 @@ import {
   query as sdkQuery,
   type SDKMessage,
 } from '@anthropic-ai/claude-agent-sdk'
+import { localIso } from '@monica/ui/local-time'
 import { EventPublisher, ORPCError } from '@orpc/server'
 import { and, asc, desc, eq, isNull, like, lt, max, sql } from 'drizzle-orm'
 import type { BunSQLiteDatabase } from 'drizzle-orm/bun-sqlite'
@@ -27,7 +28,7 @@ import { listArtifacts, readArtifact, resolveArtifact } from './artifact.ts'
 import type { AskUser } from './box.ts'
 import { type Claude, type ClaudeDeps, type Query, wakeClaude } from './claude.ts'
 import { cleanPrototypes, createRunner, removePlayground, type Tools } from './cleanup.ts'
-import type { StudyMessage, StudyWatchEvent } from './contract.ts'
+import { repoKey, type StudyMessage, type StudyWatchEvent } from './contract.ts'
 import { playgroundEnv } from './playground.ts'
 import reflectionRequest from './reflection.md' with { type: 'text' }
 import { study, studyConversation, studyMessage, studyRepo } from './schema.ts'
@@ -137,19 +138,6 @@ function lastLogLine(dir: string): string | null {
   return line === undefined ? null : line.replace(/^- /, '')
 }
 
-const pad = (n: number) => String(n).padStart(2, '0')
-
-function localIso(date: Date): string {
-  const offset = -date.getTimezoneOffset()
-  const sign = offset >= 0 ? '+' : '-'
-  const abs = Math.abs(offset)
-  return (
-    `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}` +
-    `T${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}` +
-    `${sign}${pad(Math.floor(abs / 60))}:${pad(abs % 60)}`
-  )
-}
-
 function toolText(name: string, input: Record<string, unknown>): string {
   const field = (key: string) => (typeof input[key] === 'string' ? input[key] : '')
   switch (name) {
@@ -174,8 +162,7 @@ function toolText(name: string, input: Record<string, unknown>): string {
 const isStale = (row: { lastActiveAt: Date } | undefined) =>
   row !== undefined && row.lastActiveAt.getTime() < Date.now() - STALE_MS
 
-// GitHub の repo 名は大文字と小文字を区別しない。
-const isRepo = (repo: string) => eq(sql`lower(${studyRepo.repo})`, repo.toLowerCase())
+const isRepo = (repo: string) => eq(sql`lower(${studyRepo.repo})`, repoKey(repo))
 
 function makeLedger(deps: {
   db: Db

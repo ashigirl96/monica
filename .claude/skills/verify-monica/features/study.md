@@ -50,6 +50,7 @@ Preconditions: `launch.sh <name> MONICA_BROWSER_PORT=<port>` で dev の Backend
 - **start と converse**: `watch` を開いてから `start` → `send`（「https://github.com/sindresorhus/ky のコードを読んで分かりたい」）。`watch` に `snapshot`・`turn-started`・`message`（`user`）・`delta`・`message`（`tutor`・`tool`）・`turn-ended` が流れる。`$H/studies/study-*/MISSION.md` ができ、`list` の `missionLine` がその 1 行目になる。
 - **途中で開いた watch**: turn の途中で 2 本目の `watch` を開くと、`snapshot` の `running` が true で、`partialText` の続きから同じ event を受ける。1 本目を閉じても turn は終わりまで走る。
 - **Tutor の切り替え**: Backend の stderr に plugin の error が無い。`get` に `tutor_switch` の `repository` の行がある。
+- **init の skills**: 最初の turn と、Backend を起こし直した後の resume の turn の両方で、init の `skills` に `tutors:repository` がある。init は DB にも記録にも残らないので、`packages/study/src/study.ts` の `translate` の init の枝に `console.error('[study] init skills', message.skills)` を一時的に足して Backend の stderr で見て、見終えたら戻す。
 - **箱と Bash の HOME**: Tutor に `echo $HOME` を走らせると `<Study の dir>/env/home`。`git clone https://github.com/sindresorhus/ky env/sources/sindresorhus/ky` と `git init prototypes/check` が通る。`env/env.sh` に `export STUDY_ENV_CHECK=1` を書かせた後の `echo $STUDY_ENV_CHECK` が同じ session で出るかを記録する（`packages/study/tutors/TEACHING.md` の「The box」の書き方はこの結果に合わせる）。
 - **env**: Tutor に `env | sort` を走らせ、出た key が allowlist と claude が足すものと `.claude-env.sh` の `HOME` だけで、login shell の rc が export した key が無い。
 - **断られるもの**: Tutor に `ls <本物の HOME>/.ssh`（箱の中の `~` は `env/home` を指すので絶対 path で書く）と `curl --noproxy '' http://127.0.0.1:<port>/` を走らせ、どちらも断られる。

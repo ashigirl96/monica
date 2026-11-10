@@ -15,6 +15,9 @@ export const RepoSchema = z
   .regex(/^[A-Za-z0-9-]+\/[A-Za-z0-9._-]+$/)
   .describe('owner/repo')
 
+// GitHub の repo 名は大文字と小文字を区別しない。
+export const repoKey = (repo: string) => repo.toLowerCase()
+
 const repos = z.array(RepoSchema).describe('the linked Repos as spelled when linked, in link order')
 
 export const StudyMessageSchema = z.object({

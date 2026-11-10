@@ -3,12 +3,13 @@ import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { X } from 'lucide-react'
 import { type ReactNode, useState } from 'react'
 
+import { repoKey } from '../contract.ts'
 import { studiesKey } from './new-conversation.tsx'
 import { activityTime } from './recency.ts'
 import { typedRepoItem, unlinkedCandidates } from './repo-picker.ts'
 import { FailureLine, StudyName, type StudyNamed, useScreen } from './screen.tsx'
 
-const repoStudiesKey = (repo: string) => ['repo-studies', repo.toLowerCase()] as const
+const repoStudiesKey = (repo: string) => ['repo-studies', repoKey(repo)] as const
 
 export function LinkedRepos({
   id,
