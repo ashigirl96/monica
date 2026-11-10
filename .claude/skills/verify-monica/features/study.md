@@ -14,6 +14,8 @@
 - `study-new-key`: Study の画面で ⌥N を押すと `/studies` に戻る。
 - `study-repo-link`: Study の画面の上の欄の「+ Repo」で Repo を紐付け、印の × で外す。紐付けた Repo は新しい会話の画面の一覧の行にも出る。
 - `study-repo-panel`: 紐付けた Repo の画面の左の欄の時系列の下に「Study」の欄が出て、行を押すとその Study の画面に移る。
+- `study-artifacts`: 左の成果物の木の項目か、会話の「を書いた」の行を押すと右の欄に中身が出る。成果物の中の相対 link で別の成果物に移る。Tutor が書くと木と開いている欄が読み直される。
+- `study-artifact-editor`: 右の欄の「エディタで開く」で、Zed にその file だけが開く。
 
 ## How to get to it (user POV)
 
@@ -29,6 +31,8 @@ Preconditions: `note-daily.md` の「Driving it with headless の Backend・Vite
 - **study-screen-converse.** turn の途中で `open` で読み込み直すと、途中の文から続きが流れる。2 つ目の Browser Tab で同じ URL を開くと同じ文が流れる。Vite の proxy 越しでも流れが途切れない。
 - **study-repo-link.** `note-repo.md` の Preconditions の偽の ghq の root（`acme/alpha` と `acme/gamma`）で起こす。Study の画面の「+ Repo」を押し、窓（placeholder「Repo を選ぶか owner/repo を打つ」）で `acme/alpha` を選ぶと、上の欄に `acme/alpha` の印が出る。もう一度開いて `acme/beta` を打つと、最後に「acme/beta を紐付ける（Repo の一覧に無い）」が出て、選ぶと印が出る。`acme/alpha` の印の ×（aria-label「acme/alpha の紐付けを外す」）で印が消える。⌥N の一覧の行に紐付けた Repo が等幅の字で出る。`/repos` の窓（⌃W）に `acme/beta` が増えていない。
 - **study-repo-panel.** `acme/alpha` を紐付けたまま `/repos/acme/alpha` を開くと、左の欄の時系列の下に「Study」の欄と Study の行が出る。行を押すと `/studies/<id>` に移る。`/repos/acme/gamma` には欄が無い。
+- **study-artifacts.** 木の項目を押すと右の欄に中身が出て、×（「閉じる」）で閉じると会話が広がる。成果物の中の相対 link（`[用語集](GLOSSARY.md)` など）を押すと、右の欄がその成果物になる。Tutor が学習記録を書くと、木の「学習記録」に「<番号> <題>」が増え、会話の「を書いた」の行を押すとその記録が開く。開いている成果物を Tutor が直すと、欄の中身が変わる。
+- **study-artifact-editor.** Study の dir に `.zed/settings.json`（`{"buffer_font_size": 30}`）を置いてから「エディタで開く」を押す。Zed にその file だけが開き、字が大きくならない。ブラウザの口に `POST /rpc/study/artifact/read` で `../../backend.json` を送ると 403 で断られる。
 - **見た目.** Study の画面に背景写真と右下の pill が無い。theme を dark にすると面と影も dark になる。⌘+ で会話の字が大きくなる。
 - **証拠.** 各段の `screenshot` を `$E/study-screen-*.png` に残す。
 

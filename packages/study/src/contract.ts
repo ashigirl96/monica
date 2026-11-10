@@ -79,6 +79,8 @@ export const StudyWatchEventSchema = z.discriminatedUnion('type', [
 
 export type StudyWatchEvent = z.infer<typeof StudyWatchEventSchema>
 
+const ArtifactPathSchema = z.string().min(1).describe('a path relative to the Study dir')
+
 export const contract = {
   start: meta
     .meta({ description: 'Start a Study: make its row and its dir, without a conversation yet' })
@@ -161,5 +163,36 @@ export const contract = {
       })
       .input(z.object({ repo: RepoSchema }))
       .output(z.object({ studies: z.array(StudySummarySchema) })),
+  },
+  artifact: {
+    list: meta
+      .meta({
+        description:
+          'List the artifacts of a Study: MISSION.md, RESOURCES.md, GLOSSARY.md and log.md that exist, then the Learning Records by name',
+      })
+      .input(z.object({ id: StudyIdSchema }))
+      .output(
+        z.object({
+          artifacts: z.array(
+            z.object({
+              path: ArtifactPathSchema,
+              title: z
+                .string()
+                .nullable()
+                .describe(
+                  'the first # heading of a Learning Record, or its file name without the number; null on the others',
+                ),
+            }),
+          ),
+        }),
+      ),
+    read: meta
+      .meta({ description: 'Read a regular file in the Study dir, up to 1 MiB' })
+      .input(z.object({ id: StudyIdSchema, path: ArtifactPathSchema }))
+      .output(z.object({ path: ArtifactPathSchema, content: z.string() })),
+    open: meta
+      .meta({ description: 'Open a regular file in the Study dir in Zed' })
+      .input(z.object({ id: StudyIdSchema, path: ArtifactPathSchema }))
+      .output(z.void()),
   },
 }

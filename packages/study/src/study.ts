@@ -6,6 +6,7 @@ import { EventPublisher, ORPCError } from '@orpc/server'
 import { and, asc, desc, eq, isNull, max, sql } from 'drizzle-orm'
 import type { BunSQLiteDatabase } from 'drizzle-orm/bun-sqlite'
 
+import { listArtifacts, readArtifact, resolveArtifact } from './artifact.ts'
 import type { AskUser } from './box.ts'
 import { type Claude, type ClaudeDeps, type Query, wakeClaude } from './claude.ts'
 import type { StudyMessage, StudyWatchEvent } from './contract.ts'
@@ -110,6 +111,7 @@ function makeLedger(deps: {
   askUser?: AskUser
   query?: Query
   tutorsDir?: string | undefined
+  openInEditor?: (path: string) => Promise<void>
 }) {
   const { db, home } = deps
   const studiesDir = join(home, 'studies')
@@ -455,6 +457,28 @@ function makeLedger(deps: {
 
     send(id: string, text: string) {
       return { message: startTurn(id, text) }
+    },
+
+    listArtifacts(id: string) {
+      mustExist(id)
+      return { artifacts: listArtifacts(dirOf(id)) }
+    },
+
+    readArtifact(id: string, path: string) {
+      mustExist(id)
+      return { path, content: readArtifact(dirOf(id), path) }
+    },
+
+    async openArtifact(id: string, path: string): Promise<void> {
+      mustExist(id)
+      const real = resolveArtifact(dirOf(id), path)
+      if (!deps.openInEditor) throw new Error('no editor to open artifacts in')
+      try {
+        await deps.openInEditor(real)
+      } catch (error) {
+        // ORPCError でない Error は、ブラウザに message を伏せて届く。
+        throw new ORPCError('INTERNAL_SERVER_ERROR', { message: (error as Error).message })
+      }
     },
 
     watch(id: string, signal: AbortSignal | undefined): AsyncGenerator<StudyWatchEvent> {

@@ -32,4 +32,15 @@ export const router = os.router({
   watch: os.watch.handler(async ({ context, input, signal }) =>
     internals(context.studyLedger).watch(input.id, signal),
   ),
+  artifact: {
+    list: os.artifact.list.handler(({ context, input }) =>
+      internals(context.studyLedger).listArtifacts(input.id),
+    ),
+    read: os.artifact.read.handler(({ context, input }) =>
+      internals(context.studyLedger).readArtifact(input.id, input.path),
+    ),
+    open: os.artifact.open.handler(({ context, input }) =>
+      internals(context.studyLedger).openArtifact(input.id, input.path),
+    ),
+  },
 })

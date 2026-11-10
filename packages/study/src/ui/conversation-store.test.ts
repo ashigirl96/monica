@@ -238,3 +238,30 @@ test('a Study the Backend does not know is missing and is not reopened', async (
   await Bun.sleep(5)
   expect(client.watches).toHaveLength(1)
 })
+
+const toolRow = (id: number, tool: string, text: string): StudyMessage => ({
+  ...row(id, 'tool', text),
+  tool,
+})
+
+test('a Write or Edit row from watch in the Study dir asks to reread that artifact by its relative path, and other rows do not', async () => {
+  const client = new FakeClient()
+  const dir = `/home/studies/${ID}`
+  client.rows = [toolRow(1, 'Write', `${dir}/MISSION.md`)]
+  const written: string[] = []
+  const store = createConversationStore(client, ID, undefined, (path) => written.push(path))
+  cleanups.push(store.open())
+  const stream = await watching(client)
+  stream.push({ type: 'snapshot', running: true, lastMessageId: 1, partialText: '' })
+
+  stream.push({ type: 'message', message: toolRow(2, 'Edit', '/home/learning-preference/x.md') })
+  stream.push({ type: 'message', message: toolRow(3, 'Read', `${dir}/GLOSSARY.md`) })
+  stream.push({
+    type: 'message',
+    message: toolRow(4, 'Write', `${dir}/learning-records/0001-x.md`),
+  })
+  stream.push({ type: 'message', message: toolRow(5, 'Edit', `${dir}/log.md`) })
+
+  await until(store, (s) => s.messages.length === 5)
+  expect(written).toEqual(['learning-records/0001-x.md', 'log.md'])
+})
