@@ -165,6 +165,48 @@ test('the cleanup removes only what the .gitignore of each prototype ignores, an
   ])
 })
 
+test("the cleanup does not run the commands or reach the work tree that a Tutor wrote into a prototype's .git", async () => {
+  const fixture = setup()
+  const { id } = await fixture.client.start({})
+  const prototype = join(fixture.home, 'studies', id, 'prototypes', 'a')
+  const outside = mkdtempSync(join(tmpdir(), 'study-outside-'))
+  cleanups.push(() => rmSync(outside, { recursive: true, force: true }))
+  writeFileSync(join(outside, '.gitignore'), 'secret\n')
+  writeFileSync(join(outside, 'secret'), 'keep')
+  mkdirSync(prototype, { recursive: true })
+  Bun.spawnSync(['git', 'init', '-q', prototype], { env: process.env })
+  const ran = join(outside, 'ran')
+  const config = (key: string, value: string) =>
+    Bun.spawnSync(['git', '-C', prototype, 'config', key, value], { env: process.env })
+  config('core.fsmonitor', `touch ${ran}; false`)
+  config('core.worktree', outside)
+  lastActiveAt(fixture, id, staleAgo())
+
+  await cleanUp(fixture).catch(() => {})
+
+  expect(existsSync(ran)).toBe(false)
+  expect(existsSync(join(outside, 'secret'))).toBe(true)
+})
+
+test('the cleanup skips a prototype whose .git is a file pointing elsewhere', async () => {
+  const fixture = setup()
+  const { id } = await fixture.client.start({})
+  const prototype = join(fixture.home, 'studies', id, 'prototypes', 'a')
+  const outside = mkdtempSync(join(tmpdir(), 'study-outside-'))
+  cleanups.push(() => rmSync(outside, { recursive: true, force: true }))
+  Bun.spawnSync(['git', 'init', '-q', outside], { env: process.env })
+  writeFileSync(join(outside, '.gitignore'), 'secret\n')
+  writeFileSync(join(outside, 'secret'), 'keep')
+  mkdirSync(prototype, { recursive: true })
+  writeFileSync(join(prototype, '.git'), `gitdir: ${join(outside, '.git')}\n`)
+  Bun.spawnSync(['git', '-C', outside, 'config', 'core.worktree', outside], { env: process.env })
+  lastActiveAt(fixture, id, staleAgo())
+
+  await cleanUp(fixture).catch(() => {})
+
+  expect(existsSync(join(outside, 'secret'))).toBe(true)
+})
+
 test('playground_removed_at is written when the env is removed, not when there was none, and the list marks the Study', async () => {
   const fixture = setup()
   const withEnv = await fixture.client.start({})

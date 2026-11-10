@@ -1,12 +1,14 @@
 import { afterEach, expect, setSystemTime, test } from 'bun:test'
 import {
   existsSync,
+  lstatSync,
   mkdirSync,
   mkdtempSync,
   readFileSync,
   realpathSync,
   rmSync,
   statSync,
+  symlinkSync,
   writeFileSync,
 } from 'node:fs'
 import { homedir, tmpdir } from 'node:os'
@@ -519,6 +521,36 @@ test('the env file of a Study points HOME under env and sources env/env.sh, and 
   expect(readFileSync(envFile, 'utf8')).toBe(written)
 })
 
+test('a symlink a Tutor put at the env file is replaced, and the file it pointed to is left as it was', async () => {
+  const { home, client, fake } = setup()
+  const { id } = await client.start({})
+  const dir = join(home, 'studies', id)
+  const outside = join(home, 'outside-zshrc')
+  writeFileSync(outside, 'keep\n')
+  symlinkSync(outside, join(dir, '.claude-env.sh'))
+
+  await client.send({ id, text: 'hello' })
+  await until(() => fake.claudes.length === 1)
+
+  expect(readFileSync(outside, 'utf8')).toBe('keep\n')
+  expect(lstatSync(join(dir, '.claude-env.sh')).isFile()).toBe(true)
+  expect(statSync(join(dir, '.claude-env.sh')).mode & 0o777).toBe(0o600)
+})
+
+test('list returns when a Tutor put a FIFO at MISSION.md and log.md', async () => {
+  const { home, client } = setup()
+  const { id } = await client.start({})
+  for (const name of ['MISSION.md', 'log.md']) {
+    Bun.spawnSync(['mkfifo', join(home, 'studies', id, name)], { env: process.env })
+  }
+
+  const { studies } = await client.list({})
+
+  expect(studies.map(({ missionLine, lastLogLine }) => ({ missionLine, lastLogLine }))).toEqual([
+    { missionLine: null, lastLogLine: null },
+  ])
+})
+
 test('a Ledger made again on the same DB resumes the Study Conversation by its session id', async () => {
   const before = setup()
   const { id } = await before.client.start({})
@@ -558,6 +590,25 @@ test('a claude that exits in a turn ends it with turn-ended carrying its stderr,
   await client.send({ id, text: 'again' })
   await until(() => fake.claudes.length === 2)
   expect(fake.claudes[1]!.options.resume).toBe('session-b')
+})
+
+test('a claude that exits between turns is woken again by resume on the next send', async () => {
+  const { client, fake } = setup()
+  const { id } = await client.start({})
+  const watch = await watching(client, id)
+  await client.send({ id, text: 'hello' })
+  await until(() => fake.claudes.length === 1)
+  fake.claudes[0]!.emit(init('session-c'), said('Hi'), result())
+  await watch.ended()
+
+  process.kill(-fake.claudes[0]!.pid, 'SIGKILL')
+  await fake.claudes[0]!.exited
+  await client.send({ id, text: 'again' })
+  await until(() => fake.claudes.length === 2)
+
+  expect(fake.claudes[1]!.options.resume).toBe('session-c')
+  await until(() => fake.claudes[1]!.prompts.length === 1)
+  expect(fake.claudes[1]!.prompts).toEqual(['again'])
 })
 
 test('a fifth Study stops the idle claude whose turn is oldest, and send is refused with TOO_MANY_REQUESTS while all four are in a turn', async () => {

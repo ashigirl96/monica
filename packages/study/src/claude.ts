@@ -1,5 +1,13 @@
 import { type ChildProcessByStdio, spawn } from 'node:child_process'
-import { readdirSync, readFileSync, writeFileSync } from 'node:fs'
+import {
+  closeSync,
+  constants,
+  openSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+  writeSync,
+} from 'node:fs'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
 import type { Readable, Writable } from 'node:stream'
@@ -60,10 +68,18 @@ const quote = (value: string) => `'${value.replaceAll("'", `'\\''`)}'`
 export function writeEnvFile(studyDir: string): string {
   const path = join(studyDir, '.claude-env.sh')
   const envSh = quote(join(studyDir, 'env', 'env.sh'))
-  writeFileSync(
-    path,
-    `export HOME=${quote(join(studyDir, 'env', 'home'))}\nif [ -f ${envSh} ]; then . ${envSh}; fi\n`,
-  )
+  // Tutor が置いた symlink を辿って箱の外の file を上書きしないよう、消してから新しく作る。
+  rmSync(path, { force: true })
+  const { O_WRONLY, O_CREAT, O_EXCL, O_NOFOLLOW } = constants
+  const fd = openSync(path, O_WRONLY | O_CREAT | O_EXCL | O_NOFOLLOW, 0o600)
+  try {
+    writeSync(
+      fd,
+      `export HOME=${quote(join(studyDir, 'env', 'home'))}\nif [ -f ${envSh} ]; then . ${envSh}; fi\n`,
+    )
+  } finally {
+    closeSync(fd)
+  }
   return path
 }
 

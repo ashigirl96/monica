@@ -1,4 +1,4 @@
-import { existsSync, readdirSync, readlinkSync } from 'node:fs'
+import { existsSync, lstatSync, readdirSync, readlinkSync } from 'node:fs'
 import { join } from 'node:path'
 
 import type { Subprocess } from 'bun'
@@ -22,9 +22,9 @@ const reasonOf = (argv: string[], { code, stderr }: ToolResult) =>
 /** Playground の掃除が起こす子 process。stop() で group ごと止めるため、detached で起こして持つ。 */
 export function createRunner() {
   const children = new Set<Subprocess>()
-  async function run(argv: string[]): Promise<ToolResult> {
+  async function run(argv: string[], env: NodeJS.ProcessEnv = process.env): Promise<ToolResult> {
     const child = Bun.spawn(argv, {
-      env: process.env,
+      env,
       stdin: 'ignore',
       stdout: 'pipe',
       stderr: 'pipe',
@@ -162,17 +162,42 @@ export async function removePlayground(
   return { removed, failures, dockerSkipped }
 }
 
-/** .git を持つ Prototype ごとに、.gitignore が無視する物だけを消す。 */
+// Tutor が書ける .git/config から command を走らせず、core.worktree で箱の外の work tree を消さないよう、repo の設定を上書きする。
+const SAFE_GIT_CONFIG = ['-c', 'core.fsmonitor=false', '-c', 'core.hooksPath=/dev/null']
+
+function gitEnv(): NodeJS.ProcessEnv {
+  const env = Object.fromEntries(
+    Object.entries(process.env).filter(([key]) => !key.startsWith('GIT_')),
+  )
+  return { ...env, GIT_CONFIG_NOSYSTEM: '1', GIT_CONFIG_GLOBAL: '/dev/null' }
+}
+
+const isRealDir = (path: string) => {
+  try {
+    return lstatSync(path).isDirectory()
+  } catch {
+    return false
+  }
+}
+
+/** 本物の .git の dir を持つ Prototype ごとに、.gitignore が無視する物だけを消す。 */
 export async function cleanPrototypes(studyDir: string, run: Run): Promise<string[]> {
   const prototypes = join(studyDir, 'prototypes')
   if (!existsSync(prototypes)) return []
   const failures: string[] = []
   for (const entry of readdirSync(prototypes, { withFileTypes: true })) {
     const dir = join(prototypes, entry.name)
-    // .git の無い dir で git -C を呼ぶと、親の dir の repo を拾う。
-    if (!entry.isDirectory() || !existsSync(join(dir, '.git'))) continue
-    const argv = ['git', '-C', dir, 'clean', '-fdX']
-    const result = await run(argv)
+    // .git が file なら gitdir: で箱の外の repo を指せる。
+    if (!entry.isDirectory() || !isRealDir(join(dir, '.git'))) continue
+    const argv = [
+      'git',
+      ...SAFE_GIT_CONFIG,
+      `--git-dir=${join(dir, '.git')}`,
+      `--work-tree=${dir}`,
+      'clean',
+      '-fdX',
+    ]
+    const result = await run(argv, gitEnv())
     if (result.code !== 0) failures.push(reasonOf(argv, result))
   }
   return failures

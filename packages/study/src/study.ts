@@ -2,10 +2,11 @@ import {
   closeSync,
   constants,
   existsSync,
+  fstatSync,
   mkdirSync,
   openSync,
   readdirSync,
-  readFileSync,
+  readSync,
   renameSync,
   rmSync,
   writeSync,
@@ -103,11 +104,23 @@ function appendLine(path: string, line: string) {
   }
 }
 
+const READ_LIMIT_BYTES = 64 * 1024
+
+// Tutor が置いた FIFO や大きな file で list を止めないよう、通常の file の頭だけを読む。
 function readOrEmpty(path: string): string {
+  const { O_RDONLY, O_NOFOLLOW, O_NONBLOCK } = constants
+  let fd: number
   try {
-    return readFileSync(path, 'utf8')
+    fd = openSync(path, O_RDONLY | O_NOFOLLOW | O_NONBLOCK)
   } catch {
     return ''
+  }
+  try {
+    if (!fstatSync(fd).isFile()) return ''
+    const buffer = Buffer.alloc(READ_LIMIT_BYTES)
+    return buffer.toString('utf8', 0, readSync(fd, buffer, 0, READ_LIMIT_BYTES, 0))
+  } finally {
+    closeSync(fd)
   }
 }
 
@@ -439,6 +452,9 @@ function makeLedger(deps: {
       },
     )
     claudes.set(studyId, claude)
+    void claude.exited().then(() => {
+      if (claudes.get(studyId) === claude) claudes.delete(studyId)
+    })
     return claude
   }
 
