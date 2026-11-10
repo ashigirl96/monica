@@ -11,6 +11,7 @@ import { migrate } from 'drizzle-orm/bun-sqlite/migrator'
 
 import { migrations } from '../migrations/index.ts'
 import type { Query } from './claude.ts'
+import type { Tools } from './cleanup.ts'
 import type { StudyWatchEvent } from './contract.ts'
 import { createStudyLedger, router } from './server.ts'
 
@@ -126,6 +127,7 @@ export function studyFixture(cleanups: (() => unknown)[]) {
     db?: ReturnType<typeof inMemoryDb>
     home?: string
     tutorsDir?: string
+    tools?: Tools
   }) {
     const home = given?.home ?? mkdtempSync(join(tmpdir(), 'monica-study-'))
     const db = given?.db ?? inMemoryDb()
@@ -135,6 +137,8 @@ export function studyFixture(cleanups: (() => unknown)[]) {
       home,
       query: fake.query,
       tutorsDir: given?.tutorsDir,
+      // 既定の tools は手元の本物の docker と nix-store を呼ぶ。
+      tools: given?.tools ?? { docker: null, nixStore: null },
     })
     const client = createRouterClient(router, { context: { db, studyLedger } })
     cleanups.push(async () => {

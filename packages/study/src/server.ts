@@ -5,7 +5,7 @@ import { type Db, internals, type StudyLedger } from './study.ts'
 
 export { migrations } from '../migrations/index.ts'
 export { tutorBox, type AskUser, type TutorBox, type TutorBoxDeps } from './box.ts'
-export { createStudyLedger, type StudyLedger } from './study.ts'
+export { createStudyLedger, type StudyLedger, systemJobs } from './study.ts'
 export { writeTutors } from './tutors.ts'
 
 const os = implement(contract).$context<{ db: Db; studyLedger: StudyLedger }>()

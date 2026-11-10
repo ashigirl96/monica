@@ -3,12 +3,14 @@ import { join } from 'node:path'
 
 import { query as sdkQuery, type SDKMessage } from '@anthropic-ai/claude-agent-sdk'
 import { EventPublisher, ORPCError } from '@orpc/server'
-import { and, asc, desc, eq, isNull, like, max, sql } from 'drizzle-orm'
+import { and, asc, desc, eq, isNull, like, lt, max, sql } from 'drizzle-orm'
 import type { BunSQLiteDatabase } from 'drizzle-orm/bun-sqlite'
 
+import { STALE_MS } from './activity.ts'
 import { listArtifacts, readArtifact, resolveArtifact } from './artifact.ts'
 import type { AskUser } from './box.ts'
 import { type Claude, type ClaudeDeps, type Query, wakeClaude } from './claude.ts'
+import { cleanPrototypes, createRunner, removePlayground, type Tools } from './cleanup.ts'
 import type { StudyMessage, StudyWatchEvent } from './contract.ts'
 import { playgroundEnv } from './playground.ts'
 import { study, studyConversation, studyMessage, studyRepo } from './schema.ts'
@@ -19,8 +21,10 @@ export type Db = BunSQLiteDatabase
 export type StudyLedger = {
   /** monica study shell の zsh が読む shim を書く。 */
   start(): void
-  /** 持っている claude すべての group を同期に止める。 */
+  /** 持っている claude と Playground の掃除の子 process すべての group を同期に止める。 */
   stop(): void
+  /** STALE_MS より前に最後の活動があった Study の Playground を消す。 */
+  cleanPlaygrounds(): Promise<void>
 }
 
 // 1 つ 270〜290MB あるので、同時に持つ claude はここまで。
@@ -111,6 +115,9 @@ function toolText(name: string, input: Record<string, unknown>): string {
   }
 }
 
+const isStale = (row: { lastActiveAt: Date } | undefined) =>
+  row !== undefined && row.lastActiveAt.getTime() < Date.now() - STALE_MS
+
 // GitHub の repo 名は大文字と小文字を区別しない。
 const isRepo = (repo: string) => eq(sql`lower(${studyRepo.repo})`, repo.toLowerCase())
 
@@ -121,6 +128,7 @@ function makeLedger(deps: {
   query?: Query
   tutorsDir?: string | undefined
   openInEditor?: (path: string) => Promise<void>
+  tools?: Tools
 }) {
   const { db, home } = deps
   const studiesDir = join(home, 'studies')
@@ -138,6 +146,8 @@ function makeLedger(deps: {
   const turns = new Map<string, Turn>()
   const claudes = new Map<string, Claude>()
   const waiting = new Map<number, (allowed: boolean) => void>()
+  const cleaning = new Set<string>()
+  const runner = createRunner()
   const dirOf = (id: string) => join(studiesDir, id)
   const shellZdotdir = shellZdotdirOf(home)
 
@@ -408,6 +418,11 @@ function makeLedger(deps: {
     if (turns.has(studyId)) {
       throw new ORPCError('CONFLICT', { message: `a turn is already running in ${studyId}` })
     }
+    if (cleaning.has(studyId)) {
+      throw new ORPCError('CONFLICT', {
+        message: `the Playground of ${studyId} is being cleaned up`,
+      })
+    }
     if (
       !claudes.has(studyId) &&
       claudes.size >= MAX_CLAUDES &&
@@ -635,9 +650,54 @@ function makeLedger(deps: {
     stop() {
       for (const claude of claudes.values()) claude.kill()
       claudes.clear()
+      runner.killAll()
+    },
+    async cleanPlaygrounds() {
+      const stale = db
+        .select({ id: study.id })
+        .from(study)
+        .where(lt(study.lastActiveAt, new Date(Date.now() - STALE_MS)))
+        .orderBy(asc(study.lastActiveAt))
+        .all()
+      const failures: string[] = []
+      for (const { id } of stale) {
+        // turn の claude が Playground を使っているので、次の日に回す。
+        if (turns.has(id)) continue
+        cleaning.add(id)
+        try {
+          // 前の Study を消す await の間に、発言や shell で動いたかもしれない。
+          if (!isStale(db.select().from(study).where(eq(study.id, id)).get())) continue
+          const env = join(dirOf(id), 'env')
+          const { removed, failures: failed } = await removePlayground(
+            { rootsDir: env, removeDir: env, studyId: id },
+            { tools: deps.tools ?? runner.tools(), run: runner.run },
+          )
+          if (removed) {
+            db.update(study).set({ playgroundRemovedAt: new Date() }).where(eq(study.id, id)).run()
+          }
+          failed.push(...(await cleanPrototypes(dirOf(id), runner.run)))
+          if (failed.length > 0) failures.push(`${id}: ${failed.join(', ')}`)
+        } finally {
+          cleaning.delete(id)
+        }
+      }
+      if (failures.length > 0) {
+        throw new Error(`could not clean up the Playgrounds: ${failures.join('; ')}`)
+      }
     },
   }
   return { ledger, procedures }
+}
+
+// study は job を import しないので、createJobLedger の systemJobs と同じ構造の素のオブジェクトで返す。
+export function systemJobs(studyLedger: StudyLedger) {
+  return [
+    {
+      name: 'study.env-cleanup',
+      every: 24 * 60 * 60_000,
+      run: () => studyLedger.cleanPlaygrounds(),
+    },
+  ]
 }
 
 type Internals = ReturnType<typeof makeLedger>['procedures']

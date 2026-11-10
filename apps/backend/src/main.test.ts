@@ -401,7 +401,7 @@ test('the Backend tells the Shell to post a notification that carries the Termin
   expect(await nextOf(backend, 'notify')).toMatchObject({ type: 'notify', terminalSessionId })
 })
 
-test('the Backend hands the Job Ledger the system Jobs of task and note', async () => {
+test('the Backend hands the Job Ledger the system Jobs of task, note and study', async () => {
   const response = await viaToken(await startBackend(freePort()), 'job/list')
   const { json } = (await response.json()) as { json: { jobs: { name: string }[] } }
 
@@ -410,6 +410,7 @@ test('the Backend hands the Job Ledger the system Jobs of task and note', async 
     'task.setup-log-cleanup',
     'task.worktree-sweep',
     'note.image-cleanup',
+    'study.env-cleanup',
   ])
 })
 
