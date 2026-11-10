@@ -185,6 +185,12 @@
         "react-dom": "catalog:",
       },
     },
+    "packages/study": {
+      "name": "@monica/study",
+      "dependencies": {
+        "@anthropic-ai/claude-agent-sdk": "catalog:",
+      },
+    },
     "packages/task": {
       "name": "@monica/task",
       "dependencies": {
@@ -450,6 +456,8 @@
     "@monica/job": ["@monica/job@workspace:packages/job"],
 
     "@monica/note": ["@monica/note@workspace:packages/note"],
+
+    "@monica/study": ["@monica/study@workspace:packages/study"],
 
     "@monica/task": ["@monica/task@workspace:packages/task"],
 
