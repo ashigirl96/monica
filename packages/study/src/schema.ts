@@ -7,6 +7,7 @@ export const study = sqliteTable('study', {
   id: text('id').primaryKey(),
   createdAt: timestamp('created_at').notNull(),
   lastActiveAt: timestamp('last_active_at').notNull(),
+  playgroundRemovedAt: timestamp('playground_removed_at'),
 })
 
 export const studyConversation = sqliteTable(

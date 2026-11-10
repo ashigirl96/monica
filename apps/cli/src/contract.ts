@@ -1,5 +1,6 @@
 import { completers as jobCompleters, formatters as jobFormatters } from '@monica/job/cli'
 import { contract as jobContract } from '@monica/job/contract'
+import { contract as studyContract } from '@monica/study/contract'
 import { completers as taskCompleters, formatters as taskFormatters } from '@monica/task/cli'
 import { contract as taskContract } from '@monica/task/contract'
 import { formatters as usageFormatters } from '@monica/usage/cli'
@@ -12,6 +13,7 @@ export const contract = {
   task: taskContract,
   job: jobContract,
   usage: usageContract,
+  study: studyContract,
 }
 
 export const formatters = {

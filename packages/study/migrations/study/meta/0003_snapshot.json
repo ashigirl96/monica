@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "a2aca35b-9932-4edf-8464-119ea0623ca5",
+  "id": "266cb2a6-27cf-45b1-8470-c2af06897073",
   "prevId": "e849e7fa-16df-4721-a1e3-1797ed5f13b3",
   "tables": {
     "study": {
@@ -26,6 +26,13 @@
           "type": "integer",
           "primaryKey": false,
           "notNull": true,
+          "autoincrement": false
+        },
+        "playground_removed_at": {
+          "name": "playground_removed_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false,
           "autoincrement": false
         }
       },
@@ -68,13 +75,6 @@
         },
         "session_id": {
           "name": "session_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "summary": {
-          "name": "summary",
           "type": "text",
           "primaryKey": false,
           "notNull": false,

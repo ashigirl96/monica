@@ -1,7 +1,7 @@
 import { eventIterator, oc } from '@orpc/contract'
 import { z } from 'zod'
 
-// ブラウザの口にだけ載せ、CLI には出さないので、meta に cli を持たない。
+// trpc-cli には出さない（study shell は手書きの command）ので、meta に cli を持たない。
 const meta = oc.$meta<{ description?: string }>({})
 
 export const StudyIdSchema = z
@@ -110,6 +110,9 @@ export const contract = {
             waitingPermission: z
               .boolean()
               .describe('a permission row of the Study waits for the answer'),
+            playgroundRemoved: z
+              .boolean()
+              .describe('the Playground was removed after the last activity of the Study'),
             repos,
           }),
         ),
@@ -177,6 +180,28 @@ export const contract = {
       .input(z.object({ id: z.number().int(), allow: z.boolean() }))
       .output(StudyMessageSchema),
   },
+  shell: meta
+    .meta({
+      description:
+        'Find the one Study whose id starts with the prefix, mark it active, and give what its shell needs',
+    })
+    .input(
+      z.object({
+        prefix: z
+          .string()
+          .transform((prefix) => prefix.toLowerCase().replace(/^study-/, ''))
+          .pipe(z.string().regex(/^[0-9a-f-]+$/))
+          .describe('the head of the Study id, with or without study-'),
+      }),
+    )
+    .output(
+      z.object({
+        studyId: StudyIdSchema,
+        dir: z.string().describe('the absolute path of the Study dir'),
+        env: z.record(z.string(), z.string()).describe('the Playground env'),
+        zdotdir: z.string().describe('the ZDOTDIR whose files read env/env.sh after the user rc'),
+      }),
+    ),
   repo: {
     link: meta
       .meta({
@@ -231,3 +256,6 @@ export const contract = {
       .output(z.void()),
   },
 }
+
+/** 画面と CLI が打たせる短い id。`study-` の後の頭 8 文字。 */
+export const shortIdOf = (studyId: string) => studyId.slice('study-'.length, 'study-'.length + 8)

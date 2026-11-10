@@ -189,7 +189,7 @@ const fakeClaude = (scenario: FakeScenario) => (home: string) => ({
 const INVALID_QUESTION = { question: '' }
 const INVALID_SEND = { id: '', text: '' }
 
-test('the token listener carries workbench, task, job and chat but not note or study, and the browser listener note and study but none of those four', async () => {
+test('the token listener carries workbench, task, job, chat and study but not note, and the browser listener note and study but none of those four', async () => {
   const browserPort = freePort()
   const backend = await startBackend(browserPort)
 
@@ -214,7 +214,7 @@ test('the token listener carries workbench, task, job and chat but not note or s
   expect((await viaBrowser('note/essay/create')).status).toBe(200)
   expect((await viaToken(backend, 'note/essay/create')).status).toBe(404)
   expect((await viaBrowser('study/send', INVALID_SEND)).status).toBe(400)
-  expect((await viaToken(backend, 'study/send', INVALID_SEND)).status).toBe(404)
+  expect((await viaToken(backend, 'study/send', INVALID_SEND)).status).toBe(400)
 })
 
 // Chrome Extension で script が動いても、任意の prompt を打つ task.run や shell に打鍵する workbench.openTab には届かせない。
@@ -243,6 +243,8 @@ test('the Chrome Extension token in backend.json opens only chat and the Run But
   }
   expect((await viaToken(viaExtensionToken, 'task/run', { ref: '' })).status).toBe(401)
   expect((await viaToken(backend, 'task/run', { ref: 1 })).status).toBe(400)
+  expect((await viaToken(viaExtensionToken, 'study/shell', { prefix: 'xyz' })).status).toBe(401)
+  expect((await viaToken(backend, 'study/shell', { prefix: 'xyz' })).status).toBe(400)
   for (const path of ['workbench/layout/get', 'task/list', 'job/list']) {
     expect([path, (await viaToken(viaExtensionToken, path)).status]).toEqual([path, 401])
     expect([path, (await viaToken({ port: backend.port }, path)).status]).toEqual([path, 401])
@@ -408,6 +410,7 @@ test('the Backend hands the Job Ledger the system Jobs of task, note and study',
     'task.setup-log-cleanup',
     'task.worktree-sweep',
     'note.image-cleanup',
+    'study.env-cleanup',
     'study.conversation-end',
   ])
 })
@@ -465,6 +468,7 @@ test('usage.list gives every Feature of both listeners as 0 calls, even when the
     failed: 0,
     lastUsed: null,
   })
+  expect(features.filter((feature) => feature === 'study.shell')).toHaveLength(1)
 })
 
 const isCreate = (op: { op: string }) => op.op === 'create'
