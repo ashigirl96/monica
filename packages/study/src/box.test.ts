@@ -261,7 +261,7 @@ test('a file not yet written is judged by the real path of its nearest existing 
   )
 })
 
-test('a Glob with an absolute pattern or .. is refused', async () => {
+test('a Glob with an absolute pattern, or with glob syntax other than * next to a dot, is refused', async () => {
   const { box: b, studyDir } = box()
   expect(await decision(b, 'Glob', { pattern: `${studyDir}/**` })).toBe('deny')
   expect(await decision(b, 'Glob', { pattern: '/etc/*' })).toBe('deny')
@@ -269,12 +269,31 @@ test('a Glob with an absolute pattern or .. is refused', async () => {
   expect(await decision(b, 'Glob', { pattern: '../**', path: studyDir })).toBe('deny')
   expect(await decision(b, 'Glob', { pattern: 'a/../../*' })).toBe('deny')
   expect(await decision(b, 'Glob', { pattern: '{..,x}/*' })).toBe('deny')
-  for (const pattern of ['\\.\\./*', '[.][.]/*', '.[.]/*', '{.,x}{.,y}/*', 'a/[.].']) {
+  for (const pattern of [
+    '\\.\\./*',
+    '[.][.]/*',
+    '.[.]/*',
+    '{.,x}{.,y}/*',
+    '.?/*',
+    '?./*',
+    '@(.)@(.)/*',
+    '+(.)/*',
+    '.*/*',
+    '*./*',
+    'src/*.{ts,md}',
+  ]) {
     expect([pattern, await decision(b, 'Glob', { pattern })]).toEqual([pattern, 'deny'])
   }
-  expect(await decision(b, 'Glob', { pattern: '.*/*.md' })).toBe('allow')
-  expect(await decision(b, 'Glob', { pattern: 'a.b.md' })).toBe('allow')
-  expect(await decision(b, 'Glob', { pattern: 'src/*.{ts,md}' })).toBe('allow')
+  for (const pattern of [
+    '*.md',
+    'src/**/*.test.ts',
+    '{a,b}/*',
+    'notes/foo.*',
+    'a-b_c.md',
+    'ノート.md',
+  ]) {
+    expect([pattern, await decision(b, 'Glob', { pattern })]).toEqual([pattern, 'allow'])
+  }
   expect(await decision(b, 'Glob', { pattern: 'src/**', path: studyDir })).toBe('allow')
 })
 

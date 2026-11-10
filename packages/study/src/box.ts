@@ -92,10 +92,15 @@ async function nearestRealPath(path: string, hops = 0): Promise<string | null> {
 const toResult = (verdict: Verdict): PermissionResult =>
   verdict.allow ? { behavior: 'allow' } : { behavior: 'deny', message: verdict.message }
 
-// glob の escape・文字の組・brace は、.. の字面を含まずに親を指せるので、それらしい区切りも断る。
+// glob の記号は .. の字面を書かずに親を指せる（\.\.・[.][.]・.?・@(.)@(.)）ので、点を含む区切りでは * だけを許す。
 const climbsOut = (pattern: string) =>
-  /^[/~]|\.\.|\\/.test(pattern) ||
-  pattern.split('/').some((segment) => /[[\]{}]/.test(segment) && /\..*\./.test(segment))
+  /^[/~]|\\/.test(pattern) ||
+  pattern
+    .split('/')
+    .some(
+      (segment) =>
+        segment.includes('.') && (/[^\p{L}\p{N}_.*-]/u.test(segment) || /^[.*]+$/.test(segment)),
+    )
 
 const inside = (path: string, dir: string) => path === dir || path.startsWith(`${dir}/`)
 
@@ -151,7 +156,7 @@ export function tutorBox(deps: TutorBoxDeps): TutorBox {
       case 'Glob':
         if (typeof input.pattern === 'string' && climbsOut(input.pattern)) {
           return deny(
-            'A Glob with an absolute pattern or .. is refused; give a relative pattern and a path inside the box.',
+            'A Glob with an absolute pattern, or with glob syntax other than * next to a dot, is refused; give a relative pattern such as src/**/*.md and a path inside the box.',
           )
         }
         return judgePath(input.path ?? studyDir, 'read')
