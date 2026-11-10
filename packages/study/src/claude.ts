@@ -210,7 +210,6 @@ export function wakeClaude(
       try {
         process.kill(-pid, 'SIGKILL')
       } catch {
-        // 既に居ない。
       }
     },
     exited: () => exited,

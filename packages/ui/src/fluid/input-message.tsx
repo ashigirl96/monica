@@ -44,6 +44,8 @@ interface InputMessageProps extends Omit<HTMLAttributes<HTMLDivElement>, 'onChan
   rightSlot?: ReactNode
   /** Disables the textarea and the send button. */
   disabled?: boolean
+  /** Disables only sending; the textarea still takes typing. */
+  sendDisabled?: boolean
   /** Minimum visible rows before the textarea grows. */
   minRows?: number
   /** Maximum visible rows before the textarea starts to scroll. */
@@ -83,6 +85,7 @@ const InputMessage = forwardRef<HTMLDivElement, InputMessageProps>(
       leftSlot,
       rightSlot,
       disabled,
+      sendDisabled,
       minRows = 1,
       maxRows = 8,
       clickToFocus = true,
@@ -174,7 +177,7 @@ const InputMessage = forwardRef<HTMLDivElement, InputMessageProps>(
     // the Stop control stands in for Send and Enter sends nothing.
     const stopping = streaming && onStop !== undefined
     const trimmed = value.trim()
-    const canSend = !disabled && trimmed.length > 0 && !stopping
+    const canSend = !disabled && !sendDisabled && trimmed.length > 0 && !stopping
 
     // Edge = the box-shadow's 1px ring, recoloured in place per state so the
     // stroke gains contrast without ever appearing to thicken (no second

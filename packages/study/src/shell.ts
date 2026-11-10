@@ -17,7 +17,6 @@ function writeIfChanged(path: string, content: string) {
   try {
     current = readFileSync(path, 'utf8')
   } catch {
-    // まだ無い。
   }
   if (current !== content) writeFileSync(path, content)
 }

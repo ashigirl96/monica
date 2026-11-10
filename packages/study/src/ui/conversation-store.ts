@@ -19,22 +19,18 @@ export type ConversationSummary = {
 }
 
 export type ConversationSnapshot = {
-  /** get を読むまでは無い。 */
   study: { dir: string; missionLine: string | null; firstMessage: string | null } | undefined
   missing: boolean
-  /** get で読んだ Study Conversation。新しい順。 */
   conversations: readonly ConversationSummary[]
-  /** 画面に出す Study Conversation。null は空の新しい会話。 */
+  /** null は空の新しい会話。 */
   shown: ConversationSummary | null
-  /** 終わっていない Study Conversation の id。 */
   ongoingId: string | null
-  /** 画面に出す Study Conversation の行。pending の許可の行は除く。 */
+  repos: readonly string[]
   messages: readonly StudyMessage[]
-  /** 入力欄の代わりに出す許可の行。pending の行のうち id の最も小さいもの。 */
   permission: StudyMessage | null
   running: boolean
   partialText: string
-  /** turn が失敗した時の 1 行。DB に無いので、次に送るか開き直すと消える。 */
+  /** DB に無いので、次に送るか開き直すと消える。 */
   turnError: string | null
   sendError: string | null
 }
@@ -54,13 +50,13 @@ export function createConversationStore(
   client: ConversationClient,
   id: string,
   onTurnEnded?: () => void,
-  /** Tutor が Study の dir の file を書き終えた時に、その相対 path で呼ぶ。get で読んだ行では呼ばない。 */
+  /** get で読んだ行では呼ばない。 */
   onArtifactWritten?: (path: string) => void,
 ) {
   const rows = new Map<number, StudyMessage>()
-  /** 選ばずに出す Study Conversation。null は空の新しい会話。 */
+  /** null は空の新しい会話。 */
   let conversationId: string | null = null
-  /** URL で選んだ Study Conversation。null なら conversationId を出す。 */
+  /** null なら conversationId を出す。 */
   let selected: string | null = null
   let loaded = false
   let sending = false
@@ -70,6 +66,7 @@ export function createConversationStore(
     conversations: [],
     shown: null,
     ongoingId: null,
+    repos: [],
     messages: [],
     permission: null,
     running: false,
@@ -101,17 +98,23 @@ export function createConversationStore(
   }
 
   async function load(signal: AbortSignal) {
-    const { dir, missionLine, firstMessage, conversations } = await client.get({ id }, { signal })
+    const { dir, missionLine, firstMessage, conversations, repos } = await client.get(
+      { id },
+      { signal },
+    )
     const open = conversations.find((conversation) => conversation.endedAt === null)
     for (const conversation of conversations) {
       for (const message of conversation.messages) rows.set(message.id, message)
     }
-    const shownEnded = conversations.some(
-      (conversation) => conversation.id === conversationId && conversation.endedAt !== null,
-    )
-    // 開いた時は最も新しい終わった会話を出し、出していた会話が終わったら空の新しい会話にする。
+    const reflected =
+      conversations.some((c) => c.id === conversationId && c.endedAt !== null) &&
+      [...rows.values()].some(
+        (message) => message.conversationId === conversationId && message.kind === 'reflection',
+      )
+    // 開いた時は最も新しい終わった会話を出し、出していた会話を振り返って終えたら空の新しい会話にする。
+    // 振り返らずに終えた時は、送った行と終わった理由を見せるため、その会話を出したままにする。
     conversationId =
-      open?.id ?? (loaded ? (shownEnded ? null : conversationId) : (conversations[0]?.id ?? null))
+      open?.id ?? (loaded ? (reflected ? null : conversationId) : (conversations[0]?.id ?? null))
     loaded = true
     set({
       study: { dir, missionLine, firstMessage },
@@ -122,6 +125,7 @@ export function createConversationStore(
         summary: c.summary,
       })),
       ongoingId: open?.id ?? null,
+      repos,
     })
   }
 
@@ -176,6 +180,13 @@ export function createConversationStore(
       const controller = new AbortController()
       void run(controller.signal)
       return () => controller.abort()
+    },
+    async reload(): Promise<void> {
+      try {
+        await load(new AbortController().signal)
+      } catch (error) {
+        set({ sendError: failureLine(error) })
+      }
     },
     /** URL で選んだ Study Conversation を出す。null なら続いている会話か空の新しい会話。 */
     select(conversation: string | null): void {

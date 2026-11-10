@@ -8,18 +8,21 @@ import { activityTime } from './recency.ts'
 import { typedRepoItem, unlinkedCandidates } from './repo-picker.ts'
 import { FailureLine, StudyName, type StudyNamed, useScreen } from './screen.tsx'
 
-export const studyKey = (id: string) => ['study', id] as const
 const repoStudiesKey = (repo: string) => ['repo-studies', repo.toLowerCase()] as const
 
-/** Study の画面の上の欄に並べる、紐付けた Repo の印と「+ Repo」。 */
-export function LinkedRepos({ id }: { id: string }) {
+export function LinkedRepos({
+  id,
+  linked,
+  onChanged,
+}: {
+  id: string
+  linked: readonly string[]
+  onChanged: () => Promise<void>
+}) {
   const { client } = useScreen()
   const queryClient = useQueryClient()
-  const { data } = useQuery({ queryKey: studyKey(id), queryFn: () => client.get({ id }) })
   const [picking, setPicking] = useState(false)
   const [failure, setFailure] = useState<string | null>(null)
-  if (data === undefined) return null
-  const linked = data.repos
 
   async function change(action: () => Promise<unknown>) {
     try {
@@ -29,11 +32,12 @@ export function LinkedRepos({ id }: { id: string }) {
       setFailure(`変えられなかった: ${error instanceof Error ? error.message : String(error)}`)
     }
     // 紐付けは会話の行ではなく watch に流れないので、読み直させる。
-    await Promise.all(
-      [studyKey(id), studiesKey, ['repo-studies']].map((queryKey) =>
+    await Promise.all([
+      onChanged(),
+      ...[studiesKey, ['repo-studies']].map((queryKey) =>
         queryClient.invalidateQueries({ queryKey }),
       ),
-    )
+    ])
   }
 
   return (
@@ -106,7 +110,6 @@ function RepoPicker({
 
 type LinkedStudy = StudyNamed & { id: string; lastActivityAt: Date }
 
-/** Repo の画面の左の欄の「Study」。紐付いた Study が無い時と読み込み中は描かない。 */
 export function RepoStudies({ repo }: { repo: string }) {
   const { client } = useScreen()
   const { data, error, dataUpdatedAt } = useQuery({

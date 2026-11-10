@@ -85,7 +85,7 @@ export function StudyPage({ id }: { id: string }) {
             void store.end()
           }}
         />
-        <LinkedRepos id={id} />
+        {study && <LinkedRepos id={id} linked={snapshot.repos} onChanged={store.reload} />}
         <StudyMenu id={id} />
       </StudyHeader>
       <div className="flex min-h-0 flex-1">
@@ -132,7 +132,7 @@ export function StudyPage({ id }: { id: string }) {
               <InputMessage
                 value={draft}
                 onValueChange={setDraft}
-                disabled={running}
+                sendDisabled={running}
                 onSend={(text) => {
                   void store.send(text).then((sent) => {
                     if (!sent) return

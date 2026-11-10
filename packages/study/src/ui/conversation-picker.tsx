@@ -12,7 +12,6 @@ function subscribe(onChange: () => void) {
   return () => window.removeEventListener('popstate', onChange)
 }
 
-/** URL の search param で選んだ Study Conversation の id。 */
 export function useSelectedConversation(): string | null {
   return useSyncExternalStore(
     subscribe,

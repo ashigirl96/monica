@@ -67,6 +67,7 @@ class FakeClient implements ConversationClient {
   rows: StudyMessage[] = []
   /** 新しい順。rows は conversationId で振り分ける。 */
   conversationRows: FakeConversation[] = [{ id: CONVERSATION, endedAt: null, summary: null }]
+  repos: string[] = []
   readonly ends: string[] = []
   getError: unknown
   sendError: unknown
@@ -98,7 +99,7 @@ class FakeClient implements ConversationClient {
       missionLine: 'Understand ky',
       firstMessage: 'learn ky',
       running: false,
-      repos: [],
+      repos: this.repos,
       conversations: this.conversationRows.map((conversation) => ({
         ...conversation,
         startedAt: new Date(),
@@ -397,4 +398,39 @@ test('a Study without an ongoing Study Conversation opens on the newest ended on
   store.select('older')
   expect(store.getSnapshot().shown).toMatchObject({ id: 'older', summary: 'older summary' })
   expect(texts(store.getSnapshot())).toEqual(['first'])
+})
+
+test('a send turn that ends the Study Conversation without reflecting keeps it shown with the sent row and the error', async () => {
+  const client = new FakeClient()
+  client.rows = [row(1, 'user', 'learn ky'), row(2, 'tutor', 'why ky?')]
+  const store = open(client)
+  const stream = await watching(client)
+  stream.push({ type: 'snapshot', running: false, lastMessageId: 2, partialText: '' })
+  await until(store, (s) => s.messages.length === 2)
+
+  await store.send('again')
+  stream.push({ type: 'turn-started', conversationId: CONVERSATION })
+  client.rows = [...client.rows, row(101, 'user', 'again')]
+  client.conversationRows = [{ id: CONVERSATION, endedAt: new Date(), summary: 'no SDK record' }]
+  stream.push({ type: 'turn-ended', error: 'No conversation found with session ID x' })
+
+  const ended = await until(store, (s) => s.ongoingId === null && s.conversations[0]?.endedAt !== null)
+  expect(ended.shown).toMatchObject({ id: CONVERSATION, summary: 'no SDK record' })
+  expect(texts(ended)).toEqual(['learn ky', 'why ky?', 'again'])
+  expect(ended.turnError).toBe('No conversation found with session ID x')
+})
+
+test('the linked Repos come with the Study, and reload rereads them without a watch event', async () => {
+  const client = new FakeClient()
+  client.repos = ['acme/alpha']
+  const store = open(client)
+  const stream = await watching(client)
+  stream.push({ type: 'snapshot', running: false, lastMessageId: null, partialText: '' })
+  await until(store, (s) => s.study !== undefined)
+  expect(store.getSnapshot().repos).toEqual(['acme/alpha'])
+
+  client.repos = ['acme/alpha', 'acme/beta']
+  await store.reload()
+
+  expect(store.getSnapshot().repos).toEqual(['acme/alpha', 'acme/beta'])
 })

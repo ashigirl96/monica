@@ -26,6 +26,7 @@ test('/studies is the new conversation, and /studies/<id> is the Study', () => {
 })
 
 test('any other path under /studies has no Study', () => {
+  expect(render('/studies/')).toContain('その Study は無い')
   expect(render('/studies/abc')).toContain('その Study は無い')
   expect(render('/studies/study-0190a000-0000-7000-8000-000000000001/x')).toContain(
     'その Study は無い',

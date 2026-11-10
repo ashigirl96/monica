@@ -9,7 +9,6 @@ export type FuzzyPickerModalProps = {
   onClose: () => void
   placeholder?: string
   footer?: string
-  /** 打った文から、並びの最後に足す項目。 */
   extraItem?: (query: string) => FuzzyPickerItem | null
 }
 
