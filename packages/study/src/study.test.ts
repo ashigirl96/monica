@@ -3,6 +3,7 @@ import { afterEach, expect, setSystemTime, test } from 'bun:test'
 import type { ChildProcess } from 'node:child_process'
 import {
   existsSync,
+  mkdirSync,
   mkdtempSync,
   readFileSync,
   realpathSync,
@@ -136,16 +137,21 @@ function inMemoryDb() {
   return db
 }
 
-function setup(given?: { db: ReturnType<typeof inMemoryDb>; home: string }) {
+function setup(given?: { db?: ReturnType<typeof inMemoryDb>; home?: string; tutorsDir?: string }) {
   const home = given?.home ?? mkdtempSync(join(tmpdir(), 'monica-study-'))
   const db = given?.db ?? inMemoryDb()
   const fake = fakeQuery()
-  const studyLedger = createStudyLedger({ db, home, query: fake.query })
+  const studyLedger = createStudyLedger({
+    db,
+    home,
+    query: fake.query,
+    tutorsDir: given?.tutorsDir,
+  })
   const client = createRouterClient(router, { context: { db, studyLedger } })
   cleanups.push(async () => {
     studyLedger.stop()
     await Promise.all(fake.claudes.map((claude) => claude.exited))
-    if (!given) rmSync(home, { recursive: true, force: true })
+    if (!given?.home) rmSync(home, { recursive: true, force: true })
   })
   return { home, db, fake, client, studyLedger }
 }
@@ -483,6 +489,25 @@ test('the claude of a Study runs in its Study dir with the Tutors plugin, its sk
     realpathSync(tutorDir),
     realpathSync(join(home, 'learning-preference')),
   ])
+})
+
+test('a Ledger given a Tutor dir passes it as the plugin and reads the teaching and the skills from it', async () => {
+  const tutorsDir = mkdtempSync(join(tmpdir(), 'monica-tutors-'))
+  cleanups.push(() => rmSync(tutorsDir, { recursive: true, force: true }))
+  mkdirSync(join(tutorsDir, 'skills/web'), { recursive: true })
+  writeFileSync(join(tutorsDir, 'TEACHING.md'), 'Teach from home.\n')
+  const { home, client, fake } = setup({ tutorsDir })
+  const { id } = await client.start({})
+
+  await client.send({ id, text: 'hello' })
+  await until(() => fake.claudes.length === 1)
+
+  const { options } = fake.claudes[0]!
+  expect(options.plugins).toEqual([{ type: 'local', path: tutorsDir, skipMcpDiscovery: true }])
+  expect(options.skills).toEqual(['tutors:web'])
+  expect(options.systemPrompt).toBe(
+    `Teach from home.\n\nThe Learning Preference file is ${join(home, 'learning-preference', 'LEARNING-PREFERENCE.md')}\n`,
+  )
 })
 
 test('the claude env carries the allowlisted keys, the PATH without dirs under HOME and CLAUDE_ENV_FILE, and no other key of the Backend env', async () => {

@@ -19,7 +19,7 @@ import {
   migrations as noteMigrations,
   systemJobs as noteSystemJobs,
 } from '@monica/note/server'
-import { createStudyLedger, migrations as studyMigrations } from '@monica/study/server'
+import { createStudyLedger, migrations as studyMigrations, writeTutors } from '@monica/study/server'
 import {
   createTaskLedger,
   migrations as taskMigrations,
@@ -113,7 +113,23 @@ const workbenchLedger = createWorkbenchLedger({
 })
 const taskLedger = createTaskLedger({ db, workbenchLedger, home })
 const noteLedger = createNoteLedger({ db, home })
-const studyLedger = createStudyLedger({ db, home, claudePath: process.env.MONICA_CLAUDE_PATH })
+// compiled binary は --asset の tutors を /$bunfs に持ち、Backend が起こす claude からは読めないので home に書き出す。
+const bundledTutors = join(import.meta.dir, 'tutors')
+let tutorsDir: string | undefined
+if (existsSync(bundledTutors)) {
+  try {
+    tutorsDir = await writeTutors(bundledTutors, join(home, 'tutors'))
+  } catch (error) {
+    // Study の turn は失敗を turn-ended に出し、Workbench・Task・Note は動く。
+    console.error(`[backend] could not write the Tutors: ${(error as Error).message}`)
+  }
+}
+const studyLedger = createStudyLedger({
+  db,
+  home,
+  claudePath: process.env.MONICA_CLAUDE_PATH,
+  tutorsDir,
+})
 const jobLedger = createJobLedger({
   db,
   home,

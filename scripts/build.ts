@@ -26,8 +26,8 @@ const cMaps = join(
   dirname(Bun.resolveSync('pdfjs-dist/package.json', join(repo, 'packages/chat'))),
   'cmaps',
 )
-// Backend は --asset の folder を basename で引く（apps/web/dist は dist、pdfjs-dist/cmaps は cmaps）。
-const assets = [...migrations, 'apps/web/dist', cMaps]
+// Backend は --asset の folder を basename で引く（apps/web/dist は dist、pdfjs-dist/cmaps は cmaps、packages/study/tutors は tutors）。
+const assets = [...migrations, 'apps/web/dist', cMaps, 'packages/study/tutors']
 // compile した binary の Worker は build の entrypoint に要る。main.ts の隣に置くと、main.ts の import.meta.url から同じ相対 path で引ける。
 const backendEntrypoints = [
   'apps/backend/src/main.ts',
