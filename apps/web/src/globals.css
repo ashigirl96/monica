@@ -1,8 +1,11 @@
 @import "tailwindcss";
 @import "tw-animate-css";
+@import "./study-prototype/fluid.css";
+@import "../../../packages/chat/src/ui/fluid/typeset.css";
 /* 画面は packages の ui entry にあり、vite の root の外なので自動では走査されない。 */
 @source "../../../packages/note/src/ui/**/*.{ts,tsx}";
 @source "../../../packages/ui/src";
+@source "../../../packages/chat/src/ui/fluid";
 
 @custom-variant dark (&:where([data-theme="dark"], [data-theme="dark"] *));
 

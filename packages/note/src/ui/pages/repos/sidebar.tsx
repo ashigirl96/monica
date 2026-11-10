@@ -3,6 +3,7 @@ import { Fragment, useEffect, useRef } from 'react'
 import type { RepoNoteSummary } from '../../../contract.ts'
 import { StarButton, StarDivider, startsUnstarred } from '../../notes/star.tsx'
 import { summaryTitle } from '../../notes/summary.ts'
+import { studyPrototypeSlots } from '../../study-prototype-slots.ts'
 
 function TimelineItem({
   summary,
@@ -164,6 +165,7 @@ export function RepoSidebar({
           </div>
         )}
       </div>
+      {studyPrototypeSlots.repoPanel?.(repoName)}
     </div>
   )
 }

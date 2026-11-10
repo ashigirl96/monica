@@ -1,4 +1,5 @@
 import './globals.css'
+import './study-prototype/install.tsx'
 import type { contract as noteContract } from '@monica/note/contract'
 import { type CallContext, NotesApp, noteLinkOptions } from '@monica/note/ui'
 import { createORPCClient } from '@orpc/client'
