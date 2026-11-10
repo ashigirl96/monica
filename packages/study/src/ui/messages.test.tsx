@@ -3,7 +3,13 @@ import { expect, test } from 'bun:test'
 import { renderToStaticMarkup } from 'react-dom/server'
 
 import type { StudyMessage } from '../contract.ts'
-import { currentTutor, MessageView } from './messages.tsx'
+import {
+  currentTutor,
+  type KeyboardEventLike,
+  MessageView,
+  permissionAnswerOf,
+  PermissionPrompt,
+} from './messages.tsx'
 
 const DIR = '/home/u/.monica/studies/study-1'
 
@@ -17,8 +23,16 @@ const message = (
   kind,
   text,
   tool,
+  reason: null,
+  state: null,
   createdAt: new Date('2026-11-11T00:00:00Z'),
 })
+
+const permission = (
+  state: 'pending' | 'allowed' | 'denied',
+  text = 'docker ps <b>\n--all',
+  reason: string | null = 'List <i>containers</i>',
+): StudyMessage => ({ ...message('permission', text), reason, state })
 
 const render = (m: StudyMessage) => renderToStaticMarkup(<MessageView message={m} dir={DIR} />)
 
@@ -68,6 +82,61 @@ test.each<[string, string, string]>([
 test('a tutor_switch row reads that the Tutor changed', () => {
   expect(render(message('tutor_switch', 'repository'))).toContain('Tutor を repository に替えた')
 })
+
+test.each<['allowed' | 'denied', string]>([
+  ['allowed', '<code>docker ps &lt;b&gt;</code> を許した'],
+  ['denied', '<code>docker ps &lt;b&gt;</code> を断った'],
+])(
+  'an %s permission row reads as one line with the first line of the command as text',
+  (state, line) => {
+    const html = render(permission(state))
+
+    expect(html).toContain(line)
+    expect(html).not.toContain('--all')
+  },
+)
+
+test('the prompt shows the whole command and the reason as text, not HTML', () => {
+  const html = renderToStaticMarkup(
+    <PermissionPrompt permission={permission('pending')} onAnswer={() => {}} />,
+  )
+
+  expect(html).toContain('箱の外で走らせてよいか')
+  expect(html).toContain('docker ps &lt;b&gt;\n--all</pre>')
+  expect(html).toContain('List &lt;i&gt;containers&lt;/i&gt;')
+  expect(html).toContain('許す（この 1 回だけ）')
+  expect(html).toContain('断る')
+})
+
+test('the prompt without a reason says that none was given', () => {
+  const html = renderToStaticMarkup(
+    <PermissionPrompt permission={permission('pending', 'ls', null)} onAnswer={() => {}} />,
+  )
+
+  expect(html).toContain('理由は書かれていない')
+})
+
+test.each<[string, Partial<KeyboardEventLike>, boolean | null]>([
+  ['1', { key: '1' }, true],
+  ['2', { key: '2' }, false],
+  ['3', { key: '3' }, null],
+  ['⌘1', { key: '1', metaKey: true }, null],
+  ['⌃2', { key: '2', ctrlKey: true }, null],
+  ['⌥1', { key: '1', altKey: true }, null],
+  ['⇧1', { key: '1', shiftKey: true }, null],
+  ['1 while composing', { key: '1', isComposing: true }, null],
+])('the key %s answers the prompt with %p', (_name, event, answer) => {
+  expect(permissionAnswerOf({ ...noKeys, ...event })).toBe(answer)
+})
+
+const noKeys: KeyboardEventLike = {
+  key: '',
+  metaKey: false,
+  ctrlKey: false,
+  altKey: false,
+  shiftKey: false,
+  isComposing: false,
+}
 
 test('the current Tutor is the last switch of the conversation, or the shared way of teaching without one', () => {
   expect(currentTutor([message('user', 'hi')])).toBe('共通の教え方')

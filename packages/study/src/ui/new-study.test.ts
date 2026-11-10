@@ -11,6 +11,8 @@ const row = (id: string, text: string): StudyMessage => ({
   kind: 'user',
   text,
   tool: null,
+  reason: null,
+  state: null,
   createdAt: new Date(),
 })
 

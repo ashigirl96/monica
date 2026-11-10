@@ -17,6 +17,11 @@ export const router = os.router({
   send: os.send.handler(({ context, input }) =>
     internals(context.studyLedger).send(input.id, input.text),
   ),
+  permission: {
+    answer: os.permission.answer.handler(({ context, input }) =>
+      internals(context.studyLedger).answerPermission(input.id, input.allow),
+    ),
+  },
   repo: {
     link: os.repo.link.handler(({ context, input }) =>
       internals(context.studyLedger).linkRepo(input.id, input.repo),

@@ -90,7 +90,14 @@ function StudyList() {
                   onClick={spaLinkClick(`/studies/${study.id}`)}
                   className="flex flex-col gap-0.5 rounded-lg px-2 py-2 hover:bg-muted"
                 >
-                  <StudyName study={study} className="text-[15px]" />
+                  <span className="flex items-center gap-2">
+                    <StudyName study={study} className="min-w-0 text-[15px]" />
+                    {study.waitingPermission && (
+                      <span className="shrink-0 rounded bg-muted px-1.5 text-[12px] text-muted-foreground">
+                        許可を待っている
+                      </span>
+                    )}
+                  </span>
                   <span className="flex gap-2 text-[12px] text-muted-foreground">
                     <span className="shrink-0 tabular-nums">
                       {activityTime(study.lastActivityAt, now)}

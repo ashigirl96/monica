@@ -51,7 +51,14 @@ const row = (id: number, kind: StudyMessage['kind'], text: string): StudyMessage
   kind,
   text,
   tool: null,
+  reason: null,
+  state: null,
   createdAt: new Date('2026-11-11T00:00:00Z'),
+})
+
+const permission = (id: number, state: 'pending' | 'allowed' | 'denied'): StudyMessage => ({
+  ...row(id, 'permission', `docker ps ${id}`),
+  state,
 })
 
 class FakeClient implements ConversationClient {
@@ -60,7 +67,15 @@ class FakeClient implements ConversationClient {
   sendError: unknown
   readonly gets: number[] = []
   readonly sent: string[] = []
+  readonly answers: { id: number; allow: boolean }[] = []
   readonly watches: { stream: FakeStream; signal: AbortSignal }[] = []
+
+  readonly permission = {
+    answer: async (input: { id: number; allow: boolean }) => {
+      this.answers.push(input)
+      return permission(input.id, input.allow ? 'allowed' : 'denied')
+    },
+  }
 
   async get() {
     this.gets.push(this.watches.length)
@@ -225,6 +240,51 @@ test('a broken stream reopens after a second, and closing aborts the stream', as
   await watching(client, 2)
   close()
   expect(client.watches[1]!.signal.aborted).toBe(true)
+})
+
+test('a pending permission row becomes the prompt instead of a row, and the same id denied turns into a row', async () => {
+  const client = new FakeClient()
+  client.rows = [row(1, 'user', 'run docker ps')]
+  const store = open(client)
+  const stream = await watching(client)
+  stream.push({ type: 'snapshot', running: true, lastMessageId: 1, partialText: '' })
+  await until(store, (s) => s.study !== undefined)
+
+  stream.push({ type: 'message', message: permission(2, 'pending') })
+  const asking = await until(store, (s) => s.permission !== null)
+  expect(asking.permission).toEqual(permission(2, 'pending'))
+  expect(texts(asking)).toEqual(['run docker ps'])
+
+  stream.push({ type: 'message', message: permission(2, 'denied') })
+  const answered = await until(store, (s) => s.permission === null)
+  expect(answered.messages).toEqual([row(1, 'user', 'run docker ps'), permission(2, 'denied')])
+})
+
+test('with two pending permission rows the prompt is the one with the smaller id', async () => {
+  const client = new FakeClient()
+  client.rows = [permission(5, 'pending'), permission(3, 'pending')]
+  const store = open(client)
+  const stream = await watching(client)
+  stream.push({ type: 'snapshot', running: true, lastMessageId: 5, partialText: '' })
+
+  expect((await until(store, (s) => s.permission !== null)).permission!.id).toBe(3)
+})
+
+test('answering sends the answer and puts the returned row in place of the prompt', async () => {
+  const client = new FakeClient()
+  client.rows = [permission(2, 'pending')]
+  const store = open(client)
+  const stream = await watching(client)
+  stream.push({ type: 'snapshot', running: true, lastMessageId: 2, partialText: '' })
+  await until(store, (s) => s.permission !== null)
+
+  await store.answer(2, true)
+
+  expect(client.answers).toEqual([{ id: 2, allow: true }])
+  expect(store.getSnapshot()).toMatchObject({
+    permission: null,
+    messages: [permission(2, 'allowed')],
+  })
 })
 
 test('a Study the Backend does not know is missing and is not reopened', async () => {

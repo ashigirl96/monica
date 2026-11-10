@@ -1,7 +1,7 @@
 import { ChatMessage } from '@monica/ui/fluid'
 import { type Components, Markdown } from '@monica/ui/markdown'
-import { FileText, PenLine, Search, SquareTerminal, Wrench } from 'lucide-react'
-import type { ReactNode } from 'react'
+import { FileText, PenLine, Search, ShieldAlert, SquareTerminal, Wrench } from 'lucide-react'
+import { type ReactNode, useEffect, useRef } from 'react'
 
 import type { StudyMessage } from '../contract.ts'
 import { writtenArtifact } from './artifact-link.ts'
@@ -105,7 +105,96 @@ export function MessageView({
           Tutor を {message.text} に替えた
         </p>
       )
+    case 'permission':
+      return (
+        <p className="flex items-center gap-2 text-[13px] text-muted-foreground">
+          <ShieldAlert className="size-3.5 shrink-0" strokeWidth={1.8} />
+          <span className="min-w-0 truncate">
+            <code>{message.text.split('\n')[0]}</code> を
+            {message.state === 'allowed' ? '許した' : '断った'}
+          </span>
+        </p>
+      )
   }
+}
+
+export type KeyboardEventLike = Pick<
+  KeyboardEvent,
+  'key' | 'metaKey' | 'ctrlKey' | 'altKey' | 'shiftKey' | 'isComposing'
+>
+
+/** 1 は許す、2 は断る。修飾キー付きと変換中は答えにしない。 */
+export function permissionAnswerOf(event: KeyboardEventLike): boolean | null {
+  if (event.metaKey || event.ctrlKey || event.altKey || event.shiftKey || event.isComposing) {
+    return null
+  }
+  return event.key === '1' ? true : event.key === '2' ? false : null
+}
+
+export function PermissionPrompt({
+  permission,
+  onAnswer,
+}: {
+  permission: StudyMessage
+  onAnswer: (allow: boolean) => void
+}) {
+  const panel = useRef<HTMLDivElement>(null)
+  useEffect(() => panel.current?.focus(), [])
+  return (
+    <div
+      ref={panel}
+      tabIndex={-1}
+      role="group"
+      aria-label="箱の外で走らせてよいか"
+      onKeyDown={(event) => {
+        const allow = permissionAnswerOf({ ...event, isComposing: event.nativeEvent.isComposing })
+        if (allow === null) return
+        event.preventDefault()
+        onAnswer(allow)
+      }}
+      className="flex flex-col gap-2.5 rounded-2xl border p-4 outline-none focus-visible:ring-2 focus-visible:ring-ring"
+    >
+      <p className="flex items-center gap-1.5 text-[15px] font-medium">
+        <ShieldAlert className="size-4" strokeWidth={1.8} />
+        箱の外で走らせてよいか
+      </p>
+      <pre className="rounded-lg bg-muted px-3 py-2 font-mono text-[13px] break-all whitespace-pre-wrap">
+        {permission.text}
+      </pre>
+      <p className="text-[13px] text-muted-foreground">
+        {permission.reason ?? '理由は書かれていない'}
+      </p>
+      <div className="flex flex-col gap-1">
+        <AnswerButton digit="1" onClick={() => onAnswer(true)}>
+          許す（この 1 回だけ）
+        </AnswerButton>
+        <AnswerButton digit="2" onClick={() => onAnswer(false)}>
+          断る
+        </AnswerButton>
+      </div>
+    </div>
+  )
+}
+
+function AnswerButton({
+  digit,
+  onClick,
+  children,
+}: {
+  digit: string
+  onClick: () => void
+  children: ReactNode
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className="flex items-center gap-2 rounded-lg px-2 py-1.5 text-left hover:bg-muted"
+    >
+      <kbd className="rounded bg-muted px-1.5 font-mono text-[12px]">{digit}</kbd>
+      {children}
+    </button>
+  )
 }
 
 export function currentTutor(messages: readonly StudyMessage[]): string {
