@@ -12,6 +12,8 @@
 - `study-screen-list`: 新しい会話の画面の一覧に Study が区分ごとに出て、名前は Mission の 1 行目になる。行を押すと同じ会話に戻る。
 - `study-screen-converse`: turn の途中で読み込み直しても、2 つ目の Browser Tab でも、途中の文から続きが流れる。
 - `study-new-key`: Study の画面で ⌥N を押すと `/studies` に戻る。
+- `study-artifacts`: 左の成果物の木の項目か、会話の「を書いた」の行を押すと右の欄に中身が出る。成果物の中の相対 link で別の成果物に移る。Tutor が書くと木と開いている欄が読み直される。
+- `study-artifact-editor`: 右の欄の「エディタで開く」で、Zed にその file だけが開く。
 
 ## How to get to it (user POV)
 
@@ -25,6 +27,8 @@ Preconditions: `note-daily.md` の「Driving it with headless の Backend・Vite
 - **study-screen-start.** `open http://localhost:<Vite の port>/` の後、rail の Study を `click` して URL が `/studies` になる。入力欄に「https://github.com/sindresorhus/ky のコードを読んで分かりたい」を打って「始める」を押すと、URL が `/studies/study-*` になり、Tutor の文が流れる（`ThinkingIndicator` の後に文が伸びる）。
 - **study-screen-list.** Tutor が `MISSION.md` を書いた後、上の欄の名前が Mission の 1 行目になる。⌥N で `/studies` に戻ると、一覧の「今日」に同じ名前で出る。行を押すと同じ会話に戻る。
 - **study-screen-converse.** turn の途中で `open` で読み込み直すと、途中の文から続きが流れる。2 つ目の Browser Tab で同じ URL を開くと同じ文が流れる。Vite の proxy 越しでも流れが途切れない。
+- **study-artifacts.** 木の項目を押すと右の欄に中身が出て、×（「閉じる」）で閉じると会話が広がる。成果物の中の相対 link（`[用語集](GLOSSARY.md)` など）を押すと、右の欄がその成果物になる。Tutor が学習記録を書くと、木の「学習記録」に「<番号> <題>」が増え、会話の「を書いた」の行を押すとその記録が開く。開いている成果物を Tutor が直すと、欄の中身が変わる。
+- **study-artifact-editor.** Study の dir に `.zed/settings.json`（`{"buffer_font_size": 30}`）を置いてから「エディタで開く」を押す。Zed にその file だけが開き、字が大きくならない。ブラウザの口に `POST /rpc/study/artifact/read` で `../../backend.json` を送ると 403 で断られる。
 - **見た目.** Study の画面に背景写真と右下の pill が無い。theme を dark にすると面と影も dark になる。⌘+ で会話の字が大きくなる。
 - **証拠.** 各段の `screenshot` を `$E/study-screen-*.png` に残す。
 

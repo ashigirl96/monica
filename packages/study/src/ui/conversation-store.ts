@@ -1,6 +1,7 @@
 import { ORPCError } from '@orpc/client'
 
 import type { StudyMessage, StudyWatchEvent } from '../contract.ts'
+import { writtenArtifact } from './artifact-link.ts'
 import { failureLine, type StudyClient } from './client.ts'
 
 const REOPEN_MS = 1000
@@ -35,6 +36,8 @@ export function createConversationStore(
   client: ConversationClient,
   id: string,
   onTurnEnded?: () => void,
+  /** Tutor が Study の dir の file を書き終えた時に、その相対 path で呼ぶ。get で読んだ行では呼ばない。 */
+  onArtifactWritten?: (path: string) => void,
 ) {
   const rows = new Map<number, StudyMessage>()
   let conversationId: string | null = null
@@ -83,10 +86,13 @@ export function createConversationStore(
         conversationId = event.conversationId
         set({ running: true, partialText: '', turnError: null })
         return
-      case 'message':
+      case 'message': {
         put(event.message)
+        const written = snapshot.study && writtenArtifact(event.message, snapshot.study.dir)
+        if (written) onArtifactWritten?.(written)
         set(event.message.kind === 'tutor' ? { partialText: '' } : {})
         return
+      }
       case 'delta':
         set({ partialText: snapshot.partialText + event.text })
         return

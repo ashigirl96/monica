@@ -36,6 +36,7 @@ import {
 } from '@monica/usage/server'
 import {
   createWorkbenchLedger,
+  openInEditor,
   migrations as workbenchMigrations,
   router as workbenchRouter,
 } from '@monica/workbench/server'
@@ -129,6 +130,7 @@ const studyLedger = createStudyLedger({
   home,
   claudePath: process.env.MONICA_CLAUDE_PATH,
   tutorsDir,
+  openInEditor,
 })
 const jobLedger = createJobLedger({
   db,
