@@ -3,9 +3,31 @@
   "private": true,
   "type": "module",
   "exports": {
-    "./server": "./src/server.ts"
+    "./schema": "./src/schema.ts",
+    "./contract": "./src/contract.ts",
+    "./server": "./src/server.ts",
+    "./ui": "./src/ui/index.ts",
+    "./cli": "./src/cli.ts"
+  },
+  "scripts": {
+    "generate": "drizzle-kit generate"
   },
   "dependencies": {
-    "@anthropic-ai/claude-agent-sdk": "catalog:"
+    "@anthropic-ai/claude-agent-sdk": "catalog:",
+    "@monica/ui": "workspace:*",
+    "@orpc/client": "catalog:",
+    "@orpc/contract": "catalog:",
+    "@orpc/server": "catalog:",
+    "@tanstack/react-query": "catalog:",
+    "drizzle-orm": "catalog:",
+    "lucide-react": "catalog:",
+    "react": "catalog:",
+    "zod": "catalog:"
+  },
+  "devDependencies": {
+    "@types/react": "catalog:",
+    "@types/react-dom": "catalog:",
+    "drizzle-kit": "catalog:",
+    "react-dom": "catalog:"
   }
 }

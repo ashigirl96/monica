@@ -13,6 +13,12 @@ import {
   migrations as noteMigrations,
   systemJobs as noteSystemJobs,
 } from '@monica/note/server'
+import {
+  createStudyLedger,
+  migrations as studyMigrations,
+  router as studyRouter,
+  systemJobs as studySystemJobs,
+} from '@monica/study/server'
 import { issue, issueBlocker, task as taskTable } from '@monica/task/schema'
 import {
   createTaskLedger,
@@ -68,7 +74,7 @@ export function writeEndpoint(home: string, port: number) {
 }
 
 export function serveBackend(home: string) {
-  const backend = inMemoryBackend()
+  const backend = inMemoryBackend({ home })
   const handler = new RPCHandler(backend.router)
   const server = Bun.serve({
     hostname: '127.0.0.1',
@@ -95,6 +101,7 @@ export function inMemoryBackend({ home, ghq = noGhq }: { home?: string; ghq?: Gh
     taskMigrations,
     jobMigrations,
     noteMigrations,
+    studyMigrations,
     usageMigrations,
   ]) {
     migrate(db, { migrationsFolder: m.folder, migrationsTable: m.table })
@@ -124,10 +131,21 @@ export function inMemoryBackend({ home, ghq = noGhq }: { home?: string; ghq?: Gh
   })
   const noteLedger = createNoteLedger({ db, home: home ?? ptydHome })
   onCleanup(() => noteLedger.stop())
+  const studyLedger = createStudyLedger({
+    db,
+    home: home ?? ptydHome,
+    openInEditor: () => Promise.reject(new Error('no editor in the CLI tests')),
+  })
+  studyLedger.start()
+  onCleanup(() => studyLedger.stop())
   const jobLedger = createJobLedger({
     db,
     home: home ?? ptydHome,
-    systemJobs: [...taskSystemJobs(taskLedger), ...noteSystemJobs(noteLedger)],
+    systemJobs: [
+      ...taskSystemJobs(taskLedger),
+      ...noteSystemJobs(noteLedger),
+      ...studySystemJobs(studyLedger),
+    ],
   })
   onCleanup(() => jobLedger.stop())
   const tokenRouter = {
@@ -135,9 +153,10 @@ export function inMemoryBackend({ home, ghq = noGhq }: { home?: string; ghq?: Gh
     task: taskRouter,
     job: jobRouter,
     usage: usageRouter,
+    study: studyRouter,
   }
   const usageLedger = createUsageLedger({ db, features: featuresOf(tokenRouter) })
-  const context = { db, workbenchLedger, taskLedger, jobLedger, usageLedger }
+  const context = { db, workbenchLedger, taskLedger, jobLedger, usageLedger, studyLedger }
   return { sqlite, db, ptyd, router: os.$context<typeof context>().router(tokenRouter), context }
 }
 

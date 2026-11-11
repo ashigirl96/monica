@@ -21,7 +21,7 @@
 Preconditions:
 
 - `doctor.sh <name>` が `OK`。
-- `monica job list` に system の Job（`task.sync`・`task.setup-log-cleanup`・`task.worktree-sweep`・`note.image-cleanup`）だけがあり、`stamp` は無い。
+- `monica job list` に system の Job（`task.sync`・`task.setup-log-cleanup`・`task.worktree-sweep`・`note.image-cleanup`・`study.env-cleanup`・`study.conversation-end`・`study.trash-sweep`）だけがあり、`stamp` は無い。
 
 - **登録する.** 2 分先の予定を作る。`T=$(date -v+2M '+%M %H')` から `S="$((10#${T% *})) $((10#${T#* })) * * *"`。`monica job add stamp --schedule "$S" --command "date +%s >> $E/stamp.txt; echo stamped" --cwd $E` を流す。exit 0 で `added stamp; it runs next at <今日の予定の時刻>` が出る。
 - **今すぐ走らせる.** `monica job run stamp` を流す。exit 0 で `started stamp at …` が出て、`$E/stamp.txt` が 1 行になる。

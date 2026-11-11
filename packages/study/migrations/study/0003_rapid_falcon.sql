@@ -1,0 +1,1 @@
+ALTER TABLE `study` ADD `playground_removed_at` integer;

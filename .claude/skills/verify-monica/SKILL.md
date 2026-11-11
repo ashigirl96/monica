@@ -1,6 +1,6 @@
 ---
 name: verify-monica
-description: "monica を本物の Backend・monica-ptyd・dev の desktop・Chrome Extension の side panel で起こし、ユーザーの経路（CLI・RPC・端末・画面）で動かして証拠を残す。受け入れ条件や変更が実機で動くかを確かめるとき、Backend の起動・終了・ptyd との再接続、Tab の claude と Agent Session、Task の Bench（run・close）、Job の予定の実行、zsh の補完、notes の画面を見るとき、desktop の一瞬だけ出る表示や窓の枠（信号機・vibrancy）を撮るとき、side panel の中身や Chrome Extension の HMR と reload を見るとき、Chrome Extension の ID と鍵を作り直すときに使う。"
+description: "monica を本物の Backend・monica-ptyd・dev の desktop・Chrome Extension の side panel で起こし、ユーザーの経路（CLI・RPC・端末・画面）で動かして証拠を残す。受け入れ条件や変更が実機で動くかを確かめるとき、Backend の起動・終了・ptyd との再接続、Tab の claude と Agent Session、Task の Bench（run・close）、Job の予定の実行、zsh の補完、notes の画面を見るとき、Study の会話と Study の画面を見るとき、desktop の一瞬だけ出る表示や窓の枠（信号機・vibrancy）を撮るとき、side panel の中身や Chrome Extension の HMR と reload を見るとき、Chrome Extension の ID と鍵を作り直すときに使う。"
 ---
 
 起動・健康診断・片付けは `scripts/` の 3 つで行う。機能ごとの操作と、何が見えれば動いたと言えるかは `features/README.md` から引く。面ごとの細かい操作は `surfaces/` の文書にあり、地図の各 file がその節を名指す。文書の参照（`surfaces/…`・`features/…`）は、この skill の directory（`.claude/skills/verify-monica/`）から書く。command は repo の root で流す形で書く。地図が名前だけで書く `launch.sh`・`doctor.sh`・`cleanup.sh` は、`.claude/skills/verify-monica/scripts/` のものを指す。

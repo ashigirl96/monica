@@ -6,6 +6,7 @@
     "@monica/chat": "workspace:*",
     "@monica/job": "workspace:*",
     "@monica/note": "workspace:*",
+    "@monica/study": "workspace:*",
     "@monica/task": "workspace:*",
     "@monica/usage": "workspace:*",
     "@monica/workbench": "workspace:*",

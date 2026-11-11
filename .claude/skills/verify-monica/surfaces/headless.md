@@ -16,7 +16,7 @@ SKILL.md の「起こす」の `launch.sh` と `doctor.sh --wait` で起こす�
 1. Bash の `run_in_background` で `.claude/skills/verify-monica/scripts/launch.sh s2` を流す。親の script は background job のまま生かす。`( … &)` で切り離すと親がすぐ死に、Backend は ppid=1 の見張りで約 1 秒後に黙って抜ける。
    - `.app` でだけ起きること（gh や ghq が見つからないなど）を確かめるときは、後ろに `PATH=/usr/bin:/bin:/usr/sbin:/sbin` を足す。PATH が launchd の渡すものと同じになり、Backend が login shell から取った PATH が効いているかを見られる。起動時に login shell の PATH を読めなければ、Backend は起動時の PATH で始め、読めるまで 30 秒ごとに読み直して、失敗と読めた回を 1 行ずつ stderr に出す。
    - release の build の Backend（同梱した SPA や migrations）は、`bun run build` の後に `VERIFY_BACKEND=$PWD/target/release/bundle/macos/Monica.app/Contents/MacOS/monica-backend` を前に付けて起こす。`.app` そのものは起こさない。identifier が release と同じなので、single-instance が手元の release の窓に回すか、release が居なければ `~/.monica` で Backend を起こす。
-     - Chat も確かめるなら `MONICA_CLAUDE_PATH` に claude の場所を渡す。build した `.app` には claude が無い（`install-app` が写す）ので、`bun run install-app --stage <dir>` で置いた `<dir>/Monica.app/Contents/MacOS/monica-backend` を `VERIFY_BACKEND` にし、同じ directory の `claude` を後ろの `MONICA_CLAUDE_PATH=…` に渡す（`release-notifications` skill の「Chat の claude と Chrome Extension」）。compile した Backend は node_modules の claude を解けないので、渡さないと Chat は答えられない。
+     - Chat か Study も確かめるなら `MONICA_CLAUDE_PATH` に claude の場所を渡す。build した `.app` には claude が無い（`install-app` が写す）ので、`bun run install-app --stage <dir>` で置いた `<dir>/Monica.app/Contents/MacOS/monica-backend` を `VERIFY_BACKEND` にし、同じ directory の `claude` を後ろの `MONICA_CLAUDE_PATH=…` に渡す（`release-notifications` skill の「Chat の claude と Chrome Extension」）。compile した Backend は node_modules の claude を解けないので、渡さないと Chat は答えられない。
 
 2. `.claude/skills/verify-monica/scripts/doctor.sh s2 --wait` が `OK` を返すまで待つ。Backend の生死は自分の home で見る。`pgrep -f apps/backend/src/main.ts` は他の agent の Backend にも当たる。
 
@@ -163,7 +163,7 @@ SKILL.md の「起こす」の `launch.sh` と `doctor.sh --wait` で起こす�
 
    Backend に届かないときは、Vite が proxy の接続を応答なしで切り（release の口と同じく、画面には network error に見える）、`web.log` に `http proxy error` が出る。
 
-5. 確かめる Note は、ブラウザの口に RPCLink を向けた script で入れる。ユーザーの Note で起きた不具合を再現するときは、ユーザーの口（URL の port）の `POST /rpc/note/get` で本文を読み、`repoNote.create` と `save` で同じ本文を入れる。ユーザーの Note にはキーを送らない。router は `{ note }` の下にあり、GET 以外の request には `Sec-Fetch-Site: same-origin` か、`Sec-Fetch-Site: none` と `Sec-Fetch-Mode: cors` の組（Chrome Extension の fetch が付けるもの）が要る。script を `packages/note/` の下に置くと `@orpc/*` と `./src/contract.ts` を解決できるので、終わったら消す。
+5. 確かめる Note は、ブラウザの口に RPCLink を向けた script で入れる。ユーザーの Note で起きた不具合を再現するときは、ユーザーの口（URL の port）の `POST /rpc/note/get` で本文を読み、`repoNote.create` と `save` で同じ本文を入れる。ユーザーの Note にはキーを送らない。router は `{ note, study }` の下にあり、GET 以外の request には `Sec-Fetch-Site: same-origin` が要る。script を `packages/note/` の下に置くと `@orpc/*` と `./src/contract.ts` を解決できるので、終わったら消す。
 
    ```ts
    const root: ContractRouterClient<{ note: typeof contract }> = createORPCClient(

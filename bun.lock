@@ -18,6 +18,7 @@
         "@monica/chat": "workspace:*",
         "@monica/job": "workspace:*",
         "@monica/note": "workspace:*",
+        "@monica/study": "workspace:*",
         "@monica/task": "workspace:*",
         "@monica/usage": "workspace:*",
         "@monica/workbench": "workspace:*",
@@ -37,6 +38,7 @@
       },
       "dependencies": {
         "@monica/job": "workspace:*",
+        "@monica/study": "workspace:*",
         "@monica/task": "workspace:*",
         "@monica/usage": "workspace:*",
         "@monica/workbench": "workspace:*",
@@ -104,6 +106,7 @@
       "name": "@monica/web",
       "dependencies": {
         "@monica/note": "workspace:*",
+        "@monica/study": "workspace:*",
         "@orpc/client": "catalog:",
         "@orpc/contract": "catalog:",
         "react": "catalog:",
@@ -189,6 +192,21 @@
       "name": "@monica/study",
       "dependencies": {
         "@anthropic-ai/claude-agent-sdk": "catalog:",
+        "@monica/ui": "workspace:*",
+        "@orpc/client": "catalog:",
+        "@orpc/contract": "catalog:",
+        "@orpc/server": "catalog:",
+        "@tanstack/react-query": "catalog:",
+        "drizzle-orm": "catalog:",
+        "lucide-react": "catalog:",
+        "react": "catalog:",
+        "zod": "catalog:",
+      },
+      "devDependencies": {
+        "@types/react": "catalog:",
+        "@types/react-dom": "catalog:",
+        "drizzle-kit": "catalog:",
+        "react-dom": "catalog:",
       },
     },
     "packages/task": {

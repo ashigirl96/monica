@@ -20,6 +20,13 @@ import {
   systemJobs as noteSystemJobs,
 } from '@monica/note/server'
 import {
+  createStudyLedger,
+  migrations as studyMigrations,
+  router as studyRouter,
+  systemJobs as studySystemJobs,
+  installTutors,
+} from '@monica/study/server'
+import {
   createTaskLedger,
   migrations as taskMigrations,
   nameAgentSession,
@@ -35,6 +42,7 @@ import {
 } from '@monica/usage/server'
 import {
   createWorkbenchLedger,
+  openInEditor,
   migrations as workbenchMigrations,
   router as workbenchRouter,
 } from '@monica/workbench/server'
@@ -94,6 +102,7 @@ for (const m of [
   taskMigrations,
   jobMigrations,
   noteMigrations,
+  studyMigrations,
   chatMigrations,
   usageMigrations,
 ]) {
@@ -111,10 +120,21 @@ const workbenchLedger = createWorkbenchLedger({
 })
 const taskLedger = createTaskLedger({ db, workbenchLedger, home })
 const noteLedger = createNoteLedger({ db, home })
+const studyLedger = createStudyLedger({
+  db,
+  home,
+  claudePath: process.env.MONICA_CLAUDE_PATH,
+  tutorsDir: await installTutors(join(import.meta.dir, 'tutors'), home),
+  openInEditor,
+})
 const jobLedger = createJobLedger({
   db,
   home,
-  systemJobs: [...taskSystemJobs(taskLedger), ...noteSystemJobs(noteLedger)],
+  systemJobs: [
+    ...taskSystemJobs(taskLedger),
+    ...noteSystemJobs(noteLedger),
+    ...studySystemJobs(studyLedger),
+  ],
 })
 // compiled binary は --asset の cmaps を entry の隣に持ち、bun run の Backend は packages/chat が node_modules から解く。
 const cMaps = join(import.meta.dir, 'cmaps')
@@ -134,14 +154,15 @@ const tokenRouter = {
   job: jobRouter,
   chat: chatRouter,
   usage: usageRouter,
+  study: studyRouter,
 }
-// ブラウザの口を立てない起動でも、note の Feature を 0 回として出す。
+// ブラウザの口を立てない起動でも、note と study の Feature を 0 回として出す。両方の口に載る study は 1 度だけ数える。
 const usageLedger = createUsageLedger({
   db,
-  features: [...featuresOf(tokenRouter), ...featuresOf(browserRouter)],
+  features: [...new Set([...featuresOf(tokenRouter), ...featuresOf(browserRouter)])],
 })
 
-const context = { db, workbenchLedger, taskLedger, jobLedger, chatAgent, usageLedger }
+const context = { db, workbenchLedger, taskLedger, jobLedger, chatAgent, usageLedger, studyLedger }
 type TokenContext = typeof context & { caller: Caller }
 const clientInterceptors = [usageLedger.count]
 const handler = new RPCHandler(os.$context<TokenContext>().router(tokenRouter), {
@@ -210,9 +231,10 @@ const workbenchStarted = workbenchLedger.start().then(() => true)
 taskLedger.start()
 jobLedger.start()
 noteLedger.start()
+studyLedger.start()
 // compiled binary の --asset は entry の隣に置かれ、bun run の Backend には無い。
 const browserListener = listenBrowser(process.env.MONICA_BROWSER_PORT, {
-  context: { db, noteLedger },
+  context: { db, noteLedger, studyLedger },
   usageLedger,
   webDist: join(import.meta.dir, 'dist'),
 })
@@ -238,6 +260,7 @@ function exit() {
   stopRereading()
   browserListener?.stop()
   chatAgent.stop()
+  studyLedger.stop()
   noteLedger.stop()
   jobLedger.stop()
   taskLedger.stop()

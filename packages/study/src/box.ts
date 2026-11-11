@@ -25,6 +25,8 @@ export type TutorBoxDeps = {
   learningPreferenceDir: string
   monicaHome: string
   askUser?: AskUser
+  /** 振り返りの turn の間は true。Read・Write・Edit のほかを断る。 */
+  reflecting?: () => boolean
   nixDaemonSocket?: string
   lookup?: Lookup
 }
@@ -58,6 +60,7 @@ const CANNOT_ASK: Verdict = {
 }
 
 const ALLOW: Verdict = { allow: true }
+const REFLECTION_TOOLS = ['Read', 'Write', 'Edit']
 const deny = (message: string): Verdict => ({ allow: false, message })
 
 // Bun の realpath は socket に EOPNOTSUPP を返すので、親の dir を解いてから symlink を自分で辿る。
@@ -191,10 +194,12 @@ export function tutorBox(deps: TutorBoxDeps): TutorBox {
 
   const preToolUse: HookCallback = async (input) => {
     if (input.hook_event_name !== 'PreToolUse') return {}
-    const verdict = await judgeTool(
-      input.tool_name,
-      (input.tool_input ?? {}) as Record<string, unknown>,
-    )
+    const verdict =
+      deps.reflecting?.() && !REFLECTION_TOOLS.includes(input.tool_name)
+        ? deny(
+            `The ${input.tool_name} tool is not available while reflecting; use only Read, Write and Edit.`,
+          )
+        : await judgeTool(input.tool_name, (input.tool_input ?? {}) as Record<string, unknown>)
     if (!verdict) return {}
     return {
       hookSpecificOutput: verdict.allow
