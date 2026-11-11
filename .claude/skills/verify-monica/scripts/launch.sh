@@ -34,7 +34,9 @@ mkdir -p "$home" "$evidence"
 rm -f "$evidence/stdin.pid"
 trap 'echo "[launch exited]" >> "$evidence/err.log"' EXIT
 # 同じ name の home で前に動いた claude の記録を消さないよう、起動の前からある dir を控える。
-ls -d "$HOME"/.claude/projects/*monica-"$name"* > "$evidence/claude-projects.before" 2> /dev/null || true
+# 起こし直しで上書きすると、その間に出来た dir を前からあった物として見落とすので、cleanup が消すまで残す。
+[ -f "$evidence/claude-projects.before" ] ||
+  ls -d "$HOME"/.claude/projects/*monica-"$name"* > "$evidence/claude-projects.before" 2> /dev/null || true
 
 cd "$repo"
 if [ -n "${VERIFY_BACKEND:-}" ]; then
