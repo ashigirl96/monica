@@ -23,21 +23,22 @@
 
 @custom-variant dark (&:where([data-theme="dark"], [data-theme="dark"] *));
 
-/* 名前は @monica/ui の部品が読む desktop の token に揃え、値は旧 Monica の notes のものを使う。 */
+/* 名前は @monica/ui の部品が読む desktop の token に揃え、値は packages/ui/src/fluid/tokens.css の灰色の段に揃える。 */
 :root {
   color-scheme: light;
-  --background: oklch(1 0 0);
-  --foreground: oklch(0.2 0.025 265);
-  --card: oklch(0.975 0.005 250);
-  --card-foreground: oklch(0.2 0.025 265);
-  --popover: oklch(1 0 0);
-  --popover-foreground: oklch(0.2 0.025 265);
-  --muted: oklch(0.965 0.005 250);
-  --muted-foreground: oklch(0.49 0.02 255);
-  --border: oklch(0.895 0.012 255);
-  --accent: oklch(0.55 0.21 263);
-  --accent-foreground: oklch(0.985 0 0);
-  --destructive: oklch(0.577 0.245 27.325);
+  --background: #fafafa;
+  --foreground: #171717;
+  --card: #ffffff;
+  --card-foreground: #171717;
+  --popover: #ffffff;
+  --popover-foreground: #171717;
+  --muted: #f4f4f5;
+  --muted-foreground: #737373;
+  --border: color-mix(in oklab, var(--foreground) 12%, transparent);
+  --accent: #e5e5e5;
+  --accent-foreground: #171717;
+  --focus-ring: #6b97ff;
+  --destructive: #ef4444;
   --destructive-foreground: oklch(0.985 0 0);
   --accent-diff: oklch(0.7 0.12 75);
   --accent-topic: oklch(0.65 0.1 230);
@@ -46,18 +47,17 @@
 
 :root[data-theme="dark"] {
   color-scheme: dark;
-  --background: oklch(0.135 0.015 265);
-  --foreground: oklch(1 0 0);
-  --card: oklch(0.175 0.02 265);
-  --card-foreground: oklch(1 0 0);
-  --popover: oklch(0.205 0.02 265);
-  --popover-foreground: oklch(1 0 0);
-  --muted: oklch(0.22 0.02 260);
-  --muted-foreground: oklch(0.85 0 0);
-  --border: oklch(0.275 0.025 260);
-  --accent: oklch(0.72 0.13 266);
-  --accent-foreground: oklch(0.135 0.015 265);
-  --destructive: oklch(0.704 0.191 22.216);
+  --background: #171717;
+  --foreground: #f5f5f5;
+  --card: #252525;
+  --card-foreground: #f5f5f5;
+  --popover: #252525;
+  --popover-foreground: #f5f5f5;
+  --muted: #1e1e1e;
+  --muted-foreground: #a3a3a3;
+  --accent: #525252;
+  --accent-foreground: #f5f5f5;
+  --destructive: #fca5a5;
   --destructive-foreground: oklch(0.985 0 0);
   --accent-diff: oklch(0.75 0.12 75);
   --accent-topic: oklch(0.7 0.1 230);
@@ -108,10 +108,10 @@
     line-height: 1.6;
   }
   ::selection {
-    background-color: color-mix(in oklab, var(--accent) 22%, transparent);
+    background-color: color-mix(in oklab, var(--focus-ring) 30%, transparent);
   }
   :where(a, button, input):focus-visible {
-    outline: 2px solid var(--accent);
+    outline: 2px solid var(--focus-ring);
     outline-offset: 2px;
   }
 }

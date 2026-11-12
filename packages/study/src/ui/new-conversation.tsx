@@ -3,6 +3,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { useCallback, useRef, useState } from 'react'
 
 import { failureLine, type StudyClient } from './client.ts'
+import { useTutorChoice } from './model-picker.tsx'
 import { createStudyStarter } from './new-study.ts'
 import { activityTime, groupByRecency } from './recency.ts'
 import {
@@ -23,13 +24,14 @@ export function NewConversation() {
   const [draft, setDraft] = useState('')
   const [failure, setFailure] = useState<string | null>(null)
   const composer = useRef<HTMLDivElement>(null)
+  const { choice, picker } = useTutorChoice()
 
   useDocumentTitle('新しい会話')
   useNewConversationKey(useCallback(() => composer.current?.querySelector('textarea')?.focus(), []))
 
   async function begin(text: string) {
     try {
-      const id = await starter.begin(text)
+      const id = await starter.begin(text, choice)
       void queryClient.invalidateQueries({ queryKey: studiesKey })
       navigate(`/studies/${id}`)
     } catch (error) {
@@ -58,6 +60,7 @@ export function NewConversation() {
             onSend={(text) => void begin(text)}
             placeholder="何を学ぶ？（最初の一言から、Tutor と Mission を決める）"
             sendLabel="始める"
+            leftSlot={picker}
             textareaProps={{ autoFocus: true, 'aria-label': '最初の一言' }}
           />
         </div>

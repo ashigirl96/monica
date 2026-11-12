@@ -1,18 +1,15 @@
 /* Notes 画面 — 「暗い部屋で、机の上だけが照らされている」。左の app chrome が部屋
    （素の --background = ほぼ黒）、サイドバーと essays 一覧が机（--desk）、
    エディタがその上の一枚の紙（--paper）。
-   dark は sizu.me 由来の無彩色をやめ、面を紺（伝統色 #223a70・#192f60 と同じ
-   oklch hue 264）で塗り、その上に置く細い線とラベルだけを水色（--water #59b9c6）にしている。
-   面の hue を 264 に固定するのは、hue 240 前後（#2980af 系）だと暗く落としたとき
-   R が沈んで petrol＝緑がかった青に見えてしまうため。 */
+   dark の面は fluid-functionalism の灰色の段（packages/ui/src/fluid/tokens.css の --surface-*）で塗り、
+   その上に置く細い線とラベルだけを水色（--water #59b9c6）にしている。 */
 .notes-screen {
   --water: #59b9c6;
   /* --ambient / --ambient-blur / --ambient-opacity-{dark,light} は ambient.ts の
      AMBIENTS が :root へ流し込む。どちらの opacity を採るかだけをここで決める */
   --ambient-opacity: var(--ambient-opacity-dark);
-  /* dark の文字階調だけは透明度で作らない: 紺の紙に白を alpha で載せると必ず
-     paper の青が透けて青灰色に転ぶ。
-     線と hover は面の一部なので従来どおり alpha 導出のまま。 */
+  /* dark の文字階調だけは透明度で作らない: ambient を透かす紙に白を alpha で載せると、
+     写真の色が文字に透ける。線と hover は面の一部なので alpha 導出のまま。 */
   --ink: var(--foreground);
   --ink-text: var(--ink);
   --ink-muted: oklch(0.9 0 0);
@@ -22,16 +19,15 @@
   /* 机と紙は ambient を透かすため alpha 付き。0.8 を超えると背景はほぼ潰れる */
   --desk-alpha: 0.74;
   --paper-alpha: 0.58;
-  --desk: oklch(0.24 0.058 264 / var(--desk-alpha));
-  --paper: oklch(0.305 0.05 264 / var(--paper-alpha));
+  --desk: rgb(30 30 30 / var(--desk-alpha));
+  --paper: rgb(44 44 44 / var(--paper-alpha));
   --kind-essay: #bd6a52;
   /* essays カード: 机の上にデスクマット、その中央に紙のミニチュア。sheet を一段明るく
-     持ち上げて「照らされた原稿」の輪郭を出す。writing はマットの chroma を落として
-     静かにし、区別はバッジに任せる（light の #eff7ff / #f1f6f9 と同じ関係）。
-     ただし chroma 0.05 が紺の下限 — これを割ると青ではなく灰色に転ぶ */
-  --essay-mat: oklch(0.3 0.08 264);
-  --essay-mat-writing: oklch(0.3 0.052 264);
-  --essay-sheet: oklch(0.37 0.055 262);
+     持ち上げて「照らされた原稿」の輪郭を出す。writing はマットを一段暗くして静かにし、
+     区別はバッジに任せる（light の #eff7ff / #f1f6f9 と同じ関係）。 */
+  --essay-mat: #333333;
+  --essay-mat-writing: #2c2c2c;
+  --essay-sheet: #414141;
   --essay-badge-bg: color-mix(in srgb, var(--water) 22%, var(--essay-mat-writing));
   --essay-badge-ink: color-mix(in srgb, var(--water) 78%, #fff);
   font-family:
@@ -100,14 +96,13 @@
 
 /* inline code と callout は dark で block-editor.css の透明度導出から降りる。紙 (--paper)
    がすでに ambient を透かしているうえに alpha の面を重ねると写真が二重に抜けて面の輪郭が
-   消え、載せた色も紺に沈む。
-   どちらも紙より一段明るい不透明な紺を下地にし（chroma 0.05 が紺の下限）、callout は
-   その上に kind ごとのアクセントが載る。inline code の文字は同じテラコッタの明度だけを
+   消える。
+   どちらも紙より一段明るい不透明な灰色を下地にし、callout はその上に kind ごとのアクセントが載る。inline code の文字は同じテラコッタの明度だけを
    上げたもの。 */
 :root[data-theme="dark"] .notes-screen .jb-root {
-  --jb-inline-code-bg: oklch(0.37 0.05 264);
+  --jb-inline-code-bg: #3a3a3a;
   --jb-code-red: oklch(0.82 0.12 42);
-  --jb-callout-under: oklch(0.345 0.045 264);
+  --jb-callout-under: #333333;
 }
 
 /* 写真なし（ambient.ts の none と ink）。透かす相手がいないのに alpha を残すと、机と紙が
@@ -123,12 +118,11 @@
 }
 
 /* ink（ambient.ts）は dark の机と紙を黒に寄せる。机を紙より一段暗くするのは none と同じ
-   「机の上の紙」の明度順を保つため。hue 264 をわずかに残すのは、無彩色の黒だと
-   紺の差し色（線・バッジ）から浮くため。
+   「机の上の紙」の明度順を保つため。
    :root に置くのは .notes-screen の外にいる AmbientSwitcher の swatch も紙の色を読むため。 */
 :root {
-  --ambient-ink-desk: oklch(0.135 0.02 264);
-  --ambient-ink-paper: oklch(0.17 0.02 264);
+  --ambient-ink-desk: #111111;
+  --ambient-ink-paper: #171717;
 }
 
 :root[data-theme="dark"][data-ambient="ink"] .notes-screen {

@@ -20,7 +20,7 @@ const tutorComponents: Components = {
 
 export function TutorText({ text }: { text: string }) {
   return (
-    <ChatMessage from="assistant">
+    <ChatMessage from="assistant" className="max-w-full">
       <Markdown text={text} components={tutorComponents} />
     </ChatMessage>
   )

@@ -12,7 +12,7 @@ import { migrate } from 'drizzle-orm/bun-sqlite/migrator'
 import { migrations } from '../migrations/index.ts'
 import type { Query } from './claude.ts'
 import type { Tools } from './cleanup.ts'
-import type { StudyWatchEvent } from './contract.ts'
+import type { Model, StudyWatchEvent } from './contract.ts'
 import { createStudyLedger, router } from './server.ts'
 
 const noop = () => {}
@@ -28,6 +28,8 @@ export type FakeClaude = {
   emit(...messages: object[]): void
   exited: Promise<void>
   interrupts: number
+  /** setModel と applyFlagSettings に渡ったもの。 */
+  switches: object[]
 }
 
 // 本物の process を持ち、台本の SDK の message を返す。テストが emit で続きを流し、process が居なくなると message が尽きる。
@@ -35,7 +37,15 @@ function fakeQuery() {
   const fake = {
     shell: 'sleep 60 & wait',
     claudes: [] as FakeClaude[],
+    models: [{ value: 'default', displayName: 'Default', description: 'the default' }] as Model[],
+    modelReads: 0,
     query: (({ prompt, options }: { prompt: AsyncIterable<SDKUserMessage>; options: Options }) => {
+      const supportedModels = async () => {
+        fake.modelReads++
+        return fake.models
+      }
+      // 一覧を訊くだけの query は Tutor の process を起こさない。
+      if (!options.spawnClaudeCodeProcess) return { supportedModels, close: noop }
       const queued: object[] = []
       let wake: () => void = noop
       let gone = false
@@ -55,6 +65,7 @@ function fakeQuery() {
           wake()
         },
         interrupts: 0,
+        switches: [],
         exited: new Promise((resolve) =>
           child.once('exit', () => {
             gone = true
@@ -81,6 +92,9 @@ function fakeQuery() {
           claude.interrupts++
           claude.emit(result('interrupted'))
         },
+        setModel: async (model?: string) => void claude.switches.push({ model }),
+        applyFlagSettings: async (settings: object) => void claude.switches.push(settings),
+        supportedModels,
       })
     }) as unknown as Query,
   }

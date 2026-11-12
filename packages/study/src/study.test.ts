@@ -193,6 +193,32 @@ test('send stores the utterance and returns its row without waiting for the turn
   expect((await client.list({})).studies[0]!.firstMessage).toBe('I want to read ky')
 })
 
+test('send wakes claude on the chosen model and effort, and switches the running claude when the next send chooses others', async () => {
+  const { client, fake } = setup()
+  const { id } = await client.start({})
+  const watch = await watching(client, id)
+
+  await client.send({ id, text: 'hello', model: 'sonnet', effort: 'high' })
+  await until(() => fake.claudes.length === 1)
+  const claude = fake.claudes[0]!
+  expect(claude.options).toMatchObject({ model: 'sonnet', effort: 'high' })
+  claude.emit(init(), result())
+  await watch.ended()
+
+  await client.send({ id, text: 'again', model: 'opus' })
+  await until(() => claude.prompts.length === 2)
+  expect(claude.switches).toEqual([{ model: 'opus' }, { effortLevel: null }])
+  expect(fake.claudes).toHaveLength(1)
+})
+
+test('models reads the list from claude once and keeps it', async () => {
+  const { client, fake } = setup()
+
+  expect(await client.models({})).toEqual(fake.models)
+  expect(await client.models({})).toEqual(fake.models)
+  expect(fake.modelReads).toBe(1)
+})
+
 test('watch streams a turn as turn-started, the user row, Tutor text as deltas and a row, a tool row once the tool has run, and turn-ended', async () => {
   const { client, fake } = setup()
   const { id } = await client.start({})
