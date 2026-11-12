@@ -99,7 +99,9 @@ function serialize(nodes: ChildNode[], map: Element[]): string {
 
 /** element の行内の node。行を切る子要素とその後ろの中身は含めない。 */
 export function inlineNodes(element: Element): ChildNode[] {
-  return [...element.childNodes].filter((node) => !(isElement(node) && BREAKS.has(node.localName)))
+  const nodes = [...element.childNodes]
+  const end = nodes.findIndex((node) => isElement(node) && BREAKS.has(node.localName))
+  return end < 0 ? nodes : nodes.slice(0, end)
 }
 
 /** 行内の node が文字を持たなければ undefined。 */

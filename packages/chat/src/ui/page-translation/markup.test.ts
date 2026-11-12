@@ -129,3 +129,17 @@ test('a text that the page rewrites after it was translated goes back to the rew
 
   expect(p.innerHTML).toBe('New article')
 })
+
+test('the translation of an item with a nested list stays before that list, though white space follows the list', () => {
+  const { document } = parseHTML(
+    '<html><body><ul><li>Outer <em>item</em>\n<ul><li>Inner item</li></ul>\n</li></ul></body></html>',
+  )
+  const li = document.querySelector('li')!
+  const block = blockOf(li)!
+  const parsed = parseTranslation('外の<g0>項目</g0>', block.map)
+  if ('error' in parsed) throw new Error(parsed.error)
+
+  writeTranslation(block, parsed.kids, new Map())
+
+  expect(li.innerHTML.replace(/\s+/g, ' ')).toBe('外の<em>項目</em><ul><li>Inner item</li></ul> ')
+})
