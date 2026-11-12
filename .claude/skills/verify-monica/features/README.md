@@ -7,7 +7,7 @@ monica のユーザーから見える振る舞いを確かめるときの正本�
 - 自分が起こした instance だけを操作する。ユーザーの release の `~/.monica` と、`bun run dev:list` の他の行は操作しない。
   - headless の機能: `launch.sh <name>` で起こし、`doctor.sh <name>` が `OK` を返したもの。
   - desktop の機能（[Tab の dot と Unread（未読）](./desktop-agent-dot.md)）: `surfaces/desktop.md` の「起こす」で起こし、tauri-mcp の identifier を確かめたもの。Backend は desktop が起こすので、`launch.sh` と `cleanup.sh` は使わない。
-  - side panel の機能（[side panel の Chat](./extension-chat.md)）: `surfaces/extension.md` の「起こす」で Brave を起こし、同じ home に `launch.sh <worktree の名前>` で Backend を起こしたもの。
+  - Chrome Extension の機能（[side panel の Chat](./extension-chat.md)、[Page Translation](./extension-page-translation.md)）: `surfaces/extension.md` の「起こす」で Brave を起こし、同じ home に `launch.sh <worktree の名前>` で Backend を起こしたもの。
 - `H=${TMPDIR%/}/monica-<name>`、`E=${TMPDIR%/}/verify-monica/<name>` と書く。地図の `monica <command>` は `MONICA_HOME=$H scripts/monica-dev <command>` と読み替えて流す。素の `monica` はユーザーの home の Backend に繋ぐ。`launch.sh`・`doctor.sh`・`cleanup.sh` は `.claude/skills/verify-monica/scripts/` のもの。
 - 新しい home には Runspace もユーザーの Job も Note も無い。system の Job（`task.sync` など）だけは起動時からある。各機能の手順は、その機能の前提を自分で作るところから始める。
 - home の中（`$H/logs/` など）にあるものは片付けで消える。証拠にするなら `$E` へ写す。
@@ -50,4 +50,5 @@ H1 の title と、ユーザーに見える振る舞いの 1 段落で始め、�
 - [Ambient](./note-ambient.md): notes の画面の背景を選び、⌥; で巡り、読み直しても残る。
 - [Tab の dot と Unread](./desktop-agent-dot.md): desktop の Tab の dot、Unread、Dock の数（`surfaces/desktop.md`）。
 - [side panel の Chat](./extension-chat.md): Brave の side panel で質問し、答えを受ける（`surfaces/extension.md`）。
+- [Page Translation](./extension-page-translation.md): ⌥A で Current Page の本文を日本語に置き換え、もう一度押して戻す（`surfaces/extension.md`）。
 - [Study](./study.md): Study を始め、Tutor と会話し、Backend を起こし直して続ける。箱と Bash の HOME（RPC）。
