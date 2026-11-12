@@ -19,7 +19,7 @@
 - `study-repo-panel`: 紐付けた Repo の画面の左の欄の時系列の下に「Study」の欄が出て、行を押すとその Study の画面に移る。
 - `study-artifacts`: 左の成果物の木の項目か、会話の「を書いた」の行を押すと右の欄に中身が出る。成果物の中の相対 link で別の成果物に移る。Tutor が Write か Edit の tool で書くと、木と開いている欄が読み直される（Bash で書いた file は turn の後に読み込み直すまで出ない）。
 - `study-artifact-editor`: 右の欄の「エディタで開く」で、Zed にその file だけが開く。
-- `study-conversation-end`: 上の欄の会話の選択の「新しい会話を始める」で、Tutor が振り返り（Read・Write・Edit だけ）、報告の 1 行目が選択の終わった会話に添えられる。終わった会話を選ぶと入力欄の代わりに「続いている会話に戻る」が出る。SDK の記録が消えた会話は振り返らずに終わる。1 時間の無発言で終わるのは system の Job `study.conversation-end` で、実機では待たない（`packages/study/src/conversation-end.test.ts`）。
+- `study-conversation-end`: 会話の末尾の点線の「振り返って終える」で、Tutor が振り返り（Read・Write・Edit だけ）、報告の 1 行目が選択の終わった会話に添えられる。上の欄の会話の選択の「新しい会話を始める」は振り返らずに終え、空の新しい会話を出す。終わった会話を選ぶと入力欄の代わりに「続いている会話に戻る」が出る。SDK の記録が消えた会話は振り返らずに終わる。1 時間の無発言で振り返らずに終えるのは system の Job `study.conversation-end` で、実機では待たない（`packages/study/src/conversation-end.test.ts`）。
 - `study-remove`: Study の画面の上の欄の ⋯ の「Study を消す」で確かめずに消え、一覧に戻る。Study の dir は `$H/trash/studies/<id>/tree` に移り、claude の session の記録はその場で消える。捨て場は system の Job `study.trash-sweep`（10 分ごと）が Playground ごと消す。
 
 ## How to get to it (user POV)
@@ -39,7 +39,7 @@ Preconditions: `note-daily.md` の「Driving it with headless の Backend・Vite
 - **study-repo-panel.** `acme/alpha` を紐付けたまま `/repos/acme/alpha` を開くと、左の欄の時系列の下に「Study」の欄（見出しは大文字で、snapshot でも `STUDY`）と Study の行が出る。行を押すと `/studies/<id>` に移る。`/repos/acme/gamma` には欄が無い。
 - **study-artifacts.** 木の項目を押すと右の欄に中身が出て、×（「閉じる」）で閉じると会話が広がる。成果物の中の相対 link（`[用語集](GLOSSARY.md)` など）を押すと、右の欄がその成果物になる。Tutor に Write の tool で学習記録を書かせると、木の「学習記録」に「<番号> <題>」が増え、会話の「を書いた」の行を押すとその記録が開く。開いている成果物を Tutor が直すと、欄の中身が変わる。
 - **study-artifact-editor.** Study の dir に `.zed/settings.json`（`{"buffer_font_size": 30}`）を置いてから「エディタで開く」を押す。Zed にその file だけが開き（Zed の窓が既にあれば、その窓の tab に開く）、字が大きくならない。ブラウザの口に `POST /rpc/study/artifact/read` で `../../backend.json` を送ると 403 で断られる。
-- **study-conversation-end.** Study で 2 往復話し、上の欄の「… の会話」（aria-label「会話を選ぶ」）から「新しい会話を始める（今の会話は終わる）」を押す。「振り返り」の区切りが出て、tool の行が Read・Write・Edit だけで、最後に報告が出る。その間は入力欄が止まり、終わると空の新しい会話になる。選択に終わった会話と報告の 1 行が出て、選ぶと URL に `?conversation=` が付き、入力欄の代わりに「続いている会話に戻る」が出る（続いている会話がある時）。`log.md` の 1 つ目の節の最後に `**Summary**:` のまとめがある。新しい会話の最初の turn で、Tutor が `log.md` を読む tool の行が出る。次に Backend を止め、`~/.claude/projects/` の下のその会話の `<session id>.jsonl` を消してから起こし直し、「新しい会話を始める」を押す。振り返らずに終わり、選択の 1 行が「SDK の記録が消えていたので、振り返らずに終えた」になり、`log.md` の末尾に同じ 1 行が足される。
+- **study-conversation-end.** Study で 2 往復話す。入力欄のすぐ上に点線の「振り返って終える」が出る（turn の間と許可の欄が出ている間は出ない）。押すと実線の「振り返り」の区切りに替わり、tool の行が Read・Write・Edit だけで、最後に報告が出る。その間は入力欄が止まり、終わると空の新しい会話になる。選択に終わった会話と報告の 1 行が出て、選ぶと URL に `?conversation=` が付き、入力欄の代わりに「続いている会話に戻る」が出る（続いている会話がある時）。`log.md` の 1 つ目の節の最後に `**Summary**:` のまとめがある。新しい会話の最初の turn で、Tutor が `log.md` を読む tool の行が出る。次の会話で 1 往復話し、上の欄の「… の会話」（aria-label「会話を選ぶ」）から「新しい会話を始める（今の会話は振り返らずに終わる）」を押す。振り返りの区切りは出ず、すぐ空の新しい会話になり、選択の終わった会話の行は「終わった会話」になる。最後に 1 往復話してから Backend を止め、`~/.claude/projects/` の下のその会話の `<session id>.jsonl` を消してから起こし直し、「振り返って終える」を押す。振り返らずに終わり、選択の 1 行が「SDK の記録が消えていたので、振り返らずに終えた」になり、`log.md` の末尾に同じ 1 行が足される。
 - **見た目.** Study の画面に背景写真と右下の pill が無い。theme を dark にすると面と影も dark になる。⌘+（`press 'Meta+='`。`Meta+Equal` は届かない）で会話の字が大きくなり、`document.documentElement.style.getPropertyValue('--note-zoom')` が `1.1` になる。
 - **証拠.** 各段の `screenshot` を `$E/study-screen-*.png` に残す。
 

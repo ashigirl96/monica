@@ -141,6 +141,7 @@ export const shape = (event: StudyWatchEvent) => {
   if (event.type === 'message') return `${event.message.kind}:${event.message.text}`
   if (event.type === 'delta') return `delta:${event.text}`
   if (event.type === 'turn-ended') return `turn-ended:${event.error}`
+  if (event.type === 'conversation-ended') return `conversation-ended:${event.conversationId}`
   return event.type
 }
 

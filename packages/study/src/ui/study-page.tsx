@@ -19,7 +19,13 @@ import {
   useSelectedConversation,
 } from './conversation-picker.tsx'
 import { createConversationStore } from './conversation-store.ts'
-import { currentTutor, MessageView, PermissionPrompt, TutorText } from './messages.tsx'
+import {
+  currentTutor,
+  MessageView,
+  PermissionPrompt,
+  ReflectButton,
+  TutorText,
+} from './messages.tsx'
 import { useTutorChoice } from './model-picker.tsx'
 import { studiesKey } from './new-conversation.tsx'
 import { StudyMenu } from './remove-study.tsx'
@@ -84,7 +90,7 @@ export function StudyPage({ id }: { id: string }) {
           }
           onNew={() => {
             navigate(conversationPath(id, null))
-            void store.end()
+            void store.end(false)
           }}
         />
         {study && <LinkedRepos id={id} linked={snapshot.repos} onChanged={() => store.reload()} />}
@@ -112,6 +118,7 @@ export function StudyPage({ id }: { id: string }) {
                   permission === null && <ThinkingIndicator />
                 ))}
               <FailureLine>{turnError}</FailureLine>
+              {snapshot.canReflect && <ReflectButton onClick={() => void store.end(true)} />}
             </div>
           </div>
           <div className="mx-auto flex w-full max-w-2xl flex-col gap-1.5 px-4 pb-4">
