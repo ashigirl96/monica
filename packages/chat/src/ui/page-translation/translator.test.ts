@@ -327,7 +327,9 @@ test('a paragraph longer than the Backend takes is left out, and no chunk holds 
 })
 
 test('an answer that cannot be written reports a failure instead of leaving the chunk in flight', async () => {
-  const { translator, states, settle } = start(() => ({ segments: null }) as unknown as SegmentsReply)
+  const { translator, states, settle } = start(
+    () => ({ segments: null }) as unknown as SegmentsReply,
+  )
   const settled = settle()
 
   translator.toggle()
