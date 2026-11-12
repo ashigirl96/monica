@@ -88,7 +88,7 @@ if (values.stage) {
 // pid は再利用されうるので、起動のたびに変わる token で新しい Backend を見分ける。
 const before = (await backend())?.token
 
-// 起きている Monica は入れ替えの途中の .app を読むので、先に終了させる。Tab の shell と claude は ptyd が持ち続ける。
+// 起きている Monica は入れ替えの途中の .app を読むので、先に終了させる。
 if (await running()) {
   await $`osascript -e 'tell application id "com.ashigirl96.monica" to quit'`.nothrow().quiet()
   for (let i = 0; i < 100 && (await running()); i++) await Bun.sleep(100)
@@ -96,6 +96,9 @@ if (await running()) {
     rmSync(stagingDir, { recursive: true, force: true })
     fail('Monica が終了しません。⌘Q で終了してから流してください')
   }
+  // macOS は終了の数十 ms 後に Background Task Management に .app の署名を読ませ、削除が先に始まって読めないと
+  // ptyd と Tab の shell・claude ごと止めるので、その確認を十分に越えるまで消さない。
+  await Bun.sleep(1000)
 }
 
 rmSync(installed, { recursive: true, force: true })
