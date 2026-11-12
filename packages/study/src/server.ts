@@ -14,9 +14,10 @@ export const router = os.router({
   start: os.start.handler(({ context }) => internals(context.studyLedger).start()),
   list: os.list.handler(({ context }) => internals(context.studyLedger).list()),
   get: os.get.handler(({ context, input }) => internals(context.studyLedger).get(input.id)),
-  send: os.send.handler(({ context, input }) =>
-    internals(context.studyLedger).send(input.id, input.text),
+  send: os.send.handler(({ context, input: { id, text, ...choice } }) =>
+    internals(context.studyLedger).send(id, text, choice),
   ),
+  models: os.models.handler(({ context }) => internals(context.studyLedger).models()),
   conversation: {
     end: os.conversation.end.handler(({ context, input }) =>
       internals(context.studyLedger).endConversation(input.id),

@@ -21,6 +21,7 @@ import type {
 } from '@anthropic-ai/claude-agent-sdk'
 
 import { type AskUser, tutorBox } from './box.ts'
+import type { Choice, Model } from './contract.ts'
 import { playgroundEnv } from './playground.ts'
 
 export type Query = typeof sdkQuery
@@ -51,6 +52,8 @@ export type Claude = {
   kill(): void
   /** process が居なくなると解ける。起こす前なら解けている。 */
   exited(): Promise<void>
+  /** 次の turn を choice の model と effort で答えさせる。今と同じなら何もしない。 */
+  choose(choice: Choice): Promise<void>
 }
 
 export type ClaudeDeps = {
@@ -105,11 +108,11 @@ function pathOutsideHome(): string {
     .join(':')
 }
 
-function claudeEnv(envFile: string): { [key: string]: string } {
+function claudeEnv(envFile?: string): { [key: string]: string } {
   const env: { [key: string]: string } = {
     ...ADDED_ENV,
     PATH: pathOutsideHome(),
-    CLAUDE_ENV_FILE: envFile,
+    ...(envFile && { CLAUDE_ENV_FILE: envFile }),
   }
   for (const key of PASSED_ENV_KEYS) {
     const value = process.env[key]
@@ -141,6 +144,7 @@ function inbox() {
 export function wakeClaude(
   deps: ClaudeDeps,
   study: { id: string; dir: string; sessionId: string | null },
+  choice: Choice = {},
 ): Claude {
   const teaching = readFileSync(join(deps.tutorDir, 'TEACHING.md'), 'utf8')
   const learningPreference = join(deps.learningPreferenceDir, 'LEARNING-PREFERENCE.md')
@@ -171,6 +175,8 @@ export function wakeClaude(
     skills,
     settingSources: [],
     includePartialMessages: true,
+    ...(choice.model && { model: choice.model }),
+    ...(choice.effort && { effort: choice.effort }),
     ...(deps.claudePath && { pathToClaudeCodeExecutable: deps.claudePath }),
     ...(study.sessionId && { resume: study.sessionId }),
     env: { ...claudeEnv(envFile), ...box.env },
@@ -197,6 +203,7 @@ export function wakeClaude(
   }
   const input = inbox()
   const messages = deps.query({ prompt: input, options })
+  let chosen = choice
 
   return {
     messages,
@@ -225,5 +232,47 @@ export function wakeClaude(
       } catch {}
     },
     exited: () => exited,
+    async choose(next) {
+      if (next.model !== chosen.model) await messages.setModel(next.model)
+      // null は model の既定の effort に戻す。
+      if (next.effort !== chosen.effort) {
+        await messages.applyFlagSettings({ effortLevel: next.effort ?? null })
+      }
+      chosen = next
+    },
+  }
+}
+
+/** Tutor と同じ env の claude を起こして model の一覧を訊き、閉じる。 */
+export async function readModels(deps: Pick<ClaudeDeps, 'query' | 'claudePath'>): Promise<Model[]> {
+  const { promise: ended, resolve: end } = Promise.withResolvers<void>()
+  // 一覧を受けるまで claude の stdin を開けておく。
+  const nothing: AsyncIterable<SDKUserMessage> = {
+    [Symbol.asyncIterator]: () => ({
+      next: () => ended.then(() => ({ done: true, value: undefined })),
+    }),
+  }
+  const q = deps.query({
+    prompt: nothing,
+    options: {
+      settingSources: [],
+      env: claudeEnv(),
+      ...(deps.claudePath && { pathToClaudeCodeExecutable: deps.claudePath }),
+    },
+  })
+  try {
+    const found = await q.supportedModels()
+    return found.map(
+      ({ value, displayName, description, supportsEffort, supportedEffortLevels }) => ({
+        value,
+        displayName,
+        description,
+        ...(supportsEffort !== undefined && { supportsEffort }),
+        ...(supportedEffortLevels && { supportedEffortLevels }),
+      }),
+    )
+  } finally {
+    end()
+    q.close()
   }
 }

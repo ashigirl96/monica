@@ -1,6 +1,6 @@
 import { ORPCError } from '@orpc/client'
 
-import type { StudyMessage, StudyWatchEvent } from '../contract.ts'
+import type { Choice, StudyMessage, StudyWatchEvent } from '../contract.ts'
 import { writtenArtifact } from './artifact-link.ts'
 import { failureLine, type StudyClient } from './client.ts'
 
@@ -215,11 +215,11 @@ export function createConversationStore(
       }
     },
     /** 走っている turn の間や送っている途中は送らずに false を返す。 */
-    async send(text: string): Promise<boolean> {
+    async send(text: string, choice: Choice = {}): Promise<boolean> {
       if (snapshot.running || sending) return false
       sending = true
       try {
-        const { message } = await client.send({ id, text })
+        const { message } = await client.send({ ...choice, id, text })
         put(message)
         conversationId = message.conversationId
         set({ turnError: null, sendError: null })

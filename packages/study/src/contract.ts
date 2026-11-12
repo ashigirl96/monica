@@ -90,6 +90,32 @@ export const StudyWatchEventSchema = z.discriminatedUnion('type', [
 
 export type StudyWatchEvent = z.infer<typeof StudyWatchEventSchema>
 
+// chat と同じ形。study は chat を import しないので写す。
+export const EffortSchema = z.enum(['low', 'medium', 'high', 'xhigh', 'max'])
+
+export type Effort = z.infer<typeof EffortSchema>
+
+export const ChoiceSchema = z.object({
+  model: z
+    .string()
+    .min(1)
+    .optional()
+    .describe('the value of a model from models; the default model of claude when left out'),
+  effort: EffortSchema.optional().describe('the default effort of the model when left out'),
+})
+
+export type Choice = z.infer<typeof ChoiceSchema>
+
+export const ModelSchema = z.object({
+  value: z.string().describe('what to pass as the model of send'),
+  displayName: z.string(),
+  description: z.string(),
+  supportsEffort: z.boolean().optional(),
+  supportedEffortLevels: z.array(EffortSchema).optional(),
+})
+
+export type Model = z.infer<typeof ModelSchema>
+
 const ArtifactPathSchema = z.string().min(1).describe('a path relative to the Study dir')
 
 export const contract = {
@@ -154,10 +180,17 @@ export const contract = {
   send: meta
     .meta({
       description:
-        'Store what the user said and start a turn of the Tutor; returns the stored row without waiting for the turn, whose answer comes through watch',
+        'Store what the user said and start a turn of the Tutor on the model and effort; returns the stored row without waiting for the turn, whose answer comes through watch',
     })
-    .input(z.object({ id: StudyIdSchema, text: z.string().min(1) }))
+    .input(ChoiceSchema.extend({ id: StudyIdSchema, text: z.string().min(1) }))
     .output(z.object({ message: StudyMessageSchema })),
+  models: meta
+    .meta({
+      description:
+        'List the models that claude offers the Tutor, each with the effort levels it supports; the Backend reads them once and keeps them',
+    })
+    .input(z.object({}))
+    .output(z.array(ModelSchema)),
   watch: meta
     .meta({
       description:
