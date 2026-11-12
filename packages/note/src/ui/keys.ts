@@ -15,6 +15,7 @@ export type NoteCommand =
   | 'goDaily'
   | 'goEssays'
   | 'goRepos'
+  | 'goRailItem'
   | 'cycleAmbient'
   | 'toggleDensity'
   | 'zoomIn'
@@ -70,6 +71,7 @@ export const NOTE_KEYS: NoteKeyRow[] = [
   { mods: 'ctrl', codes: ['Digit1'], command: 'goDaily' },
   { mods: 'ctrl', codes: ['Digit2'], command: 'goEssays' },
   { mods: 'ctrl', codes: ['Digit3'], command: 'goRepos' },
+  { mods: 'ctrl', codes: ['Digit4'], command: 'goRailItem' },
   // ambient は文書に触らないので、変換中に奪っても害がない。macOS の ⌥; の key は "…" なので code で見る。
   { mods: 'altAnyShift', codes: ['Semicolon'], command: 'cycleAmbient', composing: true },
   alt('KeyD', 'toggleDensity'),

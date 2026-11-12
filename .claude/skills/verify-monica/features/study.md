@@ -24,7 +24,7 @@
 
 ## How to get to it (user POV)
 
-- web の rail の Study（`/studies`）。新しい会話の画面で打つと Study が始まり、`/studies/<Study の id>` の画面で Tutor と話す。
+- web の rail の Study（⌃4、`/studies`）。新しい会話の画面で打つと Study が始まり、`/studies/<Study の id>` の画面で Tutor と話す。
 - 画面を通さずに確かめるときは、ブラウザの口（`MONICA_BROWSER_PORT`）の `study.*` の RPC を呼ぶ。
 
 ## Driving it with headless の Backend・Vite・agent-browser

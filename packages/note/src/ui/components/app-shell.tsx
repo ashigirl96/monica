@@ -13,25 +13,28 @@ import { useNoteKeys } from './use-note-keys.ts'
 const NAV_TARGETS = { goDaily: DAILY_PATH, goEssays: ESSAYS_PATH, goRepos: REPOS_PATH }
 
 /** tooltip の "(⌃1)" はキーの表から導出する。手書きすると表と食い違っても誰も気づけない */
+function shortcutOf(command: string): string {
+  const code = NOTE_KEYS.find((row) => row.command === command)?.codes?.[0] ?? ''
+  return `⌃${code.replace('Digit', '')}`
+}
+
 const SHORTCUT_LABELS: Record<string, string> = Object.fromEntries(
-  Object.entries(NAV_TARGETS).map(([command, to]) => {
-    const code = NOTE_KEYS.find((row) => row.command === command)?.codes?.[0] ?? ''
-    return [to, `⌃${code.replace('Digit', '')}`]
-  }),
+  Object.entries(NAV_TARGETS).map(([command, to]) => [to, shortcutOf(command)]),
 )
 
 function RailLink({
   to,
   label,
   active,
+  shortcut = SHORTCUT_LABELS[to],
   children,
 }: {
   to: string
   label: string
   active: boolean
+  shortcut?: string
   children: ReactNode
 }) {
-  const shortcut = SHORTCUT_LABELS[to]
   return (
     <a
       href={to}
@@ -136,6 +139,7 @@ export function AppShell({
     goDaily: () => navigate(NAV_TARGETS.goDaily),
     goEssays: () => navigate(NAV_TARGETS.goEssays),
     goRepos: () => navigate(NAV_TARGETS.goRepos),
+    ...(railItem && { goRailItem: () => navigate(railItem.to) }),
   })
 
   return (
@@ -184,7 +188,12 @@ export function AppShell({
           </svg>
         </RailLink>
         {railItem && (
-          <RailLink to={railItem.to} label={railItem.label} active={onSlotPage}>
+          <RailLink
+            to={railItem.to}
+            label={railItem.label}
+            active={onSlotPage}
+            shortcut={shortcutOf('goRailItem')}
+          >
             {railItem.icon}
           </RailLink>
         )}
