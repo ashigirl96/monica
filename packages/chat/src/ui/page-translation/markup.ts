@@ -129,7 +129,19 @@ export function currentText(element: Element): string {
 
 const tagOf = (id: number, atomic: boolean) => (atomic ? `<x${id}/>` : `<g${id}>`)
 
-type Frame = { id: number | undefined; kids: TranslatedNode[] }
+type Frame = { id: number | undefined; element: Element | undefined; kids: TranslatedNode[] }
+
+// 印の付いた要素ごとに、それを包む印の付いた要素。訳文が入れ子を変えると、書き戻しで祖先を子孫に入れることになる。
+function enclosingOf(map: Element[]): Map<Element, Element | undefined> {
+  const marked = new Set(map)
+  const enclosing = new Map<Element, Element | undefined>()
+  for (const element of map) {
+    let up = element.parentElement
+    while (up && !marked.has(up)) up = up.parentElement
+    enclosing.set(element, up ?? undefined)
+  }
+  return enclosing
+}
 
 /**
  * 訳文を木にする。印がそろい入れ子が閉じていなければ error を返す。
@@ -140,7 +152,8 @@ export function parseTranslation(
   map: Element[],
   { lenient = false }: { lenient?: boolean } = {},
 ): { kids: TranslatedNode[] } | { error: string } {
-  const root: Frame = { id: undefined, kids: [] }
+  const root: Frame = { id: undefined, element: undefined, kids: [] }
+  const enclosing = enclosingOf(map)
   const stack: Frame[] = []
   let top = root
   const seen = new Set<number>()
@@ -172,12 +185,14 @@ export function parseTranslation(
       }
       return { error: `repeated ${tagOf(id, kind === 'x')}` }
     }
+    if (enclosing.get(element) !== top.element)
+      return { error: `misnested ${tagOf(id, kind === 'x')}` }
     seen.add(id)
     const node = { element, kids: [] }
     top.kids.push(node)
     if (kind === 'g') {
       stack.push(top)
-      top = { id, kids: node.kids }
+      top = { id, element, kids: node.kids }
     }
   }
   if (top !== root) return { error: `unclosed <g${top.id}>` }
@@ -188,10 +203,17 @@ export function parseTranslation(
 }
 
 const wrote = new WeakMap<Text, string>()
+const arranged = new WeakMap<Element, ChildNode[]>()
+
+const sameNodes = (a: ChildNode[], b: ChildNode[]) =>
+  a.length === b.length && a.every((node, i) => node === b[i])
 
 // React が覚えている node を消すと後の描き直しで removeChild が落ちるので、元の node は消さずに、文字の差し替えと並べ替えだけをする。
 function write(parent: Element, own: ChildNode[], kids: TranslatedNode[], originals: Originals) {
-  if (!originals.has(parent)) originals.set(parent, [...parent.childNodes])
+  // 前に書いた後でページが子を入れ替えていたら、その並びを原文に取り直す。
+  const left = arranged.get(parent)
+  const children = [...parent.childNodes]
+  if (!originals.has(parent) || !left || !sameNodes(left, children)) originals.set(parent, children)
   const texts = own.filter(isText)
   // 前に書いた後でページが同じ text node を書き換えていたら、その文を原文に取り直す。
   for (const text of texts) {
@@ -226,6 +248,7 @@ function write(parent: Element, own: ChildNode[], kids: TranslatedNode[], origin
   }
   const anchor = own.at(-1)?.nextSibling ?? null
   for (const node of order) parent.insertBefore(node, anchor)
+  arranged.set(parent, [...parent.childNodes])
 }
 
 export function writeTranslation(

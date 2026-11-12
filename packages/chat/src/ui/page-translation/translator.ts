@@ -152,15 +152,27 @@ export function createPageTranslator(deps: {
     while (inFlight < MAX_IN_FLIGHT && pending.length > 0) {
       const chunk = takeChunk(pending)
       inFlight++
-      void send(chunk, session).then((stale) => {
-        inFlight--
-        for (const { block } of chunk)
-          if (!pending.some((p) => p.block === block)) queued.delete(block.element)
-        // 送っている間に書き換わった段落は、見張りが見ても送り待ちとして飛ばしたので、ここで見直す。
-        if (stale && active) scan()
-        pump()
-        settle()
-      })
+      const sent = session
+      void send(chunk, sent)
+        // 書き戻しが投げても、送信中の数と送り待ちの印を残さない。
+        .catch((error: unknown) => {
+          if (sent !== session) return false
+          failed = true
+          deps.report({
+            kind: 'failed',
+            reason: error instanceof Error ? error.message : String(error),
+          })
+          return false
+        })
+        .then((stale) => {
+          inFlight--
+          for (const { block } of chunk)
+            if (!pending.some((p) => p.block === block)) queued.delete(block.element)
+          // 送っている間に書き換わった段落は、見張りが見ても送り待ちとして飛ばしたので、ここで見直す。
+          if (stale && active) scan()
+          pump()
+          settle()
+        })
     }
   }
 

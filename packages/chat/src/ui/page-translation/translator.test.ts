@@ -325,3 +325,13 @@ test('a paragraph longer than the Backend takes is left out, and no chunk holds 
   expect(texts(sent).filter((text) => text === 'Kelp')).toHaveLength(250)
   for (const chunk of sent) expect(chunk.length).toBeLessThanOrEqual(200)
 })
+
+test('an answer that cannot be written reports a failure instead of leaving the chunk in flight', async () => {
+  const { translator, states, settle } = start(() => ({ segments: null }) as unknown as SegmentsReply)
+  const settled = settle()
+
+  translator.toggle()
+  await settled
+
+  expect(states.at(-1)).toMatchObject({ kind: 'failed', reason: expect.any(String) })
+})

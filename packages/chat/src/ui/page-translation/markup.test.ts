@@ -143,3 +143,35 @@ test('the translation of an item with a nested list stays before that list, thou
 
   expect(li.innerHTML.replace(/\s+/g, ' ')).toBe('外の<em>項目</em><ul><li>Inner item</li></ul> ')
 })
+
+test('a translation that nests the tags the other way round from the page is refused', () => {
+  const { p } = paragraph('Read <a href="#">the <b>guide</b></a> first.')
+  const { map } = blockOf(p)!
+
+  expect(parseTranslation('まず<g1><g0>案内</g0></g1>を読む。', map)).toEqual({
+    error: 'misnested <g1>',
+  })
+  expect(parseTranslation('<g0>案内</g0>と<g1>本</g1>を読む。', map)).toEqual({
+    error: 'misnested <g1>',
+  })
+})
+
+test('children that the page swapped after the translation was written go back in the order the page left them', () => {
+  const { document, p } = paragraph('Read <b>old</b> now')
+  const originals = new Map()
+  const first = blockOf(p)!
+  const parsedFirst = parseTranslation('<g0>古い</g0>のを今読む', first.map)
+  if ('error' in parsedFirst) throw new Error(parsedFirst.error)
+  writeTranslation(first, parsedFirst.kids, originals)
+
+  const b = document.createElement('b')
+  b.textContent = 'new'
+  p.replaceChildren(document.createTextNode('Read '), b, document.createTextNode(' now'))
+  const second = blockOf(p)!
+  const parsed = parseTranslation('<g0>新しい</g0>のを今読む', second.map)
+  if ('error' in parsed) throw new Error(parsed.error)
+  writeTranslation(second, parsed.kids, originals)
+  restoreOriginals(originals)
+
+  expect(p.innerHTML).toBe('Read <b>new</b> now')
+})
