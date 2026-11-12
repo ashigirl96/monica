@@ -55,23 +55,27 @@ const conversationJob = (fixture: ReturnType<typeof setup>) => {
   return job
 }
 
-test('the system Job study.conversation-end runs every 5 minutes and ends a Study Conversation an hour after its last row with a reflection turn', async () => {
+test('the system Job study.conversation-end runs every 5 minutes and ends a Study Conversation an hour after its last row without a reflection', async () => {
   clock(T0)
   const fixture = await talked()
-  const { client, watch, claude, id } = fixture
+  const { client, watch, claude, id, home } = fixture
+  const logFile = join(home, 'studies', id, 'log.md')
+  writeFileSync(logFile, '# Log\n')
   const job = conversationJob(fixture)
   expect(job.every).toBe(5 * 60_000)
 
   setSystemTime(at(60))
   await job.run()
 
-  await watch.until((event) => event.type === 'message' && event.message.kind === 'reflection')
-  expect(claude.prompts.at(-1)).toContain('This Study Conversation is ending.')
-  claude.emit(said('Wrote LR-0001.\nUpdated the log.'), result())
-  await until(() => turnEnds(watch.events) === 2)
+  await watch.until((event) => event.type === 'conversation-ended')
+  await claude.exited
   const [conversation] = (await client.get({ id })).conversations
   expect(conversation!.endedAt).not.toBeNull()
-  expect(conversation!.summary).toBe('Wrote LR-0001.')
+  expect(conversation!.summary).toBeNull()
+  expect(conversation!.messages.map((m) => m.kind)).toEqual(['user', 'tutor'])
+  expect(claude.prompts).toHaveLength(1)
+  expect(watch.events.filter((event) => event.type === 'turn-started')).toHaveLength(1)
+  expect(readFileSync(logFile, 'utf8')).toBe('# Log\n')
 })
 
 test('a Study Conversation whose last row is 59 minutes old stays', async () => {
@@ -118,7 +122,7 @@ test('the idle conversation Job skips a removal that finishes before its refusal
 
 test('a reflection left by a stopped Backend is started again', async () => {
   const before = await talked()
-  await before.client.conversation.end({ id: before.id })
+  await before.client.conversation.end({ id: before.id, reflect: true })
   await before.watch.until(
     (event) => event.type === 'message' && event.message.kind === 'reflection',
   )
@@ -143,24 +147,25 @@ test('conversation.end returns once the reflection turn has started, and watch s
   const { client, watch, claude, id } = await talked()
   const conversationId = (await client.get({ id })).conversations[0]!.id
 
-  expect(await client.conversation.end({ id })).toEqual({ conversationId })
+  expect(await client.conversation.end({ id, reflect: true })).toEqual({ conversationId })
   expect((await client.get({ id })).running).toBe(true)
 
   claude.emit(toolUse('t1', 'Write', { file_path: 'log.md' }), toolResult('t1'), said('Done.'))
   claude.emit(result())
   await until(() => turnEnds(watch.events) === 2)
-  expect(watch.events.slice(-5).map(shape)).toEqual([
+  expect(watch.events.slice(-6).map(shape)).toEqual([
     'turn-started',
     'reflection:',
     'tool:log.md',
     'tutor:Done.',
+    `conversation-ended:${conversationId}`,
     'turn-ended:null',
   ])
 })
 
 test('the reflection turn writes the summary from the first line of the report, and the next send starts a new session', async () => {
   const { client, watch, claude, fake, id } = await talked()
-  await client.conversation.end({ id })
+  await client.conversation.end({ id, reflect: true })
   claude.emit(said('Looking back.'), said('\nRecorded two terms.\nAnd one LR.'), result())
   await until(() => turnEnds(watch.events) === 2)
   await claude.exited
@@ -190,6 +195,52 @@ test('conversation.end is refused with CONFLICT while a turn runs, and NOT_FOUND
   expect((await client.get({ id })).conversations[0]!.messages.map((m) => m.kind)).toEqual(['user'])
 })
 
+test('conversation.end without reflect ends the Study Conversation at once without a turn, and the next send starts a new session', async () => {
+  const { client, watch, claude, fake, id, home } = await talked()
+  const logFile = join(home, 'studies', id, 'log.md')
+  writeFileSync(logFile, '# Log\n')
+  const conversationId = (await client.get({ id })).conversations[0]!.id
+
+  expect(await client.conversation.end({ id })).toEqual({ conversationId })
+
+  const study = await client.get({ id })
+  expect(study.running).toBe(false)
+  expect(study.conversations[0]).toMatchObject({ summary: null })
+  expect(study.conversations[0]!.endedAt).not.toBeNull()
+  expect(study.conversations[0]!.messages.map((m) => m.kind)).toEqual(['user', 'tutor'])
+  await claude.exited
+  expect(claude.prompts).toHaveLength(1)
+  expect(watch.events.filter((event) => event.type === 'turn-started')).toHaveLength(1)
+  expect(readFileSync(logFile, 'utf8')).toBe('# Log\n')
+
+  await client.send({ id, text: 'new topic' })
+  await until(() => fake.claudes.length === 2)
+  expect(fake.claudes[1]!.options.resume).toBeUndefined()
+  expect((await client.get({ id })).conversations.map((c) => c.endedAt === null)).toEqual([
+    true,
+    false,
+  ])
+})
+
+test('conversation.end without reflect is not refused while four Studies are in a turn, and with reflect it is TOO_MANY_REQUESTS', async () => {
+  const fixture = await talked()
+  const { client, fake, id } = fixture
+  for (const text of ['a', 'b', 'c', 'd']) {
+    const other = await client.start({})
+    await client.send({ id: other.id, text })
+  }
+  await until(() => fake.claudes.length === 5)
+  await fixture.claude.exited
+
+  await expect(client.conversation.end({ id, reflect: true })).rejects.toMatchObject({
+    code: 'TOO_MANY_REQUESTS',
+  })
+  await client.conversation.end({ id })
+
+  expect((await client.get({ id })).conversations[0]!.endedAt).not.toBeNull()
+  expect(fake.claudes).toHaveLength(5)
+})
+
 function askOutside(claude: FakeClaude) {
   return claude.options.canUseTool!(
     'Bash',
@@ -209,7 +260,7 @@ test('ending a Study Conversation denies its pending permission, interrupts the 
   const asked = askOutside(claude)
   await watch.until((event) => event.type === 'message' && event.message.kind === 'permission')
 
-  await client.conversation.end({ id })
+  await client.conversation.end({ id, reflect: true })
 
   expect(await asked).toMatchObject({ behavior: 'deny' })
   expect(claude.interrupts).toBe(1)
@@ -225,6 +276,29 @@ test('ending a Study Conversation denies its pending permission, interrupts the 
   ])
 })
 
+test('ending a Study Conversation without reflect denies its pending permission, interrupts the turn and ends it without a reflection', async () => {
+  const { client, fake } = setup()
+  const { id } = await client.start({})
+  const watch = await watching(client, id)
+  await client.send({ id, text: 'run docker ps' })
+  await until(() => fake.claudes.length === 1)
+  const claude = fake.claudes[0]!
+  claude.emit(init())
+  const asked = askOutside(claude)
+  await watch.until((event) => event.type === 'message' && event.message.kind === 'permission')
+
+  await client.conversation.end({ id })
+
+  expect(await asked).toMatchObject({ behavior: 'deny' })
+  expect(claude.interrupts).toBe(1)
+  await claude.exited
+  const [conversation] = (await client.get({ id })).conversations
+  expect(conversation!.endedAt).not.toBeNull()
+  expect(conversation!.summary).toBeNull()
+  expect(conversation!.messages.map((m) => m.kind)).not.toContain('reflection')
+  expect(watch.events.filter((event) => event.type === 'turn-started')).toHaveLength(1)
+})
+
 const NO_RECORD_SHELL =
   'echo "No conversation found with session ID: session-a" >&2; touch stderr-written; exit 1'
 
@@ -237,7 +311,7 @@ test('a Study Conversation whose SDK record is gone ends without a reflection, w
   after.fake.shell = NO_RECORD_SHELL
   const watch = await watching(after.client, before.id)
 
-  await after.client.conversation.end({ id: before.id })
+  await after.client.conversation.end({ id: before.id, reflect: true })
   await watch.ended()
 
   expect(watch.events.at(-1)).toMatchObject({ type: 'turn-ended' })
@@ -274,7 +348,7 @@ test('a send whose resume finds no SDK record ends that Study Conversation, and 
 test('a reflection turn that fails ends the Study Conversation and is not tried again', async () => {
   const fixture = await talked()
   const { client, watch, claude, id, home } = fixture
-  await client.conversation.end({ id })
+  await client.conversation.end({ id, reflect: true })
   claude.emit(result('overloaded'))
   await until(() => turnEnds(watch.events) === 2)
 
@@ -295,7 +369,7 @@ test('log.md that the Tutor made a symlink is not followed', async () => {
   const outside = join(home, 'outside.md')
   writeFileSync(outside, 'keep\n')
   symlinkSync(outside, join(realpathSync(join(home, 'studies', id)), 'log.md'))
-  await client.conversation.end({ id })
+  await client.conversation.end({ id, reflect: true })
   claude.emit(result('overloaded'))
   await until(() => turnEnds(watch.events) === 2)
 
@@ -320,7 +394,7 @@ test('the reflection turn lets Read, Write and Edit through and denies Bash, Web
   const hook = preToolUse(claude)
   expect(await decide(hook, 'Bash', { command: 'ls' })).toBeUndefined()
 
-  await client.conversation.end({ id })
+  await client.conversation.end({ id, reflect: true })
 
   expect(await decide(hook, 'Read', { file_path: 'MISSION.md' })).toBe('allow')
   expect(await decide(hook, 'Write', { file_path: 'log.md' })).toBe('allow')

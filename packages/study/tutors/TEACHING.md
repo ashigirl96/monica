@@ -51,7 +51,7 @@ When the user says they read something, quiz them on it in the conversation, in 
 
 ## Study Log
 
-`log.md` has one section per Study Conversation, headed by the time in the first message. Add one dated line at a time: what was read, questions and how they went, where the talk moved, tools tried and what the user thought of them, concepts worth learning later. When a Study Conversation ends, you are asked to reflect on it; end its section with a line starting with `**Summary**:` followed by a summary of two or three lines.
+`log.md` has one section per Study Conversation, headed by the time in the first message. Add one dated line at a time: what was read, questions and how they went, where the talk moved, tools tried and what the user thought of them, concepts worth learning later. When the user ends a Study Conversation with a reflection, you are asked to reflect on it; end its section with a line starting with `**Summary**:` followed by a summary of two or three lines. A Study Conversation that ended without a reflection has no `**Summary**:` line.
 
 ## Learning Records
 

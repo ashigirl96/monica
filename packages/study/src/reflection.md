@@ -1,4 +1,4 @@
-This Study Conversation is ending. The user is not here, so do not ask them anything, and use only Read, Write and Edit.
+The user asked to end this Study Conversation with a reflection. Do not ask them anything, and use only Read, Write and Edit.
 
 Look back over this Study Conversation and:
 

@@ -79,6 +79,7 @@ export const StudyWatchEventSchema = z.discriminatedUnion('type', [
   z.object({ type: z.literal('turn-started'), conversationId: z.string() }),
   z.object({ type: z.literal('message'), message: StudyMessageSchema }),
   z.object({ type: z.literal('delta'), text: z.string() }),
+  z.object({ type: z.literal('conversation-ended'), conversationId: z.string() }),
   z.object({
     type: z.literal('turn-ended'),
     error: z
@@ -169,9 +170,17 @@ export const contract = {
     end: meta
       .meta({
         description:
-          'End the ongoing Study Conversation of a Study: deny its pending permission, then start the reflection turn and return without waiting for it, whose rows come through watch',
+          'End the ongoing Study Conversation of a Study: deny its pending permission and stop its turn; with reflect, start the reflection turn and return without waiting for it, whose rows come through watch',
       })
-      .input(z.object({ id: StudyIdSchema }))
+      .input(
+        z.object({
+          id: StudyIdSchema,
+          reflect: z
+            .boolean()
+            .optional()
+            .describe('have the Tutor reflect on it before it ends; false when left out'),
+        }),
+      )
       .output(z.object({ conversationId: z.string() })),
   },
   remove: meta

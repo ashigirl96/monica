@@ -85,7 +85,7 @@ export function ConversationPicker({
               onNew()
             }}
           >
-            新しい会話を始める（今の会話は終わる）
+            新しい会話を始める（今の会話は振り返らずに終わる）
           </PopoverMenuItem>
         </PopoverMenu>
       )}

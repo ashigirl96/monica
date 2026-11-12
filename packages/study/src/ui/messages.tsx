@@ -126,6 +126,22 @@ export function MessageView({
   }
 }
 
+/** 押すと届く「振り返り」の区切りと同じ組み方で、線だけを点線にする。 */
+export function ReflectButton({ onClick }: { onClick: () => void }) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      title="Tutor が学習記録と Study Log を書き足して、この会話を終える"
+      className="group flex items-center gap-3 rounded-md py-1 text-[12px] text-muted-foreground outline-none hover:text-foreground focus-visible:text-foreground focus-visible:ring-2 focus-visible:ring-ring"
+    >
+      <span className="flex-1 border-t border-dashed border-foreground/25 group-hover:border-foreground/40 group-focus-visible:border-foreground/40" />
+      振り返って終える
+      <span className="flex-1 border-t border-dashed border-foreground/25 group-hover:border-foreground/40 group-focus-visible:border-foreground/40" />
+    </button>
+  )
+}
+
 // 見た目を偽る bidi の制御・幅ゼロの文字（Cf）と、改行と tab 以外の制御文字（Cc）。
 const HIDDEN_CHARS = /(?![\n\t])[\p{Cc}\p{Cf}]/gu
 

@@ -44,7 +44,7 @@ export type StudyLedger = {
   stop(): void
   /** STALE_MS より前に最後の活動があった Study の Playground を消す。 */
   cleanPlaygrounds(): Promise<void>
-  /** 最後の行から 1 時間たった続いている会話と、振り返りの途中で止まった会話を、振り返らせて終える。 */
+  /** 最後の行から 1 時間たった続いている会話を振り返らずに終え、振り返りの途中で止まった会話は振り返らせて終える。 */
   endIdleConversations(): Promise<void>
   /** 捨て場の Study のうち行の無いものを、Playground ごと消す。 */
   sweepTrash(): Promise<void>
@@ -448,10 +448,13 @@ function makeLedger(deps: {
 
   /** 会話を終え、claude を閉じる。振り返らずに終えた時は、その理由を log.md の末尾にも書く。 */
   function finish(studyId: string, conversationId: string, ending: string | null, logged: boolean) {
-    db.update(studyConversation)
+    const ended = db
+      .update(studyConversation)
       .set({ endedAt: new Date(), summary: ending })
       .where(and(eq(studyConversation.id, conversationId), isNull(studyConversation.endedAt)))
-      .run()
+      .returning({ id: studyConversation.id })
+      .get()
+    if (ended) publish(studyId, { type: 'conversation-ended', conversationId })
     claudes.get(studyId)?.kill()
     claudes.delete(studyId)
     if (!logged || ending === null) return
@@ -622,8 +625,21 @@ function makeLedger(deps: {
     void runTurn(studyId, conversation, reflectionRequest, turn)
   }
 
-  /** pending の許可を断って turn を止め、その終わりを待ってから振り返りの turn を始める。 */
-  async function endConversation(studyId: string, conversationId: string, idle: boolean) {
+  /** 会話を振り返らずに終える。止めた turn が SDK の記録の無さで先に終えていれば、finish は何も書き換えない。 */
+  function endWithoutReflection(studyId: string, conversationId: string) {
+    if (turns.has(studyId)) {
+      throw new ORPCError('CONFLICT', { message: `a turn is already running in ${studyId}` })
+    }
+    finish(studyId, conversationId, null, false)
+  }
+
+  /** pending の許可を断って turn を止め、その終わりを待ってから、振り返りの turn を始めるか振り返らずに終える。 */
+  async function endConversation(
+    studyId: string,
+    conversationId: string,
+    idle: boolean,
+    reflect: boolean,
+  ) {
     const pending = db
       .select({ id: studyMessage.id })
       .from(studyMessage)
@@ -638,7 +654,7 @@ function makeLedger(deps: {
     if (turn && pending.length === 0) {
       throw new ORPCError('CONFLICT', { message: `a turn is already running in ${studyId}` })
     }
-    refuseWhenFull(studyId)
+    if (reflect) refuseWhenFull(studyId)
     if (turn) {
       for (const row of pending) settle(row.id, false)
       try {
@@ -649,7 +665,8 @@ function makeLedger(deps: {
       await turn.ended
     }
     // 止めた turn の Tutor の行で最後の行が新しくなるので、止めた後は無発言を見直さない。
-    startReflection(studyId, conversationId, idle && !turn)
+    if (reflect) startReflection(studyId, conversationId, idle && !turn)
+    else endWithoutReflection(studyId, conversationId)
   }
 
   function ongoingOf(studyId: string) {
@@ -817,12 +834,12 @@ function makeLedger(deps: {
       }
     },
 
-    async endConversation(id: string): Promise<{ conversationId: string }> {
+    async endConversation(id: string, reflect: boolean): Promise<{ conversationId: string }> {
       mustExist(id)
       const ongoing = ongoingOf(id)
       if (!ongoing)
         throw new ORPCError('NOT_FOUND', { message: `no ongoing Study Conversation in ${id}` })
-      await endConversation(id, ongoing.id, false)
+      await endConversation(id, ongoing.id, false, reflect)
       return { conversationId: ongoing.id }
     },
 
@@ -983,7 +1000,9 @@ function makeLedger(deps: {
       for (const conversation of ongoing) {
         try {
           if (!isIdle(conversation)) continue
-          await endConversation(conversation.studyId, conversation.id, true)
+          // 振り返りの行があるのは、振り返りの途中で Backend が止まった会話。
+          const reflect = hasReflection(conversation.id)
+          await endConversation(conversation.studyId, conversation.id, true, reflect)
         } catch (error) {
           if (
             error instanceof ORPCError &&

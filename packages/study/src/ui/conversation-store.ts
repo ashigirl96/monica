@@ -33,6 +33,8 @@ export type ConversationSnapshot = {
   /** DB に無いので、次に送るか開き直すと消える。 */
   turnError: string | null
   sendError: string | null
+  /** 続いている会話を出していて、ユーザーの行があり、turn が無い。許可待ちは turn の間にしか無い。 */
+  canReflect: boolean
 }
 
 export type ConversationStore = ReturnType<typeof createConversationStore>
@@ -60,6 +62,8 @@ export function createConversationStore(
   let selected: string | null = null
   let loaded = false
   let sending = false
+  /** end で振り返らずに終えた会話。終わったと読めたら空の新しい会話にする。 */
+  let leaving: string | null = null
   let snapshot: ConversationSnapshot = {
     study: undefined,
     missing: false,
@@ -73,6 +77,7 @@ export function createConversationStore(
     partialText: '',
     turnError: null,
     sendError: null,
+    canReflect: false,
   }
   const listeners = new Set<() => void>()
 
@@ -89,7 +94,13 @@ export function createConversationStore(
       .toSorted((a, b) => a.id - b.id)
     const messages = current.filter((message) => message.state !== 'pending')
     const permission = current.find((message) => message.state === 'pending') ?? null
-    snapshot = { ...snapshot, shown, messages, permission, ...next }
+    const merged = { ...snapshot, shown, messages, permission, ...next }
+    const canReflect =
+      merged.shown !== null &&
+      merged.shown.id === merged.ongoingId &&
+      !merged.running &&
+      merged.messages.some((message) => message.kind === 'user')
+    snapshot = { ...merged, canReflect }
     for (const listener of listeners) listener()
   }
 
@@ -106,15 +117,16 @@ export function createConversationStore(
     for (const conversation of conversations) {
       for (const message of conversation.messages) rows.set(message.id, message)
     }
-    const reflected =
+    const left =
       conversations.some((c) => c.id === conversationId && c.endedAt !== null) &&
-      [...rows.values()].some(
-        (message) => message.conversationId === conversationId && message.kind === 'reflection',
-      )
-    // 開いた時は最も新しい終わった会話を出し、出していた会話を振り返って終えたら空の新しい会話にする。
-    // 振り返らずに終えた時は、送った行と終わった理由を見せるため、その会話を出したままにする。
+      (conversationId === leaving ||
+        [...rows.values()].some(
+          (message) => message.conversationId === conversationId && message.kind === 'reflection',
+        ))
+    // 開いた時は最も新しい終わった会話を出し、出していた会話を振り返るか end で終えたら空の新しい会話にする。
+    // turn が SDK の記録の無さで終えた時は、送った行と終わった理由を見せるため、その会話を出したままにする。
     conversationId =
-      open?.id ?? (loaded ? (reflected ? null : conversationId) : (conversations[0]?.id ?? null))
+      open?.id ?? (loaded ? (left ? null : conversationId) : (conversations[0]?.id ?? null))
     loaded = true
     set({
       study: { dir, missionLine, firstMessage },
@@ -148,6 +160,9 @@ export function createConversationStore(
       }
       case 'delta':
         set({ partialText: snapshot.partialText + event.text })
+        return
+      case 'conversation-ended':
+        await load(signal)
         return
       case 'turn-ended':
         set({ running: false, partialText: '', turnError: event.error })
@@ -193,14 +208,16 @@ export function createConversationStore(
       selected = conversation
       set({})
     },
-    /** 続いている Study Conversation を終える。振り返りの turn は watch で届く。無ければ空の新しい会話を出す。 */
-    async end(): Promise<void> {
+    /** 続いている Study Conversation を終える。振り返りの turn は watch で届き、振り返らない時と続いている会話が無い時は空の新しい会話を出す。 */
+    async end(reflect: boolean): Promise<void> {
       if (snapshot.ongoingId === null) {
         conversationId = null
         return set({})
       }
       try {
-        await client.conversation.end({ id })
+        if (!reflect) leaving = snapshot.ongoingId
+        await client.conversation.end({ id, reflect })
+        if (!reflect) await load(new AbortController().signal)
         set({ sendError: null })
       } catch (error) {
         set({ sendError: failureLine(error) })

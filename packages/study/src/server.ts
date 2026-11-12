@@ -19,7 +19,7 @@ export const router = os.router({
   ),
   conversation: {
     end: os.conversation.end.handler(({ context, input }) =>
-      internals(context.studyLedger).endConversation(input.id),
+      internals(context.studyLedger).endConversation(input.id, input.reflect ?? false),
     ),
   },
   remove: os.remove.handler(({ context, input }) =>

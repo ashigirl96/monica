@@ -68,7 +68,7 @@ class FakeClient implements ConversationClient {
   /** 新しい順。rows は conversationId で振り分ける。 */
   conversationRows: FakeConversation[] = [{ id: CONVERSATION, endedAt: null, summary: null }]
   repos: string[] = []
-  readonly ends: string[] = []
+  readonly ends: { id: string; reflect?: boolean }[] = []
   getError: unknown
   sendError: unknown
   readonly gets: number[] = []
@@ -84,8 +84,8 @@ class FakeClient implements ConversationClient {
   }
 
   readonly conversation = {
-    end: async ({ id }: { id: string }) => {
-      this.ends.push(id)
+    end: async (input: { id: string; reflect?: boolean }) => {
+      this.ends.push(input)
       return { conversationId: CONVERSATION }
     },
   }
@@ -354,8 +354,8 @@ test('a reflection turn that ends the Study Conversation leaves an empty new con
   stream.push({ type: 'snapshot', running: false, lastMessageId: 2, partialText: '' })
   await until(store, (s) => s.messages.length === 2)
 
-  await store.end()
-  expect(client.ends).toEqual([ID])
+  await store.end(true)
+  expect(client.ends).toEqual([{ id: ID, reflect: true }])
   stream.push({ type: 'turn-started', conversationId: CONVERSATION })
   stream.push({ type: 'message', message: row(3, 'reflection', '') })
   stream.push({ type: 'message', message: row(4, 'tutor', 'Wrote LR-0001.') })
@@ -436,4 +436,84 @@ test('the linked Repos come with the Study, and reload rereads them without a wa
   await store.reload()
 
   expect(store.getSnapshot().repos).toEqual(['acme/alpha', 'acme/beta'])
+})
+
+test('ending without a reflection shows an empty new conversation once conversation.end returns', async () => {
+  const client = new FakeClient()
+  client.rows = [row(1, 'user', 'learn ky'), row(2, 'tutor', 'why ky?')]
+  const store = open(client)
+  const stream = await watching(client)
+  stream.push({ type: 'snapshot', running: false, lastMessageId: 2, partialText: '' })
+  await until(store, (s) => s.messages.length === 2)
+
+  client.conversationRows = [{ id: CONVERSATION, endedAt: new Date(), summary: null }]
+  await store.end(false)
+
+  expect(client.ends).toEqual([{ id: ID, reflect: false }])
+  expect(store.getSnapshot()).toMatchObject({ shown: null, messages: [], ongoingId: null })
+  expect(store.getSnapshot().conversations).toMatchObject([{ id: CONVERSATION, summary: null }])
+})
+
+test('canReflect is true only on the ongoing Study Conversation with a user row, no turn and no pending permission', async () => {
+  const client = new FakeClient()
+  const store = open(client)
+  const stream = await watching(client)
+  stream.push({ type: 'snapshot', running: false, lastMessageId: null, partialText: '' })
+  const empty = await until(store, (s) => s.study !== undefined)
+  expect(empty).toMatchObject({ shown: { id: CONVERSATION }, canReflect: false })
+
+  stream.push({ type: 'message', message: row(1, 'tutor', 'Hi') })
+  expect((await until(store, (s) => s.messages.length === 1)).canReflect).toBe(false)
+  stream.push({ type: 'message', message: row(2, 'user', 'learn ky') })
+  expect((await until(store, (s) => s.messages.length === 2)).canReflect).toBe(true)
+
+  stream.push({ type: 'turn-started', conversationId: CONVERSATION })
+  expect((await until(store, (s) => s.running)).canReflect).toBe(false)
+  stream.push({ type: 'message', message: permission(3, 'pending') })
+  expect((await until(store, (s) => s.permission !== null)).canReflect).toBe(false)
+  stream.push({ type: 'message', message: permission(3, 'denied') })
+  stream.push({ type: 'turn-ended', error: null })
+  expect((await until(store, (s) => !s.running && s.permission === null)).canReflect).toBe(true)
+
+  client.conversationRows = [
+    { id: 'newer', endedAt: null, summary: null },
+    { id: CONVERSATION, endedAt: new Date(), summary: 'Wrote LR-0001.' },
+  ]
+  await store.reload()
+  store.select(CONVERSATION)
+  expect(store.getSnapshot()).toMatchObject({ shown: { id: CONVERSATION }, canReflect: false })
+})
+
+test('conversation-ended from watch rereads the Study, so a conversation ended elsewhere stops being the ongoing one', async () => {
+  const client = new FakeClient()
+  client.rows = [row(1, 'user', 'learn ky')]
+  const store = open(client)
+  const stream = await watching(client)
+  stream.push({ type: 'snapshot', running: false, lastMessageId: 1, partialText: '' })
+  expect((await until(store, (s) => s.study !== undefined)).canReflect).toBe(true)
+
+  client.conversationRows = [{ id: CONVERSATION, endedAt: new Date(), summary: null }]
+  stream.push({ type: 'conversation-ended', conversationId: CONVERSATION })
+
+  const ended = await until(store, (s) => s.ongoingId === null)
+  expect(ended).toMatchObject({ shown: { id: CONVERSATION }, canReflect: false })
+})
+
+test('after ending without a reflection, a reread that still saw the conversation open is overtaken by the next one', async () => {
+  const client = new FakeClient()
+  client.rows = [row(1, 'user', 'learn ky')]
+  const store = open(client)
+  const stream = await watching(client)
+  stream.push({ type: 'snapshot', running: false, lastMessageId: 1, partialText: '' })
+  await until(store, (s) => s.study !== undefined)
+
+  client.conversationRows = [{ id: CONVERSATION, endedAt: new Date(), summary: null }]
+  await store.end(false)
+  client.conversationRows = [{ id: CONVERSATION, endedAt: null, summary: null }]
+  await store.reload()
+  expect(store.getSnapshot().shown).toMatchObject({ id: CONVERSATION })
+  client.conversationRows = [{ id: CONVERSATION, endedAt: new Date(), summary: null }]
+  stream.push({ type: 'conversation-ended', conversationId: CONVERSATION })
+
+  expect(await until(store, (s) => s.ongoingId === null)).toMatchObject({ shown: null })
 })
