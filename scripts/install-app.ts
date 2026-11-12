@@ -13,6 +13,9 @@ const extension = join(repo, 'apps/extension/dist/production')
 const installed = '/Applications/Monica.app'
 const desktop = join(installed, 'Contents/MacOS/monica-desktop')
 const backendJson = join(homedir(), '.monica/backend.json')
+// macOS は終了の数十 ms 後に Background Task Management に .app の署名を読ませ、削除が先に始まって読めないと
+// ptyd と Tab の shell・claude ごと止めるので、その確認を十分に越えるまで .app を消さない。
+const SIGNATURE_CHECK_MARGIN_MS = 1000
 
 const { values } = parseArgs({ options: { stage: { type: 'string' } } })
 
@@ -96,9 +99,7 @@ if (await running()) {
     rmSync(stagingDir, { recursive: true, force: true })
     fail('Monica が終了しません。⌘Q で終了してから流してください')
   }
-  // macOS は終了の数十 ms 後に Background Task Management に .app の署名を読ませ、削除が先に始まって読めないと
-  // ptyd と Tab の shell・claude ごと止めるので、その確認を十分に越えるまで消さない。
-  await Bun.sleep(1000)
+  await Bun.sleep(SIGNATURE_CHECK_MARGIN_MS)
 }
 
 rmSync(installed, { recursive: true, force: true })
