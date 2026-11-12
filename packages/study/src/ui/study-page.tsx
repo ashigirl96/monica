@@ -20,6 +20,7 @@ import {
 } from './conversation-picker.tsx'
 import { createConversationStore } from './conversation-store.ts'
 import { currentTutor, MessageView, PermissionPrompt, TutorText } from './messages.tsx'
+import { useTutorChoice } from './model-picker.tsx'
 import { studiesKey } from './new-conversation.tsx'
 import { StudyMenu } from './remove-study.tsx'
 import { LinkedRepos } from './repo-links.tsx'
@@ -55,6 +56,7 @@ export function StudyPage({ id }: { id: string }) {
   const { study, messages, permission, running, partialText, turnError, sendError } = snapshot
   const { conversations, shown, ongoingId } = snapshot
   const [draft, setDraft] = useState('')
+  const { choice, picker } = useTutorChoice()
   const selected = useSelectedConversation()
   useEffect(() => store.select(selected), [store, selected])
   // 続いている会話があるのに終わった会話を開いた時は、送ると別の会話に入るので入力欄を出さない。
@@ -134,7 +136,7 @@ export function StudyPage({ id }: { id: string }) {
                 onValueChange={setDraft}
                 sendDisabled={running}
                 onSend={(text) => {
-                  void store.send(text).then((sent) => {
+                  void store.send(text, choice).then((sent) => {
                     if (!sent) return
                     setDraft('')
                     if (selected !== null) navigate(conversationPath(id, null))
@@ -142,6 +144,7 @@ export function StudyPage({ id }: { id: string }) {
                 }}
                 placeholder="Tutor に話す"
                 sendLabel="送る"
+                leftSlot={picker}
                 textareaProps={{ autoFocus: true, 'aria-label': 'Tutor に話す' }}
               />
             )}

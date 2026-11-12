@@ -27,9 +27,22 @@ import type { BunSQLiteDatabase } from 'drizzle-orm/bun-sqlite'
 import { STALE_MS } from './activity.ts'
 import { listArtifacts, readArtifact, resolveArtifact } from './artifact.ts'
 import type { AskUser } from './box.ts'
-import { type Claude, type ClaudeDeps, envFileOf, type Query, wakeClaude } from './claude.ts'
+import {
+  type Claude,
+  type ClaudeDeps,
+  envFileOf,
+  type Query,
+  readModels,
+  wakeClaude,
+} from './claude.ts'
 import { cleanPrototypes, createRunner, removePlayground, type Tools } from './cleanup.ts'
-import { repoKey, type StudyMessage, type StudyWatchEvent } from './contract.ts'
+import {
+  type Choice,
+  type Model,
+  repoKey,
+  type StudyMessage,
+  type StudyWatchEvent,
+} from './contract.ts'
 import { playgroundEnv } from './playground.ts'
 import reflectionRequest from './reflection.md' with { type: 'text' }
 import { study, studyConversation, studyMessage, studyRepo } from './schema.ts'
@@ -192,6 +205,7 @@ function makeLedger(deps: {
   const events = new EventPublisher<Record<string, StudyWatchEvent | null>>()
   const turns = new Map<string, Turn>()
   const claudes = new Map<string, Claude>()
+  let models: Promise<Model[]> | undefined
   const waiting = new Map<number, (allowed: boolean) => void>()
   let stopped = false
   const cleaning = new Map<string, Promise<void>>()
@@ -415,7 +429,11 @@ function makeLedger(deps: {
     }
   }
 
-  function wake(studyId: string, conversation: { sessionId: string | null }): Claude {
+  function wake(
+    studyId: string,
+    conversation: { sessionId: string | null },
+    choice: Choice | undefined,
+  ): Claude {
     if (claudes.size >= MAX_CLAUDES) {
       const idle = [...claudes].filter(([id]) => !turns.has(id))
       const oldest = idle.reduce<[string, Claude] | null>(
@@ -438,6 +456,7 @@ function makeLedger(deps: {
         dir: dirOf(studyId),
         sessionId: conversation.sessionId,
       },
+      choice,
     )
     claudes.set(studyId, claude)
     void claude.exited().then(() => {
@@ -482,10 +501,13 @@ function makeLedger(deps: {
     conversation: { id: string; startedAt: Date; sessionId: string | null },
     text: string,
     turn: Turn,
+    // 振り返りの turn は持たず、会話の claude の model と effort のまま答える。
+    choice?: Choice,
   ) {
     let error: string | null
     try {
-      const claude = claudes.get(studyId) ?? wake(studyId, conversation)
+      const claude = claudes.get(studyId) ?? wake(studyId, conversation, choice)
+      if (choice) await claude.choose(choice)
       claude.lastTurnAt = Date.now()
       claude.say(
         claude.fresh
@@ -543,7 +565,7 @@ function makeLedger(deps: {
   }
 
   /** ユーザーの発言を書いて turn を始め、turn の終わりを待たずに書いた行を返す。 */
-  function startTurn(studyId: string, text: string): StudyMessage {
+  function startTurn(studyId: string, text: string, choice: Choice): StudyMessage {
     mustExist(studyId)
     const turn = takeTurn(studyId, false)
     const now = new Date()
@@ -571,7 +593,7 @@ function makeLedger(deps: {
     publish(studyId, { type: 'turn-started', conversationId: written.conversation.id })
     const message = toMessage(written.row)
     publish(studyId, { type: 'message', message })
-    void runTurn(studyId, written.conversation, text, turn)
+    void runTurn(studyId, written.conversation, text, turn, choice)
     return message
   }
 
@@ -752,8 +774,16 @@ function makeLedger(deps: {
       return { studies: rows.map((row) => summary(row.study)) }
     },
 
-    send(id: string, text: string) {
-      return { message: startTurn(id, text) }
+    send(id: string, text: string, choice: Choice) {
+      return { message: startTurn(id, text, choice) }
+    },
+
+    models(): Promise<Model[]> {
+      models ??= readModels(claudeDeps).catch((error: unknown) => {
+        models = undefined
+        throw error
+      })
+      return models
     },
 
     async remove(id: string): Promise<Record<string, never>> {
