@@ -22,6 +22,7 @@ const facts = (init: Partial<KeyFacts>): KeyFacts => ({
 test.each<[string, Parameters<typeof commandOf>[0], Partial<KeyFacts>, NoteCommand | undefined]>([
   ['⌥B', null, { alt: true, code: 'KeyB' }, 'toggleZen'],
   ['⌃2', null, { ctrl: true, code: 'Digit2' }, 'goEssays'],
+  ['⌃4', null, { ctrl: true, code: 'Digit4' }, 'goRailItem'],
   ['⌥D', null, { alt: true, code: 'KeyD' }, 'toggleDensity'],
   ['; だけ', null, { code: 'Semicolon' }, undefined],
   ['⌥;', null, { alt: true, code: 'Semicolon' }, 'cycleAmbient'],
