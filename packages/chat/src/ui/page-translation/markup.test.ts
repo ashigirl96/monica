@@ -115,3 +115,17 @@ test('a child that the page took out after the translation was written does not 
 
   expect(p.innerHTML).toBe('Call <code>run()</code> and  wait.')
 })
+
+test('a text that the page rewrites after it was translated goes back to the rewritten original, not the first one', () => {
+  const { p } = paragraph('Old article')
+  const text = p.firstChild as Text
+  const originals = new Map()
+  const first = blockOf(p)!
+  writeTranslation(first, ['古い記事'], originals)
+
+  text.data = 'New article'
+  writeTranslation(blockOf(p)!, ['新しい記事'], originals)
+  restoreOriginals(originals)
+
+  expect(p.innerHTML).toBe('New article')
+})

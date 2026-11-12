@@ -271,3 +271,57 @@ test('paragraphs with the same tags each keep their own translation when drawn a
     '訳 Rocks hold <b>mussels</b> in the waves.',
   ])
 })
+
+test('a paragraph rewritten while its translation is on the way is sent again in its new words', async () => {
+  const held: (() => void)[] = []
+  const article = '<p>Sea stars eat the mussels that cling to the rock.</p>'
+  const {
+    translator,
+    article: root,
+    sent,
+    settle,
+  } = start(
+    (segments) =>
+      new Promise((resolve) =>
+        held.push(() =>
+          resolve({ segments: segments.map(({ id, text }) => ({ id, text: japanese(text) })) }),
+        ),
+      ),
+    article,
+  )
+  translator.toggle()
+  await Bun.sleep(0)
+  const p = root.querySelector('p')!
+  p.firstChild!.textContent = 'Crabs hide under the rocks when the tide goes out.'
+  await Bun.sleep(0)
+
+  const settled = settle()
+  held.shift()!()
+  await Bun.sleep(0)
+  held.shift()?.()
+  await settled
+
+  expect(texts(sent)).toEqual([
+    'Sea stars eat the mussels that cling to the rock.',
+    'Crabs hide under the rocks when the tide goes out.',
+  ])
+  expect(p.textContent).toBe('訳 Crabs hide under the rocks when the tide goes out.')
+})
+
+test('a paragraph longer than the Backend takes is left out, and no chunk holds more segments than it takes', async () => {
+  const long = `<p>${'Tide '.repeat(4100)}</p>`
+  const items = `<ul>${'<li>Kelp</li>'.repeat(250)}</ul>`
+  const { translator, sent, settle } = start(
+    undefined,
+    `${long}<p>Sea stars eat mussels.</p>${items}`,
+  )
+  const settled = settle()
+
+  translator.toggle()
+  await settled
+
+  expect(texts(sent)).not.toContain('Tide '.repeat(4100).trim())
+  expect(texts(sent)).toContain('Sea stars eat mussels.')
+  expect(texts(sent).filter((text) => text === 'Kelp')).toHaveLength(250)
+  for (const chunk of sent) expect(chunk.length).toBeLessThanOrEqual(200)
+})

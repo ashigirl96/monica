@@ -1,4 +1,4 @@
-import { MAX_CLAUDES, type Segment } from '../../contract.ts'
+import { MAX_CLAUDES, MAX_SEGMENT_CHARS, MAX_SEGMENTS, type Segment } from '../../contract.ts'
 import { bodyBlocks } from './body.ts'
 import {
   currentText,
@@ -49,6 +49,7 @@ function takeChunk(pending: Pending[]): Pending[] {
   const chunk: Pending[] = []
   let size = 0
   for (let next = pending[0]; next; next = pending[0]) {
+    if (chunk.length >= MAX_SEGMENTS) break
     if (chunk.length > 0 && size + next.block.text.length > CHUNK_CHARS) break
     size += next.block.text.length
     chunk.push(next)
@@ -101,10 +102,11 @@ export function createPageTranslator(deps: {
     }
   }
 
-  function write(block: TranslationBlock, kids: TranslatedNode[]) {
-    if (!unchangedSince(block)) return
+  function write(block: TranslationBlock, kids: TranslatedNode[]): boolean {
+    if (!unchangedSince(block)) return false
     writeTranslation(block, kids, originals)
     written.set(block.element, currentText(block.element))
+    return true
   }
 
   function scan() {
@@ -126,6 +128,8 @@ export function createPageTranslator(deps: {
       if (queued.has(element) || written.get(element) === text || givenUp.get(element) === text) {
         continue
       }
+      // Backend の口が断る長さの段落を送ると、同じ塊の段落まで訳せなくなる。
+      if (text.length > MAX_SEGMENT_CHARS) continue
       const known = cache.get(block.text)
       if (known === undefined) {
         queued.add(block.element)
@@ -148,36 +152,40 @@ export function createPageTranslator(deps: {
     while (inFlight < MAX_IN_FLIGHT && pending.length > 0) {
       const chunk = takeChunk(pending)
       inFlight++
-      void send(chunk, session).finally(() => {
+      void send(chunk, session).then((stale) => {
         inFlight--
         for (const { block } of chunk)
           if (!pending.some((p) => p.block === block)) queued.delete(block.element)
+        // 送っている間に書き換わった段落は、見張りが見ても送り待ちとして飛ばしたので、ここで見直す。
+        if (stale && active) scan()
         pump()
         settle()
       })
     }
   }
 
-  async function send(chunk: Pending[], sent: number) {
+  /** 送っている間に書き換わって、答えを書けなかった段落があれば true。 */
+  async function send(chunk: Pending[], sent: number): Promise<boolean> {
     const reply = await deps
       .translate(chunk.map(({ block }, id) => ({ id, text: block.text })))
       .catch((error: unknown) => ({
         failed: error instanceof Error ? error.message : String(error),
       }))
-    if (sent !== session) return
+    if (sent !== session) return false
     if ('busy' in reply) {
       await wait(BUSY_WAIT_MS)
       if (sent === session) pending.unshift(...chunk)
-      return
+      return false
     }
     if ('failed' in reply) {
       failed = true
       for (const { block } of pending) queued.delete(block.element)
       pending = []
       deps.report({ kind: 'failed', reason: reply.failed })
-      return
+      return false
     }
     const again: Pending[] = []
+    let stale = false
     unwatched(() =>
       chunk.forEach(({ block, retried }, id) => {
         const text = reply.segments.find((segment) => segment.id === id)?.text
@@ -190,10 +198,11 @@ export function createPageTranslator(deps: {
           return
         }
         cache.set(block.text, text!)
-        write(block, parsed.kids)
+        if (!write(block, parsed.kids)) stale = true
       }),
     )
     pending.unshift(...again)
+    return stale
   }
 
   function start() {

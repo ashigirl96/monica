@@ -185,11 +185,16 @@ export function parseTranslation(
   return { kids: root.kids }
 }
 
+const wrote = new WeakMap<Text, string>()
+
 // React が覚えている node を消すと後の描き直しで removeChild が落ちるので、元の node は消さずに、文字の差し替えと並べ替えだけをする。
 function write(parent: Element, own: ChildNode[], kids: TranslatedNode[], originals: Originals) {
   if (!originals.has(parent)) originals.set(parent, [...parent.childNodes])
   const texts = own.filter(isText)
-  for (const text of texts) if (!originals.has(text)) originals.set(text, text.data)
+  // 前に書いた後でページが同じ text node を書き換えていたら、その文を原文に取り直す。
+  for (const text of texts) {
+    if (!originals.has(text) || wrote.get(text) !== text.data) originals.set(text, text.data)
+  }
   const order: ChildNode[] = []
   let used = 0
   for (const kid of kids) {
@@ -200,6 +205,7 @@ function write(parent: Element, own: ChildNode[], kids: TranslatedNode[], origin
         originals.set(text, null)
       }
       text.data = kid
+      wrote.set(text, kid)
       order.push(text)
     } else if (kid.copy) {
       const copy = kid.element.cloneNode(true) as Element
@@ -212,7 +218,10 @@ function write(parent: Element, own: ChildNode[], kids: TranslatedNode[], origin
       }
     }
   }
-  for (const text of texts.slice(used)) text.data = ''
+  for (const text of texts.slice(used)) {
+    text.data = ''
+    wrote.set(text, '')
+  }
   const anchor = own.at(-1)?.nextSibling ?? null
   for (const node of order) parent.insertBefore(node, anchor)
 }
