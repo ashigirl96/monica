@@ -184,6 +184,39 @@ export const modelsErrors = {
   AGENT_FAILED: askErrors.AGENT_FAILED,
 }
 
+// 1 つ 270〜290MB の claude を token の無い口から起こせるので、spare とページの翻訳も含めてこの数で止める。
+export const MAX_CLAUDES = 4
+
+export const TRANSLATION_MODEL = 'haiku'
+export const TRANSLATION_EFFORT = 'medium'
+export const MAX_SEGMENTS = 200
+export const MAX_SEGMENT_CHARS = 20_000
+
+export const SegmentSchema = z.object({
+  id: z.number().int().nonnegative(),
+  text: z
+    .string()
+    .min(1)
+    .max(MAX_SEGMENT_CHARS)
+    .describe(
+      'one paragraph, heading, list item or table cell, with <gN>…</gN> around inline elements that hold text and <xN/> for those that are not translated',
+    ),
+})
+
+export const TranslateSegmentsInputSchema = z.object({
+  segments: z.array(SegmentSchema).min(1).max(MAX_SEGMENTS),
+})
+
+export const TranslateSegmentsOutputSchema = z.object({
+  segments: z
+    .array(z.object({ id: z.number().int().nonnegative(), text: z.string() }))
+    .describe(
+      'the Japanese of each segment that claude returned, with the ids of the input; the caller checks the tags',
+    ),
+})
+
+export const translateSegmentsErrors = askErrors
+
 export type Effort = z.infer<typeof EffortSchema>
 export type Choice = z.infer<typeof ChoiceSchema>
 export type Model = z.infer<typeof ModelSchema>
@@ -195,6 +228,9 @@ export type AskInput = z.infer<typeof AskInputSchema>
 export type ChatEvent = z.infer<typeof ChatEventSchema>
 export type SnapshotEvent = Extract<ChatEvent, { type: 'snapshot' }>
 export type UsageEvent = Extract<ChatEvent, { type: 'usage' }>
+export type Segment = z.infer<typeof SegmentSchema>
+export type TranslateSegmentsInput = z.infer<typeof TranslateSegmentsInputSchema>
+export type TranslateSegmentsOutput = z.infer<typeof TranslateSegmentsOutputSchema>
 
 export const contract = {
   prepare: meta
@@ -219,4 +255,11 @@ export const contract = {
     .errors(askErrors)
     .input(AskInputSchema)
     .output(eventIterator(ChatEventSchema)),
+  translateSegments: meta
+    .meta({
+      description: `Translate segments of the main text of the Current Page into Japanese for Page Translation, with ${TRANSLATION_MODEL} at ${TRANSLATION_EFFORT} effort; it counts toward the same claude processes as ask`,
+    })
+    .errors(translateSegmentsErrors)
+    .input(TranslateSegmentsInputSchema)
+    .output(TranslateSegmentsOutputSchema),
 }

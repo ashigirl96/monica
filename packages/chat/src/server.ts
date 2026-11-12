@@ -62,4 +62,9 @@ export const router = os.router({
     if (!answer) throw errors.CHAT_BUSY()
     return typedFailures(answer, errors)
   }),
+  translateSegments: os.translateSegments.handler(async ({ context, input, signal, errors }) => {
+    const translation = internals(context.chatAgent).translateSegments(input, signal)
+    if (!translation) throw errors.CHAT_BUSY()
+    return translation.catch((error: unknown) => Promise.reject(typed(error, errors)))
+  }),
 })

@@ -187,6 +187,7 @@ const fakeClaude = (scenario: FakeScenario) => (home: string) => ({
 
 // 不正な input の chat.ask は handler の前で 400 で断られるので、claude を起こさずに口に載っているかを見られる。
 const INVALID_QUESTION = { question: '' }
+const INVALID_SEGMENTS = { segments: [] }
 const INVALID_SEND = { id: '', text: '' }
 
 test('the token listener carries workbench, task, job, chat and study but not note, and the browser listener note and study but none of those four', async () => {
@@ -211,6 +212,7 @@ test('the token listener carries workbench, task, job, chat and study but not no
   }
   expect((await viaToken(backend, 'chat/ask', INVALID_QUESTION)).status).toBe(400)
   expect((await viaBrowser('chat/ask', INVALID_QUESTION)).status).toBe(404)
+  expect((await viaBrowser('chat/translateSegments', INVALID_SEGMENTS)).status).toBe(404)
   expect((await viaBrowser('note/essay/create')).status).toBe(200)
   expect((await viaToken(backend, 'note/essay/create')).status).toBe(404)
   expect((await viaBrowser('study/send', INVALID_SEND)).status).toBe(400)
@@ -230,6 +232,9 @@ test('the Chrome Extension token in backend.json opens only chat and the Run But
 
   expect((await viaToken(viaExtensionToken, 'chat/ask', INVALID_QUESTION)).status).toBe(400)
   expect((await viaToken({ port: backend.port }, 'chat/ask', INVALID_QUESTION)).status).toBe(401)
+  expect(
+    (await viaToken(viaExtensionToken, 'chat/translateSegments', INVALID_SEGMENTS)).status,
+  ).toBe(400)
   // 不正な input は handler の前で 400 になるので、本物の GitHub に届かずに口に載っているかを見られる。
   for (const path of ['task/runButtons', 'task/press']) {
     expect([path, (await viaToken(viaExtensionToken, path, { ref: 1, refs: 1 })).status]).toEqual([

@@ -7,6 +7,8 @@
     "./server": "./src/server.ts",
     "./ui": "./src/ui/index.ts",
     "./native-host": "./src/ui/native-host.ts",
+    "./page-translation": "./src/ui/page-translation/index.ts",
+    "./page-translation-relay": "./src/ui/page-translation/relay.ts",
     "./testing": "./src/testing.ts",
     "./html-worker": "./src/html-worker.ts",
     "./pdf-worker": "./src/pdf-worker.ts"

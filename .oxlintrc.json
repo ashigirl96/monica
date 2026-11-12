@@ -1076,6 +1076,11 @@
       }
     },
     {
+      // `?script&iife` は CRXJS が build の時に作る module で、default に注入する file の名前を出すが、oxlint は file を読めない。
+      "files": ["apps/extension/src/background.ts"],
+      "rules": { "import/default": "off" }
+    },
+    {
       // Chrome Extension の side panel と service worker でだけ動く。
       "files": ["apps/extension/**", "packages/chat/src/ui/**"],
       "rules": { "no-restricted-globals": "off" }

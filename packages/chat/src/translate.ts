@@ -4,6 +4,7 @@ import type {
   SDKMessage,
   SDKRateLimitInfo,
   SDKResultMessage,
+  SDKResultSuccess,
 } from '@anthropic-ai/claude-agent-sdk'
 
 import type { ChatEvent } from './contract.ts'
@@ -54,13 +55,13 @@ function searchesOf(message: SDKAssistantMessage): string[] {
 }
 
 /**
- * claude の message を ChatEvent に訳す。成功の result で返り、失敗の result で ChatFailure を、
+ * claude の message を ChatEvent に訳す。成功の result を返し、失敗の result で ChatFailure を、
  * result の前に message が尽きるか投げると EndedEarly を投げる。
  */
 export async function* translate(
   messages: AsyncIterator<SDKMessage>,
   log: (line: string) => void,
-): AsyncGenerator<ChatEvent, void> {
+): AsyncGenerator<ChatEvent, SDKResultSuccess> {
   let rateLimit: SDKRateLimitInfo | undefined
   let assistantError: SDKAssistantMessageError | undefined
   // CLI は API の stream が切れると答えを最初からやり直し、stream しない request に替えると答えを assistant 1 つで返す。
@@ -114,7 +115,7 @@ export async function* translate(
       if (message.is_error || message.subtype !== 'success') {
         throw failureOf(message, rateLimit, assistantError)
       }
-      return
+      return message
     }
   }
 }

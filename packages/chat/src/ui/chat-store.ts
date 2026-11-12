@@ -22,7 +22,7 @@ import { isUnreachable } from './native-host.ts'
 import { noticeOf } from './notice.ts'
 import { type Reach, watchReach } from './reach.ts'
 
-export type ChatClient = ContractRouterClient<typeof contract>
+export type ChatClient = ContractRouterClient<Pick<typeof contract, 'prepare' | 'models' | 'ask'>>
 
 export type ChatEntry = {
   id: number

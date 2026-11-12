@@ -1,6 +1,7 @@
 // テストの claude。Agent SDK と stream-json を話し、受けたものを argv[2] の記録の file に JSON 行で書く。
 // argv[3] の場面（testing.ts の FakeScenario）のとおりに答えるか、失敗する。
 // 質問に HOLD を含むと、最初の text の delta の後に止まり、stdin の EOF と SIGTERM では抜けない。
+// initialize に jsonSchema が来たら、user の JSON の段落の頭に「訳 」を付けて structured_output で返す。
 import { spawn } from 'node:child_process'
 import { appendFileSync } from 'node:fs'
 import { createInterface } from 'node:readline'
@@ -46,6 +47,7 @@ if (scenario === 'exit-leaving-stderr-open') {
 
 const session_id = crypto.randomUUID()
 let holding = false
+let structured = false
 
 function hold(ms: number) {
   holding = true
@@ -101,13 +103,14 @@ function assistant(text: string, error?: string) {
   })
 }
 
-function result(text: string, failed?: { status: number | null }) {
+function result(text: string, failed?: { status: number | null }, output?: object) {
   send({
     type: 'result',
     subtype: 'success',
     is_error: failed !== undefined,
     ...(failed && { api_error_status: failed.status }),
     result: text,
+    ...(output && { structured_output: output }),
     stop_reason: failed ? 'stop_sequence' : 'end_turn',
     duration_ms: 1,
     duration_api_ms: 1,
@@ -120,6 +123,18 @@ function result(text: string, failed?: { status: number | null }) {
 }
 
 const ANSWER = FAKE_TEXT.join('')
+
+function translateSegments(question: string) {
+  init()
+  if (question.includes('HOLD')) {
+    hold(SAFETY_EXIT_MS)
+    return
+  }
+  const { segments } = JSON.parse(question) as { segments: { id: number; text: string }[] }
+  const translated = { segments: segments.map(({ id, text }) => ({ id, text: `訳 ${text}` })) }
+  assistant(JSON.stringify(translated))
+  result('', undefined, translated)
+}
 
 function answer(question: string) {
   init()
@@ -181,6 +196,7 @@ lines.on('line', (line) => {
   if (message.type === 'control_request' && 'request_id' in message) {
     const initialize = message.request.subtype === 'initialize'
     if (initialize) record({ kind: 'initialize', request: message.request })
+    if (initialize && 'jsonSchema' in message.request) structured = true
     const respond = () =>
       send({
         type: 'control_response',
@@ -196,7 +212,8 @@ lines.on('line', (line) => {
     const { content } = message.message
     record({ kind: 'user', content })
     const text = typeof content === 'string' ? content : content.map((b) => b.text ?? '').join('')
-    scenarios[scenario as keyof typeof scenarios](text)
+    if (structured && scenario === 'answer') translateSegments(text)
+    else scenarios[scenario as keyof typeof scenarios](text)
   }
 })
 lines.on('close', () => {
