@@ -10,6 +10,7 @@ import {
   startup,
   type WarmQuery,
 } from '@anthropic-ai/claude-agent-sdk'
+import { z } from 'zod'
 
 import { type Claude, claudeOptions, stderrTail } from './claude.ts'
 import {
@@ -18,18 +19,34 @@ import {
   type Choice,
   DEFAULT_EFFORT,
   DEFAULT_MODEL,
+  MAX_CLAUDES,
   type Model,
   type SnapshotEvent,
+  TRANSLATION_EFFORT,
+  TRANSLATION_MODEL,
+  type TranslateSegmentsInput,
+  type TranslateSegmentsOutput,
+  TranslateSegmentsOutputSchema,
 } from './contract.ts'
 import { agentFailed } from './failure.ts'
 import { askContent } from './page/prompt.ts'
 import { defaultReaders, type Readers, snapshotOf } from './page/snapshot.ts'
-import { promptless, singleTurn, userMessage } from './prompt.ts'
+import { promptless, singleTurn, TRANSLATION_PROMPT, userMessage } from './prompt.ts'
 import { EndedEarly, translate } from './translate.ts'
 
-// 1 つ 270〜290MB の claude を token の無い口から起こせるので、spare も含めてこの数で止める。
-const MAX_CLAUDES = 4
 const SPARE_LIFETIME_MS = 5 * 60_000
+
+const TRANSLATION_CHOICE = { model: TRANSLATION_MODEL, effort: TRANSLATION_EFFORT } as const
+const TRANSLATION_OPTIONS: Partial<Options> = {
+  systemPrompt: TRANSLATION_PROMPT,
+  title: 'Page Translation',
+  tools: [],
+  allowedTools: [],
+  outputFormat: {
+    type: 'json_schema',
+    schema: z.toJSONSchema(TranslateSegmentsOutputSchema, { target: 'draft-7' }),
+  },
+}
 
 async function withStderr(message: string, claude: Claude | undefined): Promise<string> {
   const stderr = claude ? (await stderrTail(claude)).trim() : ''
@@ -51,6 +68,11 @@ type Internals = {
     input: AskInput,
     signal: AbortSignal | undefined,
   ): Promise<AsyncGenerator<ChatEvent> | undefined>
+  /** 空きが無ければ undefined を返す。 */
+  translateSegments(
+    input: TranslateSegmentsInput,
+    signal: AbortSignal | undefined,
+  ): Promise<TranslateSegmentsOutput> | undefined
 }
 
 // ChatAgent の型は Backend が呼ぶものだけに保ち、procedure が使う中身は ChatAgent を key にここへ置く。
@@ -247,6 +269,38 @@ export function createChatAgent(
     }
   }
 
+  async function untilTranslated(
+    { started: q, claude }: Started<Query>,
+    end: () => void,
+    signal: AbortSignal | undefined,
+  ): Promise<TranslateSegmentsOutput> {
+    const stop = () => kill(claude)
+    signal?.addEventListener('abort', stop)
+    if (signal?.aborted) stop()
+    let translatedAll = false
+    try {
+      const messages = translate(q[Symbol.asyncIterator](), (line) =>
+        console.error(`[chat] translating claude ${claude?.pid}: ${line}`),
+      )
+      let next = await messages.next()
+      while (!next.done) next = await messages.next()
+      const output = TranslateSegmentsOutputSchema.safeParse(next.value.structured_output)
+      if (!output.success) {
+        throw agentFailed(`claude returned no segments: ${output.error.message}`)
+      }
+      translatedAll = true
+      return output.data
+    } catch (error) {
+      if (!(error instanceof EndedEarly)) throw error
+      throw agentFailed(await withStderr(error.message, claude))
+    } finally {
+      signal?.removeEventListener('abort', stop)
+      end()
+      // 訳し終えた claude は stdin の EOF で抜けるが、失敗した claude は同時の 4 つに数えたまま残らないよう止める。
+      if (!translatedAll) stop()
+    }
+  }
+
   const chatAgent: ChatAgent = {
     stop() {
       if (spare) clearTimeout(spare.timer)
@@ -291,6 +345,16 @@ export function createChatAgent(
         signal,
         event,
       )
+    },
+    translateSegments(input, signal) {
+      if (claudes.size >= MAX_CLAUDES) return undefined
+      const { prompt, end } = singleTurn(
+        userMessage([{ type: 'text', text: JSON.stringify(input) }]),
+      )
+      const started = spawnWith(TRANSLATION_CHOICE, (options) =>
+        query({ prompt, options: { ...options, ...TRANSLATION_OPTIONS } }),
+      )
+      return untilTranslated(started, end, signal)
     },
   })
   return chatAgent

@@ -1,4 +1,4 @@
-import { crx, defineManifest } from '@crxjs/vite-plugin'
+import { crx, defineDynamicResource, defineManifest } from '@crxjs/vite-plugin'
 import tailwindcss from '@tailwindcss/vite'
 import react from '@vitejs/plugin-react'
 import { defineConfig } from 'vite'
@@ -35,11 +35,22 @@ const manifest = defineManifest(({ mode }) => ({
   // GitHub の Issues の一覧の行と Issue の画面の header に Run ボタンを差し込む。GitHub は `/` や `/issues` からも client 側で移り、
   // そこでは注入されないので、github.com の画面すべてに注入し、一覧か Issue の画面かは script が URL で見る。
   content_scripts: [{ matches: ['https://github.com/*'], js: ['src/issues-page.ts'] }],
-  // scripting は、質問を送った時に Current Page の HTML と選択範囲を読む。
+  // ⌥A で Current Page の本文を日本語に置き換え、もう一度押すと原文に戻す（Page Translation）。
+  commands: {
+    'page-translation': {
+      suggested_key: { default: 'Alt+A' },
+      description: 'Translate the main text of the page into Japanese, or show the original again',
+    },
+  },
+  // scripting は、質問を送った時に Current Page の HTML と選択範囲を読み、⌥A で Page Translation の script を注入する。
   // nativeMessaging は、Backend の token の口の port と Chrome Extension の token を host から引く。
   permissions: ['sidePanel', 'scripting', 'nativeMessaging'],
   // Current Page の url と title を読み、Backend の token の口（loopback）を呼ぶ。
   host_permissions: ['<all_urls>'],
+  // CRXJS は ?script で注入する script をどのページからも読める resource に足すので、決まった URL で拡張の有無を見抜かれないよう、URL を session ごとに変える。
+  web_accessible_resources: [
+    defineDynamicResource({ matches: ['http://*/*', 'https://*/*'], use_dynamic_url: true }),
+  ],
   // 答えに埋めた画像を読み込ませない。URL に載せた Chat の中身が外へ出るため。
   content_security_policy: {
     extension_pages: "script-src 'self'; object-src 'self'; img-src 'self' data:",

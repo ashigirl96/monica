@@ -256,6 +256,10 @@ _Avoid_: 今のページ, 開いているページ（どの Browser Tab のこ�
 Chrome Extension の side panel で agent と交わす一続きの問答。side panel を開いた window ごとに 1 つだけあり、質問はそれぞれ、質問した時の Current Page について訊く。新しい Chat を始めるか side panel を閉じると終わり、どこにも残らない。Backend が居ない間は答えが返らないが、Chat は終わらない。Tab の外で動くので Agent Session ではない。
 _Avoid_: 会話（単独では Agent Session の会話と紛れる）, session, conversation, thread
 
+**Page Translation（ページの翻訳）**:
+Chrome Extension で ⌥A を押したときに、Current Page の本文だけを日本語に訳し、ページの文をその場で置き換えること。ナビゲーションやサイドバーなど本文でない所は訳さない。もう一度 ⌥A を押すと原文に戻る。訳している間に描き直された段落や、ページの中で移って新しく出た本文も訳し続ける。進み具合と失敗は拡張のアイコンのバッジに出す。Chat とは別のもので、side panel を開かず、どこにも残らない。
+_Avoid_: 翻訳（単独で使うと Chat で訳させることと紛れる）, Translate Page
+
 **Page Snapshot（ページの控え）**:
 質問を送った時に Current Page から読み取った、そのページの URL・title・本文・選択範囲と、添えたならスクリーンショット。質問 1 つに 1 つある。読めなかったときは、読めなかったことと、その理由を持つ。
 _Avoid_: ページの情報, page context, capture（スクリーンショットの撮影と紛れる）

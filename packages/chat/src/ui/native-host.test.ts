@@ -26,6 +26,7 @@ function fakeBackend(extensionToken: string) {
       prepare: os.prepare.handler(() => {}),
       models: os.models.handler(() => []),
       ask: os.ask.handler(async function* () {}),
+      translateSegments: os.translateSegments.handler(() => ({ segments: [] })),
     }),
   })
   const authorizations: string[] = []
