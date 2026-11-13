@@ -33,7 +33,7 @@ export type FakeClaude = {
 }
 
 // 本物の process を持ち、台本の SDK の message を返す。テストが emit で続きを流し、process が居なくなると message が尽きる。
-function fakeQuery() {
+export function fakeQuery() {
   const fake = {
     shell: 'sleep 60 & wait',
     claudes: [] as FakeClaude[],

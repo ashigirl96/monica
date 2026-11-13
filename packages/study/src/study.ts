@@ -17,7 +17,6 @@ import { join } from 'node:path'
 import {
   deleteSession as sdkDeleteSession,
   query as sdkQuery,
-  type SDKMessage,
 } from '@anthropic-ai/claude-agent-sdk'
 import { localIso } from '@monica/ui/local-time'
 import { EventPublisher, ORPCError } from '@orpc/server'
@@ -28,12 +27,13 @@ import { STALE_MS } from './activity.ts'
 import { listArtifacts, readArtifact, resolveArtifact } from './artifact.ts'
 import type { AskUser } from './box.ts'
 import {
-  type Claude,
-  type ClaudeDeps,
+  createTutorClaudes,
   envFileOf,
   type Query,
   readModels,
-  wakeClaude,
+  type TurnEnd,
+  type TutorEvent,
+  type TutorRequest,
 } from './claude.ts'
 import { cleanPrototypes, createRunner, removePlayground, type Tools } from './cleanup.ts'
 import {
@@ -44,7 +44,6 @@ import {
   type StudyWatchEvent,
 } from './contract.ts'
 import { playgroundEnv } from './playground.ts'
-import reflectionRequest from './reflection.md' with { type: 'text' }
 import { study, studyConversation, studyMessage, studyRepo } from './schema.ts'
 import { shellZdotdirOf, writeShellFiles } from './shell.ts'
 
@@ -63,19 +62,11 @@ export type StudyLedger = {
   sweepTrash(): Promise<void>
 }
 
-// 1 つ 270〜290MB あるので、同時に持つ claude はここまで。
-const MAX_CLAUDES = 4
-const BASH_COMMAND_CHARS = 200
-
 const IDLE_MS = 60 * 60_000
-// claude は resume の session が無いと、この文を stderr に出して exit 1 する。
-const NO_SDK_RECORD = 'No conversation found with session ID'
 const NO_SDK_RECORD_SUMMARY = 'SDK の記録が消えていたので、振り返らずに終えた'
 
 type Turn = {
   partialText: string
-  /** この turn の最後の Tutor の文。振り返りの報告になる。 */
-  lastTutorText: string
   reflection: boolean
   ended: Promise<void>
   end(): void
@@ -152,27 +143,6 @@ function lastLogLine(dir: string): string | null {
   return line === undefined ? null : line.replace(/^- /, '')
 }
 
-function toolText(name: string, input: Record<string, unknown>): string {
-  const field = (key: string) => (typeof input[key] === 'string' ? input[key] : '')
-  switch (name) {
-    case 'Bash':
-      return (field('command').split('\n')[0] ?? '').slice(0, BASH_COMMAND_CHARS)
-    case 'Read':
-    case 'Write':
-    case 'Edit':
-      return field('file_path')
-    case 'Glob':
-    case 'Grep':
-      return field('pattern')
-    case 'WebFetch':
-      return field('url')
-    case 'WebSearch':
-      return field('query')
-    default:
-      return ''
-  }
-}
-
 const isStale = (row: { lastActiveAt: Date } | undefined) =>
   row !== undefined && row.lastActiveAt.getTime() < Date.now() - STALE_MS
 
@@ -191,44 +161,31 @@ function makeLedger(deps: {
   const { db, home } = deps
   const studiesDir = join(home, 'studies')
   const trashDir = join(home, 'trash', 'studies')
-  const learningPreferenceDir = join(home, 'learning-preference')
-  // tutorBox が realpath を取るので、Learning Preference の file より先に dir を置く。
-  mkdirSync(learningPreferenceDir, { recursive: true, mode: 0o700 })
-  const claudeDeps: Omit<ClaudeDeps, 'askUser' | 'reflecting'> = {
-    home,
-    tutorDir: deps.tutorsDir ?? join(import.meta.dir, '../tutors'),
-    learningPreferenceDir,
-    claudePath: deps.claudePath,
-    query: deps.query ?? sdkQuery,
-  }
+  const query = deps.query ?? sdkQuery
   // null は Study が消えた印で、watch はそれまでの event を流し終えてから閉じる。
   const events = new EventPublisher<Record<string, StudyWatchEvent | null>>()
   const turns = new Map<string, Turn>()
-  const claudes = new Map<string, Claude>()
   let models: Promise<Model[]> | undefined
   const waiting = new Map<number, (allowed: boolean) => void>()
-  let stopped = false
   const cleaning = new Map<string, Promise<void>>()
   const removing = new Set<string>()
   const runner = createRunner()
   const dirOf = (id: string) => join(studiesDir, id)
   const shellZdotdir = shellZdotdirOf(home)
+  const tutors = createTutorClaudes({
+    home,
+    tutorDir: deps.tutorsDir ?? join(import.meta.dir, '../tutors'),
+    claudePath: deps.claudePath,
+    query,
+    studyDir: dirOf,
+    askUser: (studyId) => askUserFor(studyId),
+  })
 
   // claude は Backend と一緒に居なくなったので、前の Backend で待っていた許可には答える相手が無い。
   db.update(studyMessage)
     .set({ permissionState: 'denied' })
     .where(eq(studyMessage.permissionState, 'pending'))
     .run()
-
-  function publish(studyId: string, event: StudyWatchEvent) {
-    const turn = turns.get(studyId)
-    if (turn && event.type === 'delta') turn.partialText += event.text
-    if (turn && event.type === 'message' && event.message.kind === 'tutor') {
-      turn.partialText = ''
-      turn.lastTutorText = event.message.text
-    }
-    events.publish(studyId, event)
-  }
 
   function exists(id: string): boolean {
     return db.select({ id: study.id }).from(study).where(eq(study.id, id)).get() !== undefined
@@ -279,7 +236,7 @@ function makeLedger(deps: {
       .returning()
       .get()
     const message = toMessage(row)
-    publish(studyId, { type: 'message', message })
+    events.publish(studyId, { type: 'message', message })
     return message
   }
 
@@ -304,7 +261,7 @@ function makeLedger(deps: {
       .get()
     if (!updated) return toMessage(found.row)
     const message = toMessage(updated)
-    publish(found.studyId, { type: 'message', message })
+    events.publish(found.studyId, { type: 'message', message })
     waiting.get(id)?.(allowed)
     waiting.delete(id)
     return message
@@ -337,132 +294,45 @@ function makeLedger(deps: {
     tx.update(study).set({ lastActiveAt: at }).where(eq(study.id, studyId)).run()
   }
 
-  function writeToolRow(
-    studyId: string,
-    conversationId: string,
-    claude: Claude,
-    toolUseId: string,
-  ) {
-    const use = claude.toolUses.get(toolUseId)
-    if (!use) return
-    claude.toolUses.delete(toolUseId)
-    const skill = use.input.skill
-    if (use.name === 'Skill' && typeof skill === 'string' && skill.startsWith('tutors:')) {
-      const name = skill.slice('tutors:'.length)
-      const last = db
-        .select({ text: studyMessage.text })
-        .from(studyMessage)
-        .where(
-          and(
-            eq(studyMessage.conversationId, conversationId),
-            eq(studyMessage.kind, 'tutor_switch'),
-          ),
-        )
-        .orderBy(desc(studyMessage.id))
-        .limit(1)
-        .get()
-      if (last?.text !== name) {
-        insertMessage(studyId, { conversationId, kind: 'tutor_switch', text: name })
-      }
-      return
-    }
-    insertMessage(studyId, {
-      conversationId,
-      kind: 'tool',
-      text: toolText(use.name, use.input),
-      tool: use.name,
-    })
-  }
-
-  function translate(studyId: string, conversationId: string, claude: Claude, message: SDKMessage) {
-    if (message.type === 'system' && message.subtype === 'init') {
-      db.update(studyConversation)
-        .set({ sessionId: message.session_id })
-        .where(and(eq(studyConversation.id, conversationId), isNull(studyConversation.sessionId)))
-        .run()
-    } else if (
-      message.type === 'stream_event' &&
-      message.event.type === 'content_block_delta' &&
-      message.event.delta.type === 'text_delta'
-    ) {
-      publish(studyId, { type: 'delta', text: message.event.delta.text })
-    } else if (message.type === 'assistant') {
-      for (const block of message.message.content) {
-        if (block.type === 'text' && block.text !== '') {
-          insertMessage(studyId, { conversationId, kind: 'tutor', text: block.text })
-        } else if (block.type === 'tool_use') {
-          claude.toolUses.set(block.id, {
-            name: block.name,
-            input: (block.input ?? {}) as Record<string, unknown>,
-          })
+  /** turn の出来事を行と watch の event にする。 */
+  function record(studyId: string, conversationId: string, turn: Turn, event: TutorEvent) {
+    switch (event.type) {
+      case 'session':
+        db.update(studyConversation)
+          .set({ sessionId: event.sessionId })
+          .where(and(eq(studyConversation.id, conversationId), isNull(studyConversation.sessionId)))
+          .run()
+        return
+      case 'delta':
+        turn.partialText += event.text
+        events.publish(studyId, { type: 'delta', text: event.text })
+        return
+      case 'tutor':
+        turn.partialText = ''
+        insertMessage(studyId, { conversationId, kind: 'tutor', text: event.text })
+        return
+      case 'tool':
+        insertMessage(studyId, { conversationId, kind: 'tool', text: event.text, tool: event.tool })
+        return
+      case 'tutor-switch': {
+        const last = db
+          .select({ text: studyMessage.text })
+          .from(studyMessage)
+          .where(
+            and(
+              eq(studyMessage.conversationId, conversationId),
+              eq(studyMessage.kind, 'tutor_switch'),
+            ),
+          )
+          .orderBy(desc(studyMessage.id))
+          .limit(1)
+          .get()
+        if (last?.text !== event.tutor) {
+          insertMessage(studyId, { conversationId, kind: 'tutor_switch', text: event.tutor })
         }
-      }
-    } else if (message.type === 'user' && Array.isArray(message.message.content)) {
-      for (const block of message.message.content) {
-        if (block.type === 'tool_result')
-          writeToolRow(studyId, conversationId, claude, block.tool_use_id)
+        return
       }
     }
-  }
-
-  /** turn の終わりまで claude の message を読む。失敗なら result の文か stderr の末尾を返す。 */
-  async function readTurn(studyId: string, conversationId: string, claude: Claude) {
-    for (;;) {
-      let next: IteratorResult<SDKMessage>
-      try {
-        // for await を break すると iterator が閉じるので、turn ごとに result まで next() を呼ぶ。
-        next = await claude.messages.next()
-      } catch {
-        next = { done: true, value: undefined }
-      }
-      if (next.done) {
-        if (claudes.get(studyId) === claude) claudes.delete(studyId)
-        claude.kill()
-        return (await claude.stderrTail()) || 'claude exited before the turn ended'
-      }
-      const message = next.value
-      if (message.type === 'result') {
-        if (!message.is_error) return null
-        return message.subtype === 'success' ? message.result : message.errors.join('\n')
-      }
-      translate(studyId, conversationId, claude, message)
-    }
-  }
-
-  function wake(
-    studyId: string,
-    conversation: { sessionId: string | null },
-    choice: Choice | undefined,
-  ): Claude {
-    if (claudes.size >= MAX_CLAUDES) {
-      const idle = [...claudes].filter(([id]) => !turns.has(id))
-      const oldest = idle.reduce<[string, Claude] | null>(
-        (found, entry) => (!found || entry[1].lastTurnAt < found[1].lastTurnAt ? entry : found),
-        null,
-      )
-      if (oldest) {
-        oldest[1].kill()
-        claudes.delete(oldest[0])
-      }
-    }
-    const claude = wakeClaude(
-      {
-        ...claudeDeps,
-        askUser: askUserFor(studyId),
-        reflecting: () => turns.get(studyId)?.reflection === true,
-      },
-      {
-        id: studyId,
-        dir: dirOf(studyId),
-        sessionId: conversation.sessionId,
-      },
-      choice,
-    )
-    claudes.set(studyId, claude)
-    void claude.exited().then(() => {
-      if (claudes.get(studyId) === claude) claudes.delete(studyId)
-    })
-    return claude
   }
 
   /** 会話を終え、claude を閉じる。振り返らずに終えた時は、その理由を log.md の末尾にも書く。 */
@@ -473,9 +343,8 @@ function makeLedger(deps: {
       .where(and(eq(studyConversation.id, conversationId), isNull(studyConversation.endedAt)))
       .returning({ id: studyConversation.id })
       .get()
-    if (ended) publish(studyId, { type: 'conversation-ended', conversationId })
-    claudes.get(studyId)?.kill()
-    claudes.delete(studyId)
+    if (ended) events.publish(studyId, { type: 'conversation-ended', conversationId })
+    void tutors.close(studyId)
     if (!logged || ending === null) return
     try {
       appendLine(join(dirOf(studyId), 'log.md'), `- ${localIso(new Date())} ${ending}`)
@@ -484,63 +353,42 @@ function makeLedger(deps: {
     }
   }
 
-  function finishAfter(studyId: string, conversationId: string, turn: Turn, error: string | null) {
-    if (error?.includes(NO_SDK_RECORD)) {
+  function finishAfter(
+    studyId: string,
+    conversationId: string,
+    turn: Turn,
+    end: Exclude<TurnEnd, { kind: 'stopped' }>,
+  ) {
+    if (end.kind === 'session-lost') {
       finish(studyId, conversationId, NO_SDK_RECORD_SUMMARY, true)
-    } else if (turn.reflection && error !== null) {
+    } else if (turn.reflection && end.kind === 'failed') {
       finish(
         studyId,
         conversationId,
-        `振り返りの turn が失敗した: ${firstNonEmptyLine(error)}`,
+        `振り返りの turn が失敗した: ${firstNonEmptyLine(end.error)}`,
         true,
       )
-    } else if (turn.reflection) {
-      finish(studyId, conversationId, firstNonEmptyLine(turn.lastTutorText), false)
+    } else if (turn.reflection && end.kind === 'answered') {
+      finish(studyId, conversationId, firstNonEmptyLine(end.lastText), false)
     }
   }
 
   async function runTurn(
     studyId: string,
-    conversation: { id: string; startedAt: Date; sessionId: string | null },
-    text: string,
+    conversationId: string,
     turn: Turn,
-    // 振り返りの turn は持たず、会話の claude の model と effort のまま答える。
-    choice?: Choice,
+    ended: Promise<TurnEnd>,
   ) {
-    let error: string | null
-    try {
-      const claude = claudes.get(studyId) ?? wake(studyId, conversation, choice)
-      if (choice) await claude.choose(choice)
-      claude.lastTurnAt = Date.now()
-      claude.say(
-        claude.fresh
-          ? `Study Conversation started at ${localIso(conversation.startedAt)}\n${text}`
-          : text,
-      )
-      claude.fresh = false
-      error = await readTurn(studyId, conversation.id, claude)
-      claude.lastTurnAt = Date.now()
-    } catch (thrown) {
-      error = (thrown as Error).message
-    }
+    const end = await ended
     // stop() が殺した claude の turn では会話を終えず、次の Backend の Job が振り返らせる。
-    if (!stopped) finishAfter(studyId, conversation.id, turn, error)
+    if (end.kind !== 'stopped') finishAfter(studyId, conversationId, turn, end)
     touch(db, studyId, new Date())
     turns.delete(studyId)
-    publish(studyId, { type: 'turn-ended', error })
+    events.publish(studyId, {
+      type: 'turn-ended',
+      error: end.kind === 'answered' ? null : end.error,
+    })
     turn.end()
-  }
-
-  function refuseWhenFull(studyId: string) {
-    if (
-      !claudes.has(studyId) &&
-      claudes.size >= MAX_CLAUDES &&
-      [...claudes.keys()].every((id) => turns.has(id))
-    ) {
-      throw new ORPCError('TOO_MANY_REQUESTS', {
-        message: `${MAX_CLAUDES} Studies are in a turn; try again when one ends`,
-      })
-    }
   }
 
   function refuseWhileChangingPlayground(studyId: string) {
@@ -560,11 +408,46 @@ function makeLedger(deps: {
       throw new ORPCError('CONFLICT', { message: `a turn is already running in ${studyId}` })
     }
     refuseWhileChangingPlayground(studyId)
-    refuseWhenFull(studyId)
     const { promise, resolve } = Promise.withResolvers<void>()
-    const turn = { partialText: '', lastTutorText: '', reflection, ended: promise, end: resolve }
+    const turn = { partialText: '', reflection, ended: promise, end: resolve }
     turns.set(studyId, turn)
     return turn
+  }
+
+  /** turn の印を付けたまま claude に答えさせる。claude の席が無いか prepare が投げれば、印を外して断る。 */
+  function reply<T>(
+    studyId: string,
+    turn: Turn,
+    request: TutorRequest,
+    prepare: () => {
+      conversation: { id: string; startedAt: Date; sessionId: string | null }
+      value: T
+    },
+  ): T {
+    let replied
+    try {
+      replied = tutors.reply(studyId, request, () => {
+        const { conversation, value } = prepare()
+        return {
+          conversation,
+          value: { value, conversationId: conversation.id },
+          onEvent: (event: TutorEvent) => record(studyId, conversation.id, turn, event),
+        }
+      })
+    } catch (error) {
+      turns.delete(studyId)
+      turn.end()
+      throw error
+    }
+    if (replied === 'full') {
+      turns.delete(studyId)
+      turn.end()
+      throw new ORPCError('TOO_MANY_REQUESTS', {
+        message: 'every Tutor claude is in a turn; try again when one ends',
+      })
+    }
+    void runTurn(studyId, replied.value.conversationId, turn, replied.ended)
+    return replied.value.value
   }
 
   /** ユーザーの発言を書いて turn を始め、turn の終わりを待たずに書いた行を返す。 */
@@ -572,34 +455,35 @@ function makeLedger(deps: {
     mustExist(studyId)
     const turn = takeTurn(studyId, false)
     const now = new Date()
-    const written = db.transaction((tx) => {
-      const ongoing = tx
-        .select()
-        .from(studyConversation)
-        .where(and(eq(studyConversation.studyId, studyId), isNull(studyConversation.endedAt)))
-        .get()
-      const conversation =
-        ongoing ??
-        tx
-          .insert(studyConversation)
-          .values({ id: `sc-${Bun.randomUUIDv7()}`, studyId, startedAt: now })
+    const written = reply(studyId, turn, { kind: 'say', text, choice }, () => {
+      const value = db.transaction((tx) => {
+        const ongoing = tx
+          .select()
+          .from(studyConversation)
+          .where(and(eq(studyConversation.studyId, studyId), isNull(studyConversation.endedAt)))
+          .get()
+        const conversation =
+          ongoing ??
+          tx
+            .insert(studyConversation)
+            .values({ id: `sc-${Bun.randomUUIDv7()}`, studyId, startedAt: now })
+            .returning()
+            .get()
+        const row = tx
+          .insert(studyMessage)
+          .values({ conversationId: conversation.id, createdAt: now, kind: 'user', text })
           .returning()
           .get()
-      const row = tx
-        .insert(studyMessage)
-        .values({ conversationId: conversation.id, createdAt: now, kind: 'user', text })
-        .returning()
-        .get()
-      touch(tx, studyId, now)
-      return { conversation, row }
+        touch(tx, studyId, now)
+        return { conversation, row }
+      })
+      return { conversation: value.conversation, value }
     })
-    publish(studyId, { type: 'turn-started', conversationId: written.conversation.id })
+    events.publish(studyId, { type: 'turn-started', conversationId: written.conversation.id })
     const message = toMessage(written.row)
-    publish(studyId, { type: 'message', message })
-    void runTurn(studyId, written.conversation, text, turn, choice)
+    events.publish(studyId, { type: 'message', message })
     return message
   }
-
   const hasReflection = (conversationId: string) =>
     db
       .select({ id: studyMessage.id })
@@ -632,19 +516,22 @@ function makeLedger(deps: {
       .get()
     if (!conversation || conversation.endedAt !== null || (idle && !isIdle(conversation))) {
       turns.delete(studyId)
+      turn.end()
       return
     }
-    // 振り返りの途中で Backend が止まった会話は、区切りを 2 つ描かないよう行を足さずに始め直す。
-    const row = hasReflection(conversationId)
-      ? null
-      : db
-          .insert(studyMessage)
-          .values({ conversationId, createdAt: new Date(), kind: 'reflection', text: '' })
-          .returning()
-          .get()
-    publish(studyId, { type: 'turn-started', conversationId })
-    if (row) publish(studyId, { type: 'message', message: toMessage(row) })
-    void runTurn(studyId, conversation, reflectionRequest, turn)
+    const row = reply(studyId, turn, { kind: 'reflect' }, () => ({
+      conversation,
+      // 振り返りの途中で Backend が止まった会話は、区切りを 2 つ描かないよう行を足さずに始め直す。
+      value: hasReflection(conversationId)
+        ? null
+        : db
+            .insert(studyMessage)
+            .values({ conversationId, createdAt: new Date(), kind: 'reflection', text: '' })
+            .returning()
+            .get(),
+    }))
+    events.publish(studyId, { type: 'turn-started', conversationId })
+    if (row) events.publish(studyId, { type: 'message', message: toMessage(row) })
   }
 
   /** 会話を振り返らずに終える。止めた turn が SDK の記録の無さで先に終えていれば、finish は何も書き換えない。 */
@@ -676,14 +563,9 @@ function makeLedger(deps: {
     if (turn && pending.length === 0) {
       throw new ORPCError('CONFLICT', { message: `a turn is already running in ${studyId}` })
     }
-    if (reflect) refuseWhenFull(studyId)
     if (turn) {
       for (const row of pending) settle(row.id, false)
-      try {
-        await claudes.get(studyId)?.interrupt()
-      } catch {
-        // claude が先に居なくなっても、turn は readTurn が閉じる。
-      }
+      await tutors.interrupt(studyId)
       await turn.ended
     }
     // 止めた turn の Tutor の行で最後の行が新しくなるので、止めた後は無発言を見直さない。
@@ -796,7 +678,7 @@ function makeLedger(deps: {
     },
 
     models(): Promise<Model[]> {
-      models ??= readModels(claudeDeps).catch((error: unknown) => {
+      models ??= readModels({ query, claudePath: deps.claudePath }).catch((error: unknown) => {
         models = undefined
         throw error
       })
@@ -817,11 +699,8 @@ function makeLedger(deps: {
           )
           .all()
         for (const row of pending) settle(row.id, false)
-        const claude = claudes.get(id)
-        claudes.delete(id)
-        claude?.kill()
         // 止めた claude が消した dir に書き戻さず、turn-ended が行の消えた後に流れないようにする。
-        await Promise.all([claude?.exited(), turns.get(id)?.ended, cleaning.get(id)])
+        await Promise.all([tutors.close(id), turns.get(id)?.ended, cleaning.get(id)])
         const sessionIds = db
           .select({ sessionId: studyConversation.sessionId })
           .from(studyConversation)
@@ -978,9 +857,7 @@ function makeLedger(deps: {
       }
     },
     stop() {
-      stopped = true
-      for (const claude of claudes.values()) claude.kill()
-      claudes.clear()
+      tutors.stop()
       runner.killAll()
     },
     async cleanPlaygrounds() {
