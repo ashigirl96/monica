@@ -1,7 +1,15 @@
 import { ChatMessage } from '@monica/ui/fluid'
 import { type Components, Markdown } from '@monica/ui/markdown'
-import { FileText, PenLine, Search, ShieldAlert, SquareTerminal, Wrench } from 'lucide-react'
-import { type ReactNode, useEffect, useRef } from 'react'
+import {
+  ChevronRight,
+  FileText,
+  PenLine,
+  Search,
+  ShieldAlert,
+  SquareTerminal,
+  Wrench,
+} from 'lucide-react'
+import { type ReactNode, useEffect, useRef, useState } from 'react'
 
 import type { StudyMessage } from '../contract.ts'
 import { writtenArtifact } from './artifact-link.ts'
@@ -30,22 +38,125 @@ function within(target: string, dir: string): string {
   return target.startsWith(`${dir}/`) ? target.slice(dir.length + 1) : target
 }
 
-const TOOL_LINES: Record<string, { icon: typeof FileText; line: (t: string) => ReactNode }> = {
-  Read: { icon: FileText, line: (t) => `${t} を読んだ` },
-  WebFetch: { icon: FileText, line: (t) => `${t} を読んだ` },
-  Write: { icon: PenLine, line: (t) => `${t} を書いた` },
-  Edit: { icon: PenLine, line: (t) => `${t} を書いた` },
+type Verb = { unit: '件' | '回'; going: string; done: string }
+
+const READ: Verb = { unit: '件', going: '読み', done: '読んだ' }
+const WROTE: Verb = { unit: '件', going: '書き', done: '書いた' }
+const RAN: Verb = { unit: '回', going: '走らせ', done: '走らせた' }
+const SEARCHED: Verb = { unit: '回', going: '探し', done: '探した' }
+const USED: Verb = { unit: '回', going: '使い', done: '使った' }
+const ALLOWED: Verb = { unit: '回', going: '許し', done: '許した' }
+const DENIED: Verb = { unit: '回', going: '断り', done: '断った' }
+
+const TOOL_LINES: Record<
+  string,
+  { icon: typeof FileText; verb: Verb; line?: (t: string) => ReactNode }
+> = {
+  Read: { icon: FileText, verb: READ },
+  WebFetch: { icon: FileText, verb: READ },
+  Write: { icon: PenLine, verb: WROTE },
+  Edit: { icon: PenLine, verb: WROTE },
   Bash: {
     icon: SquareTerminal,
+    verb: RAN,
     line: (t) => (
       <>
-        <code>{t}</code> を走らせた
+        <code>{t}</code> を{RAN.done}
       </>
     ),
   },
-  WebSearch: { icon: Search, line: (t) => `${t} を探した` },
-  Glob: { icon: Search, line: (t) => `${t} を探した` },
-  Grep: { icon: Search, line: (t) => `${t} を探した` },
+  WebSearch: { icon: Search, verb: SEARCHED },
+  Glob: { icon: Search, verb: SEARCHED },
+  Grep: { icon: Search, verb: SEARCHED },
+}
+
+const verbOf = (message: StudyMessage): Verb =>
+  message.kind === 'permission'
+    ? message.state === 'allowed'
+      ? ALLOWED
+      : DENIED
+    : (TOOL_LINES[message.tool ?? '']?.verb ?? USED)
+
+function headlineOf(messages: readonly StudyMessage[]): string {
+  const counts = new Map<Verb, number>()
+  for (const message of messages) {
+    const verb = verbOf(message)
+    counts.set(verb, (counts.get(verb) ?? 0) + 1)
+  }
+  const parts = [...counts]
+  return parts
+    .map(
+      ([verb, count], i) =>
+        `${count} ${verb.unit}${i === parts.length - 1 ? verb.done : verb.going}`,
+    )
+    .join('、')
+}
+
+export type ToolGroup = { kind: 'tool_group'; id: number; messages: StudyMessage[] }
+
+const isStep = (message: StudyMessage) => message.kind === 'tool' || message.kind === 'permission'
+
+export function groupTools(
+  messages: readonly StudyMessage[],
+  running: boolean,
+): (StudyMessage | ToolGroup)[] {
+  const items: (StudyMessage | ToolGroup)[] = []
+  let run: StudyMessage[] = []
+  const close = (last: boolean) => {
+    const [first, ...rest] = run
+    // 応答中の最後の連なりは、まだ続くので束ねない。
+    if (first && rest.length > 0 && !(last && running)) {
+      items.push({ kind: 'tool_group', id: first.id, messages: run })
+    } else items.push(...run)
+    run = []
+  }
+  for (const message of messages) {
+    if (isStep(message)) {
+      run.push(message)
+      continue
+    }
+    close(false)
+    items.push(message)
+  }
+  close(true)
+  return items
+}
+
+export function ToolGroupView({
+  messages,
+  dir,
+  onOpenArtifact,
+}: {
+  messages: StudyMessage[]
+  dir: string
+  onOpenArtifact?: (path: string) => void
+}) {
+  const [open, setOpen] = useState(false)
+  return (
+    <div className="flex flex-col gap-3">
+      <button
+        type="button"
+        aria-expanded={open}
+        onClick={() => setOpen(!open)}
+        className="flex items-center gap-2 self-start text-left text-[13px] text-muted-foreground hover:text-foreground"
+      >
+        <ChevronRight
+          className={`size-3.5 shrink-0 transition-transform ${open ? 'rotate-90' : ''}`}
+          strokeWidth={1.8}
+        />
+        {headlineOf(messages)}
+      </button>
+      {open &&
+        messages.map((message) => (
+          <MessageView
+            key={message.id}
+            message={message}
+            dir={dir}
+            onOpenArtifact={onOpenArtifact}
+          />
+        ))}
+    </div>
+  )
 }
 
 function ToolLine({
@@ -60,11 +171,14 @@ function ToolLine({
   const tool = message.tool ?? ''
   const known = TOOL_LINES[tool]
   const Icon = known?.icon ?? Wrench
+  const target = within(message.text, dir)
   const line = (
     <>
       <Icon className="size-3.5 shrink-0" strokeWidth={1.8} />
       <span className="min-w-0 truncate">
-        {known ? known.line(within(message.text, dir)) : `${tool} を使った`}
+        {known
+          ? (known.line?.(target) ?? `${target} を${known.verb.done}`)
+          : `${tool} を${USED.done}`}
       </span>
     </>
   )

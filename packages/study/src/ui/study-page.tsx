@@ -21,9 +21,11 @@ import {
 import { createConversationStore } from './conversation-store.ts'
 import {
   currentTutor,
+  groupTools,
   MessageView,
   PermissionPrompt,
   ReflectButton,
+  ToolGroupView,
   TutorText,
 } from './messages.tsx'
 import { useTutorChoice } from './model-picker.tsx'
@@ -103,14 +105,23 @@ export function StudyPage({ id }: { id: string }) {
           <div className="flex min-h-0 flex-1 flex-col-reverse overflow-y-auto">
             <div className="mx-auto flex w-full max-w-2xl flex-col gap-3 px-4 py-6">
               {study &&
-                messages.map((message) => (
-                  <MessageView
-                    key={message.id}
-                    message={message}
-                    dir={study.dir}
-                    onOpenArtifact={setOpenPath}
-                  />
-                ))}
+                groupTools(messages, running).map((item) =>
+                  item.kind === 'tool_group' ? (
+                    <ToolGroupView
+                      key={`group-${item.id}`}
+                      messages={item.messages}
+                      dir={study.dir}
+                      onOpenArtifact={setOpenPath}
+                    />
+                  ) : (
+                    <MessageView
+                      key={item.id}
+                      message={item}
+                      dir={study.dir}
+                      onOpenArtifact={setOpenPath}
+                    />
+                  ),
+                )}
               {running &&
                 (partialText !== '' ? (
                   <TutorText text={partialText} />
