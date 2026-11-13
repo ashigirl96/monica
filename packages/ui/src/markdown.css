@@ -13,3 +13,37 @@
 .typeset :is(strong, b, h1, h2, h3, h4, h5, h6, th) {
   font-weight: 600;
 }
+
+/* desktop・web・Chrome Extension は dark の切り替え方がそれぞれ違うので、明暗どちらの背景でも読める中間の明るさの色を 1 組だけ持つ。 */
+.typeset pre code {
+  & :is(.hljs-keyword, .hljs-selector-tag, .hljs-meta .hljs-keyword) {
+    color: oklch(0.62 0.17 330);
+  }
+  & :is(.hljs-string, .hljs-regexp, .hljs-template-tag, .hljs-addition) {
+    color: oklch(0.64 0.14 145);
+  }
+  & :is(.hljs-number, .hljs-literal, .hljs-symbol) {
+    color: oklch(0.66 0.14 60);
+  }
+  & :is(.hljs-title, .hljs-section) {
+    color: oklch(0.64 0.14 250);
+  }
+  & :is(.hljs-type, .hljs-built_in, .hljs-class .hljs-title, .hljs-title.class_) {
+    color: oklch(0.66 0.12 200);
+  }
+  & :is(.hljs-attr, .hljs-attribute, .hljs-property, .hljs-variable) {
+    color: oklch(0.64 0.12 25);
+  }
+  & :is(.hljs-comment, .hljs-quote, .hljs-meta) {
+    color: color-mix(in oklab, currentColor 55%, transparent);
+  }
+  & .hljs-deletion {
+    color: oklch(0.6 0.18 25);
+  }
+  & .hljs-emphasis {
+    font-style: italic;
+  }
+  & .hljs-strong {
+    font-weight: 600;
+  }
+}

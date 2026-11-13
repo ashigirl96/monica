@@ -1,6 +1,7 @@
 import './fluid/typeset.css'
 import './markdown.css'
 import ReactMarkdown, { type Components } from 'react-markdown'
+import rehypeHighlight from 'rehype-highlight'
 import remarkGfm from 'remark-gfm'
 
 export type { Components }
@@ -22,7 +23,11 @@ const defaults: Components = {
 export function Markdown({ text, components }: { text: string; components?: Components }) {
   return (
     <div className="typeset">
-      <ReactMarkdown remarkPlugins={[remarkGfm]} components={{ ...defaults, ...components }}>
+      <ReactMarkdown
+        remarkPlugins={[remarkGfm]}
+        rehypePlugins={[rehypeHighlight]}
+        components={{ ...defaults, ...components }}
+      >
         {text}
       </ReactMarkdown>
     </div>
