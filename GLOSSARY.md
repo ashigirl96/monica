@@ -253,7 +253,7 @@ _Avoid_: タブ（単独で使うと Tab と紛れる）
 _Avoid_: 今のページ, 開いているページ（どの Browser Tab のことか曖昧）
 
 **Chat（問答）**:
-Chrome Extension の side panel で agent と交わす一続きの問答。side panel を開いた window ごとに 1 つだけあり、質問はそれぞれ、質問した時の Current Page について訊く。新しい Chat を始めるか side panel を閉じると終わり、どこにも残らない。Backend が居ない間は答えが返らないが、Chat は終わらない。Tab の外で動くので Agent Session ではない。
+Chrome Extension の side panel で agent と交わす一続きの問答。side panel を開いた window ごとに 1 つだけあり、質問はそれぞれ、質問した時の Current Page について訊く。新しい Chat を始めると終わる。side panel を閉じても終わらず、次に開くと続きから戻る。browser を終えるか window を閉じると消え、disk には残らない。答えている途中で閉じた質問は、止めたことになる。Backend が居ない間は答えが返らないが、Chat は終わらない。Tab の外で動くので Agent Session ではない。
 _Avoid_: 会話（単独では Agent Session の会話と紛れる）, session, conversation, thread
 
 **Page Translation（ページの翻訳）**:

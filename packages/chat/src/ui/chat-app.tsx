@@ -8,8 +8,8 @@ import { type ChatClient, type ChatEntry, type ChatStore, createChatStore } from
 import { type CurrentPage, watchCurrentPage } from './current-page.ts'
 import { ModelPicker } from './model-picker.tsx'
 import { PageHeader } from './page-header.tsx'
-import { usePinchZoom } from './pinch-zoom.ts'
 import { readCurrentPage } from './read-current-page.ts'
+import { keepChat } from './saved-chat.ts'
 
 function Faint({ children }: { children: string }) {
   return <p className="text-[13px] leading-5 text-muted-foreground">{children}</p>
@@ -88,11 +88,10 @@ function ChatBody({ store }: { store: ChatStore }) {
   const { entries, picker, answering, withScreenshot, unreachable, retryable } =
     useSyncExternalStore(store.subscribe, store.snapshot)
   const [draft, setDraft] = useState('')
-  const zoom = usePinchZoom()
 
   return (
     <>
-      <ChatScroll contentClassName="flex flex-col gap-5 px-3 py-4" zoom={zoom}>
+      <ChatScroll contentClassName="flex flex-col gap-5 px-3 py-4">
         {entries.length === 0 && (
           <p className="pt-10 text-center text-[13px] text-muted-foreground">
             このページについて質問できます
@@ -147,6 +146,7 @@ function ChatBody({ store }: { store: ChatStore }) {
           }
           history={entries.map(({ question }) => question)}
           placeholder="このページについて質問"
+          textareaProps={{ autoFocus: true }}
           sendLabel="送る"
         />
       </div>
@@ -159,12 +159,19 @@ export function ChatApp({ client }: { client: ChatClient }) {
   const [page, setPage] = useState<CurrentPage>()
   const [store] = useState(() => createChatStore(client, localStorage))
 
-  // side panel を閉じると document ごと Chat が終わる。片付けが走るのは dev の StrictMode の付け直しだけ。
+  // side panel を閉じると document ごと終わるので、片付けが走るのは dev の StrictMode の付け直しだけ。
   useEffect(() => {
     const watch = watchCurrentPage(setPage)
     // 質問を送った時に、その時の Browser Tab を読む。side panel を開いているだけでは読まない。
     const close = store.open((options) => readCurrentPage(watch, options), window)
+    let stopKeeping = () => {}
+    let stopped = false
+    void chrome.windows.getCurrent().then(({ id }) => {
+      if (!stopped && id !== undefined) stopKeeping = keepChat(store, chrome.storage.session, id)
+    })
     return () => {
+      stopped = true
+      stopKeeping()
       close()
       store.startNewChat()
       watch.stop()
@@ -172,7 +179,7 @@ export function ChatApp({ client }: { client: ChatClient }) {
   }, [store])
 
   return (
-    <div className="flex h-dvh flex-col bg-background text-foreground">
+    <div className="flex h-dvh flex-col bg-background text-foreground [--fs-body:16px] [--fs-subtitle:16px] [--lh-body:24px] [--lh-subtitle:24px]">
       <PageHeader page={page} onNewChat={store.startNewChat} />
       <ChatBody store={store} />
     </div>

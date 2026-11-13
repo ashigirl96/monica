@@ -1544,3 +1544,41 @@ test('a list that could not be read is read again when the side panel gets focus
 
   expect(store.snapshot().picker).toMatchObject({ model: 'haiku' })
 })
+
+test('a chat saved mid-answer comes back stopped, and the next question carries it as history', async () => {
+  const before = openChat()
+  before.store.ask('What is this?')
+  await settled()
+  const { answer } = before.client.asked[0]!
+  answer.snapshot(snapshotAt('https://a.example/', 'A'))
+  answer.text('It is ')
+  await settled()
+  const saved = structuredClone(before.store.saved())
+
+  const after = openChat()
+  after.store.restore(saved)
+  after.store.ask('And then?')
+  await settled()
+
+  expect(after.store.snapshot().entries).toEqual([
+    { id: 0, question: 'What is this?', answer: 'It is ', status: 'stopped' },
+    { id: 1, question: 'And then?', answer: '', status: 'waiting' },
+  ])
+  expect(after.client.asked[0]!.input.history).toEqual([
+    expect.objectContaining({
+      question: 'What is this?',
+      answer: 'It is \n\n（ユーザーが途中で止めた）',
+    }),
+  ])
+})
+
+test('a saved chat does not replace one that has already started', async () => {
+  const { store } = openChat()
+  store.ask('Mine')
+  store.restore({
+    entries: [{ id: 0, question: 'Old', answer: 'A', status: 'answered' }],
+    history: [],
+  })
+
+  expect(store.snapshot().entries.map(({ question }) => question)).toEqual(['Mine'])
+})

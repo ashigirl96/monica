@@ -9,6 +9,7 @@
     "./native-host": "./src/ui/native-host.ts",
     "./page-translation": "./src/ui/page-translation/index.ts",
     "./page-translation-relay": "./src/ui/page-translation/relay.ts",
+    "./saved-chat": "./src/ui/saved-chat.ts",
     "./testing": "./src/testing.ts",
     "./html-worker": "./src/html-worker.ts",
     "./pdf-worker": "./src/pdf-worker.ts"
