@@ -207,7 +207,11 @@ test('a send or shell during remove is refused with CONFLICT', async () => {
     refused = await refusal()
   }
 
-  expect(refused).toMatchObject({ code: 'CONFLICT', message: `${id} is being removed` })
+  expect(refused).toMatchObject({
+    code: 'CONFLICT',
+    message: `${id} is being removed`,
+    data: { reason: 'study-removing' },
+  })
   await expect(client.shell({ prefix: id })).rejects.toMatchObject({
     code: 'CONFLICT',
     message: `${id} is being removed`,

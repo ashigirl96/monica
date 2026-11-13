@@ -117,6 +117,31 @@ export const ModelSchema = z.object({
 
 export type Model = z.infer<typeof ModelSchema>
 
+export const StudyRefusalSchema = z
+  .enum([
+    'turn-running',
+    'conversation-ending',
+    'playground-cleaning',
+    'study-removing',
+    'tutor-capacity',
+  ])
+  .describe(
+    'turn-running: a turn of the Study is running; conversation-ending: its Study Conversation is being ended; playground-cleaning: its Playground is being cleaned up; study-removing: it is being removed; tutor-capacity: every Tutor claude the Backend may hold is in a turn of another Study',
+  )
+
+export type StudyRefusal = z.infer<typeof StudyRefusalSchema>
+
+const refusalData = z.object({ reason: StudyRefusalSchema })
+
+export const studyErrors = {
+  CONFLICT: { status: 409, message: 'the Study cannot take this now', data: refusalData },
+  TOO_MANY_REQUESTS: {
+    status: 429,
+    message: 'every Tutor claude is in a turn',
+    data: refusalData,
+  },
+}
+
 const ArtifactPathSchema = z.string().min(1).describe('a path relative to the Study dir')
 
 export const contract = {
@@ -183,6 +208,7 @@ export const contract = {
       description:
         'Store what the user said and start a turn of the Tutor on the model and effort; returns the stored row without waiting for the turn, whose answer comes through watch',
     })
+    .errors(studyErrors)
     .input(ChoiceSchema.extend({ id: StudyIdSchema, text: z.string().min(1) }))
     .output(z.object({ message: StudyMessageSchema })),
   models: meta
@@ -205,6 +231,7 @@ export const contract = {
         description:
           'End the ongoing Study Conversation of a Study: deny its pending permission and stop its turn; with reflect, start the reflection turn and return without waiting for it, whose rows come through watch',
       })
+      .errors(studyErrors)
       .input(
         z.object({
           id: StudyIdSchema,
@@ -221,6 +248,7 @@ export const contract = {
       description:
         'Remove a Study for good: stop its turn, move its dir to the trash, delete its row with its Study Conversations and Repo links, and its claude sessions; the Learning Preference stays',
     })
+    .errors(studyErrors)
     .input(z.object({ id: StudyIdSchema }))
     .output(z.object({})),
   permission: {
@@ -237,6 +265,7 @@ export const contract = {
       description:
         'Find the one Study whose id starts with the prefix, mark it active, and give what its shell needs',
     })
+    .errors(studyErrors)
     .input(
       z.object({
         prefix: z

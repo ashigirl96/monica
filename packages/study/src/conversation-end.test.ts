@@ -234,6 +234,7 @@ test('conversation.end without reflect is not refused while four Studies are in 
 
   await expect(client.conversation.end({ id, reflect: true })).rejects.toMatchObject({
     code: 'TOO_MANY_REQUESTS',
+    data: { reason: 'tutor-capacity' },
   })
   await client.conversation.end({ id })
 

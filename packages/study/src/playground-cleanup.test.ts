@@ -128,6 +128,7 @@ test('a Study whose turn is running is left for the next run, and a send during 
   await expect(fixture.client.send({ id: quiet.id, text: 'hello' })).rejects.toMatchObject({
     code: 'CONFLICT',
     message: `the Playground of ${quiet.id} is being cleaned up`,
+    data: { reason: 'playground-cleaning' },
   })
   expect(existsSync(quietEnv)).toBe(true)
   release()
