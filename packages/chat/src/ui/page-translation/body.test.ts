@@ -68,6 +68,24 @@ test('the marks put on the page to find the main text are taken off again', () =
   expect(document.body.innerHTML).toBe(before)
 })
 
+test('an article that embeds a post as its own article and a widget with its own main is still the main text', () => {
+  const labels = Array.from({ length: 30 }, (_, i) => `<p>agent.step</p> <p>${i}ms</p>`)
+  const document = page(`
+    <div><article>
+      <p>${LONG.repeat(6)}</p>
+      <figure><article><p>Sea stars before and after the storm</p></article></figure>
+      <section><main>${labels.join(' ')}</main></section>
+      <p>Pools refill when the tide comes back in.</p>
+    </article></div>
+    <div><p>${LONG.repeat(30)}</p></div>`)
+
+  const blocks = texts(document)
+  expect([blocks[0], blocks.at(-1)]).toEqual([
+    LONG.repeat(6).trim(),
+    'Pools refill when the tide comes back in.',
+  ])
+})
+
 test('a menu that Defuddle keeps in the main text is still no block', () => {
   const document = page(`
     <main><article>
