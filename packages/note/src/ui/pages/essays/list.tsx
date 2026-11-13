@@ -2,16 +2,14 @@ import { PopoverMenu, PopoverMenuItem, PopoverMenuSeparator } from '@monica/ui'
 import { type MouseEvent as ReactMouseEvent, useCallback, useState } from 'react'
 
 import { displayName, type EssaySummary } from '../../../contract.ts'
-import { useNoteClient } from '../../client.ts'
 import { useNoteKeys } from '../../components/use-note-keys.ts'
 import { useDocumentTitle } from '../../document-title.ts'
 import { slashDate } from '../../notes/dates.ts'
-import { useEssaysCache, useEssaysQuery } from '../../notes/queries.ts'
-import { useToggleStar } from '../../notes/star.tsx'
-import { useRemovals } from '../../notes/use-removals.ts'
-import { navigate, spaLinkClick } from '../../router.ts'
-import { ESSAYS_PATH, essayPath } from '../../routes.ts'
-import { dropEssay, nextEssayStatus, patchEssay } from './support.ts'
+import { nextEssayStatus } from '../../notes/essay-status.ts'
+import { useEssaysQuery } from '../../notes/queries.ts'
+import { useListedNotes } from '../../notes/use-listed-notes.ts'
+import { spaLinkClick } from '../../router.ts'
+import { essayPath } from '../../routes.ts'
 
 import '../../notes/notes.css'
 
@@ -77,61 +75,17 @@ type Menu = { x: number; y: number; target: EssaySummary }
 
 /** /essays: Essay のカードの一覧。右クリックで Star と status の切り替えと削除。 */
 export function EssaysListPage() {
-  const client = useNoteClient()
-  const removals = useRemovals('essay')
+  const { notes } = useListedNotes('essay')
   const { data: essays = null, error: listQueryError } = useEssaysQuery()
   const listError = listQueryError === null ? null : listQueryError.message
-  const { patchEssays, invalidateEssays } = useEssaysCache()
   const [menu, setMenu] = useState<Menu | null>(null)
   const closeMenu = useCallback(() => setMenu(null), [])
 
   useDocumentTitle(null)
 
-  const toggleStar = useToggleStar(invalidateEssays)
-
-  const toggleStatus = useCallback(
-    async (summary: EssaySummary) => {
-      try {
-        const updated = await client.essay.setStatus({
-          id: summary.id,
-          status: nextEssayStatus(summary.status),
-        })
-        if (updated.kind === 'essay') {
-          patchEssays((list) => patchEssay(list, updated.id, { status: updated.status }))
-        }
-      } catch {
-        // 手元の一覧が古いだけなので、取り直せば追いつく。
-        invalidateEssays()
-      }
-    },
-    [client, patchEssays, invalidateEssays],
-  )
-
-  const deleteEssay = useCallback(
-    async (id: string) => {
-      const removed = await removals.remove(id, {
-        leave: () => navigate(ESSAYS_PATH, { replace: true }),
-      })
-      if (removed) patchEssays((list) => dropEssay(list, id))
-    },
-    [removals, patchEssays],
-  )
-
-  const undoDelete = useCallback(async () => {
-    const restored = await removals.undo()
-    if (restored === null) return
-    // 戻した Essay の preview まで正しく並べ直すため、繕わずに取り直す。
-    invalidateEssays()
-  }, [removals, invalidateEssays])
-
   useNoteKeys('essays', {
-    create: () =>
-      // 作れなくても次の ⌥N で作り直せる。
-      void client.essay.create().then(
-        (created) => navigate(essayPath(created.id)),
-        () => {},
-      ),
-    undoRemove: () => void undoDelete(),
+    create: () => void notes.create(),
+    undoRemove: () => void notes.undo(),
   })
 
   const openMenu = (e: ReactMouseEvent, target: EssaySummary) => {
@@ -165,7 +119,7 @@ export function EssaysListPage() {
           <PopoverMenuItem
             onClick={() => {
               closeMenu()
-              void toggleStar(menu.target.id)
+              void notes.toggleStar(menu.target.id)
             }}
           >
             {menu.target.starred ? 'Unstar' : 'Star'}
@@ -173,7 +127,7 @@ export function EssaysListPage() {
           <PopoverMenuItem
             onClick={() => {
               closeMenu()
-              void toggleStatus(menu.target)
+              void notes.setEssayStatus(menu.target.id, nextEssayStatus(menu.target.status))
             }}
           >
             {/* 表示と送る status が食い違わないよう、ラベルも送る status から作る。 */}
@@ -186,7 +140,7 @@ export function EssaysListPage() {
             className="text-destructive hover:bg-destructive/10 hover:text-destructive"
             onClick={() => {
               closeMenu()
-              void deleteEssay(menu.target.id)
+              void notes.remove(menu.target.id)
             }}
           >
             Delete

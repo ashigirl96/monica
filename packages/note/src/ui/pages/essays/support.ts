@@ -13,11 +13,6 @@ export function otherEssayTab(current: EssayStatus): EssayStatus {
   return current === ESSAY_TABS[0] ? ESSAY_TABS[1] : ESSAY_TABS[0]
 }
 
-/** ⌃W・StatusChip・一覧の右クリックで送る status。procedure は toggle ではなく値を受ける。 */
-export function nextEssayStatus(current: EssayStatus): EssayStatus {
-  return current === 'writing' ? 'finished' : 'writing'
-}
-
 /** 未取得（null）を保ったまま status 別に分ける。 */
 export function splitEssaysByStatus(list: readonly NoteSummary[] | null): EssayGroups | null {
   if (list === null) return null
@@ -26,17 +21,4 @@ export function splitEssaysByStatus(list: readonly NoteSummary[] | null): EssayG
     if (summary.kind === 'essay') groups[summary.status].push(summary)
   }
   return groups
-}
-
-/** 未取得（null）を保ったまま手元の一覧を繕う。取り直しを待たずに反映するため */
-export function patchEssay(
-  list: EssaySummary[] | null,
-  id: string,
-  patch: Partial<Pick<EssaySummary, 'title' | 'status'>>,
-): EssaySummary[] | null {
-  return list?.map((s) => (s.id === id ? { ...s, ...patch } : s)) ?? list
-}
-
-export function dropEssay(list: EssaySummary[] | null, id: string): EssaySummary[] | null {
-  return list?.filter((s) => s.id !== id) ?? list
 }

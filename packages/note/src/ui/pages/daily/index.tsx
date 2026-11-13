@@ -9,11 +9,9 @@ import type { BlockEditorHandle } from '../../editor/block-editor.tsx'
 import { useAutosaveContext } from '../../notes/autosave-context.tsx'
 import { addMonths, dayLabelWithYear, type Month, monthOf, sameMonth } from '../../notes/dates.ts'
 import { cycleSelect } from '../../notes/editor-support.ts'
-import { NoteBlockEditor } from '../../notes/note-block-editor.tsx'
-import { readBody, UnreadableBody, UnreadableNotice } from '../../notes/note-body.tsx'
+import { NotePane } from '../../notes/note-pane.tsx'
 import { NotesShell } from '../../notes/notes-shell.tsx'
 import { dailyOrPadQueryOptions, useDailyDatesQuery } from '../../notes/queries.ts'
-import { SaveStatus } from '../../notes/save-status.tsx'
 import { useOpenNote } from '../../notes/use-open-note.ts'
 import { queryKeys } from '../../query.ts'
 import { navigate } from '../../router.ts'
@@ -44,13 +42,6 @@ export function DailyPage({ date }: { date: string | null }) {
   // 開く = 作る（get-or-create、冪等）。docKey は note id ではなく date —
   // id はフェッチするまで分からないため
   const { openNote, view } = useOpenNote(date ?? PAD_KEY, dailyOrPadQueryOptions(client, date))
-  const { note, generation } = view
-
-  // 描画できる note がある間はエラーを出さない。復帰時の再フェッチが一時的に失敗しても
-  // エディタを unmount しないため（latch の古い content で remount され、保存済みの
-  // 編集が巻き戻ってそのまま上書きされる）。
-  const noteError = note === null && view.error !== null ? view.error.message : null
-  const read = note === null ? null : readBody(note.content)
 
   const datesQuery = useDailyDatesQuery()
 
@@ -123,39 +114,22 @@ export function DailyPage({ date }: { date: string | null }) {
         </>
       }
     >
-      <main className="flex-1 [zoom:var(--note-zoom,1)] overflow-y-auto bg-[var(--paper)]">
-        {noteError ? (
-          <div className="flex h-full items-center justify-center text-sm text-destructive">
-            {noteError}
+      <NotePane
+        view={view}
+        changeBody={openNote.changeBody}
+        reload={openNote.reload}
+        autoFocus
+        handleRef={editorHandleRef}
+        headerClassName="pt-10"
+        renderHeader={({ saveStatus }) => (
+          <div className="flex items-baseline justify-between gap-3">
+            <h1 className="font-mono text-[0.8rem] tracking-widest text-[var(--ink-muted)] uppercase">
+              {heading}
+            </h1>
+            <span className="truncate text-xs">{saveStatus}</span>
           </div>
-        ) : note && read ? (
-          <div className="mx-auto w-full max-w-[calc(760px+var(--note-extra-w,0px))] px-10">
-            <header className="pt-10">
-              <div className="flex items-baseline justify-between gap-3">
-                <h1 className="font-mono text-[0.8rem] tracking-widest text-[var(--ink-muted)] uppercase">
-                  {heading}
-                </h1>
-                <span className="truncate text-xs">
-                  <SaveStatus noteId={note.id} onReload={() => void openNote.reload()} />
-                </span>
-              </div>
-              {!read.ok && <UnreadableNotice error={read.error} />}
-            </header>
-            {read.ok ? (
-              <NoteBlockEditor
-                note={note}
-                doc={read.doc}
-                generation={generation}
-                autoFocus
-                onDocChange={openNote.changeBody}
-                handleRef={editorHandleRef}
-              />
-            ) : (
-              <UnreadableBody noteId={note.id} content={note.content} error={read.error} />
-            )}
-          </div>
-        ) : null}
-      </main>
+        )}
+      />
     </NotesShell>
   )
 }
