@@ -78,6 +78,12 @@ function pdfBudget(question: string, history: readonly Turn[]): number {
   return MAX_ASK_BODY_BYTES - BODY_MARGIN_BYTES - jsonBytes({ question, history: bare })
 }
 
+const stoppedTurn = ({ question, page, answer }: Asking): Turn => ({
+  question,
+  page,
+  answer: answer ? `${answer}\n\n${STOPPED_MARK}` : STOPPED_MARK,
+})
+
 const withoutPage = (turn: Turn): Turn | undefined => {
   const page = withoutBody(turn.page)
   return page && { ...turn, page }
@@ -165,7 +171,10 @@ export type Reading = { shown: CurrentPage; page: Promise<Page> }
  */
 export type ReadPage = (options: ReadOptions) => Reading
 
-/** side panel の Chat。document の memory にだけあり、どこにも残さない。 */
+/** side panel を閉じても残す Chat。答えている途中の質問は止めたことにする。 */
+export type SavedChat = { entries: readonly ChatEntry[]; history: readonly Turn[] }
+
+/** side panel の Chat。 */
 export type ChatStore = {
   snapshot: () => ChatSnapshot
   subscribe: (listener: () => void) => () => void
@@ -186,6 +195,9 @@ export type ChatStore = {
   chooseEffort: (effort: Effort) => void
   /** 今の Chat を終える。答えの途中なら、その stream を abort する。 */
   startNewChat: () => void
+  saved: () => SavedChat
+  /** まだ何も訊いていなければ、残した Chat に戻す。失敗した質問は送り直せない。 */
+  restore: (chat: SavedChat) => void
 }
 
 /** 送った質問。答えが返るか履歴から外れるまで、送った input（HTML・PDF・スクリーンショットも）を持つ。 */
@@ -455,13 +467,10 @@ export function createChatStore(client: ChatClient, storage: ChoiceStorage): Cha
     },
     stop() {
       if (!asking) return
-      const { id, question, controller, answer: text, page } = asking
+      const { id, controller } = asking
       controller.abort()
+      history = [...history, stoppedTurn(asking)]
       asking = undefined
-      history = [
-        ...history,
-        { question, page, answer: text ? `${text}\n\n${STOPPED_MARK}` : STOPPED_MARK },
-      ]
       patch(id, { ...NO_PASSING_LINES, status: 'stopped' })
     },
     toggleScreenshot() {
@@ -477,6 +486,22 @@ export function createChatStore(client: ChatClient, storage: ChoiceStorage): Cha
       history = []
       withScreenshot = false
       publish([])
+    },
+    saved() {
+      if (!asking) return { entries, history }
+      const { id } = asking
+      return {
+        entries: entries.map((entry) =>
+          entry.id === id ? { ...entry, ...NO_PASSING_LINES, status: 'stopped' } : entry,
+        ),
+        history: [...history, stoppedTurn(asking)],
+      }
+    },
+    restore(chat) {
+      if (entries.length > 0 || asking) return
+      history = chat.history
+      nextId = Math.max(nextId, ...chat.entries.map(({ id }) => id + 1))
+      publish(chat.entries)
     },
   }
 }

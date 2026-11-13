@@ -44,7 +44,8 @@ const manifest = defineManifest(({ mode }) => ({
   },
   // scripting は、質問を送った時に Current Page の HTML と選択範囲を読み、⌥A で Page Translation の script を注入する。
   // nativeMessaging は、Backend の token の口の port と Chrome Extension の token を host から引く。
-  permissions: ['sidePanel', 'scripting', 'nativeMessaging'],
+  // storage は、side panel を閉じても Chat を残す storage.session に使う。
+  permissions: ['sidePanel', 'scripting', 'nativeMessaging', 'storage'],
   // Current Page の url と title を読み、Backend の token の口（loopback）を呼ぶ。
   host_permissions: ['<all_urls>'],
   // CRXJS は ?script で注入する script をどのページからも読める resource に足すので、決まった URL で拡張の有無を見抜かれないよう、URL を session ごとに変える。

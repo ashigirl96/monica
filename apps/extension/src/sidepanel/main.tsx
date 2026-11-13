@@ -7,10 +7,14 @@ import type { ContractRouterClient } from '@orpc/contract'
 import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
 
+import { magnifyOnPinch } from './pinch-zoom.ts'
+
 type Client = ContractRouterClient<{ chat: typeof chatContract }>
 
 // Backend の token の口を、Native Messaging の host が返す Chrome Extension の token で呼ぶ。
 const client: Client = createORPCClient(new RPCLink(viaNativeHost(__MONICA_NATIVE_HOST__)))
+
+magnifyOnPinch(document.body)
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
