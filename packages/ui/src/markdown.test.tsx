@@ -30,3 +30,15 @@ test('a table is wrapped so it scrolls on its own instead of widening the text',
 
   expect(html).toContain('<div class="typeset-scroll"><table>')
 })
+
+test('a fenced block with a language gets token classes to color', () => {
+  const html = renderToStaticMarkup(<Markdown text={'```ts\nconst a = 1\n```'} />)
+
+  expect(html).toContain('<span class="hljs-keyword">const</span>')
+})
+
+test('a fenced block without a language stays plain text', () => {
+  const html = renderToStaticMarkup(<Markdown text={'```\nconst a = 1\n```'} />)
+
+  expect(html).not.toContain('hljs-')
+})
