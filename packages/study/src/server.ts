@@ -1,6 +1,7 @@
-import { implement } from '@orpc/server'
+import { implement, type ORPCErrorConstructorMap } from '@orpc/server'
 
-import { contract } from './contract.ts'
+import { contract, type studyErrors } from './contract.ts'
+import { isRefusal, type Refusal } from './lifecycle.ts'
 import { type Db, internals, type StudyLedger } from './study.ts'
 
 export { migrations } from '../migrations/index.ts'
@@ -10,21 +11,32 @@ export { installTutors } from './tutors.ts'
 
 const os = implement(contract).$context<{ db: Db; studyLedger: StudyLedger }>()
 
+// 断った理由を CONFLICT と TOO_MANY_REQUESTS の data に載せ、画面が理由ごとの文を出せるようにする。
+function admitted<T>(result: T | Refusal, errors: ORPCErrorConstructorMap<typeof studyErrors>): T {
+  if (!isRefusal(result)) return result
+  const { refused: reason, message } = result
+  if (reason === 'tutor-capacity') throw errors.TOO_MANY_REQUESTS({ message, data: { reason } })
+  throw errors.CONFLICT({ message, data: { reason } })
+}
+
 export const router = os.router({
   start: os.start.handler(({ context }) => internals(context.studyLedger).start()),
   list: os.list.handler(({ context }) => internals(context.studyLedger).list()),
   get: os.get.handler(({ context, input }) => internals(context.studyLedger).get(input.id)),
-  send: os.send.handler(({ context, input: { id, text, ...choice } }) =>
-    internals(context.studyLedger).send(id, text, choice),
+  send: os.send.handler(({ context, input: { id, text, ...choice }, errors }) =>
+    admitted(internals(context.studyLedger).send(id, text, choice), errors),
   ),
   models: os.models.handler(({ context }) => internals(context.studyLedger).models()),
   conversation: {
-    end: os.conversation.end.handler(({ context, input }) =>
-      internals(context.studyLedger).endConversation(input.id, input.reflect ?? false),
+    end: os.conversation.end.handler(async ({ context, input, errors }) =>
+      admitted(
+        await internals(context.studyLedger).endConversation(input.id, input.reflect ?? false),
+        errors,
+      ),
     ),
   },
-  remove: os.remove.handler(({ context, input }) =>
-    internals(context.studyLedger).remove(input.id),
+  remove: os.remove.handler(async ({ context, input, errors }) =>
+    admitted(await internals(context.studyLedger).remove(input.id), errors),
   ),
   permission: {
     answer: os.permission.answer.handler(({ context, input }) =>
@@ -46,8 +58,8 @@ export const router = os.router({
   watch: os.watch.handler(async ({ context, input, signal }) =>
     internals(context.studyLedger).watch(input.id, signal),
   ),
-  shell: os.shell.handler(({ context, input }) =>
-    internals(context.studyLedger).shell(input.prefix),
+  shell: os.shell.handler(({ context, input, errors }) =>
+    admitted(internals(context.studyLedger).shell(input.prefix), errors),
   ),
   artifact: {
     list: os.artifact.list.handler(({ context, input }) =>

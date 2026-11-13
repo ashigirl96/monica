@@ -374,6 +374,7 @@ test('a second send to a Study whose turn is running is refused with CONFLICT an
   await expect(client.send({ id: busy.id, text: 'second' })).rejects.toMatchObject({
     code: 'CONFLICT',
     message: `a turn is already running in ${busy.id}`,
+    data: { reason: 'turn-running' },
   })
   expect((await client.get({ id: busy.id })).conversations[0]!.messages).toHaveLength(1)
   expect((await client.send({ id: other.id, text: 'hi' })).message.text).toBe('hi')
@@ -711,6 +712,7 @@ test('a fifth Study stops the idle claude whose turn is oldest, and send is refu
   for (const id of ids.slice(1)) await client.send({ id, text: 'busy' })
   await expect(client.send({ id: ids[0]!, text: 'hello' })).rejects.toMatchObject({
     code: 'TOO_MANY_REQUESTS',
+    data: { reason: 'tutor-capacity' },
   })
   expect((await client.get({ id: ids[0]! })).conversations[0]!.messages).toHaveLength(1)
 })

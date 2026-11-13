@@ -231,9 +231,18 @@ test('send is refused while a turn runs, and a failed send shows one line', asyn
 
   stream.push({ type: 'turn-ended', error: null })
   await until(store, (s) => !s.running)
-  client.sendError = new ORPCError('CONFLICT', { message: 'a turn is already running' })
+  client.sendError = new ORPCError('CONFLICT', {
+    message: 'a turn is already running',
+    data: { reason: 'turn-running' },
+  })
   expect(await store.send('again')).toBe(false)
   expect(store.getSnapshot().sendError).toBe('Tutor がまだ答えている。答え終わってから送る')
+  client.sendError = new ORPCError('CONFLICT', {
+    message: 'being removed',
+    data: { reason: 'study-removing' },
+  })
+  expect(await store.send('again')).toBe(false)
+  expect(store.getSnapshot().sendError).toBe('この Study は消している途中')
 })
 
 test('a broken stream reopens after a second, and closing aborts the stream', async () => {
