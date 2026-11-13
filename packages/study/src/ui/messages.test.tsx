@@ -6,10 +6,12 @@ import type { StudyMessage } from '../contract.ts'
 import {
   commandLine,
   currentTutor,
+  groupTools,
   type KeyboardEventLike,
   MessageView,
   permissionAnswerOf,
   PermissionPrompt,
+  ToolGroupView,
   visibleCommand,
 } from './messages.tsx'
 
@@ -183,4 +185,69 @@ test('the current Tutor is the last switch of the conversation, or the shared wa
       message('tutor_switch', 'paper'),
     ]),
   ).toBe('paper')
+})
+
+const row = (id: number, kind: StudyMessage['kind'], tool: string | null = null): StudyMessage => ({
+  ...message(kind, `text-${id}`, tool),
+  id,
+})
+const shape = (items: ReturnType<typeof groupTools>) =>
+  items.map((item) => (item.kind === 'tool_group' ? item.messages.map((m) => m.id) : item.id))
+
+test('tool and permission rows in a row of two or more fold into a group, cut by every other row', () => {
+  const messages = [
+    row(1, 'user'),
+    row(2, 'tool', 'Read'),
+    row(3, 'permission'),
+    row(4, 'tool', 'Bash'),
+    row(5, 'tutor'),
+    row(6, 'tool', 'Read'),
+    row(7, 'tutor_switch'),
+    row(8, 'tool', 'Grep'),
+    row(9, 'tool', 'Grep'),
+    row(10, 'reflection'),
+  ]
+
+  expect(shape(groupTools(messages, false))).toEqual([1, [2, 3, 4], 5, 6, 7, [8, 9], 10])
+})
+
+test('the last run stays open while the Tutor is still answering, and folds once the answer ends', () => {
+  const messages = [row(1, 'user'), row(2, 'tool', 'Read'), row(3, 'tool', 'Bash')]
+
+  expect(shape(groupTools(messages, true))).toEqual([1, 2, 3])
+  expect(shape(groupTools(messages, false))).toEqual([1, [2, 3]])
+})
+
+test('an earlier run folds while the Tutor is still answering after it', () => {
+  const messages = [row(1, 'tool', 'Read'), row(2, 'tool', 'Read'), row(3, 'tutor')]
+
+  expect(shape(groupTools(messages, true))).toEqual([[1, 2], 3])
+})
+
+test('a folded group reads what kinds of tools ran and how often, in the order they first ran', () => {
+  const answered = (id: number, state: 'allowed' | 'denied') => ({
+    ...row(id, 'permission'),
+    state,
+  })
+  const html = renderToStaticMarkup(
+    <ToolGroupView
+      messages={[
+        row(1, 'tool', 'Read'),
+        row(2, 'tool', 'Bash'),
+        row(3, 'tool', 'WebFetch'),
+        answered(4, 'allowed'),
+        row(5, 'tool', 'Grep'),
+        row(6, 'tool', 'WebSearch'),
+        row(7, 'tool', 'Edit'),
+        row(8, 'tool', 'Mystery'),
+        answered(9, 'denied'),
+        row(10, 'tool', 'Bash'),
+      ]}
+      dir={DIR}
+    />,
+  )
+
+  expect(html).toContain('2 件読み、2 回走らせ、1 回許し、2 回探し、1 件書き、1 回使い、1 回断った')
+  expect(html).toContain('aria-expanded="false"')
+  expect(html).not.toContain('text-1')
 })
