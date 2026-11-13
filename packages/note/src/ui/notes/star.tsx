@@ -1,22 +1,3 @@
-import { useMemo } from 'react'
-
-import { useNoteClient } from '../client.ts'
-import { createStarToggle } from './star-toggle.ts'
-
-/** 並びは Backend だけが決めるので、手元では並べ替えずに一覧を取り直す。 */
-export function useToggleStar(invalidate: () => void) {
-  const client = useNoteClient()
-  return useMemo(
-    () =>
-      createStarToggle({
-        read: (id) => client.get({ id }).then((note) => 'starred' in note && note.starred),
-        send: (id, starred) => client.star({ id, starred }),
-        invalidate,
-      }),
-    [client, invalidate],
-  )
-}
-
 export function StarButton({ starred, onToggle }: { starred: boolean; onToggle: () => void }) {
   return (
     <button

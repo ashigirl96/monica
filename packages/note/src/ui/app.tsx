@@ -3,7 +3,7 @@ import { useEffect } from 'react'
 import { AppShell } from './components/app-shell.tsx'
 import type { Section } from './keys.ts'
 import { NoteConflictNotice } from './notes/conflict-notice.tsx'
-import { RemovalsContext, useScreenRemovals } from './notes/use-removals.ts'
+import { ListedNotesContext, useScreenNotes } from './notes/use-listed-notes.ts'
 import { DailyPage } from './pages/daily/index.tsx'
 import { EssayEditorPage } from './pages/essays/editor.tsx'
 import { EssaysListPage } from './pages/essays/list.tsx'
@@ -19,7 +19,7 @@ export function App() {
   const { slotPage, railItem } = useSlots()
   const slotScreen = slotPageOf(pathname, slotPage)
   const toToday = route.page === 'today'
-  const removals = useScreenRemovals(route)
+  const notes = useScreenNotes(route)
 
   useEffect(() => {
     if (toToday) navigate(todayPath(new Date()), { replace: true })
@@ -29,7 +29,7 @@ export function App() {
     <>
       {/* 今日への replace の間も外さない。外すと zen が解ける。 */}
       <AppShell active={sectionOf(route)} railItem={railItem} onSlotPage={slotScreen !== null}>
-        <RemovalsContext value={removals}>{slotScreen ?? pageOf(route)}</RemovalsContext>
+        <ListedNotesContext value={notes}>{slotScreen ?? pageOf(route)}</ListedNotesContext>
       </AppShell>
       <NoteConflictNotice />
     </>

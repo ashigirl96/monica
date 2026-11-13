@@ -5,6 +5,7 @@ import type { NoteClient } from '../client.ts'
 import { queryKeys } from '../query.ts'
 import { dayLabelWithYear } from './dates.ts'
 import { persistableContent } from './editor-support.ts'
+import { nextEssayStatus } from './essay-status.ts'
 import { readBody } from './note-body.tsx'
 import { noteToOpen, shouldAdoptServerDoc, usableServerDoc } from './note-sync.ts'
 import type { NoteQueryOptions } from './queries.ts'
@@ -189,7 +190,7 @@ export class OpenNote {
     // 未保存が無いので、画面の title と本文は Backend の版と同じはず。
     const shown = this.#editing?.kind === 'essay' ? this.#editing : current
     const shownDoc = JSON.stringify(persistableContent(this.#content).toJSON())
-    const status = current.status === 'writing' ? 'finished' : 'writing'
+    const status = nextEssayStatus(current.status)
     const updated = await client.essay.setStatus({ id: current.id, status })
     if (updated.kind !== 'essay') return null
     // 外で書き換わった版を Base Version にすると、画面の古い本文が次の保存でその変更を Note Conflict にならずに上書きする。
