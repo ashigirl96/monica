@@ -1,3 +1,4 @@
+import { listenNewConversationKey } from '@monica/ui'
 import { Button, ChatMessage, InputMessage, ThinkingIndicator, useIcons } from '@monica/ui/fluid'
 import { Camera } from 'lucide-react'
 import { Fragment, useEffect, useState, useSyncExternalStore } from 'react'
@@ -169,7 +170,10 @@ export function ChatApp({ client }: { client: ChatClient }) {
     void chrome.windows.getCurrent().then(({ id }) => {
       if (!stopped && id !== undefined) stopKeeping = keepChat(store, chrome.storage.session, id)
     })
+    // ⌘N は Chrome が新しい窓に予約していて届かないので、Study と同じ ⌥N にする。
+    const stopKey = listenNewConversationKey(store.startNewChat)
     return () => {
+      stopKey()
       stopped = true
       stopKeeping()
       close()
@@ -179,7 +183,7 @@ export function ChatApp({ client }: { client: ChatClient }) {
   }, [store])
 
   return (
-    <div className="flex h-dvh flex-col bg-background text-foreground [--fs-body:16px] [--fs-subtitle:16px] [--lh-body:24px] [--lh-subtitle:24px]">
+    <div className="flex h-[calc(100dvh/var(--chat-zoom,1))] [zoom:var(--chat-zoom,1)] flex-col bg-background text-foreground [--fs-body:16px] [--fs-subtitle:16px] [--lh-body:24px] [--lh-subtitle:24px]">
       <PageHeader page={page} onNewChat={store.startNewChat} />
       <ChatBody store={store} />
     </div>

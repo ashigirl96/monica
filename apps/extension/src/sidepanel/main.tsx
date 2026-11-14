@@ -8,6 +8,7 @@ import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
 
 import { magnifyOnPinch } from './pinch-zoom.ts'
+import { zoomOnKeys } from './text-zoom.ts'
 
 type Client = ContractRouterClient<{ chat: typeof chatContract }>
 
@@ -15,6 +16,7 @@ type Client = ContractRouterClient<{ chat: typeof chatContract }>
 const client: Client = createORPCClient(new RPCLink(viaNativeHost(__MONICA_NATIVE_HOST__)))
 
 magnifyOnPinch(document.body)
+zoomOnKeys()
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
