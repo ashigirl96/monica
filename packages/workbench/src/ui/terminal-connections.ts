@@ -6,6 +6,7 @@ import { layoutAtom } from './backend-copy.ts'
 import { encoder } from './base64.ts'
 import {
   canAttach,
+  markEndedAtom,
   setTerminalSessionStatusAtom,
   type TerminalSessionStatus,
 } from './terminal-sessions.ts'
@@ -27,7 +28,7 @@ export type ConnectingTab = {
   sessionId: string
   status?: TerminalSessionStatus
   onStatus: (status: 'running' | 'lost') => void
-  onExit: (exitCode: number | null) => void
+  onExit: () => void
 }
 
 export type TabConnections = ReturnType<typeof createTabConnections>
@@ -183,6 +184,12 @@ function createTabConnections(port: TerminalPort) {
       return [...connections.keys()]
     },
 
+    releaseUnbound(bound: ReadonlyMap<string, string>): void {
+      for (const [tabId, conn] of connections) {
+        if (bound.get(tabId) !== conn.sessionId) release(tabId)
+      }
+    },
+
     mount(tabId: string, term: Terminal): () => void {
       terminals.set(tabId, term)
       return () => {
@@ -223,20 +230,32 @@ if (import.meta.env.DEV) {
     getDefaultStore().get(tabConnectionsAtom).terminals
 }
 
-export function connectTab(store: Store, tab: Omit<ConnectingTab, 'onStatus'>): boolean {
+function boundSessions(store: Store): Map<string, string> {
+  return new Map(
+    store
+      .get(layoutAtom)
+      ?.runspaces.flatMap((r) => r.tabs.map((t) => [t.id, t.terminalSessionId] as const)),
+  )
+}
+
+// 閉じるか張り直すかは Backend が決める。張り直しが先に届いた Tab はもう新しい shell を指しているので触らない。
+function tabExited(store: Store, tabId: string, sessionId: string) {
+  if (boundSessions(store).get(tabId) !== sessionId) return
+  store.get(tabConnectionsAtom).release(tabId)
+  store.set(markEndedAtom, sessionId)
+}
+
+export function connectTab(store: Store, tab: Omit<ConnectingTab, 'onStatus' | 'onExit'>): boolean {
   return store.get(tabConnectionsAtom).connect({
     ...tab,
     onStatus: (status) => store.set(setTerminalSessionStatusAtom, tab.sessionId, { status }),
+    onExit: () => tabExited(store, tab.tabId, tab.sessionId),
   })
 }
 
-// CLI の tab close や Task の close は webview を通らないので、読み直した Layout に無い Tab Connection をここで release する。
+// CLI の tab close や Task の close は webview を通らず、見えていない Tab の張り直しには pane の connect が走らないので、読み直した Layout が同じ Terminal Session に結んでいない Tab Connection をここで release する。
 export function releaseTabsLeavingLayout(store: Store): () => void {
-  return store.sub(layoutAtom, () => {
-    const tabIds = new Set(store.get(layoutAtom)?.runspaces.flatMap((r) => r.tabs.map((t) => t.id)))
-    const connections = store.get(tabConnectionsAtom)
-    for (const tabId of connections.tabIds()) {
-      if (!tabIds.has(tabId)) connections.release(tabId)
-    }
-  })
+  return store.sub(layoutAtom, () =>
+    store.get(tabConnectionsAtom).releaseUnbound(boundSessions(store)),
+  )
 }

@@ -40,7 +40,6 @@ const {
   reloadAtom,
   sidebarAtom,
   startNewShellForTabAtom,
-  tabExitedAtom,
   toggleTabPinAtom,
   updateTabCwdAtom,
   updateTabTitleAtom,
@@ -72,9 +71,7 @@ type Backend = ReturnType<typeof bench>
 async function connected(store: Store, tab: Tab) {
   const shell = fakeTerminalPort(store)
   mountFakeTerminal(store, tab.id)
-  connectAsPane(store, tab.id, tab.terminalSessionId, () =>
-    store.set(tabExitedAtom, tab.id, tab.terminalSessionId),
-  )
+  connectAsPane(store, tab.id, tab.terminalSessionId)
   await shell.received(1)
   return shell
 }
@@ -597,13 +594,15 @@ test('an Exit that arrives after the Tab was bound to a new shell leaves the new
   const { tab } = await client.runspace.create(size)
   await client.tab.pin({ id: tab.id })
   await settled(tab.terminalSessionId)
+  await store.set(reloadAtom)
+  const shell = await connected(store, tab)
   ptyd.exit(tab.terminalSessionId, 0)
   await ptyd.received((op) => op.op === 'reap' && op.session_id === tab.terminalSessionId)
   const respawned = await client.tab.respawn({ id: tab.id, ...size })
   await settled(respawned.terminalSessionId)
   await store.set(reloadAtom)
 
-  store.set(tabExitedAtom, tab.id, tab.terminalSessionId)
+  shell.exit(tab.terminalSessionId, 0)
 
   expect(store.get(deadTabsAtom)).toEqual({})
   expect(store.get(terminalSessionStatusAtom)[respawned.terminalSessionId]?.status).toBe('running')

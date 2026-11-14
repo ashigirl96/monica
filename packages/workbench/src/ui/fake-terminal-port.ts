@@ -121,12 +121,7 @@ export function mountFakeTerminal(store: Store, tabId: string) {
 }
 
 // pane と同じく、読み直した status で attach してよいかを決める。
-export function connectAsPane(
-  store: Store,
-  tabId: string,
-  sessionId: string,
-  onExit: (code: number | null) => void = () => {},
-) {
+export function connectAsPane(store: Store, tabId: string, sessionId: string) {
   const status = store.get(terminalSessionStatusAtom)[sessionId]?.status
-  return connectTab(store, { tabId, sessionId, status, onExit })
+  return connectTab(store, { tabId, sessionId, status })
 }

@@ -26,7 +26,6 @@ import { tabConnectionsAtom } from './terminal-connections.ts'
 import {
   applyTerminalSessionListAtom,
   isDeadStatus,
-  markEndedAtom,
   type TerminalSessionStatusEntry,
   terminalSessionStatusAtom,
 } from './terminal-sessions.ts'
@@ -365,14 +364,6 @@ export const deadTabsAtom = atom((get) => {
     if (entry && isDeadStatus(entry.status)) dead[tab.id] = entry
   }
   return dead
-})
-
-// 閉じるか張り直すかは Backend が決め、閉じる Tab に overlay を出さないよう終わった印も付けない。
-export const tabExitedAtom = atom(null, (get, set, tabId: string, terminalSessionId: string) => {
-  // Backend の張り直しが先に届いた Tab は、もう新しい shell を指している。
-  if (findTab(get, tabId)?.tab.terminalSessionId !== terminalSessionId) return
-  get(tabConnectionsAtom).release(tabId)
-  set(markEndedAtom, terminalSessionId)
 })
 
 export const toggleTabPinAtom = action(async (get, set, tabId?: string) => {
