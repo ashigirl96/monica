@@ -7,6 +7,16 @@ function isList(node: Node): node is HTMLUListElement | HTMLOListElement {
   return node instanceof Element && (node.tagName === 'UL' || node.tagName === 'OL')
 }
 
+// 太字などを p の style で書く HTML があるので、p を外すときは style を span に移して mark に読ませる。
+function unwrap(paragraph: Element, doc: Document): Node[] {
+  const style = paragraph.getAttribute('style')
+  if (!style) return [...paragraph.childNodes]
+  const span = doc.createElement('span')
+  span.setAttribute('style', style)
+  span.append(...paragraph.childNodes)
+  return [span]
+}
+
 function containersOf(list: HTMLUListElement | HTMLOListElement, doc: Document): HTMLElement[] {
   const kind = BLOCK_KIND[list.tagName as keyof typeof BLOCK_KIND]
   return [...list.children]
@@ -20,7 +30,7 @@ function containersOf(list: HTMLUListElement | HTMLOListElement, doc: Document):
         if (isList(child)) children.push(...containersOf(child, doc))
         // shortcut: 段落を複数持つ項目は 1 行につなげる。行を分けたいと言われたら兄弟の段落にする。
         else if (child instanceof Element && child.tagName === 'P')
-          content.append(...child.childNodes)
+          content.append(...unwrap(child, doc))
         else content.append(child)
       }
       const container = doc.createElement('div')
