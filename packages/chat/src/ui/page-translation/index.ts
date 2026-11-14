@@ -18,10 +18,15 @@ export function togglePageTranslation(): void {
         type: 'monica.translateSegments',
         segments,
       })) ?? { failed: 'the Chrome Extension did not answer' },
-    report: (state) =>
-      void chrome.runtime
-        .sendMessage<PageTranslationMessage>({ type: 'monica.pageTranslationState', state })
-        .catch(() => {}),
+    report: (state) => {
+      // 拡張を読み込み直した後も、前に注入した script は Browser Tab に残り、その sendMessage は
+      // Promise を返さずにその場で "Extension context invalidated" を投げる。
+      try {
+        void chrome.runtime
+          .sendMessage<PageTranslationMessage>({ type: 'monica.pageTranslationState', state })
+          .catch(() => {})
+      } catch {}
+    },
   })
   world[TRANSLATOR].toggle()
 }
