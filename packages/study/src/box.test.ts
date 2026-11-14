@@ -384,7 +384,7 @@ test('a git clone of a GitHub repository into env/sources/<owner>/<repo> and a g
     expect(await outside(command)).toEqual({
       behavior: 'allow',
       updatedInput: {
-        command: `GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_NOSYSTEM=1 GIT_TERMINAL_PROMPT=0 ${command}`,
+        command: `HOME=/var/empty GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_NOSYSTEM=1 GIT_TERMINAL_PROMPT=0 ${command}`,
         dangerouslyDisableSandbox: true,
       },
     })
