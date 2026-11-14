@@ -135,6 +135,31 @@ export function deleteColumnTr(state: EditorState, ctx: TableCellContext): Trans
   return tr
 }
 
+export function isRagged(table: PMNode): boolean {
+  const width = tableWidth(table)
+  for (let r = 0; r < table.childCount; r++) if (table.child(r).childCount !== width) return true
+  return false
+}
+
+/** 短い行の末尾に空のセルを足し、どの行も最も長い行と同じ数にする。足りないセルはクリックできず、他の操作では埋まらない */
+export function fillRowsTr(state: EditorState, ctx: TableCellContext): Transaction {
+  const width = tableWidth(ctx.tableNode)
+  const tr = state.tr
+  // 末尾行から遡ると各挿入位置は直前の挿入より必ず手前なので、元 doc の位置がそのまま使える
+  for (let r = ctx.tableNode.childCount - 1; r >= 0; r--) {
+    const row = ctx.tableNode.child(r)
+    if (row.childCount === width) continue
+    const at = rowStartPos(ctx.tablePos, ctx.tableNode, r) + row.nodeSize - 1
+    const header = rowIsHeader(row)
+    tr.insert(
+      at,
+      Array.from({ length: width - row.childCount }, () => nodes.tableCell.create({ header })),
+    )
+  }
+  selectCellIn(tr, ctx.tablePos, ctx.rowIndex, ctx.cellIndex)
+  return tr
+}
+
 function tableCommand(build: (state: EditorState, ctx: TableCellContext) => Transaction): Command {
   return (state, dispatch) => {
     const ctx = getTableCellContext(state.selection.$from)
@@ -148,5 +173,6 @@ export const tableInsertRowAbove = tableCommand((s, ctx) => insertRowTr(s, ctx, 
 export const tableInsertRowBelow = tableCommand((s, ctx) => insertRowTr(s, ctx, 'below'))
 export const tableInsertColumnLeft = tableCommand((s, ctx) => insertColumnTr(s, ctx, 'left'))
 export const tableInsertColumnRight = tableCommand((s, ctx) => insertColumnTr(s, ctx, 'right'))
+export const tableFillRows = tableCommand(fillRowsTr)
 export const tableDeleteRow = tableCommand(deleteRowTr)
 export const tableDeleteColumn = tableCommand(deleteColumnTr)
