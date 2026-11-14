@@ -82,6 +82,24 @@ export const TurnSchema = z.object({
   page: PageSnapshotSchema,
 })
 
+const LeftOutSchema = z.discriminatedUnion('kind', [
+  z.object({
+    kind: z.literal('page'),
+    parts: z
+      .array(z.enum(['text', 'screenshot', 'selection']))
+      .min(1)
+      .describe('what the page had; text also stands for the text of the page it was the same as'),
+  }),
+  z.object({ kind: z.literal('turn') }),
+])
+
+// 外した turn も question・answer・page を持つ。leftOut を知らない Backend にも印の文字と too-large で通じるため。
+export const SentTurnSchema = TurnSchema.extend({
+  leftOut: LeftOutSchema.optional().describe(
+    'what was left out of this turn to stay within a limit; a turn left out whole keeps its place so that same keeps pointing at the right turn',
+  ),
+})
+
 export const DEFAULT_MODEL = 'haiku'
 export const DEFAULT_EFFORT = 'low'
 
@@ -109,7 +127,7 @@ export const AskInputSchema = ChoiceSchema.extend({
   question: z.string().min(1),
   page: PageSchema.describe('the Current Page when the question was sent'),
   history: z
-    .array(TurnSchema)
+    .array(SentTurnSchema)
     .describe(
       'the earlier questions and answers of the Chat, oldest first, each with the page of its snapshot event',
     ),
@@ -175,7 +193,9 @@ export const askErrors = {
   AGENT_FAILED: {
     status: 500,
     message: 'claude could not answer',
-    data: z.object({ detail: z.string().describe('what claude or the Agent SDK said, as it is') }),
+    data: z.object({
+      detail: z.string().describe('what claude or the Agent SDK said, as it is'),
+    }),
   },
 }
 
@@ -221,6 +241,8 @@ export type Unreadable = z.infer<typeof UnreadableSchema>
 export type Page = z.infer<typeof PageSchema>
 export type PageSnapshot = z.infer<typeof PageSnapshotSchema>
 export type Turn = z.infer<typeof TurnSchema>
+export type SentTurn = z.infer<typeof SentTurnSchema>
+export type LeftOut = NonNullable<SentTurn['leftOut']>
 export type AskInput = z.infer<typeof AskInputSchema>
 export type ChatEvent = z.infer<typeof ChatEventSchema>
 export type SnapshotEvent = Extract<ChatEvent, { type: 'snapshot' }>

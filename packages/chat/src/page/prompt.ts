@@ -1,4 +1,5 @@
-import type { PageSnapshot, Turn, Unreadable } from '../contract.ts'
+import type { LeftOut, PageSnapshot, SentTurn, Unreadable } from '../contract.ts'
+import { withinPromptLimit } from '../history.ts'
 import type { Block } from '../prompt.ts'
 import { cut, MAX_PAGE_CHARS } from './snapshot.ts'
 
@@ -83,24 +84,26 @@ function screenshotNote({ screenshot, screenshotFailed }: PageSnapshot): string[
   ]
 }
 
-function leftOutNote(page: PageSnapshot): string[] {
-  const parts = [
-    ...(hasText(page.content) ? ['text'] : []),
-    ...(page.screenshot === undefined ? [] : ['screenshot']),
-    ...(page.selection ? ['selection'] : []),
-  ]
+type PageLeftOut = Extract<LeftOut, { kind: 'page' }>
+
+function leftOutNote({ parts }: PageLeftOut): string[] {
   return [
     `The ${parts.join(' and ')} of the page ${parts.length > 1 ? 'are' : 'is'} left out to keep this message within its length limit.`,
   ]
 }
 
-function heading(n: number, question: string, page: PageSnapshot, pageLeftOut: boolean): string {
+function heading(
+  n: number,
+  question: string,
+  page: PageSnapshot,
+  pageLeftOut: PageLeftOut | undefined,
+): string {
   return [
     `Question ${n}, asked on this page:`,
     `URL: ${page.url ?? 'unknown'}`,
     `Title: ${page.title ?? 'unknown'}`,
     ...(pageLeftOut
-      ? leftOutNote(page)
+      ? leftOutNote(pageLeftOut)
       : [...contentNote(page), ...screenshotNote(page), ...selectionNote(page)]),
     '',
     `<question>\n${question}\n</question>`,
@@ -112,15 +115,15 @@ function turnBlocks(
   n: number,
   question: string,
   page: PageSnapshot,
-  pageLeftOut: boolean,
+  pageLeftOut: PageLeftOut | undefined,
 ): Block[] {
   const { content, selection, screenshot, title, url } = page
-  if (pageLeftOut) return [{ type: 'text', text: heading(n, question, page, true) }]
+  if (pageLeftOut) return [{ type: 'text', text: heading(n, question, page, pageLeftOut) }]
   return [
     ...(hasText(content) ? [document(content, title, url)] : []),
     ...(screenshot === undefined ? [] : [image(screenshot)]),
     ...(selection ? [document(selection, title ? `Selection: ${title}` : 'Selection', url)] : []),
-    { type: 'text', text: heading(n, question, page, false) },
+    { type: 'text', text: heading(n, question, page, undefined) },
   ]
 }
 
@@ -129,56 +132,13 @@ const answerBlock = (n: number, answer: string): Block => ({
   text: `Your answer to question ${n}:\n<answer>\n${answer}\n</answer>`,
 })
 
-/** 1 回に送る前の問答・前のページ・今の Page Snapshot の字の和の上限。見出しの決まった文は数えない。 */
-export const MAX_ASK_CHARS = 200_000
-/** スクリーンショット 1 枚を数える字数。CSS px の 1280×800 の JPEG が約 1,300 token になる。 */
-const SCREENSHOT_CHARS = 1_500
-
 const bounded = (page: PageSnapshot): PageSnapshot => ({
   ...page,
   ...(page.url !== undefined && { url: cut(page.url, MAX_URL_CHARS).text }),
-  ...(page.title !== undefined && { title: cut(page.title, MAX_TITLE_CHARS).text }),
+  ...(page.title !== undefined && {
+    title: cut(page.title, MAX_TITLE_CHARS).text,
+  }),
 })
-
-// ページを落としても見出しに残るので、turn の問答の側に数える。
-const addressChars = ({ url, title }: PageSnapshot) => (url?.length ?? 0) + (title?.length ?? 0)
-
-const words = (turn: Turn) => turn.question.length + turn.answer.length + addressChars(turn.page)
-
-function pageChars({ content, selection, screenshot }: PageSnapshot): number {
-  return (
-    (content?.kind === 'text' ? content.text.length : 0) +
-    (selection?.text.length ?? 0) +
-    (screenshot === undefined ? 0 : SCREENSHOT_CHARS)
-  )
-}
-
-// 古い turn のページから 1 つずつ落とし、それでも超えたら古い turn の問答を落とす。
-// 今の分と、Current Page の Page Snapshot が same で指す turn は落とさない。Current Page の本文がそこにしか無いため。
-function leaveOut(question: string, page: PageSnapshot, history: readonly Turn[]) {
-  const kept = page.content?.kind === 'same' ? page.content.turn : undefined
-  let total =
-    question.length +
-    addressChars(page) +
-    pageChars(page) +
-    history.reduce((sum, turn) => sum + words(turn) + pageChars(turn.page), 0)
-  const pages = new Set<number>()
-  const turns = new Set<number>()
-  history.forEach((turn, i) => {
-    const size = pageChars(turn.page)
-    if (total <= MAX_ASK_CHARS || i === kept || size === 0) return
-    pages.add(i)
-    total -= size
-  })
-  history.forEach((turn, i) => {
-    if (total <= MAX_ASK_CHARS || i === kept) return
-    turns.add(i)
-    // 問答ごと落とした turn のページは、問答の数に含めて 2 度数えない。
-    pages.delete(i)
-    total -= words(turn)
-  })
-  return { pages, turns }
-}
 
 /**
  * 前の問答と今の質問を、古い順に turn ごとに本文の document、スクリーンショットの image、選択範囲の document、見出しと質問の text、答えの text の順に並べる。
@@ -187,30 +147,33 @@ function leaveOut(question: string, page: PageSnapshot, history: readonly Turn[]
 export function askContent(
   question: string,
   current: PageSnapshot,
-  sent: readonly Turn[],
+  sent: readonly SentTurn[],
 ): { content: Block[]; omitted: { pages: number; turns: number } } {
   const page = bounded(current)
-  const history = sent.map((turn) => ({ ...turn, page: bounded(turn.page) }))
-  const { pages, turns } = leaveOut(question, page, history)
+  const { history, omitted } = withinPromptLimit(
+    question,
+    page,
+    sent.map((turn) => ({ ...turn, page: bounded(turn.page) })),
+  )
   const opening: Block[] =
-    turns.size > 0
+    omitted.turns > 0
       ? [
           {
             type: 'text',
-            text: `${turns.size} earlier ${turns.size > 1 ? 'questions of this chat and their answers are' : 'question of this chat and its answer is'} left out to keep this message within its length limit.`,
+            text: `${omitted.turns} earlier ${omitted.turns > 1 ? 'questions of this chat and their answers are' : 'question of this chat and its answer is'} left out to keep this message within its length limit.`,
           },
         ]
       : []
   const earlier = history.flatMap((turn, i) =>
-    turns.has(i)
+    turn.leftOut?.kind === 'turn'
       ? []
       : [
-          ...turnBlocks(i + 1, turn.question, turn.page, pages.has(i)),
+          ...turnBlocks(i + 1, turn.question, turn.page, turn.leftOut),
           answerBlock(i + 1, turn.answer),
         ],
   )
   return {
-    content: [...opening, ...earlier, ...turnBlocks(history.length + 1, question, page, false)],
-    omitted: { pages: pages.size, turns: turns.size },
+    content: [...opening, ...earlier, ...turnBlocks(history.length + 1, question, page, undefined)],
+    omitted,
   }
 }
