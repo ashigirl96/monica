@@ -11,6 +11,7 @@ import type {
 } from '@anthropic-ai/claude-agent-sdk'
 
 import { isLocalHost, type Lookup } from './address.ts'
+import researcherPrompt from './researcher.md' with { type: 'text' }
 
 type Verdict = { allow: true } | { allow: false; message: string }
 
@@ -46,6 +47,7 @@ export type TutorBox = Required<
     | 'sandbox'
     | 'settings'
     | 'env'
+    | 'agents'
   >
 >
 
@@ -61,6 +63,10 @@ const CANNOT_ASK: Verdict = {
 
 const ALLOW: Verdict = { allow: true }
 const REFLECTION_TOOLS = ['Read', 'Write', 'Edit']
+const RESEARCHER = 'researcher'
+const RESEARCHER_TOOLS = ['Read', 'Glob', 'Grep', 'WebSearch', 'WebFetch']
+// model・effort・isolation などを渡すと、下調べ役に固定した model と effort と場所を替えられる。
+const AGENT_INPUT_KEYS = ['description', 'prompt', 'subagent_type', 'run_in_background']
 const deny = (message: string): Verdict => ({ allow: false, message })
 
 // Bun の realpath は socket に EOPNOTSUPP を返すので、親の dir を解いてから symlink を自分で辿る。
@@ -186,8 +192,24 @@ export function tutorBox(deps: TutorBoxDeps): TutorBox {
   }
 
   // hook と canUseTool のどちらの経路で来ても同じ線になるよう、判定をここ 1 つにする。
-  async function judgeTool(tool: string, input: Record<string, unknown>): Promise<Verdict | null> {
+  async function judgeTool(
+    tool: string,
+    input: Record<string, unknown>,
+    agentId: string | undefined,
+  ): Promise<Verdict | null> {
+    if (agentId !== undefined && !RESEARCHER_TOOLS.includes(tool)) {
+      return deny(`The ${tool} tool is not available to the ${RESEARCHER} subagent.`)
+    }
     switch (tool) {
+      case 'Agent':
+        // 結果を待たずに turn を閉じると、後から届く報告が次の turn に紛れる。
+        return input.subagent_type === RESEARCHER &&
+          input.run_in_background === false &&
+          Object.keys(input).every((key) => AGENT_INPUT_KEYS.includes(key))
+          ? ALLOW
+          : deny(
+              `Only the ${RESEARCHER} subagent is available: pass subagent_type "${RESEARCHER}" and run_in_background false, without model, effort or isolation.`,
+            )
       case 'Read':
         return judgePath(input.file_path, 'read')
       case 'Write':
@@ -209,14 +231,14 @@ export function tutorBox(deps: TutorBoxDeps): TutorBox {
     }
   }
 
-  const canUseTool: CanUseTool = async (tool, input, { signal }) => {
-    if (tool === 'SandboxNetworkAccess') {
+  const canUseTool: CanUseTool = async (tool, input, { signal, agentID }) => {
+    if (tool === 'SandboxNetworkAccess' && agentID === undefined) {
       const host = String(input.host)
       return (await isLocalHost(host, deps.lookup))
         ? toResult(deny(`Connecting to ${host} is refused; you can reach only public hosts.`))
         : toResult(ALLOW)
     }
-    if (tool === 'Bash') {
+    if (tool === 'Bash' && agentID === undefined) {
       if (input.dangerouslyDisableSandbox !== true) return toResult(ALLOW)
       if (await runsWithoutAsking(String(input.command))) {
         return {
@@ -231,7 +253,8 @@ export function tutorBox(deps: TutorBoxDeps): TutorBox {
       return toResult(await askUser(request, signal))
     }
     return toResult(
-      (await judgeTool(tool, input)) ?? deny(`The ${tool} tool is not available in this Study.`),
+      (await judgeTool(tool, input, agentID)) ??
+        deny(`The ${tool} tool is not available in this Study.`),
     )
   }
 
@@ -242,7 +265,11 @@ export function tutorBox(deps: TutorBoxDeps): TutorBox {
         ? deny(
             `The ${input.tool_name} tool is not available while reflecting; use only Read, Write and Edit.`,
           )
-        : await judgeTool(input.tool_name, (input.tool_input ?? {}) as Record<string, unknown>)
+        : await judgeTool(
+            input.tool_name,
+            (input.tool_input ?? {}) as Record<string, unknown>,
+            input.agent_id,
+          )
     if (!verdict) return {}
     return {
       hookSpecificOutput: verdict.allow
@@ -258,7 +285,28 @@ export function tutorBox(deps: TutorBoxDeps): TutorBox {
   return {
     cwd: studyDir,
     additionalDirectories: [tutorDir, learningPreferenceDir],
-    tools: ['Bash', 'Read', 'Write', 'Edit', 'Glob', 'Grep', 'WebSearch', 'WebFetch', 'Skill'],
+    tools: [
+      'Bash',
+      'Read',
+      'Write',
+      'Edit',
+      'Glob',
+      'Grep',
+      'WebSearch',
+      'WebFetch',
+      'Skill',
+      'Agent',
+    ],
+    agents: {
+      [RESEARCHER]: {
+        description:
+          'Finds primary sources and researches the parts of the Map, reading the cloned source and the web. Returns only the findings.',
+        prompt: researcherPrompt,
+        tools: RESEARCHER_TOOLS,
+        model: 'sonnet',
+        effort: 'high',
+      },
+    },
     // Bash・file の tool・WebFetch に allow rule を置くと、dangerouslyDisableSandbox の試し直しも聞かずに通る。
     allowedTools: ['WebSearch'],
     strictMcpConfig: true,

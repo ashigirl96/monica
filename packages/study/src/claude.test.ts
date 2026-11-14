@@ -78,6 +78,8 @@ test('a turn streams the session, the Tutor text as deltas and a text, a tool on
     toolResult('t1'),
     toolUse('t2', 'Skill', { skill: 'tutors:repository' }),
     toolResult('t2'),
+    toolUse('t3', 'Agent', { description: 'Find zod sources', subagent_type: 'researcher' }),
+    toolResult('t3'),
     result(),
   )
 
@@ -89,6 +91,7 @@ test('a turn streams the session, the Tutor text as deltas and a text, a tool on
     { type: 'tutor', text: 'Hi' },
     { type: 'tool', tool: 'Bash', text: 'ls -la' },
     { type: 'tutor-switch', tutor: 'repository' },
+    { type: 'tool', tool: 'Agent', text: 'Find zod sources' },
   ])
   const next = reply(tutors, 'a')
   fake.claudes[0]!.emit(result())

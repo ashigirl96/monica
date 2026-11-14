@@ -57,11 +57,17 @@ async function ask(
   b: TutorBox,
   tool: string,
   input: Record<string, unknown>,
+  agentId?: string,
 ): Promise<PermissionResult> {
-  return (await b.canUseTool(tool, input, { signal, toolUseID: 't', requestId: 'r' }))!
+  return (await b.canUseTool(tool, input, {
+    signal,
+    toolUseID: 't',
+    requestId: 'r',
+    ...(agentId && { agentID: agentId }),
+  }))!
 }
 
-async function hook(b: TutorBox, tool: string, input: Record<string, unknown>) {
+async function hook(b: TutorBox, tool: string, input: Record<string, unknown>, agentId?: string) {
   const callback = b.hooks.PreToolUse![0]!.hooks[0]!
   const output = await callback(
     {
@@ -72,6 +78,7 @@ async function hook(b: TutorBox, tool: string, input: Record<string, unknown>) {
       tool_name: tool,
       tool_input: input,
       tool_use_id: 't',
+      ...(agentId && { agent_id: agentId, agent_type: 'researcher' }),
     } as HookInput,
     't',
     { signal },
@@ -80,9 +87,14 @@ async function hook(b: TutorBox, tool: string, input: Record<string, unknown>) {
 }
 
 // hook と canUseTool が同じ答えを出すことも、ここで確かめる。
-async function decision(b: TutorBox, tool: string, input: Record<string, unknown>) {
-  const fromHook = await hook(b, tool, input)
-  const fromAsk = await ask(b, tool, input)
+async function decision(
+  b: TutorBox,
+  tool: string,
+  input: Record<string, unknown>,
+  agentId?: string,
+) {
+  const fromHook = await hook(b, tool, input, agentId)
+  const fromAsk = await ask(b, tool, input, agentId)
   expect(fromHook).toEqual(
     fromAsk.behavior === 'allow'
       ? { hookEventName: 'PreToolUse', permissionDecision: 'allow' }
@@ -462,10 +474,89 @@ test('without askUser, a Bash outside the sandbox is refused with a message that
 
 test('canUseTool refuses a tool the box does not name', async () => {
   const { box: b } = box()
-  for (const tool of ['Agent', 'NotebookEdit', 'mcp__x__y', 'Skill']) {
+  for (const tool of ['NotebookEdit', 'mcp__x__y', 'Skill']) {
     expect((await ask(b, tool, {})).behavior).toBe('deny')
     expect(await hook(b, tool, {})).toBeUndefined()
   }
+})
+
+const RESEARCHER_CALL = {
+  description: 'Find sources',
+  prompt: 'Find the primary sources of zod.',
+  subagent_type: 'researcher',
+  run_in_background: false,
+}
+
+test('the Tutor can start only the researcher subagent, in the foreground, at its own model, effort and place', async () => {
+  const { box: b } = box()
+  expect(await decision(b, 'Agent', RESEARCHER_CALL)).toBe('allow')
+  const refused = [
+    { ...RESEARCHER_CALL, subagent_type: 'general-purpose' },
+    { ...RESEARCHER_CALL, subagent_type: 'fork' },
+    { description: 'x', prompt: 'x' },
+    { ...RESEARCHER_CALL, run_in_background: true },
+    { ...RESEARCHER_CALL, run_in_background: undefined },
+    { ...RESEARCHER_CALL, model: 'opus' },
+    { ...RESEARCHER_CALL, effort: 'max' },
+    { ...RESEARCHER_CALL, isolation: 'worktree' },
+    { ...RESEARCHER_CALL, name: 'helper' },
+  ]
+  for (const input of refused) {
+    expect([input, await decision(b, 'Agent', input)]).toEqual([input, 'deny'])
+  }
+})
+
+test('the researcher subagent is defined at sonnet and high effort with only the reading and web tools', () => {
+  const { box: b } = box()
+  expect(Object.keys(b.agents)).toEqual(['researcher'])
+  expect(b.agents.researcher).toMatchObject({
+    model: 'sonnet',
+    effort: 'high',
+    tools: ['Read', 'Glob', 'Grep', 'WebSearch', 'WebFetch'],
+  })
+  expect(b.agents.researcher!.prompt).toContain('## 一次資料')
+})
+
+test('the researcher subagent goes through the same box as the Tutor', async () => {
+  const { box: b, studyDir, tutorDir } = box()
+  const agent = 'a1'
+  expect(await decision(b, 'Read', { file_path: join(studyDir, 'MAP.md') }, agent)).toBe('allow')
+  expect(await decision(b, 'Read', { file_path: join(tutorDir, 'TEACHING.md') }, agent)).toBe(
+    'allow',
+  )
+  expect(await decision(b, 'Read', { file_path: '/etc/hosts' }, agent)).toBe('deny')
+  expect(await decision(b, 'Grep', { pattern: 'x', path: homedir() }, agent)).toBe('deny')
+  expect(await decision(b, 'Glob', { pattern: '/etc/*' }, agent)).toBe('deny')
+  expect(await decision(b, 'WebFetch', { url: 'http://localhost:3000/' }, agent)).toBe('deny')
+  expect(await decision(b, 'WebFetch', { url: 'http://10.0.0.1/' }, agent)).toBe('deny')
+  expect(await decision(b, 'WebFetch', { url: 'https://example.com/' }, agent)).toBe('allow')
+})
+
+test('the researcher subagent cannot run Bash, write, start a subagent or use a tool outside its list, even when the Tutor could', async () => {
+  const { box: b, studyDir } = box()
+  const inside = join(studyDir, 'MAP.md')
+  const calls: [string, Record<string, unknown>][] = [
+    ['Bash', { command: 'echo hi' }],
+    ['Bash', { command: 'docker ps', dangerouslyDisableSandbox: true }],
+    ['Write', { file_path: inside, content: 'x' }],
+    ['Edit', { file_path: inside, old_string: 'a', new_string: 'b' }],
+    ['Agent', RESEARCHER_CALL],
+    ['Skill', { skill: 'tutors:repository' }],
+    ['SandboxNetworkAccess', { host: 'example.com' }],
+  ]
+  for (const [tool, input] of calls) {
+    expect([tool, await decision(b, tool, input, 'a1')]).toEqual([tool, 'deny'])
+  }
+  expect(await ask(b, 'Bash', { command: 'echo hi' })).toEqual({ behavior: 'allow' })
+  expect(await decision(b, 'Write', { file_path: inside, content: 'x' })).toBe('allow')
+})
+
+test('while reflecting, the Tutor cannot start the researcher subagent', async () => {
+  let reflecting = true
+  const { box: b } = box({ reflecting: () => reflecting })
+  expect(await hook(b, 'Agent', RESEARCHER_CALL)).toMatchObject({ permissionDecision: 'deny' })
+  reflecting = false
+  expect(await hook(b, 'Agent', RESEARCHER_CALL)).toMatchObject({ permissionDecision: 'allow' })
 })
 
 test('the options open no domain, no local binding and no excluded command, look up only configd and trustd, deny reading the home and the monica home, and name the real path of the nix daemon socket', () => {
@@ -519,6 +610,7 @@ test('the options open no domain, no local binding and no excluded command, look
     'WebSearch',
     'WebFetch',
     'Skill',
+    'Agent',
   ])
   expect(
     tutorBox({ ...made, nixDaemonSocket: join(made.root, 'missing') }).sandbox.network,

@@ -106,6 +106,7 @@ Study の箱の効き目は、確かめた版のものしか分からない。`@
   - Read で `~/.monica/backend.json`、Write で `<Tutor の dir>/w.txt` が断られ、Write で `<Study の dir>/notes.md` と `learning-preference/LEARNING-PREFERENCE.md` が通る。
   - WebFetch の `http://127.0.0.1:<port>/`・`http://monica.localhost:<port>/`・`http://127.0.0.1.nip.io:<port>/` が hook で断られ、server の log に何も届かない。`https://example.com/` は通る。
   - 箱の中の `echo $TMPDIR` が `/tmp/monica-tutors` の下になる。`/tmp/claude-<uid>` の実 path の `ls` と、そこに置いた canary の `cat` が断られる。`mktemp`・heredoc・`run_in_background` の Bash が動き、Tutor が background の出力を読める。
+- subagent も同じ箱を通ること: `MONICA_STUDY_REAL_CLAUDE=1 bun test packages/study/src/researcher.test.ts` が通る（下調べ役の subagent の Read が `agent_id` 付きで hook に届き、箱の外が断られる）。
 - 終わったら `$HOME/.monica-box-check.*` と server を消す。
 - SDK の記録を消した会話の終わり方: 箱の script とは別に、`resume` に無い session id を渡した `query()` が、stderr に `No conversation found with session ID: <id>` を出して exit 1 することを確かめる。文が変わっていたら、`packages/study/src/study.ts` の `NO_SDK_RECORD` と `conversation-end.test.ts` の `NO_RECORD_SHELL` を直す。
 

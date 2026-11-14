@@ -19,7 +19,7 @@ git clone https://github.com/<owner>/<repo> <Study の dir の絶対 path>/env/s
 
 ## Map の描き方
 
-source を読んでから描きます。README だけで描くと、分け方や設計の型を外しやすいためです。
+source を読んでから描きます。README だけで描くと、分け方や設計の型を外しやすいためです。clone した後、全体の分け方は自分で entry point から辿って決め、各部分に添えるものの下調べは、clone の path と部分の名前を書いて下調べ役の subagent に任せます。subagent は部分ごとに 4 つの観点を 1 行ずつ返します。
 
 - **全体**: リポジトリを、package、directory、主な module といった、メンテナ自身が分けている単位で分けます。entry point（README が名指す入口、CLI の main、公開している API）から辿ります。
 - **各部分に添えるもの**:
@@ -31,7 +31,7 @@ source を読んでから描きます。README だけで描くと、分け方や
 
 ## 一次資料
 
-次を、この順で探し、残す価値のあるものを理解の順に `RESOURCES.md` に並べます。
+次を、この順で下調べ役の subagent に探させ、資料ごとに URL と 1 行の注釈で返ってきたものから、残す価値のあるものを選び、理解の順に `RESOURCES.md` に並べます。
 
 - 作者か名の知れた専門家が書いた解説（blog、講演、記事）。なぜ作ったか、どう考えて設計したかを噛み砕いていることが多いので、良いものがあれば README より先に渡します
 - README と、メンテナが公開している docs
