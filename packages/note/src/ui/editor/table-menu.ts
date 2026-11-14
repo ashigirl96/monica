@@ -1,5 +1,5 @@
 import { Plugin, TextSelection } from 'prosemirror-state'
-import type { Command } from 'prosemirror-state'
+import type { Command, EditorState } from 'prosemirror-state'
 import type { EditorView } from 'prosemirror-view'
 
 import { linkMenuKey, noteMentionMenuKey, pasteMenuKey, tableMenuKey } from './menu-keys.ts'
@@ -11,8 +11,10 @@ import {
   positionMenuAtPoint,
 } from './menu-overlay.ts'
 import {
+  isRagged,
   tableDeleteColumn,
   tableDeleteRow,
+  tableFillRows,
   tableInsertColumnLeft,
   tableInsertColumnRight,
   tableInsertRowAbove,
@@ -51,12 +53,26 @@ export const TABLE_MENU_ITEMS: TableMenuItem[] = [
   { kind: 'trash', label: 'Delete column', command: tableDeleteColumn, destructive: true },
 ]
 
+const FILL_ITEM: TableMenuItem = {
+  kind: 'column',
+  label: 'Fill missing cells',
+  command: tableFillRows,
+}
+
+/** 行の長さが揃っていない表では、欠けたセルを埋める項目を先頭に出す */
+export function tableMenuItems(state: EditorState): TableMenuItem[] {
+  const ctx = getTableCellContext(state.selection.$from)
+  if (!ctx || !isRagged(ctx.tableNode)) return TABLE_MENU_ITEMS
+  const [first, ...rest] = TABLE_MENU_ITEMS
+  return first ? [FILL_ITEM, { ...first, separatorBefore: true }, ...rest] : [FILL_ITEM]
+}
+
 function close(view: EditorView): void {
   view.dispatch(view.state.tr.setMeta(tableMenuKey, { type: 'close' } satisfies TableMenuMeta))
 }
 
 function pick(view: EditorView, index: number): void {
-  const item = TABLE_MENU_ITEMS[index]
+  const item = tableMenuItems(view.state)[index]
   const ran = item?.command(view.state, (tr) =>
     view.dispatch(tr.setMeta(tableMenuKey, { type: 'close' } satisfies TableMenuMeta)),
   )
@@ -97,7 +113,7 @@ class TableMenuView {
       return
     }
     this.menu.replaceChildren()
-    TABLE_MENU_ITEMS.forEach((item, i) => {
+    tableMenuItems(view.state).forEach((item, i) => {
       if (item.separatorBefore) {
         const sep = document.createElement('div')
         sep.className = 'jb-slash-separator'
@@ -147,7 +163,7 @@ export function tableMenuPlugin(): Plugin<TableMenuState> {
         const state = tableMenuKey.getState(view.state)
         if (!state?.active) return false
         return handleMenuNavKey(event, state.index, {
-          itemCount: TABLE_MENU_ITEMS.length,
+          itemCount: tableMenuItems(view.state).length,
           onClose: () => {
             close(view)
             view.focus()

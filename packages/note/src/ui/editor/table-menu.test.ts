@@ -5,8 +5,16 @@ import { EditorState, TextSelection } from 'prosemirror-state'
 
 import { linkMenuPlugin, openLinkMenu } from './link-menu.ts'
 import { linkMenuKey, tableMenuKey } from './menu-keys.ts'
-import { TABLE_MENU_ITEMS, tableMenuPlugin } from './table-menu.ts'
-import { block, cellPositions, contentPos, docOf, para, tableOf } from './test-fixtures.ts'
+import { TABLE_MENU_ITEMS, tableMenuItems, tableMenuPlugin } from './table-menu.ts'
+import {
+  block,
+  cellPositions,
+  contentPos,
+  docOf,
+  para,
+  stateInCell,
+  tableOf,
+} from './test-fixtures.ts'
 
 const tableAndParagraph = () =>
   docOf(
@@ -78,6 +86,17 @@ describe('tableMenuPlugin の state 追従', () => {
     expect(next.doc.child(0).child(0).child(0).childCount).toBe(1)
     expect(menuState(next)).toEqual({ active: false })
   })
+})
+
+const labels = (doc: Parameters<typeof stateInCell>[0]) =>
+  tableMenuItems(stateInCell(doc, 0)).map((item) => item.label)
+
+test('行の長さが揃っていない表でだけ、欠けたセルを埋める項目が先頭に出る', () => {
+  expect(labels(tableAndParagraph())).toEqual(TABLE_MENU_ITEMS.map((item) => item.label))
+  expect(labels(docOf(block('T', tableOf([['a'], ['b', 'c']]))))).toEqual([
+    'Fill missing cells',
+    ...TABLE_MENU_ITEMS.map((item) => item.label),
+  ])
 })
 
 /** contextmenu handler が必要とする最小限の EditorView 相当 */

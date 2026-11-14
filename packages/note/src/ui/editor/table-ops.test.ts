@@ -10,6 +10,7 @@ import { nodes } from './schema.ts'
 import {
   tableDeleteColumn,
   tableDeleteRow,
+  tableFillRows,
   tableInsertColumnLeft,
   tableInsertColumnRight,
   tableInsertRowAbove,
@@ -107,6 +108,23 @@ describe('列の挿入', () => {
     const { table } = apply(ragged(), 2, tableInsertColumnRight)
     expect(rowTexts(table, 0)).toEqual(['a', 'b', 'c', ''])
     expect(rowTexts(table, 1)).toEqual(['d', ''])
+  })
+})
+
+describe('欠けたセルを埋める', () => {
+  test('短い行の末尾に空のセルを足して最長の行に揃え、カーソルは元のセルに残る', () => {
+    const { table, ctx } = apply(ragged(), 3, tableFillRows)
+    expect(rowTexts(table, 0)).toEqual(['a', 'b', 'c'])
+    expect(rowTexts(table, 1)).toEqual(['d', '', ''])
+    expect(ctx).toMatchObject({ rowIndex: 1, cellIndex: 0 })
+  })
+
+  test('短い header 行に足すセルは header になり、markdown の表が崩れない', () => {
+    const doc = docOf(block('T', tableOf([['h'], ['a', 'b']], true)))
+    const { table, state } = apply(doc, 0, tableFillRows)
+    expect(rowHeaders(table, 0)).toEqual([true, true])
+    expect(rowHeaders(table, 1)).toEqual([false, false])
+    expect(toMarkdown(state.doc.toJSON())).toContain('| h |  |\n| --- | --- |\n| a | b |')
   })
 })
 
