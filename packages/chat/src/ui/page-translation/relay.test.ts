@@ -81,7 +81,7 @@ test('segments from a Browser Tab go to the Backend the native host names, and i
   expect(reply).toEqual({ segments: [{ id: 0, text: '潮だまり' }] })
 })
 
-test('a Backend whose claude processes are all in use answers busy, so that the Browser Tab sends again later', async () => {
+test('a Backend that lends no claude to the translation answers busy, so that the Browser Tab sends again later', async () => {
   const { chrome } = serviceWorker()
   chrome.nativeHost = { reply: { port: fakeBackend('CHAT_BUSY'), token: TOKEN } }
 

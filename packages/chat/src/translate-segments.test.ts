@@ -5,7 +5,7 @@ import { join } from 'node:path'
 
 import { createRouterClient } from '@orpc/server'
 
-import type { TranslateSegmentsInput } from './contract.ts'
+import type { AskInput, ChatEvent, TranslateSegmentsInput } from './contract.ts'
 import { createChatAgent, router } from './server.ts'
 import { type FakeScenario, untilFakeClaudesExit, writeFakeClaude } from './testing.ts'
 
@@ -114,22 +114,37 @@ test('claude translates as haiku at medium effort with no tools, a JSON schema a
   expect(JSON.parse(text!)).toEqual(INPUT)
 })
 
-test('a fifth translation while four claudes translate is refused as CHAT_BUSY, and so is a question to Chat', async () => {
+const UNREADABLE: AskInput = {
+  question: 'What?',
+  page: { content: { kind: 'unreadable', reason: 'restricted' } },
+  history: [],
+}
+
+async function answered(answer: AsyncIterable<ChatEvent>) {
+  let text = ''
+  for await (const event of answer) if (event.type === 'text') text += event.text
+  return text.length > 0
+}
+
+test('a fourth translation while three claudes translate is refused as CHAT_BUSY, but a question to Chat gets the last claude', async () => {
   const { client, records } = start()
-  await holdTranslations(client, records, 4)
+  await holdTranslations(client, records, 3)
 
   await expect(client.translateSegments(INPUT)).rejects.toMatchObject({
     code: 'CHAT_BUSY',
     status: 429,
   })
-  await expect(
-    client.ask({
-      question: 'What?',
-      page: { content: { kind: 'unreadable', reason: 'restricted' } },
-      history: [],
-    }),
-  ).rejects.toMatchObject({ code: 'CHAT_BUSY' })
+  expect(await answered(await client.ask(UNREADABLE))).toBe(true)
   expect(records().filter((r) => r.kind === 'start')).toHaveLength(4)
+})
+
+test('a question with another pair than the spare still gets a claude while Page Translation holds every claude it may', async () => {
+  const { client, records } = start()
+  await client.prepare()
+  await holdTranslations(client, records, 2)
+
+  await expect(client.translateSegments(INPUT)).rejects.toMatchObject({ code: 'CHAT_BUSY' })
+  expect(await answered(await client.ask({ ...UNREADABLE, model: 'sonnet' }))).toBe(true)
 })
 
 test('aborting a translation kills the claude that translates', async () => {
