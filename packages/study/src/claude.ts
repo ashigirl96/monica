@@ -529,6 +529,8 @@ function toolText(name: string, input: Record<string, unknown>): string {
       return field('url')
     case 'WebSearch':
       return field('query')
+    case 'Agent':
+      return field('description')
     default:
       return ''
   }
