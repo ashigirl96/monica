@@ -1,12 +1,13 @@
+import { WidthControl } from '@monica/ui'
 import { type ReactNode, useState } from 'react'
 
 import { NOTE_KEYS, type Section } from '../keys.ts'
+import { NOTE_WIDTH } from '../note-width.ts'
 import { navigate, spaLinkClick } from '../router.ts'
 import { DAILY_PATH, ESSAYS_PATH, REPOS_PATH } from '../routes.ts'
 import type { RailItem } from '../slots.ts'
 import { setThemePref, themePref, type ThemePref } from '../theme.ts'
 import { AmbientSwitcher } from './ambient-switcher.tsx'
-import { NoteWidthControl } from './note-width-control.tsx'
 import { useNoteKeys } from './use-note-keys.ts'
 
 /** ⌃1/⌃2/⌃3 の遷移先 */
@@ -205,7 +206,7 @@ export function AppShell({
       {!onSlotPage && (
         <div className="fixed right-4 bottom-4 z-40 flex items-center gap-2">
           <AmbientSwitcher />
-          <NoteWidthControl />
+          <WidthControl pref={NOTE_WIDTH} label="Editor width" />
         </div>
       )}
     </div>

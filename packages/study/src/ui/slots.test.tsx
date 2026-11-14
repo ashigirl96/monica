@@ -1,4 +1,4 @@
-import { expect, test } from 'bun:test'
+import { afterAll, beforeAll, expect, test } from 'bun:test'
 
 import { renderToStaticMarkup } from 'react-dom/server'
 
@@ -11,6 +11,18 @@ const { slotPage, railItem, repoPanel } = createStudySlots({
   repoCandidates: async () => [],
   navigate: () => {},
   spaLinkClick: () => () => {},
+})
+
+// 会話欄の幅のピルと左右の欄が、描くときに残した幅と窓幅を読む。
+beforeAll(() => {
+  Object.assign(globalThis, {
+    localStorage: { getItem: () => null },
+    window: { innerWidth: 1440, addEventListener() {}, removeEventListener() {} },
+  })
+})
+afterAll(() => {
+  Reflect.deleteProperty(globalThis, 'localStorage')
+  Reflect.deleteProperty(globalThis, 'window')
 })
 
 const render = (pathname: string) => {

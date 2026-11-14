@@ -1,27 +1,36 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 
-import {
-  applyNoteWidth,
-  NOTE_EXTRA_MAX,
-  NOTE_EXTRA_STEP,
-  noteWidthPref,
-  setNoteWidthPref,
-} from '../note-width.ts'
 import { usePopupDismiss } from './use-popup-dismiss.ts'
+import {
+  applyWidth,
+  setWidthPref,
+  WIDTH_EXTRA_MAX,
+  WIDTH_EXTRA_STEP,
+  type WidthPref,
+  widthPref,
+} from './width-pref.ts'
 
 /**
- * ノート本文カラムの幅を広げるスライダー。AmbientSwitcher と同じ右下常駐ピルの一員。
- * 既定幅が 0 で、+px ぶんだけ左右へ対称に伸びる。
+ * 本文カラムの幅を広げるスライダーのピル。既定幅が 0 で、+px ぶんだけ左右へ対称に伸びる。
+ * popupBelow は、画面の上端に置いたピルの popup を下へ開く。
  */
-export function NoteWidthControl() {
-  const [extra, setExtra] = useState<number>(noteWidthPref)
+export function WidthControl({
+  pref,
+  label,
+  popupBelow = false,
+}: {
+  pref: WidthPref
+  label: string
+  popupBelow?: boolean
+}) {
+  const [extra, setExtra] = useState(() => widthPref(pref))
   const [open, setOpen] = useState(false)
   const rootRef = useRef<HTMLDivElement>(null)
   const triggerRef = useRef<HTMLButtonElement>(null)
   const close = useCallback(() => setOpen(false), [])
   usePopupDismiss({ open, rootRef, triggerRef, onClose: close })
 
-  // --note-extra-w は本文カラムの max-width に効くので、変えるたび ProseMirror 全体の
+  // 幅の CSS 変数は本文カラムの max-width に効くので、変えるたび本文全体の
   // レイアウトが走る。スライダーの入力イベントをそのまま流さず rAF で 1 フレーム 1 回に
   // 間引く（notes-shell のサイドバーリサイズと同じ理由）
   const frame = useRef(0)
@@ -32,12 +41,12 @@ export function NoteWidthControl() {
     if (frame.current === 0) {
       frame.current = requestAnimationFrame(() => {
         frame.current = 0
-        applyNoteWidth(pending.current)
+        applyWidth(pref, pending.current)
       })
     }
   }
   // 永続化はドラッグ中ではなく離したときだけ（毎イベントの同期 I/O を避ける）
-  const commit = () => setNoteWidthPref(pending.current)
+  const commit = () => setWidthPref(pref, pending.current)
   useEffect(() => () => cancelAnimationFrame(frame.current), [])
 
   return (
@@ -46,8 +55,8 @@ export function NoteWidthControl() {
         ref={triggerRef}
         type="button"
         aria-expanded={open}
-        aria-label={`Editor width: +${extra}px`}
-        title={`Editor width: +${extra}px`}
+        aria-label={`${label}: +${extra}px`}
+        title={`${label}: +${extra}px`}
         onClick={() => setOpen((o) => !o)}
         className={`flex items-center gap-2 rounded-full border bg-card/75 py-1.5 pr-3.5 pl-1.5 shadow-sm backdrop-blur-sm transition-opacity hover:opacity-100 ${
           open ? 'opacity-100' : 'opacity-55'
@@ -79,8 +88,8 @@ export function NoteWidthControl() {
       {open && (
         <div
           role="group"
-          aria-label="Editor width"
-          className="absolute right-0 bottom-full mb-2 w-52 rounded-xl border bg-card p-3 shadow-xl"
+          aria-label={label}
+          className={`absolute right-0 ${popupBelow ? 'top-full mt-2' : 'bottom-full mb-2'} z-50 w-52 rounded-xl border bg-card p-3 shadow-xl`}
         >
           <div className="flex items-center justify-between font-mono text-[0.6rem] tracking-widest text-muted-foreground uppercase">
             <span>Width</span>
@@ -89,10 +98,10 @@ export function NoteWidthControl() {
           <input
             type="range"
             min={0}
-            max={NOTE_EXTRA_MAX}
-            step={NOTE_EXTRA_STEP}
+            max={WIDTH_EXTRA_MAX}
+            step={WIDTH_EXTRA_STEP}
             value={extra}
-            aria-label="Extra editor width"
+            aria-label={`Extra ${label.toLowerCase()}`}
             onChange={(e) => onSlide(Number(e.target.value))}
             onPointerUp={commit}
             onKeyUp={commit}
@@ -103,7 +112,7 @@ export function NoteWidthControl() {
             type="button"
             onClick={() => {
               onSlide(0)
-              setNoteWidthPref(0)
+              setWidthPref(pref, 0)
             }}
             className="mt-1.5 w-full rounded-lg p-1 font-mono text-[0.6rem] tracking-widest text-muted-foreground uppercase transition-colors hover:bg-muted/60"
           >

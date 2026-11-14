@@ -5,12 +5,14 @@ import { ExternalLink, FileText, Folder, X } from 'lucide-react'
 
 import { artifactLinkTarget } from './artifact-link.ts'
 import { FailureLine, useScreen } from './screen.tsx'
+import { SidePane } from './side-pane.tsx'
 
 export const artifactsKey = (id: string) => ['study', id, 'artifacts']
 export const artifactKey = (id: string, path: string) => ['study', id, 'artifact', path]
 
 const TOP_LABELS: Record<string, string> = {
   'MISSION.md': 'Mission',
+  'MAP.md': '地図',
   'RESOURCES.md': '一次資料',
   'GLOSSARY.md': '用語集',
   'log.md': '経過の記録',
@@ -106,9 +108,15 @@ export function ArtifactTree({
     )
   const records = artifacts.filter((artifact) => artifact.path.startsWith(RECORDS_PREFIX))
   return (
-    <nav className="flex w-[15rem] shrink-0 flex-col gap-0.5 overflow-y-auto border-r p-3">
+    <SidePane
+      side="left"
+      label="成果物の一覧"
+      width={{ storageKey: 'monica-study-tree-w', initial: 240, min: 180, max: 480 }}
+      className="gap-0.5 overflow-y-auto p-3"
+    >
       <h2 className="mb-1 px-2 text-[12px] text-muted-foreground">成果物</h2>
       {top('MISSION.md')}
+      {top('MAP.md')}
       {top('RESOURCES.md')}
       {records.length > 0 && (
         <>
@@ -130,7 +138,7 @@ export function ArtifactTree({
       )}
       {top('GLOSSARY.md')}
       {top('log.md')}
-    </nav>
+    </SidePane>
   )
 }
 
@@ -154,7 +162,11 @@ export function ArtifactPanel({
   })
   const open = useMutation({ mutationFn: () => client.artifact.open({ id, path }) })
   return (
-    <aside className="flex w-[28rem] shrink-0 flex-col border-l">
+    <SidePane
+      side="right"
+      label="成果物"
+      width={{ storageKey: 'monica-study-panel-w', initial: 448, min: 320, max: 960 }}
+    >
       <div className="flex items-center justify-between border-b px-3 py-2">
         <h2 className="text-[13px] font-medium">成果物</h2>
         <button
@@ -193,6 +205,6 @@ export function ArtifactPanel({
         </div>
         <FailureLine>{open.error ? `開けなかった: ${open.error.message}` : null}</FailureLine>
       </div>
-    </aside>
+    </SidePane>
   )
 }

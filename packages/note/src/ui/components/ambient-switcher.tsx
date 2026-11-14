@@ -1,3 +1,4 @@
+import { usePopupDismiss } from '@monica/ui'
 import { useCallback, useRef, useState } from 'react'
 
 import {
@@ -10,7 +11,6 @@ import {
   setAmbientPref,
 } from '../ambient.ts'
 import { useNoteKeys } from './use-note-keys.ts'
-import { usePopupDismiss } from './use-popup-dismiss.ts'
 
 /**
  * 画面右下に常駐する背景の切り替え。設定画面へ行かずに、書いている手を止めずに
