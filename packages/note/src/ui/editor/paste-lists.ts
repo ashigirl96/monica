@@ -7,13 +7,13 @@ function isList(node: Node): node is HTMLUListElement | HTMLOListElement {
   return node instanceof Element && (node.tagName === 'UL' || node.tagName === 'OL')
 }
 
-// 太字などを p の style で書く HTML があるので、p を外すときは style を span に移して mark に読ませる。
-function unwrap(paragraph: Element, doc: Document): Node[] {
-  const style = paragraph.getAttribute('style')
-  if (!style) return [...paragraph.childNodes]
+// 太字などを li・p の style で書く HTML があるので、外す要素の style は span に移して mark に読ませる。
+function keepStyle(from: Element, nodes: Node[], doc: Document): Node[] {
+  const style = from.getAttribute('style')
+  if (!style) return nodes
   const span = doc.createElement('span')
   span.setAttribute('style', style)
-  span.append(...paragraph.childNodes)
+  span.append(...nodes)
   return [span]
 }
 
@@ -30,9 +30,10 @@ function containersOf(list: HTMLUListElement | HTMLOListElement, doc: Document):
         if (isList(child)) children.push(...containersOf(child, doc))
         // shortcut: 段落を複数持つ項目は 1 行につなげる。行を分けたいと言われたら兄弟の段落にする。
         else if (child instanceof Element && child.tagName === 'P')
-          content.append(...unwrap(child, doc))
+          content.append(...keepStyle(child, [...child.childNodes], doc))
         else content.append(child)
       }
+      content.replaceChildren(...keepStyle(item, [...content.childNodes], doc))
       const container = doc.createElement('div')
       container.dataset.blockContainer = ''
       container.append(content)
