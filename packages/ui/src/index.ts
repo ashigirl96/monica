@@ -2,6 +2,8 @@ export { cn } from './cn.ts'
 export { FuzzyPickerModal } from './fuzzy-picker-modal.tsx'
 export type { FuzzyPickerItem } from './use-fuzzy-picker.ts'
 export { ChevronRightIcon, FolderIcon, PinIcon, PlusIcon, PromptIcon, XIcon } from './icons.tsx'
+export { isNewConversationKey, listenNewConversationKey } from './new-conversation-key.ts'
+export { nextZoom, ZOOM_STEPS, type ZoomStep } from './zoom.ts'
 export {
   type PopoverAnchor,
   PopoverMenu,

@@ -1,9 +1,8 @@
-import { Toaster } from '@monica/ui'
+import { listenNewConversationKey, Toaster } from '@monica/ui'
 import type { MouseEvent, ReactNode } from 'react'
 import { createContext, useContext, useEffect } from 'react'
 
 import type { StudyClient } from './client.ts'
-import { listenNewConversationKey } from './new-conversation-key.ts'
 
 export type Navigation = {
   navigate: (to: string) => void

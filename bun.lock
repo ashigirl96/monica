@@ -85,6 +85,7 @@
         "@fontsource-variable/inter": "catalog:",
         "@monica/chat": "workspace:*",
         "@monica/task": "workspace:*",
+        "@monica/ui": "workspace:*",
         "@orpc/client": "catalog:",
         "@orpc/contract": "catalog:",
         "react": "catalog:",
