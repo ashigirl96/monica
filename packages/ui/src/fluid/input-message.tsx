@@ -163,14 +163,22 @@ const InputMessage = forwardRef<HTMLDivElement, InputMessageProps>(
       const el = textareaRef.current
       if (!el || typeof ResizeObserver === 'undefined') return
       let lastWidth = el.offsetWidth
+      let frame = 0
       const ro = new ResizeObserver(() => {
         const width = el.offsetWidth
         if (width === lastWidth) return
         lastWidth = width
-        resizeTextarea()
+        // The height write resizes the observed textarea; doing it inside the
+        // callback leaves a notification undelivered this frame, which the
+        // browser reports as a window error ("ResizeObserver loop completed").
+        cancelAnimationFrame(frame)
+        frame = requestAnimationFrame(resizeTextarea)
       })
       ro.observe(el)
-      return () => ro.disconnect()
+      return () => {
+        ro.disconnect()
+        cancelAnimationFrame(frame)
+      }
     }, [resizeTextarea])
 
     // While an answer streams there is nowhere to send another question, so
