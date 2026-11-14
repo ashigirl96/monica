@@ -1,10 +1,37 @@
-import { type ResizableWidth, useResizableWidth } from '@monica/ui'
+import { useResizableWidth } from '@monica/ui'
 import type { CSSProperties, ReactNode } from 'react'
 
 /** note の AppShell の w-12。 */
 const RAIL_W = 48
 /** 会話の列に必ず残す幅。 */
 const CHAT_MIN = 320
+const TREE = { storageKey: 'monica-study-tree-w', initial: 240, min: 180, max: 480 }
+const PANEL = { storageKey: 'monica-study-panel-w', initial: 448, min: 320, max: 960 }
+
+// Screen が Study の画面ごと --note-zoom で拡大するので、欄の幅もその内側の px で数える。
+const noteZoom = () => Number(document.documentElement.style.getPropertyValue('--note-zoom')) || 1
+
+export type Pane = ReturnType<typeof useResizableWidth>
+
+/**
+ * 左右の欄の幅。互いの幅を見合うと揺れ続けるので、左を先に決め、右には会話の最小幅を残した
+ * 残りだけを渡す。
+ */
+export function useStudyPanes(panelOpen: boolean): { tree: Pane; panel: Pane } {
+  const tree = useResizableWidth({
+    ...TREE,
+    reserved: RAIL_W + CHAT_MIN + (panelOpen ? PANEL.min : 0),
+    scale: noteZoom,
+  })
+  // shortcut: ⌥B で左を畳んでも左の幅を残したまま数える。畳んだ分も右に渡したくなったら zen を hook に渡す。
+  const panel = useResizableWidth({
+    ...PANEL,
+    reserved: RAIL_W + CHAT_MIN + tree.width,
+    grows: 'left',
+    scale: noteZoom,
+  })
+  return { tree, panel }
+}
 
 /**
  * 幅をドラッグで変えられる Study の左右の欄。左の欄は、note の AppShell の ⌥B（zen）で
@@ -13,25 +40,16 @@ const CHAT_MIN = 320
 export function SidePane({
   side,
   label,
-  width,
+  pane: { width: px, resizing, separatorProps },
   className,
   children,
 }: {
   side: 'left' | 'right'
   label: string
-  width: Pick<ResizableWidth, 'storageKey' | 'initial' | 'min' | 'max'>
+  pane: Pane
   className?: string
   children: ReactNode
 }) {
-  const {
-    width: px,
-    resizing,
-    separatorProps,
-  } = useResizableWidth({
-    ...width,
-    reserved: RAIL_W + CHAT_MIN,
-    grows: side === 'left' ? 'right' : 'left',
-  })
   const left = side === 'left'
   return (
     <div className="relative flex shrink-0" style={{ '--pane-w': `${px}px` } as CSSProperties}>

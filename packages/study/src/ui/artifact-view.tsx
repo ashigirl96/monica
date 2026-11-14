@@ -5,7 +5,7 @@ import { ExternalLink, FileText, Folder, X } from 'lucide-react'
 
 import { artifactLinkTarget } from './artifact-link.ts'
 import { FailureLine, useScreen } from './screen.tsx'
-import { SidePane } from './side-pane.tsx'
+import { type Pane, SidePane } from './side-pane.tsx'
 
 export const artifactsKey = (id: string) => ['study', id, 'artifacts']
 export const artifactKey = (id: string, path: string) => ['study', id, 'artifact', path]
@@ -86,10 +86,12 @@ export function ArtifactTree({
   id,
   selected,
   onSelect,
+  pane,
 }: {
   id: string
   selected: string | null
   onSelect: (path: string) => void
+  pane: Pane
 }) {
   const { client } = useScreen()
   const { data } = useQuery({
@@ -108,12 +110,7 @@ export function ArtifactTree({
     )
   const records = artifacts.filter((artifact) => artifact.path.startsWith(RECORDS_PREFIX))
   return (
-    <SidePane
-      side="left"
-      label="成果物の一覧"
-      width={{ storageKey: 'monica-study-tree-w', initial: 240, min: 180, max: 480 }}
-      className="gap-0.5 overflow-y-auto p-3"
-    >
+    <SidePane side="left" label="成果物の一覧" pane={pane} className="gap-0.5 overflow-y-auto p-3">
       <h2 className="mb-1 px-2 text-[12px] text-muted-foreground">成果物</h2>
       {top('MISSION.md')}
       {top('MAP.md')}
@@ -148,12 +145,14 @@ export function ArtifactPanel({
   path,
   onOpenArtifact,
   onClose,
+  pane,
 }: {
   id: string
   dir: string
   path: string
   onOpenArtifact: (path: string) => void
   onClose: () => void
+  pane: Pane
 }) {
   const { client } = useScreen()
   const read = useQuery({
@@ -162,11 +161,7 @@ export function ArtifactPanel({
   })
   const open = useMutation({ mutationFn: () => client.artifact.open({ id, path }) })
   return (
-    <SidePane
-      side="right"
-      label="成果物"
-      width={{ storageKey: 'monica-study-panel-w', initial: 448, min: 320, max: 960 }}
-    >
+    <SidePane side="right" label="成果物" pane={pane}>
       <div className="flex items-center justify-between border-b px-3 py-2">
         <h2 className="text-[13px] font-medium">成果物</h2>
         <button

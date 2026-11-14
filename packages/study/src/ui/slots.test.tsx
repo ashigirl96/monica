@@ -13,16 +13,18 @@ const { slotPage, railItem, repoPanel } = createStudySlots({
   spaLinkClick: () => () => {},
 })
 
-// 会話欄の幅のピルと左右の欄が、描くときに残した幅と窓幅を読む。
+// 会話欄の幅のピルと左右の欄が、描くときに残した幅・窓幅・拡大率を読む。
 beforeAll(() => {
   Object.assign(globalThis, {
     localStorage: { getItem: () => null },
     window: { innerWidth: 1440, addEventListener() {}, removeEventListener() {} },
+    document: { documentElement: { style: { getPropertyValue: () => '' } } },
   })
 })
 afterAll(() => {
   Reflect.deleteProperty(globalThis, 'localStorage')
   Reflect.deleteProperty(globalThis, 'window')
+  Reflect.deleteProperty(globalThis, 'document')
 })
 
 const render = (pathname: string) => {

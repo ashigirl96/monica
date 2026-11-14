@@ -42,6 +42,7 @@ import {
   useNewConversationKey,
   useScreen,
 } from './screen.tsx'
+import { useStudyPanes } from './side-pane.tsx'
 
 const CHAT_WIDTH: WidthPref = { storageKey: 'monica-study-extra-w', cssVar: '--study-extra-w' }
 
@@ -62,6 +63,7 @@ export function StudyPage({ id }: { id: string }) {
     [client, id, queryClient],
   )
   const [openPath, setOpenPath] = useState<string | null>(null)
+  const panes = useStudyPanes(openPath !== null)
   useLayoutEffect(() => initWidth(CHAT_WIDTH), [])
   useEffect(() => store.open(), [store])
   const snapshot = useSyncExternalStore(store.subscribe, store.getSnapshot, store.getSnapshot)
@@ -80,7 +82,7 @@ export function StudyPage({ id }: { id: string }) {
   return (
     <Screen>
       <div className="flex min-h-0 flex-1">
-        <ArtifactTree id={id} selected={openPath} onSelect={setOpenPath} />
+        <ArtifactTree id={id} selected={openPath} onSelect={setOpenPath} pane={panes.tree} />
         <div className="flex min-w-0 flex-1 flex-col">
           <StudyHeader>
             {study && (
@@ -178,6 +180,7 @@ export function StudyPage({ id }: { id: string }) {
                 path={openPath}
                 onOpenArtifact={setOpenPath}
                 onClose={() => setOpenPath(null)}
+                pane={panes.panel}
               />
             )}
           </div>
