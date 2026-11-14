@@ -4,7 +4,7 @@ import { isAbsolute, join, normalize, sep } from 'node:path'
 import { ORPCError } from '@orpc/server'
 
 const MAX_READ_BYTES = 1024 * 1024
-const TOP_ARTIFACTS = ['MISSION.md', 'RESOURCES.md', 'GLOSSARY.md', 'log.md']
+const TOP_ARTIFACTS = ['MISSION.md', 'MAP.md', 'RESOURCES.md', 'GLOSSARY.md', 'log.md']
 const LEARNING_RECORDS = 'learning-records'
 
 export type Artifact = { path: string; title: string | null }

@@ -171,7 +171,7 @@ function startClaude(
     ...box,
     // 渡さないと CLI が最初の発言を丸ごと入れた title 生成の request を別に出す。
     title: study.id,
-    systemPrompt: `${teaching}\nThe Learning Preference file is ${learningPreference}\n`,
+    systemPrompt: `${teaching}\n学び方の好みのファイルは ${learningPreference} です。\n`,
     // resume は plugins を戻さないので、起こすたびに渡す。
     plugins: [{ type: 'local', path: deps.tutorDir, skipMcpDiscovery: true }],
     skills,
