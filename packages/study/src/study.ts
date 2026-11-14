@@ -255,9 +255,20 @@ function makeLedger(deps: {
       return { studies: rows.map((row) => summary(row.study)) }
     },
 
-    send(id: string, text: string, choice: Choice) {
+    send(id: string, text: string, choice: Choice, conversationId?: string) {
       mustExist(id)
-      const message = lifecycle.send(id, text, choice)
+      if (conversationId !== undefined) {
+        const target = db
+          .select({ id: studyConversation.id })
+          .from(studyConversation)
+          .where(and(eq(studyConversation.id, conversationId), eq(studyConversation.studyId, id)))
+          .get()
+        if (!target)
+          throw new ORPCError('NOT_FOUND', {
+            message: `no Study Conversation ${conversationId} in ${id}`,
+          })
+      }
+      const message = lifecycle.send(id, text, choice, conversationId)
       return isRefusal(message) ? message : { message }
     },
 

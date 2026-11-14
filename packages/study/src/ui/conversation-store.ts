@@ -231,12 +231,18 @@ export function createConversationStore(
         set({ sendError: failureLine(error) })
       }
     },
-    /** 走っている turn の間や送っている途中は送らずに false を返す。 */
+    /** 出している会話に送り、終わった会話なら続ける。走っている turn の間や送っている途中は送らずに false を返す。 */
     async send(text: string, choice: Choice = {}): Promise<boolean> {
       if (snapshot.running || sending) return false
       sending = true
+      const ended = snapshot.shown?.endedAt ? snapshot.shown.id : undefined
       try {
-        const { message } = await client.send({ ...choice, id, text })
+        const { message } = await client.send({
+          ...choice,
+          id,
+          text,
+          ...(ended && { conversationId: ended }),
+        })
         put(message)
         conversationId = message.conversationId
         set({ turnError: null, sendError: null })

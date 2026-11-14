@@ -209,7 +209,18 @@ export const contract = {
         'Store what the user said and start a turn of the Tutor on the model and effort; returns the stored row without waiting for the turn, whose answer comes through watch',
     })
     .errors(studyErrors)
-    .input(ChoiceSchema.extend({ id: StudyIdSchema, text: z.string().min(1) }))
+    .input(
+      ChoiceSchema.extend({
+        id: StudyIdSchema,
+        text: z.string().min(1),
+        conversationId: z
+          .string()
+          .optional()
+          .describe(
+            'an ended Study Conversation of this Study to resume, ending the ongoing one without a reflection; the ongoing one, or a new one when none, when left out',
+          ),
+      }),
+    )
     .output(z.object({ message: StudyMessageSchema })),
   models: meta
     .meta({

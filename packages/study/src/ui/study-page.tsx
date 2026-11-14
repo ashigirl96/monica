@@ -67,8 +67,6 @@ export function StudyPage({ id }: { id: string }) {
   const { choice, picker } = useTutorChoice()
   const selected = useSelectedConversation()
   useEffect(() => store.select(selected), [store, selected])
-  // 続いている会話があるのに終わった会話を開いた時は、送ると別の会話に入るので入力欄を出さない。
-  const viewingPast = shown !== null && shown.endedAt !== null && ongoingId !== null
 
   useDocumentTitle(study ? nameOf(study).text : null)
   useNewConversationKey(useCallback(() => navigate('/studies'), [navigate]))
@@ -140,14 +138,6 @@ export function StudyPage({ id }: { id: string }) {
                 permission={permission}
                 onAnswer={(allow) => void store.answer(permission.id, allow)}
               />
-            ) : viewingPast ? (
-              <button
-                type="button"
-                onClick={() => navigate(conversationPath(id, null))}
-                className="self-center rounded-lg px-3 py-1.5 text-[14px] text-muted-foreground hover:bg-muted hover:text-foreground"
-              >
-                続いている会話に戻る
-              </button>
             ) : (
               <InputMessage
                 value={draft}
