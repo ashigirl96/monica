@@ -1,4 +1,5 @@
 import './fluid/typeset.css'
+import './code-highlight.css'
 import './markdown.css'
 import ReactMarkdown, { type Components } from 'react-markdown'
 import rehypeHighlight from 'rehype-highlight'

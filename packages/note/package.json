@@ -22,6 +22,7 @@
     "drizzle-orm": "catalog:",
     "drizzle-zod": "catalog:",
     "entities": "catalog:",
+    "lowlight": "catalog:",
     "prosemirror-commands": "catalog:",
     "prosemirror-history": "catalog:",
     "prosemirror-inputrules": "catalog:",

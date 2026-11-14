@@ -8,6 +8,7 @@ import { blockHighlightPlugin } from './block-highlight.ts'
 import { blockSelectionPlugin } from './block-selection.ts'
 import { clipboardPlugin } from './clipboard.ts'
 import type { ParseMarkdown, RenderMarkdown } from './clipboard.ts'
+import { codeHighlightPlugin } from './code-highlight.ts'
 import { imeDebugPlugin } from './debug-ime.ts'
 import {
   blockDecorationsPlugin,
@@ -167,6 +168,7 @@ export function createBlockEditor(
       codeBlockActivePlugin(),
       blockDecorationsPlugin(),
       blockHighlightPlugin(),
+      codeHighlightPlugin(),
       tableResizePlugin(),
       // clipboardPlugin より前に置く: 画像ファイルの paste / drop を URL・block paste 経路より
       // 先に横取りする。uploadImage 不在（desktop journal）なら plugin ごと外れて画像 paste は無効。

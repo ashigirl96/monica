@@ -44,6 +44,7 @@
       "linkedom": "^0.18.13",
       "lucide-react": "~0.564.0",
       "pdfjs-dist": "^6.4.299",
+      "lowlight": "^3.3.0",
       "prosemirror-commands": "^1.7.2",
       "prosemirror-history": "^1.5.1",
       "prosemirror-inputrules": "^1.5.1",
