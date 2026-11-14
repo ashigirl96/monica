@@ -309,7 +309,7 @@ export const contract = {
     list: meta
       .meta({
         description:
-          'List the artifacts of a Study: MISSION.md, RESOURCES.md, GLOSSARY.md and log.md that exist, then the Learning Records by name',
+          'List the artifacts of a Study: MISSION.md, MAP.md, RESOURCES.md, GLOSSARY.md and log.md that exist, then the Learning Records by name',
       })
       .input(z.object({ id: StudyIdSchema }))
       .output(

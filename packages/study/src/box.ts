@@ -105,7 +105,21 @@ const climbsOut = (pattern: string) =>
         segment.includes('.') && (/[^\p{L}\p{N}_.*-]/u.test(segment) || /^[.*]+$/.test(segment)),
     )
 
+const exists = (path: string) =>
+  lstat(path).then(
+    () => true,
+    () => false,
+  )
+
 const inside = (path: string, dir: string) => path === dir || path.startsWith(`${dir}/`)
+
+const PLAIN_NAME = String.raw`[A-Za-z0-9_-][A-Za-z0-9_.-]*`
+const IS_PLAIN_NAME = new RegExp(`^${PLAIN_NAME}$`)
+const ABSOLUTE_PATH = String.raw`(/[A-Za-z0-9_./-]+)`
+const CLONE_COMMAND = new RegExp(
+  String.raw`^git clone https://github\.com/(${PLAIN_NAME})/(${PLAIN_NAME}) ${ABSOLUTE_PATH}$`,
+)
+const INIT_COMMAND = new RegExp(String.raw`^git init ${ABSOLUTE_PATH}$`)
 
 export function tutorBox(deps: TutorBoxDeps): TutorBox {
   const home = homedir()
@@ -148,6 +162,26 @@ export function tutorBox(deps: TutorBoxDeps): TutorBox {
     return (await isLocalHost(url.hostname, deps.lookup)) ? refused : ALLOW
   }
 
+  // 他人の source に仕込まれた指示で外へ書かないよう、行き先の実体が Study の決まった場所のものだけ聞かずに通す。
+  async function runsWithoutAsking(command: string): Promise<boolean> {
+    const clone = CLONE_COMMAND.exec(command)
+    if (clone) {
+      const [, owner, repo, dest] = clone
+      const expected = join(studyDir, 'env/sources', owner!, repo!.replace(/\.git$/, ''))
+      return (await nearestRealPath(dest!)) === expected
+    }
+    const init = INIT_COMMAND.exec(command)
+    if (!init) return false
+    const real = await nearestRealPath(init[1]!)
+    return (
+      real !== null &&
+      dirname(real) === join(studyDir, 'prototypes') &&
+      IS_PLAIN_NAME.test(basename(real)) &&
+      // 箱の中から書ける .git の file は gitdir で外の repo を指せる。
+      !(await exists(join(real, '.git')))
+    )
+  }
+
   // hook と canUseTool のどちらの経路で来ても同じ線になるよう、判定をここ 1 つにする。
   async function judgeTool(tool: string, input: Record<string, unknown>): Promise<Verdict | null> {
     switch (tool) {
@@ -181,6 +215,7 @@ export function tutorBox(deps: TutorBoxDeps): TutorBox {
     }
     if (tool === 'Bash') {
       if (input.dangerouslyDisableSandbox !== true) return toResult(ALLOW)
+      if (await runsWithoutAsking(String(input.command))) return toResult(ALLOW)
       const request = {
         command: String(input.command),
         description: typeof input.description === 'string' ? input.description : null,

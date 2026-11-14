@@ -54,6 +54,7 @@ test('artifact.list returns the artifacts that exist in order, with Learning Rec
   const { client, id, write } = await setup()
   write('log.md', '# log\n')
   write('MISSION.md', '# Understand ky\n')
+  write('MAP.md', '- ky\n')
   write('learning-records/0002-no-heading.md', 'just text\n')
   write('learning-records/0001-retry.md', '\n# Retry waits for Retry-After\n\nbody\n')
   write('learning-records/notes.txt', 'not markdown')
@@ -63,6 +64,7 @@ test('artifact.list returns the artifacts that exist in order, with Learning Rec
 
   expect(artifacts).toEqual([
     { path: 'MISSION.md', title: null },
+    { path: 'MAP.md', title: null },
     { path: 'log.md', title: null },
     { path: 'learning-records/0001-retry.md', title: 'Retry waits for Retry-After' },
     { path: 'learning-records/0002-no-heading.md', title: 'no-heading' },

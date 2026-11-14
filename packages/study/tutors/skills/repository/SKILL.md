@@ -1,29 +1,42 @@
 ---
 name: repository
-description: Teach a software repository (a library, a CLI or a framework) by reading its source and running it. Use when the Mission is to understand a repository.
+description: ソフトウェアのリポジトリ（ライブラリ、CLI、フレームワーク）を、source から描いた地図と一次資料で教える。Mission がリポジトリを理解することのときに使う。
 ---
 
-# Repository Tutor
+# リポジトリの Tutor（先生）
 
-The learning target is a software repository. Learn it the way its maintainers would: from what they wrote, and by running it.
+学習対象はソフトウェアのリポジトリです。メンテナと同じ道筋で学びます。メンテナが書いたものを読みます。動かすのは、教え方の「動かすことと試作」の場合だけです。
 
-## Primary Sources
+## 最初に clone する
 
-Look for these, in this order, and add the ones worth keeping to `RESOURCES.md`:
+Study の始めに、Map（地図）を描く前に、必ずリポジトリを `env/sources/<owner>/<repo>` に clone します。
 
-- the README and the docs the maintainers publish
-- the source itself, starting from the entry points the README names
-- design documents (ADRs, RFCs, architecture notes) in the repository
-- issues and pull requests that explain why the code is the way it is
-- the release notes and the changelog, for how the API changed
+```sh
+git clone https://github.com/<owner>/<repo> <Study の dir の絶対 path>/env/sources/<owner>/<repo>
+```
 
-## The source
+箱は `.git/config` と `.git/hooks` への書き込みを断るので、`dangerouslyDisableSandbox: true` と理由を付けて走らせます。この形（GitHub の https の URL、行き先は Study の dir の絶対 path、他のコマンドをつながない）なら、ユーザーに聞かずに通ります。`RESOURCES.md` には手元の path ではなく元の URL を書きます。clone を読むだけの git のコマンド（`git log`、`git blame`、`git diff`）は箱の中で走ります。
 
-- Clone the repository to `env/sources/<owner>/<repo>` (for example `git clone https://github.com/sindresorhus/ky env/sources/sindresorhus/ky`). The box refuses writes to `.git/config` and `.git/hooks`, so `git clone` fails inside it: run it with `dangerouslyDisableSandbox: true` and a reason, and the user is asked. The same goes for `git init` of a Prototype. Write the original URL in `RESOURCES.md`, not the local path.
-- Other git commands that only read the clone (`git log`, `git blame`, `git diff`) run inside the box.
-- Read the code with the user. Point at files and lines, and ask the user to predict what a function does before you explain it.
+## Map の描き方
 
-## Running it
+source を読んでから描きます。README だけで描くと、分け方や設計の型を外しやすいためです。
 
-- Install and run the repository in the Playground (`env/`) so the user sees it work, not only read about it.
-- When a claim needs checking, build a small Prototype under `prototypes/<name>/` that uses the repository, and run it together.
+- **全体**: リポジトリを、package、directory、主な module といった、メンテナ自身が分けている単位で分けます。entry point（README が名指す入口、CLI の main、公開している API）から辿ります。
+- **各部分に添えるもの**:
+  - 計算機科学の一般的な概念で何に当たるか（parser、scheduler、cache、状態機械など）
+  - 似た道具やサービス（同じ問題を別のやり方で解いているもの）
+  - どういう文脈で生まれたか（何に困って作られたか、何の後継か）
+  - どういう設計の型で書かれているか（middleware の連なり、plugin、event sourcing など）
+- **細かい Map**: ユーザーが特定の package や部分に興味を示したら、全体の Map を出した後に、その部分の中をさらに分けて同じように描きます。
+
+## 一次資料
+
+次を、この順で探し、残す価値のあるものを理解の順に `RESOURCES.md` に並べます。
+
+- README と、メンテナが公開している docs
+- source そのもの。README が名指す entry point から
+- リポジトリの中の設計の文書（ADR、RFC、architecture の覚え書き）
+- コードがなぜこうなっているかを説明する issue と pull request
+- API がどう変わったかを示す release note と changelog
+
+source を渡すときは、ファイルと行を指します。

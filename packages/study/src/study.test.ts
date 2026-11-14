@@ -454,7 +454,7 @@ test('the claude of a Study runs in its Study dir with the Tutors plugin, its sk
   expect(options.persistSession).toBeUndefined()
   expect(options.resume).toBeUndefined()
   expect(options.systemPrompt).toBe(
-    `${readFileSync(join(tutorDir, 'TEACHING.md'), 'utf8')}\nThe Learning Preference file is ${join(home, 'learning-preference', 'LEARNING-PREFERENCE.md')}\n`,
+    `${readFileSync(join(tutorDir, 'TEACHING.md'), 'utf8')}\n学び方の好みのファイルは ${join(home, 'learning-preference', 'LEARNING-PREFERENCE.md')} です。\n`,
   )
   expect(statSync(join(home, 'learning-preference')).mode & 0o777).toBe(0o700)
   expect(options.sandbox?.enabled).toBe(true)
@@ -479,7 +479,7 @@ test('a Ledger given a Tutor dir passes it as the plugin and reads the teaching 
   expect(options.plugins).toEqual([{ type: 'local', path: tutorsDir, skipMcpDiscovery: true }])
   expect(options.skills).toEqual(['tutors:web'])
   expect(options.systemPrompt).toBe(
-    `Teach from home.\n\nThe Learning Preference file is ${join(home, 'learning-preference', 'LEARNING-PREFERENCE.md')}\n`,
+    `Teach from home.\n\n学び方の好みのファイルは ${join(home, 'learning-preference', 'LEARNING-PREFERENCE.md')} です。\n`,
   )
 })
 
