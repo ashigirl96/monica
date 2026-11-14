@@ -412,6 +412,33 @@ test('a send whose resume finds no SDK record ends that Study Conversation, and 
   expect(conversations[1]!.summary).toBe('SDK の記録が消えていたので、振り返らずに終えた')
 })
 
+test('a send to a Study Conversation ended by a lost SDK record ends the ongoing one and starts a new one', async () => {
+  const before = await talked()
+  const lost = (await before.client.get({ id: before.id })).conversations[0]!.id
+  before.studyLedger.stop()
+  const after = setup({ db: before.db, home: before.home })
+  after.fake.shell = NO_RECORD_SHELL
+  const watch = await watching(after.client, before.id)
+  await after.client.send({ id: before.id, text: 'do you remember?' })
+  await watch.ended()
+  after.fake.shell = 'sleep 60 & wait'
+  await after.client.send({ id: before.id, text: 'other topic' })
+  await until(() => after.fake.claudes.length === 2)
+  after.fake.claudes[1]!.emit(init('session-b'), said('Sure'), result())
+  await until(() => turnEnds(watch.events) === 2)
+
+  await after.client.send({ id: before.id, text: 'to the lost one', conversationId: lost })
+  await until(() => after.fake.claudes.length === 3)
+
+  expect(after.fake.claudes[2]!.options.resume).toBeUndefined()
+  const conversations = (await after.client.get({ id: before.id })).conversations
+  expect(conversations.map((c) => [c.endedAt === null, c.messages.map((m) => m.text)])).toEqual([
+    [true, ['to the lost one']],
+    [false, ['other topic', 'Sure']],
+    [false, ['hello', 'Hi', 'do you remember?']],
+  ])
+})
+
 test('a reflection turn that fails ends the Study Conversation and is not tried again', async () => {
   const fixture = await talked()
   const { client, watch, claude, id, home } = fixture

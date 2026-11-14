@@ -549,11 +549,9 @@ export function createStudyLifecycle(deps: {
                 and(eq(studyConversation.id, resumedId), eq(studyConversation.studyId, studyId)),
               )
               .get()
+      const leaving = resumed !== undefined && resumed.endedAt !== null
       // SDK の記録が消えて終わった会話は resume できないので、新しい会話に送る。
-      const resuming =
-        resumed !== undefined &&
-        resumed.endedAt !== null &&
-        resumed.summary !== NO_SDK_RECORD_SUMMARY
+      const resuming = leaving && resumed.summary !== NO_SDK_RECORD_SUMMARY
       let left: string | undefined
       const request: TutorRequest = {
         kind: 'say',
@@ -567,7 +565,7 @@ export function createStudyLifecycle(deps: {
             .from(studyConversation)
             .where(and(eq(studyConversation.studyId, studyId), isNull(studyConversation.endedAt)))
             .get()
-          if (resuming && ongoing) {
+          if (leaving && ongoing) {
             tx.update(studyConversation)
               .set({ endedAt: now })
               .where(eq(studyConversation.id, ongoing.id))
@@ -581,7 +579,7 @@ export function createStudyLifecycle(deps: {
                 .where(eq(studyConversation.id, resumed.id))
                 .returning()
                 .get()!
-            : (ongoing ??
+            : ((leaving ? undefined : ongoing) ??
               tx
                 .insert(studyConversation)
                 .values({ id: `sc-${Bun.randomUUIDv7()}`, studyId, startedAt: now })
