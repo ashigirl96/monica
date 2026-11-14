@@ -13,6 +13,7 @@ import type { OnNoteMentionClick, ResolveNoteMention } from './node-views.ts'
 import type { SearchNoteMentions } from './note-mention-menu.ts'
 import type { OnOpenBlock, ResolveBlock } from './synced-block.ts'
 
+import '@monica/ui/code-highlight.css'
 import './block-editor.css'
 
 /** ジャンプ後に元ブロックのハイライトを消すまでの猶予 */

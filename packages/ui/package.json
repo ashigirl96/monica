@@ -7,7 +7,8 @@
     "./table": "./src/table.ts",
     "./local-time": "./src/local-time.ts",
     "./fluid": "./src/fluid/index.ts",
-    "./markdown": "./src/markdown.tsx"
+    "./markdown": "./src/markdown.tsx",
+    "./code-highlight.css": "./src/code-highlight.css"
   },
   "dependencies": {
     "@base-ui/react": "catalog:",

@@ -324,7 +324,7 @@ export class CodeBlockView implements NodeView {
       bar.append(this.select, this.wrapButton, copy)
     })
     const pre = el('pre', 'jb-code-pre')
-    this.contentDOM = document.createElement('code')
+    this.contentDOM = el('code', 'hljs')
     pre.append(this.contentDOM)
     this.dom.append(this.toolbar, pre)
     this.sync(node)
