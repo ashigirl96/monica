@@ -53,7 +53,6 @@ type UseTerminalOptions = {
   active: boolean
   onTitleChange?: (title: string) => void
   onCwdChange?: (cwd: string) => void
-  onExit: (sessionId: string, exitCode: number | null) => void
 }
 
 export function useTerminal(
@@ -218,7 +217,6 @@ export function useTerminal(
       tabId,
       sessionId,
       status: options.sessionStatus,
-      onExit: (code) => optionsRef.current.onExit(sessionId, code),
     })
     if (attached) connections.resize(tabId)
     term.focus()

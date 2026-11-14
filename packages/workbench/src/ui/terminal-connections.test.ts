@@ -162,6 +162,30 @@ test('a Tab that leaves the layout without the webview closing it releases its c
   expect(written).toEqual([])
 })
 
+test('a hidden Tab the Backend binds to a new shell stops listening to the old one', async () => {
+  const { ptyd, client, settled } = setup()
+  const store = createStore()
+  store.set(workbenchClientAtom, () => client)
+  const shell = fakeTerminalPort(store)
+  const { tab } = await client.runspace.create(size)
+  await client.tab.pin({ id: tab.id })
+  await settled(tab.terminalSessionId)
+  await store.set(reloadAtom)
+  onCleanup(releaseTabsLeavingLayout(store))
+  mountFakeTerminal(store, tab.id)
+  connectAsPane(store, tab.id, tab.terminalSessionId)
+  await shell.received(1)
+
+  ptyd.exit(tab.terminalSessionId, 0)
+  await ptyd.received((op) => op.op === 'reap' && op.session_id === tab.terminalSessionId)
+  const respawned = await client.tab.respawn({ id: tab.id, ...size })
+  await settled(respawned.terminalSessionId)
+  await store.set(reloadAtom)
+
+  expect(store.get(tabConnectionsAtom).tabIds()).toEqual([])
+  expect(shell.listening()).toEqual([])
+})
+
 test('writes to a Terminal Session reach it in the order they were made', async () => {
   const store = createStore()
   const shell = fakeTerminalPort(store)

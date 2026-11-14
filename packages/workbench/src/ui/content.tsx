@@ -11,7 +11,6 @@ import {
   createTerminalTabAtom,
   deadTabsAtom,
   startNewShellForTabAtom,
-  tabExitedAtom,
   updateTabCwdAtom,
   updateTabTitleAtom,
 } from './store.ts'
@@ -149,7 +148,6 @@ function TerminalPane({
   const containerRef = useRef<HTMLDivElement>(null)
   const closeTab = useSetAtom(closeTerminalTabAtom)
   const startNewShell = useSetAtom(startNewShellForTabAtom)
-  const tabExited = useSetAtom(tabExitedAtom)
   const updateTitle = useSetAtom(updateTabTitleAtom)
   const updateCwd = useSetAtom(updateTabCwdAtom)
 
@@ -161,7 +159,6 @@ function TerminalPane({
     (nextCwd: string) => void updateCwd(tabId, nextCwd),
     [tabId, updateCwd],
   )
-  const onExit = useCallback((sessionId: string) => tabExited(tabId, sessionId), [tabId, tabExited])
 
   useTerminal(containerRef, {
     tabId,
@@ -171,7 +168,6 @@ function TerminalPane({
     active,
     onTitleChange,
     onCwdChange,
-    onExit,
   })
 
   return (
