@@ -120,6 +120,8 @@ const CLONE_COMMAND = new RegExp(
   String.raw`^git clone https://github\.com/(${PLAIN_NAME})/(${PLAIN_NAME}) ${ABSOLUTE_PATH}$`,
 )
 const INIT_COMMAND = new RegExp(String.raw`^git init ${ABSOLUTE_PATH}$`)
+// 聞かずに通す git がユーザーの認証で private な repo を取ったり、設定の filter を走らせたりしないよう、設定を読ませない。
+const WITHOUT_USER_GIT = 'GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_NOSYSTEM=1 GIT_TERMINAL_PROMPT=0'
 
 export function tutorBox(deps: TutorBoxDeps): TutorBox {
   const home = homedir()
@@ -215,7 +217,12 @@ export function tutorBox(deps: TutorBoxDeps): TutorBox {
     }
     if (tool === 'Bash') {
       if (input.dangerouslyDisableSandbox !== true) return toResult(ALLOW)
-      if (await runsWithoutAsking(String(input.command))) return toResult(ALLOW)
+      if (await runsWithoutAsking(String(input.command))) {
+        return {
+          behavior: 'allow',
+          updatedInput: { ...input, command: `${WITHOUT_USER_GIT} ${String(input.command)}` },
+        }
+      }
       const request = {
         command: String(input.command),
         description: typeof input.description === 'string' ? input.description : null,
