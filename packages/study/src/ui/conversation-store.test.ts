@@ -73,6 +73,7 @@ class FakeClient implements ConversationClient {
   sendError: unknown
   readonly gets: number[] = []
   readonly sent: string[] = []
+  readonly sentTo: (string | undefined)[] = []
   readonly answers: { id: number; allow: boolean }[] = []
   readonly watches: { stream: FakeStream; signal: AbortSignal }[] = []
 
@@ -108,9 +109,10 @@ class FakeClient implements ConversationClient {
     }
   }
 
-  async send({ text }: { id: string; text: string }) {
+  async send({ text, conversationId }: { id: string; text: string; conversationId?: string }) {
     if (this.sendError) throw this.sendError
     this.sent.push(text)
+    this.sentTo.push(conversationId)
     return { message: row(100 + this.sent.length, 'user', text) }
   }
 
@@ -407,6 +409,27 @@ test('a Study without an ongoing Study Conversation opens on the newest ended on
   store.select('older')
   expect(store.getSnapshot().shown).toMatchObject({ id: 'older', summary: 'older summary' })
   expect(texts(store.getSnapshot())).toEqual(['first'])
+})
+
+test('send goes to the shown Study Conversation: an ended one by its id, the ongoing one and a new one without', async () => {
+  const client = new FakeClient()
+  client.conversationRows = [
+    { id: CONVERSATION, endedAt: null, summary: null },
+    { id: 'older', endedAt: new Date(), summary: 'older summary' },
+  ]
+  const store = open(client)
+  const stream = await watching(client)
+  stream.push({ type: 'snapshot', running: false, lastMessageId: null, partialText: '' })
+  await until(store, (s) => s.ongoingId === CONVERSATION)
+
+  await store.send('to the ongoing')
+  store.select('older')
+  await store.send('to the older')
+  store.select(null)
+  await store.end(false)
+  await store.send('to a new one')
+
+  expect(client.sentTo).toEqual([undefined, 'older', undefined])
 })
 
 test('a send turn that ends the Study Conversation without reflecting keeps it shown with the sent row and the error', async () => {

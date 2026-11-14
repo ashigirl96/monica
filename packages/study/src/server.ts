@@ -23,8 +23,8 @@ export const router = os.router({
   start: os.start.handler(({ context }) => internals(context.studyLedger).start()),
   list: os.list.handler(({ context }) => internals(context.studyLedger).list()),
   get: os.get.handler(({ context, input }) => internals(context.studyLedger).get(input.id)),
-  send: os.send.handler(({ context, input: { id, text, ...choice }, errors }) =>
-    admitted(internals(context.studyLedger).send(id, text, choice), errors),
+  send: os.send.handler(({ context, input: { id, text, conversationId, ...choice }, errors }) =>
+    admitted(internals(context.studyLedger).send(id, text, choice, conversationId), errors),
   ),
   models: os.models.handler(({ context }) => internals(context.studyLedger).models()),
   conversation: {

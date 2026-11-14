@@ -14,7 +14,7 @@ import { join } from 'node:path'
 import type { deleteSession } from '@anthropic-ai/claude-agent-sdk'
 import { localIso } from '@monica/ui/local-time'
 import { EventPublisher } from '@orpc/server'
-import { and, asc, desc, eq, isNull, lt, max } from 'drizzle-orm'
+import { and, asc, desc, eq, inArray, isNull, lt, max } from 'drizzle-orm'
 import type { BunSQLiteDatabase } from 'drizzle-orm/bun-sqlite'
 
 import { STALE_MS } from './activity.ts'
@@ -426,14 +426,20 @@ export function createStudyLifecycle(deps: {
     return replied.value.value
   }
 
+  /** 振り返りの行の後にユーザーの行が無い。再開した会話の前の振り返りは数えない。 */
   const hasReflection = (conversationId: string) =>
     db
-      .select({ id: studyMessage.id })
+      .select({ kind: studyMessage.kind })
       .from(studyMessage)
       .where(
-        and(eq(studyMessage.conversationId, conversationId), eq(studyMessage.kind, 'reflection')),
+        and(
+          eq(studyMessage.conversationId, conversationId),
+          inArray(studyMessage.kind, ['user', 'reflection']),
+        ),
       )
-      .get() !== undefined
+      .orderBy(desc(studyMessage.id))
+      .limit(1)
+      .get()?.kind === 'reflection'
 
   /** 最後の行の時刻。行の無い会話は始めた時刻。 */
   function lastRowAt(conversation: { id: string; startedAt: Date }): number {
@@ -524,24 +530,61 @@ export function createStudyLifecycle(deps: {
 
   return {
     /** ユーザーの発言を書いて turn を始め、turn の終わりを待たずに書いた行を返す。 */
-    send(studyId: string, text: string, choice: Choice): StudyMessage | Refusal {
+    send(
+      studyId: string,
+      text: string,
+      choice: Choice,
+      resumedId?: string,
+    ): StudyMessage | Refusal {
       const verdict = decide(states.get(studyId), 'send')
       if (verdict !== 'go') return refusal(studyId, verdict)
       const now = new Date()
-      const written = begin(studyId, { kind: 'say', text, choice }, () => {
+      const resumed =
+        resumedId === undefined
+          ? undefined
+          : db
+              .select()
+              .from(studyConversation)
+              .where(
+                and(eq(studyConversation.id, resumedId), eq(studyConversation.studyId, studyId)),
+              )
+              .get()
+      const leaving = resumed !== undefined && resumed.endedAt !== null
+      // SDK の記録が消えて終わった会話は resume できないので、新しい会話に送る。
+      const resuming = leaving && resumed.summary !== NO_SDK_RECORD_SUMMARY
+      let left: string | undefined
+      const request: TutorRequest = {
+        kind: 'say',
+        text: resuming ? `Study Conversation resumed at ${localIso(now)}\n${text}` : text,
+        choice,
+      }
+      const written = begin(studyId, request, () => {
         const value = db.transaction((tx) => {
           const ongoing = tx
             .select()
             .from(studyConversation)
             .where(and(eq(studyConversation.studyId, studyId), isNull(studyConversation.endedAt)))
             .get()
-          const conversation =
-            ongoing ??
-            tx
-              .insert(studyConversation)
-              .values({ id: `sc-${Bun.randomUUIDv7()}`, studyId, startedAt: now })
-              .returning()
-              .get()
+          if (leaving && ongoing) {
+            tx.update(studyConversation)
+              .set({ endedAt: now })
+              .where(eq(studyConversation.id, ongoing.id))
+              .run()
+            left = ongoing.id
+          }
+          const conversation = resuming
+            ? tx
+                .update(studyConversation)
+                .set({ endedAt: null, summary: null })
+                .where(eq(studyConversation.id, resumed.id))
+                .returning()
+                .get()!
+            : ((leaving ? undefined : ongoing) ??
+              tx
+                .insert(studyConversation)
+                .values({ id: `sc-${Bun.randomUUIDv7()}`, studyId, startedAt: now })
+                .returning()
+                .get())
           const row = tx
             .insert(studyMessage)
             .values({ conversationId: conversation.id, createdAt: now, kind: 'user', text })
@@ -553,6 +596,7 @@ export function createStudyLifecycle(deps: {
         return { conversation: value.conversation, value }
       })
       if (isRefusal(written)) return written
+      if (left) events.publish(studyId, { type: 'conversation-ended', conversationId: left })
       events.publish(studyId, { type: 'turn-started', conversationId: written.conversation.id })
       const message = toMessage(written.row)
       events.publish(studyId, { type: 'message', message })
