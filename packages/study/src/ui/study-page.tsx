@@ -1,4 +1,4 @@
-import { pushErrorToast, pushInfoToast } from '@monica/ui'
+import { initWidth, pushErrorToast, pushInfoToast, WidthControl, type WidthPref } from '@monica/ui'
 import { InputMessage, ThinkingIndicator } from '@monica/ui/fluid'
 import { useQueryClient } from '@tanstack/react-query'
 import { ArrowLeft } from 'lucide-react'
@@ -6,6 +6,7 @@ import {
   type ReactNode,
   useCallback,
   useEffect,
+  useLayoutEffect,
   useMemo,
   useState,
   useSyncExternalStore,
@@ -41,6 +42,9 @@ import {
   useNewConversationKey,
   useScreen,
 } from './screen.tsx'
+import { useStudyPanes } from './side-pane.tsx'
+
+const CHAT_WIDTH: WidthPref = { storageKey: 'monica-study-extra-w', cssVar: '--study-extra-w' }
 
 export function StudyPage({ id }: { id: string }) {
   const { client, navigate } = useScreen()
@@ -59,6 +63,8 @@ export function StudyPage({ id }: { id: string }) {
     [client, id, queryClient],
   )
   const [openPath, setOpenPath] = useState<string | null>(null)
+  const panes = useStudyPanes(openPath !== null)
+  useLayoutEffect(() => initWidth(CHAT_WIDTH), [])
   useEffect(() => store.open(), [store])
   const snapshot = useSyncExternalStore(store.subscribe, store.getSnapshot, store.getSnapshot)
   const { study, messages, permission, running, partialText, turnError, sendError } = snapshot
@@ -75,98 +81,110 @@ export function StudyPage({ id }: { id: string }) {
 
   return (
     <Screen>
-      <StudyHeader>
-        {study && <StudyName study={study} className="min-w-0 flex-1 text-[15px] font-medium" />}
-        <ShellCommand studyId={id} />
-        <span className="shrink-0 text-[12px] text-muted-foreground">
-          Tutor: {currentTutor(messages)}
-        </span>
-        <ConversationPicker
-          conversations={conversations}
-          shown={shown}
-          canEnd={!running || permission !== null}
-          onPick={(conversation) =>
-            navigate(conversationPath(id, conversation.id === ongoingId ? null : conversation.id))
-          }
-          onNew={() => {
-            navigate(conversationPath(id, null))
-            void store.end(false)
-          }}
-        />
-        {study && <LinkedRepos id={id} linked={snapshot.repos} onChanged={() => store.reload()} />}
-        <StudyMenu id={id} />
-      </StudyHeader>
       <div className="flex min-h-0 flex-1">
-        <ArtifactTree id={id} selected={openPath} onSelect={setOpenPath} />
-        <section className="flex min-w-0 flex-1 flex-col">
-          {/* column-reverse で、伸びる会話の下端に scroll が留まる。 */}
-          <div className="flex min-h-0 flex-1 flex-col-reverse overflow-y-auto">
-            <div className="mx-auto flex w-full max-w-2xl flex-col gap-3 px-4 py-6">
-              {study &&
-                groupTools(messages, running).map((item) =>
-                  item.kind === 'tool_group' ? (
-                    <ToolGroupView
-                      key={`group-${item.id}`}
-                      messages={item.messages}
-                      dir={study.dir}
-                      onOpenArtifact={setOpenPath}
-                    />
-                  ) : (
-                    <MessageView
-                      key={item.id}
-                      message={item}
-                      dir={study.dir}
-                      onOpenArtifact={setOpenPath}
-                    />
-                  ),
-                )}
-              {running &&
-                (partialText !== '' ? (
-                  <TutorText text={partialText} />
+        <ArtifactTree id={id} selected={openPath} onSelect={setOpenPath} pane={panes.tree} />
+        <div className="flex min-w-0 flex-1 flex-col">
+          <StudyHeader>
+            {study && (
+              <StudyName study={study} className="min-w-0 flex-1 text-[15px] font-medium" />
+            )}
+            <ShellCommand studyId={id} />
+            <span className="shrink-0 text-[12px] text-muted-foreground">
+              Tutor: {currentTutor(messages)}
+            </span>
+            <ConversationPicker
+              conversations={conversations}
+              shown={shown}
+              canEnd={!running || permission !== null}
+              onPick={(conversation) =>
+                navigate(
+                  conversationPath(id, conversation.id === ongoingId ? null : conversation.id),
+                )
+              }
+              onNew={() => {
+                navigate(conversationPath(id, null))
+                void store.end(false)
+              }}
+            />
+            {study && (
+              <LinkedRepos id={id} linked={snapshot.repos} onChanged={() => store.reload()} />
+            )}
+            <WidthControl pref={CHAT_WIDTH} label="Chat width" popupBelow />
+            <StudyMenu id={id} />
+          </StudyHeader>
+          <div className="flex min-h-0 flex-1">
+            <section className="flex min-w-0 flex-1 flex-col">
+              {/* column-reverse で、伸びる会話の下端に scroll が留まる。 */}
+              <div className="flex min-h-0 flex-1 flex-col-reverse overflow-y-auto">
+                <div className="mx-auto flex w-full max-w-[calc(42rem+var(--study-extra-w,0px))] flex-col gap-3 px-4 py-6">
+                  {study &&
+                    groupTools(messages, running).map((item) =>
+                      item.kind === 'tool_group' ? (
+                        <ToolGroupView
+                          key={`group-${item.id}`}
+                          messages={item.messages}
+                          dir={study.dir}
+                          onOpenArtifact={setOpenPath}
+                        />
+                      ) : (
+                        <MessageView
+                          key={item.id}
+                          message={item}
+                          dir={study.dir}
+                          onOpenArtifact={setOpenPath}
+                        />
+                      ),
+                    )}
+                  {running &&
+                    (partialText !== '' ? (
+                      <TutorText text={partialText} />
+                    ) : (
+                      permission === null && <ThinkingIndicator />
+                    ))}
+                  <FailureLine>{turnError}</FailureLine>
+                  {snapshot.canReflect && <ReflectButton onClick={() => void store.end(true)} />}
+                </div>
+              </div>
+              <div className="mx-auto flex w-full max-w-[calc(42rem+var(--study-extra-w,0px))] flex-col gap-1.5 px-4 pb-4">
+                <FailureLine>{sendError}</FailureLine>
+                {permission ? (
+                  <PermissionPrompt
+                    key={permission.id}
+                    permission={permission}
+                    onAnswer={(allow) => void store.answer(permission.id, allow)}
+                  />
                 ) : (
-                  permission === null && <ThinkingIndicator />
-                ))}
-              <FailureLine>{turnError}</FailureLine>
-              {snapshot.canReflect && <ReflectButton onClick={() => void store.end(true)} />}
-            </div>
-          </div>
-          <div className="mx-auto flex w-full max-w-2xl flex-col gap-1.5 px-4 pb-4">
-            <FailureLine>{sendError}</FailureLine>
-            {permission ? (
-              <PermissionPrompt
-                key={permission.id}
-                permission={permission}
-                onAnswer={(allow) => void store.answer(permission.id, allow)}
-              />
-            ) : (
-              <InputMessage
-                value={draft}
-                onValueChange={setDraft}
-                sendDisabled={running}
-                onSend={(text) => {
-                  void store.send(text, choice).then((sent) => {
-                    if (!sent) return
-                    setDraft('')
-                    if (selected !== null) navigate(conversationPath(id, null))
-                  })
-                }}
-                placeholder="Tutor に話す"
-                sendLabel="送る"
-                leftSlot={picker}
-                textareaProps={{ autoFocus: true, 'aria-label': 'Tutor に話す' }}
+                  <InputMessage
+                    value={draft}
+                    onValueChange={setDraft}
+                    sendDisabled={running}
+                    onSend={(text) => {
+                      void store.send(text, choice).then((sent) => {
+                        if (!sent) return
+                        setDraft('')
+                        if (selected !== null) navigate(conversationPath(id, null))
+                      })
+                    }}
+                    placeholder="Tutor に話す"
+                    sendLabel="送る"
+                    leftSlot={picker}
+                    textareaProps={{ autoFocus: true, 'aria-label': 'Tutor に話す' }}
+                  />
+                )}
+              </div>
+            </section>
+            {study && openPath !== null && (
+              <ArtifactPanel
+                id={id}
+                dir={study.dir}
+                path={openPath}
+                onOpenArtifact={setOpenPath}
+                onClose={() => setOpenPath(null)}
+                pane={panes.panel}
               />
             )}
           </div>
-        </section>
-        {study && openPath !== null && (
-          <ArtifactPanel
-            id={id}
-            dir={study.dir}
-            path={openPath}
-            onOpenArtifact={setOpenPath}
-            onClose={() => setOpenPath(null)}
-          />
-        )}
+        </div>
       </div>
     </Screen>
   )
