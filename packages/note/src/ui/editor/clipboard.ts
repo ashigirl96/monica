@@ -6,6 +6,7 @@ import { deleteRange } from './commands.ts'
 import { containerById, getBlockContext, rangeFromIds, rangePositions } from './context.ts'
 import { expandedHeadingsDeep, revealPos } from './folding.ts'
 import { openLinkMenu } from './link-menu.ts'
+import { listsToBlocks } from './paste-lists.ts'
 import { buildSyncedContainer, openPasteMenu } from './paste-menu.ts'
 import { isEmptyParagraphContainer, nodes, reissueIds, schema } from './schema.ts'
 import { blockSelectionKey } from './selection-state.ts'
@@ -312,6 +313,7 @@ export function clipboardPlugin(options: ClipboardOptions): Plugin {
       transformCopied: (slice) => mapSliceNodes(slice, stripIds),
       // 外部・copy 由来 paste は ID 再発行（重複 ID は normalizer の防衛もある）
       transformPasted: (slice) => mapSliceNodes(slice, preparePasted),
+      transformPastedHTML: listsToBlocks,
       // text 選択の text/plain を markdown に差し替える。block 選択は copy ハンドラが
       // preventDefault するのでここは通らない。
       clipboardTextSerializer: (slice: Slice) => selectionToMarkdown(slice, renderMarkdown),
