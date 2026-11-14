@@ -7,9 +7,8 @@ function isList(node: Node): node is HTMLUListElement | HTMLOListElement {
   return node instanceof Element && (node.tagName === 'UL' || node.tagName === 'OL')
 }
 
-// 太字などを li・p の style で書く HTML があるので、外す要素の style は span に移して mark に読ませる。
-function keepStyle(from: Element, nodes: Node[], doc: Document): Node[] {
-  const style = from.getAttribute('style')
+// 太字などを ul・ol・li・p の style で書く HTML があるので、外す要素の style は span に移して mark に読ませる。
+function keepStyle(style: string, nodes: Node[], doc: Document): Node[] {
   if (!style) return nodes
   const span = doc.createElement('span')
   span.setAttribute('style', style)
@@ -17,23 +16,35 @@ function keepStyle(from: Element, nodes: Node[], doc: Document): Node[] {
   return [span]
 }
 
-function containersOf(list: HTMLUListElement | HTMLOListElement, doc: Document): HTMLElement[] {
+// CSS の継承と同じく、外の要素の style を内の項目へ渡し、同じ property は内側が勝つ。
+const withStyle = (outer: string, el: Element) =>
+  [outer, el.getAttribute('style')].filter(Boolean).join(';')
+
+function containersOf(
+  list: HTMLUListElement | HTMLOListElement,
+  doc: Document,
+  inherited = '',
+): HTMLElement[] {
   const kind = BLOCK_KIND[list.tagName as keyof typeof BLOCK_KIND]
+  const listStyle = withStyle(inherited, list)
   return [...list.children]
     .filter((item) => item.tagName === 'LI')
     .map((item) => {
+      const itemStyle = withStyle(listStyle, item)
       const content = doc.createElement('div')
       content.dataset.blockContent = kind
       const children: HTMLElement[] = []
       // childNodes は動かすと縮むので、先に配列に写す。
       for (const child of Array.from(item.childNodes)) {
-        if (isList(child)) children.push(...containersOf(child, doc))
+        if (isList(child)) children.push(...containersOf(child, doc, itemStyle))
         // shortcut: 段落を複数持つ項目は 1 行につなげる。行を分けたいと言われたら兄弟の段落にする。
         else if (child instanceof Element && child.tagName === 'P')
-          content.append(...keepStyle(child, [...child.childNodes], doc))
+          content.append(
+            ...keepStyle(child.getAttribute('style') ?? '', [...child.childNodes], doc),
+          )
         else content.append(child)
       }
-      content.replaceChildren(...keepStyle(item, [...content.childNodes], doc))
+      content.replaceChildren(...keepStyle(itemStyle, [...content.childNodes], doc))
       const container = doc.createElement('div')
       container.dataset.blockContainer = ''
       container.append(content)
