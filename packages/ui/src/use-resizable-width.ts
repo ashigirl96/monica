@@ -9,16 +9,14 @@ export type ResizableWidth = {
   reserved: number
   /** 右端の欄は、境界を左へ引くと広がる */
   grows?: 'right' | 'left'
-  /** 欄が CSS の zoom の内側にあるときの拡大率。ポインターと窓幅は拡大後の px で届く。参照を変えない関数で渡す */
-  scale?: () => number
+  /** 欄が CSS の zoom の内側にあるときの拡大率。ポインターと窓幅は拡大後の px で届く */
+  scale?: number
 }
 
 /**
  * 欄の幅をドラッグで変える。希望幅を localStorage に残し、表示だけ窓幅に合わせて抑えるので、
  * 窓を広げれば元の幅に戻る。境界のダブルクリックで既定幅に戻す。
  */
-const unscaled = () => 1
-
 export function useResizableWidth({
   storageKey,
   initial,
@@ -26,7 +24,7 @@ export function useResizableWidth({
   max,
   reserved,
   grows = 'right',
-  scale = unscaled,
+  scale = 1,
 }: ResizableWidth) {
   const clamp = (w: number, upper = max) => Math.min(upper, Math.max(min, w))
   const [width, setWidth] = useState(() => {
@@ -37,7 +35,7 @@ export function useResizableWidth({
   const [resizeStart, setResizeStart] = useState<{ x: number; w: number } | null>(null)
   // コンテナ幅ではなく窓幅を見るのは、コンテナ幅が内容依存でループになるため
   const [viewport, setViewport] = useState(() => window.innerWidth)
-  const upper = clamp(viewport / scale() - reserved)
+  const upper = clamp(viewport / scale - reserved)
   const shown = clamp(width, upper)
   const resizing = resizeStart !== null
 
@@ -58,9 +56,8 @@ export function useResizableWidth({
     let frame = 0
     let pending: number | null = null
     const sign = grows === 'right' ? 1 : -1
-    const zoom = scale()
     const widthAt = (clientX: number) =>
-      Math.min(upper, Math.max(min, resizeStart.w + (sign * (clientX - resizeStart.x)) / zoom))
+      Math.min(upper, Math.max(min, resizeStart.w + (sign * (clientX - resizeStart.x)) / scale))
     const commit = () => {
       frame = 0
       if (pending !== null) setWidth(pending)

@@ -1,5 +1,5 @@
 import { useResizableWidth } from '@monica/ui'
-import type { CSSProperties, ReactNode } from 'react'
+import { type CSSProperties, type ReactNode, useSyncExternalStore } from 'react'
 
 /** note の AppShell の w-12。 */
 const RAIL_W = 48
@@ -8,8 +8,19 @@ const CHAT_MIN = 320
 const TREE = { storageKey: 'monica-study-tree-w', initial: 240, min: 180, max: 480 }
 const PANEL = { storageKey: 'monica-study-panel-w', initial: 448, min: 320, max: 960 }
 
-// Screen が Study の画面ごと --note-zoom で拡大するので、欄の幅もその内側の px で数える。
 const noteZoom = () => Number(document.documentElement.style.getPropertyValue('--note-zoom')) || 1
+
+// ⌘+ は :root の --note-zoom を書き換えるだけで resize も起きないので、style の変化を見る。
+function subscribeNoteZoom(onChange: () => void) {
+  const observer = new MutationObserver(onChange)
+  observer.observe(document.documentElement, { attributes: true, attributeFilter: ['style'] })
+  return () => observer.disconnect()
+}
+
+/** Screen が Study の画面ごと --note-zoom で拡大するので、欄の幅もその内側の px で数える。 */
+function useNoteZoom(): number {
+  return useSyncExternalStore(subscribeNoteZoom, noteZoom, () => 1)
+}
 
 export type Pane = ReturnType<typeof useResizableWidth>
 
@@ -18,17 +29,18 @@ export type Pane = ReturnType<typeof useResizableWidth>
  * 残りだけを渡す。
  */
 export function useStudyPanes(panelOpen: boolean): { tree: Pane; panel: Pane } {
+  const zoom = useNoteZoom()
   const tree = useResizableWidth({
     ...TREE,
     reserved: RAIL_W + CHAT_MIN + (panelOpen ? PANEL.min : 0),
-    scale: noteZoom,
+    scale: zoom,
   })
   // shortcut: ⌥B で左を畳んでも左の幅を残したまま数える。畳んだ分も右に渡したくなったら zen を hook に渡す。
   const panel = useResizableWidth({
     ...PANEL,
     reserved: RAIL_W + CHAT_MIN + tree.width,
     grows: 'left',
-    scale: noteZoom,
+    scale: zoom,
   })
   return { tree, panel }
 }
