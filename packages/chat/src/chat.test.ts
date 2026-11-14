@@ -628,18 +628,14 @@ const spares = (records: ClaudeRecord[]) => {
     .map(({ pid }) => pid)
 }
 
-test('the fourth question while three claudes answer goes to the spare, and prepare starts no spare while four claudes are held', async () => {
+test('prepare starts no spare while three claudes answer, and the fourth question still gets the last claude', async () => {
   const { client, records, claudes } = startChat()
-  await holdAnswers(client, records, 3)
+  const held = await holdAnswers(client, records, 3)
   await client.prepare()
-  const [spare] = await until(() =>
-    spares(records()).length === 1 ? spares(records()) : undefined,
-  )
 
+  expect(claudes()).toHaveLength(3)
   const [fourth] = await holdAnswers(client, records, 1)
-  await client.prepare()
-
-  expect(fourth).toBe(spare!)
+  expect(held).not.toContain(fourth!)
   expect(claudes()).toHaveLength(4)
 })
 

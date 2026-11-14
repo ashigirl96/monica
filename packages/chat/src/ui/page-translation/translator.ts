@@ -1,4 +1,4 @@
-import { MAX_CLAUDES, MAX_SEGMENT_CHARS, MAX_SEGMENTS, type Segment } from '../../contract.ts'
+import { MAX_SEGMENT_CHARS, MAX_SEGMENTS, type Segment } from '../../contract.ts'
 import { bodyBlocks } from './body.ts'
 import {
   currentText,
@@ -11,7 +11,7 @@ import {
   writeTranslation,
 } from './markup.ts'
 
-/** 1 つの塊を訳しに送った答え。busy は Backend の claude に空きが無かった。 */
+/** 1 つの塊を訳しに送った答え。busy は Backend がこの塊に claude を貸さなかった。 */
 export type SegmentsReply = { segments: Segment[] } | { busy: true } | { failed: string }
 
 /** Page Translation の今の状態。拡張のアイコンのバッジに出す。 */
@@ -26,8 +26,8 @@ export type PageTranslator = {
   toggle(): void
 }
 
-// Backend の claude は Chat と合わせて数が決まっているので、1 つは Chat に残す。
-const MAX_IN_FLIGHT = MAX_CLAUDES - 1
+// Chat に残す claude は Backend が守り、断られた塊は待って送り直すので、この数は送りすぎない目安。
+const MAX_IN_FLIGHT = 3
 const CHUNK_CHARS = 1000
 const BUSY_WAIT_MS = 1000
 const SETTLE_MS = 300

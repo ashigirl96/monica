@@ -157,7 +157,7 @@ export const ChatEventSchema = z.discriminatedUnion('type', [
 export const askErrors = {
   CHAT_BUSY: {
     status: 429,
-    message: 'the Backend is already running as many claude processes as it may',
+    message: 'the Backend has no claude process to lend to this call',
   },
   NOT_AUTHENTICATED: {
     status: 401,
@@ -183,9 +183,6 @@ export const modelsErrors = {
   CHAT_BUSY: askErrors.CHAT_BUSY,
   AGENT_FAILED: askErrors.AGENT_FAILED,
 }
-
-// 1 つ 270〜290MB の claude を token の無い口から起こせるので、spare とページの翻訳も含めてこの数で止める。
-export const MAX_CLAUDES = 4
 
 export const TRANSLATION_MODEL = 'haiku'
 export const TRANSLATION_EFFORT = 'medium'

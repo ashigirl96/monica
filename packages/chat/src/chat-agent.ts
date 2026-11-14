@@ -19,7 +19,6 @@ import {
   type Choice,
   DEFAULT_EFFORT,
   DEFAULT_MODEL,
-  MAX_CLAUDES,
   type Model,
   type SnapshotEvent,
   TRANSLATION_EFFORT,
@@ -35,6 +34,14 @@ import { promptless, singleTurn, TRANSLATION_PROMPT, userMessage } from './promp
 import { EndedEarly, translate } from './translate.ts'
 
 const SPARE_LIFETIME_MS = 5 * 60_000
+
+// 1 つ 270〜290MB の claude を token の無い口から起こせるので、spare とページの翻訳も含めてこの数で止める。
+const MAX_CLAUDES = 4
+
+type Use = 'ask' | 'spare' | 'models' | 'translate'
+
+// 最後の 1 席は質問にだけ貸すので、Page Translation がどれだけ訳していても Chat は答えられる。
+const limitOf = (use: Use) => (use === 'ask' ? MAX_CLAUDES : MAX_CLAUDES - 1)
 
 const TRANSLATION_CHOICE = { model: TRANSLATION_MODEL, effort: TRANSLATION_EFFORT } as const
 const TRANSLATION_OPTIONS: Partial<Options> = {
@@ -140,7 +147,12 @@ export function createChatAgent(
   }
 
   // SDK は query() と startup() の呼び出しの中で同期に spawn するので、空きを確かめてから呼ぶまでに await を挟まない。
-  function spawnWith<T>(choice: Required<Choice>, start: (options: Options) => T): Started<T> {
+  function spawnWith<T>(
+    use: Use,
+    choice: Required<Choice>,
+    start: (options: Options) => T,
+  ): Started<T> | undefined {
+    if (claudes.size >= limitOf(use)) return undefined
     let claude: Claude | undefined
     const started = start(
       claudeOptions({
@@ -173,8 +185,8 @@ export function createChatAgent(
   function prepare(choice: Required<Choice>) {
     if (spare && sameChoice(spare.choice, choice)) return
     if (spare) discard(spare)
-    if (claudes.size >= MAX_CLAUDES) return
-    const started = spawnWith(choice, (options) => startup({ options }))
+    const started = spawnWith('spare', choice, (options) => startup({ options }))
+    if (!started) return
     const timer = setTimeout(() => {
       if (spare !== prepared) return
       spare = undefined
@@ -192,11 +204,13 @@ export function createChatAgent(
     spare = prepared
   }
 
-  function readModels(): Promise<Model[]> {
+  function readModels(): Promise<Model[]> | undefined {
     const { promise: ended, resolve: end } = Promise.withResolvers<void>()
-    const { started: q, claude } = spawnWith(resolved(), (options) =>
+    const started = spawnWith('models', resolved(), (options) =>
       query({ prompt: promptless(ended), options }),
     )
+    if (!started) return undefined
+    const { started: q, claude } = started
     return q
       .supportedModels()
       .then((found) => found.map(modelOf))
@@ -213,7 +227,7 @@ export function createChatAgent(
   async function fromSpare(
     claimed: Spare,
     prompt: AsyncIterable<SDKUserMessage>,
-  ): Promise<Started<Query>> {
+  ): Promise<Started<Query> | undefined> {
     const { claude } = claimed
     try {
       const warm = await claimed.started
@@ -227,7 +241,7 @@ export function createChatAgent(
       )
       kill(claude)
     }
-    return spawnWith(claimed.choice, (options) => query({ prompt, options }))
+    return spawnWith('ask', claimed.choice, (options) => query({ prompt, options }))
   }
 
   async function* answer(
@@ -313,8 +327,9 @@ export function createChatAgent(
     async models() {
       if (models) return models
       if (!readingModels) {
-        if (claudes.size >= MAX_CLAUDES) return undefined
-        readingModels = readModels().finally(() => (readingModels = undefined))
+        const read = readModels()
+        if (!read) return undefined
+        readingModels = read.finally(() => (readingModels = undefined))
       }
       models = await readingModels
       return models
@@ -331,30 +346,25 @@ export function createChatAgent(
       const event: SnapshotEvent = { type: 'snapshot', page: snapshot, omitted }
       const { prompt, end } = singleTurn(userMessage(content))
       const claimed = spare
+      let started: Started<Query> | undefined
       if (claimed && sameChoice(claimed.choice, choice)) {
         spare = undefined
         clearTimeout(claimed.timer)
-        return answer(await fromSpare(claimed, prompt), choice, end, signal, event)
+        started = await fromSpare(claimed, prompt)
+      } else {
+        if (claimed) discard(claimed)
+        started = spawnWith('ask', choice, (options) => query({ prompt, options }))
       }
-      if (claimed) discard(claimed)
-      if (claudes.size >= MAX_CLAUDES) return undefined
-      return answer(
-        spawnWith(choice, (options) => query({ prompt, options })),
-        choice,
-        end,
-        signal,
-        event,
-      )
+      return started && answer(started, choice, end, signal, event)
     },
     translateSegments(input, signal) {
-      if (claudes.size >= MAX_CLAUDES) return undefined
       const { prompt, end } = singleTurn(
         userMessage([{ type: 'text', text: JSON.stringify(input) }]),
       )
-      const started = spawnWith(TRANSLATION_CHOICE, (options) =>
+      const started = spawnWith('translate', TRANSLATION_CHOICE, (options) =>
         query({ prompt, options: { ...options, ...TRANSLATION_OPTIONS } }),
       )
-      return untilTranslated(started, end, signal)
+      return started && untilTranslated(started, end, signal)
     },
   })
   return chatAgent
