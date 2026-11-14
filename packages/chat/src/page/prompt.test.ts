@@ -227,6 +227,56 @@ test('a URL goes cut to its first 2,000 characters and a title to its first 500,
   expect(heading).toContain(`Title: ${chars(500, 't')}\n`)
 })
 
+test('an earlier page whose text is the same as an earlier page goes out together with it, so no heading points at text left out', () => {
+  const history = [
+    turn(1, page(chars(80_000, 'a'))),
+    turn(2, page('', { content: { kind: 'same', turn: 0 } })),
+    turn(3, page(chars(80_000, 'c'))),
+  ]
+
+  const { content, omitted } = askContent('Q?', page(chars(50_000, 'd')), history)
+
+  expect(dataOf(content)).toEqual(['c', 'd'])
+  expect(texts(content).join('\n')).not.toContain('the same text as on the page of question 1')
+  expect(texts(content)[2]).toContain('The text of the page is left out')
+  expect(omitted).toEqual({ pages: 2, turns: 0 })
+})
+
+test('an earlier page the same as a page that the side panel left out says that its text is left out', () => {
+  const history = [
+    {
+      ...turn(1, page('', { content: { kind: 'unreadable', reason: 'too-large' } })),
+      leftOut: { kind: 'page' as const, parts: ['text' as const] },
+    },
+    turn(2, page('', { content: { kind: 'same', turn: 0 } })),
+  ]
+
+  const { content, omitted } = askContent('Q?', page('d'), history)
+
+  expect(texts(content)[0]).toContain('The text of the page is left out')
+  expect(texts(content)[2]).toContain('The text of the page is left out')
+  expect(omitted).toEqual({ pages: 2, turns: 0 })
+})
+
+test('a question that the side panel left out whole is counted and not repeated', () => {
+  const history = [
+    {
+      question: '（大きすぎて送れなかった）',
+      answer: '（大きすぎて送れなかった）',
+      page: page('', { content: { kind: 'unreadable', reason: 'too-large' } }),
+      leftOut: { kind: 'turn' as const },
+    },
+    turn(2, page('b')),
+  ]
+
+  const { content, omitted } = askContent('Q?', page('d'), history)
+
+  expect(omitted).toEqual({ pages: 0, turns: 1 })
+  expect(texts(content)[0]).toContain('1 earlier question of this chat and its answer is left out')
+  expect(texts(content).join('\n')).not.toContain('大きすぎて送れなかった')
+  expect(texts(content).join('\n')).toContain('Question 2, asked on this page')
+})
+
 test('the URLs and titles of earlier turns count toward 200,000 characters', () => {
   const history = Array.from({ length: 100 }, (_, i) =>
     turn(i + 1, page('', { url: chars(5_000, 'u'), title: chars(5_000, 't') })),

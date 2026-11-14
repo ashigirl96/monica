@@ -509,12 +509,44 @@ test('a question whose history would take the request past the body limit goes w
 
   const { page, history } = latest(client).input
   expect(history).toEqual([
-    { question: 'First?', page: tooLarge('https://a.example/', 'A'), answer: 'One.' },
+    {
+      question: 'First?',
+      page: tooLarge('https://a.example/', 'A'),
+      answer: 'One.',
+      leftOut: { kind: 'page', parts: ['text', 'screenshot', 'selection'] },
+    },
     {
       question: 'Second?',
       page: { ...halfLimit('https://b.example/', 'B'), screenshot: SHOT },
       answer: 'Two.',
     },
+  ])
+  expect(page).toEqual(pageAt('https://c.example/', 'C'))
+})
+
+test('a question whose history would take the request past the body limit goes without an earlier page together with the later page that is the same as it', async () => {
+  const { client, store, showPage } = openChat()
+
+  store.ask('First?')
+  await answerWith(client, 'One.', halfLimit('https://a.example/', 'A'))
+  store.ask('Again?')
+  await answerWith(client, 'Again.', {
+    url: 'https://a.example/',
+    title: 'A',
+    content: { kind: 'same', turn: 0 },
+  })
+  showPage(pageAt('https://b.example/', 'B'))
+  store.ask('Second?')
+  await answerWith(client, 'Two.', halfLimit('https://b.example/', 'B'))
+  showPage(pageAt('https://c.example/', 'C'))
+  store.ask('Third?')
+  await settled()
+
+  const { page, history } = latest(client).input
+  expect(history.map((turn) => turn.page)).toEqual([
+    tooLarge('https://a.example/', 'A'),
+    tooLarge('https://a.example/', 'A'),
+    halfLimit('https://b.example/', 'B'),
   ])
   expect(page).toEqual(pageAt('https://c.example/', 'C'))
 })

@@ -9,13 +9,12 @@ import {
   DEFAULT_EFFORT,
   DEFAULT_MODEL,
   type Effort,
-  MAX_ASK_BODY_BYTES,
   type Model,
   type Page,
   type PageSnapshot,
   type Turn,
-  type Unreadable,
 } from '../contract.ts'
+import { pdfRoom, withinBodyLimit } from '../history.ts'
 import { addressOf, type CurrentPage } from './current-page.ts'
 import { type Failure, failureOf, retryingLine, usageLine } from './failure.ts'
 import { isUnreachable } from './native-host.ts'
@@ -46,98 +45,14 @@ export type ChatEntry = {
 // 答えの代わりや下に出す一時の 1 行は、答えが進むか終わったら消す。
 const NO_PASSING_LINES = { retrying: undefined, searching: undefined }
 
-// oRPC が input を包む分の余白。
-const BODY_MARGIN_BYTES = 1024 * 1024
-
-// File は JSON.stringify で {} になり、multipart の別の part で送られる。
-const jsonBytes = (value: unknown) => new TextEncoder().encode(JSON.stringify(value)).byteLength
-
-// Backend は質問と答えの文字をそのまま prompt にするので、印も文字のまま claude に渡る。
+// Backend は答えの文字をそのまま prompt にするので、印も文字のまま claude に渡る。
 const STOPPED_MARK = '（ユーザーが途中で止めた）'
-const LEFT_OUT_MARK = '（大きすぎて送れなかった）'
-
-const TOO_LARGE: Unreadable = { kind: 'unreadable', reason: 'too-large' }
-
-const bodyBytes = (input: AskInput) =>
-  jsonBytes(input) + (input.page.content.kind === 'pdf' ? input.page.content.pdf.size : 0)
-
-/** 前のページから本文・選択範囲・スクリーンショットを外し、本文は大きすぎて渡せなかったことにする。外すものが無ければ undefined。 */
-function withoutBody(page: PageSnapshot): PageSnapshot | undefined {
-  const { selection, screenshot, ...rest } = page
-  const text = page.content?.kind === 'text' && page.content.text !== ''
-  if (!text && selection === undefined && screenshot === undefined) return undefined
-  return text ? { ...rest, content: TOO_LARGE } : rest
-}
-
-/**
- * Current Page の PDF に残る bytes。body の上限から、前のページを外した PDF の他の input と余白を引く。
- * Current Page のスクリーンショットは読むのと並べて撮るので数えず、送る前の withinBodyLimit が数える。
- */
-function pdfBudget(question: string, history: readonly Turn[]): number {
-  const bare = history.map((turn) => ({ ...turn, page: withoutBody(turn.page) ?? turn.page }))
-  return MAX_ASK_BODY_BYTES - BODY_MARGIN_BYTES - jsonBytes({ question, history: bare })
-}
 
 const stoppedTurn = ({ question, page, answer }: Asking): Turn => ({
   question,
   page,
   answer: answer ? `${answer}\n\n${STOPPED_MARK}` : STOPPED_MARK,
 })
-
-const withoutPage = (turn: Turn): Turn | undefined => {
-  const page = withoutBody(turn.page)
-  return page && { ...turn, page }
-}
-
-const withoutWords = (turn: Turn): Turn => ({
-  ...turn,
-  question: LEFT_OUT_MARK,
-  answer: LEFT_OUT_MARK,
-})
-
-/**
- * 上限に収まるまで古い turn から shrink し、収まった input を返す。全部 shrink しても超えれば undefined。
- * turn は落とさない。same が turn の番号で前のページを指すため。
- */
-function leaveOutEarlier(
-  input: AskInput,
-  shrink: (turn: Turn) => Turn | undefined,
-): AskInput | undefined {
-  let over = bodyBytes(input) + BODY_MARGIN_BYTES - MAX_ASK_BODY_BYTES
-  const history = input.history.map((turn) => {
-    const shrunk = over > 0 ? shrink(turn) : undefined
-    if (!shrunk) return turn
-    const saved = jsonBytes(turn) - jsonBytes(shrunk)
-    if (saved <= 0) return turn
-    over -= saved
-    return shrunk
-  })
-  return over <= 0 ? { ...input, history } : undefined
-}
-
-/**
- * body の上限を超える input は、Backend が字数の上限で落とすのと同じく、古い turn のページから外していく。
- * 前のページを全部外しても超えるなら、Current Page の HTML・PDF・選択範囲を外し、大きすぎて読めなかったことにする。
- * それでも超えるなら、古い turn の質問と答えを印に置き換える。
- * ユーザーが添えると決めた Current Page のスクリーンショットは残す。
- */
-function withinBodyLimit(input: AskInput): AskInput {
-  if (bodyBytes(input) + BODY_MARGIN_BYTES <= MAX_ASK_BODY_BYTES) return input
-  const { url, title, screenshot, screenshotFailed } = input.page
-  const page: Page = {
-    ...addressOf({ url, title }),
-    content: TOO_LARGE,
-    ...(screenshot !== undefined && { screenshot }),
-    ...(screenshotFailed && { screenshotFailed }),
-  }
-  const bare = { ...input, page, history: input.history.map((turn) => withoutPage(turn) ?? turn) }
-  return (
-    leaveOutEarlier(input, withoutPage) ??
-    leaveOutEarlier({ ...input, page }, withoutPage) ??
-    leaveOutEarlier(bare, withoutWords) ??
-    bare
-  )
-}
 
 /** 入力欄の左に出す model と effort の選択。一覧が届くまでは無い。 */
 export type Picker = {
@@ -160,7 +75,11 @@ export type ChatSnapshot = {
   retryable: number | undefined
 }
 
-export type ReadOptions = { screenshot: boolean; maxPdfBytes: number; signal: AbortSignal }
+export type ReadOptions = {
+  screenshot: boolean
+  maxPdfBytes: number
+  signal: AbortSignal
+}
 
 /** shown は送った時に side panel が出していた Current Page で、読み終える前に止めた質問の履歴に入れる。 */
 export type Reading = { shown: CurrentPage; page: Promise<Page> }
@@ -172,7 +91,10 @@ export type Reading = { shown: CurrentPage; page: Promise<Page> }
 export type ReadPage = (options: ReadOptions) => Reading
 
 /** side panel を閉じても残す Chat。答えている途中の質問は止めたことにする。 */
-export type SavedChat = { entries: readonly ChatEntry[]; history: readonly Turn[] }
+export type SavedChat = {
+  entries: readonly ChatEntry[]
+  history: readonly Turn[]
+}
 
 /** side panel の Chat。 */
 export type ChatStore = {
@@ -201,7 +123,12 @@ export type ChatStore = {
 }
 
 /** 送った質問。答えが返るか履歴から外れるまで、送った input（HTML・PDF・スクリーンショットも）を持つ。 */
-type Sent = { id: number; question: string; input: Promise<AskInput>; shown: CurrentPage }
+type Sent = {
+  id: number
+  question: string
+  input: Promise<AskInput>
+  shown: CurrentPage
+}
 
 type Asking = Sent & {
   controller: AbortController
@@ -283,7 +210,12 @@ export function createChatStore(client: ChatClient, storage: ChoiceStorage): Cha
     const { model = DEFAULT_MODEL, effort = DEFAULT_EFFORT } = chosen()
     const entry = modelIn(models, model)
     const efforts = (entry?.supportsEffort && entry.supportedEffortLevels) || []
-    return { models, model, effort: efforts.length > 0 ? effort : undefined, efforts }
+    return {
+      models,
+      model,
+      effort: efforts.length > 0 ? effort : undefined,
+      efforts,
+    }
   }
 
   const publish = (next: readonly ChatEntry[] = entries) => {
@@ -313,7 +245,9 @@ export function createChatStore(client: ChatClient, storage: ChoiceStorage): Cha
       const sent = screenshot === undefined ? {} : { screenshot }
       if (screenshot !== undefined) patch(id, sent)
       current.page = { ...addressOf(input.page), ...sent }
-      const events = await client.ask(input, { signal: current.controller.signal })
+      const events = await client.ask(input, {
+        signal: current.controller.signal,
+      })
       current.reached = true
       reach?.reached()
       for await (const event of events) {
@@ -325,7 +259,11 @@ export function createChatStore(client: ChatClient, storage: ChoiceStorage): Cha
           if (notice) patch(id, { notice })
         } else if (event.type === 'text') {
           current.answer += event.text
-          patch(id, { ...NO_PASSING_LINES, answer: current.answer, status: 'answering' })
+          patch(id, {
+            ...NO_PASSING_LINES,
+            answer: current.answer,
+            status: 'answering',
+          })
         } else if (event.type === 'retry') {
           // CLI は答えを最初からやり直すので、途中までの答えを消す。
           current.answer = ''
@@ -440,7 +378,7 @@ export function createChatStore(client: ChatClient, storage: ChoiceStorage): Cha
       // captureVisibleTab は送る操作の user gesture の中で呼ばないと quota にかかるので、await を挟まずに読み始める。
       const { shown, page } = readPage({
         screenshot: withScreenshot,
-        maxPdfBytes: pdfBudget(question, turns),
+        maxPdfBytes: pdfRoom(question, turns),
         signal: controller.signal,
       })
       const input = page.then((read) =>
