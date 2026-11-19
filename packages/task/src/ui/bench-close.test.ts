@@ -192,7 +192,7 @@ test('a forced close that fails tells why on one line and keeps the reasons and 
   expect(toasts).toEqual([
     {
       type: 'error',
-      message: expect.stringMatching(/^could not close .*not a git repository/),
+      message: expect.stringMatching(/^could not close .*: git rev-parse .* failed: /),
     },
   ])
   expect(toasts[0]!.message).not.toContain('\n')
@@ -210,7 +210,7 @@ test('a close run anew forgets the reasons it remembered before, even when it fa
   expect(toasts).toEqual([
     {
       type: 'error',
-      message: expect.stringMatching(/^could not close .*not a git repository/),
+      message: expect.stringMatching(/^could not close .*: git rev-parse .* failed: /),
     },
   ])
 })
