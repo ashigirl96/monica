@@ -116,7 +116,7 @@ test("a Bench's Tab seen while its claude still waits leaves the unread count bu
   const { db, workbenchLedger, client, store, record } = bench({ focused: true })
   const runspaceId = db.transaction((tx) => workbenchLedger.createRunspace(tx, { cwd: '/work' }))
   const { terminalSessionId } = await client.tab.open({ runspaceId, ...size })
-  const label = { repo: 'acme/app', number: 12, title: 'Ship it', setup: null }
+  const label = { repo: 'acme/app', number: 12, title: 'Ship it' }
   store.set(benchLabelOfAtom, () => (id: string) => (id === runspaceId ? label : null))
   await store.set(reloadAtom)
 

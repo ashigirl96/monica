@@ -114,8 +114,5 @@ export const bench = sqliteTable('bench', {
   cwd: text('cwd').notNull(),
   mode: text('mode', { enum: ['worktree', 'in_place'] }).notNull(),
   branch: text('branch'),
-  setupState: text('setup_state', { enum: ['preparing', 'ready', 'failed'] }).notNull(),
-  setupError: text('setup_error'),
   createdAt: timestamp('created_at').notNull(),
-  preparedAt: timestamp('prepared_at'),
 })

@@ -1,7 +1,7 @@
 import type { agentSession } from '@monica/workbench/schema'
 
 import type { DisplayState, LiveRun } from './contract.ts'
-import type { bench as benchTable, issue, task } from './schema.ts'
+import type { issue, task } from './schema.ts'
 
 export type RunAgentSession = Pick<
   typeof agentSession.$inferSelect,
@@ -15,7 +15,7 @@ const ORDER = { question: 0, permission: 0, error: 1, idle: 2, unobserved: 3, ru
 export function displayState(
   { closedAt }: Pick<typeof task.$inferSelect, 'closedAt'>,
   { state }: Pick<typeof issue.$inferSelect, 'state'>,
-  bench: Pick<typeof benchTable.$inferSelect, 'setupState'> | null,
+  hasBench: boolean,
   runs: RunAgentSession[],
 ): DisplayState {
   if (closedAt) return { state: 'closed' }
@@ -27,9 +27,7 @@ export function displayState(
   const first = live[0]
   if (first) return aggregate(first, live.map(asLiveRun))
   if (state === 'closed') return { state: 'issue_closed' }
-  if (!bench) return { state: 'not_started' }
-  if (bench.setupState === 'preparing') return { state: 'preparing' }
-  if (bench.setupState === 'failed') return { state: 'setup_failed' }
+  if (!hasBench) return { state: 'not_started' }
   return { state: 'ended' }
 }
 

@@ -63,7 +63,6 @@ export async function attachTab(
         target = insertBench(tx, workbenchLedger, found.issue, {
           cwd: checkoutOnDisk(ghqRoot, found.issue),
           mode: 'in_place',
-          setupState: 'ready',
         })
       }
       // 同じ Runspace への moveTab は末尾へ並べ替えるので、既に Bench にある Tab には呼ばない。

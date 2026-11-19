@@ -6,7 +6,7 @@ disable-model-invocation: true
 
 spec または ticket でユーザーが記述した作業を実装する。ticket は `docs/agents/issue-tracker.md` の「issue を読む」の形で取る。
 
-作業は `issue-<番号>` の branch で行う。今の branch の名前が違えば、`git fetch origin main` してから `git switch --no-track -c issue-<番号> origin/main` で切る。worktree は前の ticket の branch のまま渡されることがあり、その branch は squash merge 済みでも origin/main に無い commit を残している。切ったら `bun install` する。worktree には依存が入っていないことがあり、`bun test` は通っても `tsc` は module を解決できずに落ちるため。PR の本文の `Closes #<番号>` も branch の名前から書く。
+作業は `worktree-issue-<番号>` の branch で行う。Bench は `claude --worktree` が切るこの名前を記録し、PR との照合と close の未 push の検査に使うため。今の branch の名前が違えば、`git fetch origin main` してから `git switch --no-track -c worktree-issue-<番号> origin/main` で切る。worktree は前の ticket の branch のまま渡されることがあり、その branch は squash merge 済みでも origin/main に無い commit を残している。切ったら `bun install` する。worktree には依存が入っていないことがあり、`bun test` は通っても `tsc` は module を解決できずに落ちるため。PR の本文の `Closes #<番号>` も branch の名前から書く。
 
 可能な限り、事前に合意した seam（振る舞いを差し替えられる場所）で `dawkinsuke:tdd` を使う。
 

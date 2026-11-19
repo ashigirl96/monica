@@ -1,23 +1,21 @@
-import { appendFileSync, mkdirSync, writeFileSync } from 'node:fs'
-import { dirname } from 'node:path'
+import { existsSync } from 'node:fs'
 
 import type { Db, Tx, WorkbenchLedger } from '@monica/workbench/server'
 import { ORPCError } from '@orpc/server'
-import type { Subprocess } from 'bun'
 import { asc, eq } from 'drizzle-orm'
 
 import type { BenchItem, TaskChange } from './contract.ts'
 import {
   branchOf,
   checkoutOf,
+  checkoutOfWorktree,
+  clone,
   type Ghq,
   messageOf,
-  prepare,
-  setupLogOf,
   worktreeOf,
 } from './prepare.ts'
 import { formatRef } from './ref.ts'
-import type { Prepared, Reservations } from './reservation.ts'
+import type { Reservations } from './reservation.ts'
 import { bench, issue } from './schema.ts'
 
 export type BenchDeps = {
@@ -26,42 +24,56 @@ export type BenchDeps = {
   home: string
   ghq: Ghq
   publish: (change: TaskChange) => void
-  stopped: AbortSignal
-  setups: Set<Subprocess>
   reservations: Reservations
 }
 
 export type Bench = typeof bench.$inferSelect
 export type Issue = typeof issue.$inferSelect
 
-const INTERRUPTED = 'the Backend stopped while preparing'
-
-export async function prepareBench(
+/** worktree は作らない。新しい Run の claude が `--worktree` で作る。 */
+export async function openBenchFor(
   deps: BenchDeps,
   found: { issue: Issue; bench: Bench | null },
   inPlace: boolean | undefined,
-): Promise<{ bench: Bench; created: boolean; warnings: string[] }> {
+): Promise<{ bench: Bench; created: boolean }> {
   const ref = formatRef(found.issue)
-  const mode = inPlace ? 'in_place' : 'worktree'
-  const cwd =
-    found.bench?.cwd ??
-    (mode === 'in_place'
-      ? await checkoutOf(deps.ghq, found.issue.repo).catch((error: unknown) => {
-          throw new ORPCError('PRECONDITION_FAILED', {
-            message: `could not find the checkout of ${ref}: ${messageOf(error)}`,
-          })
-        })
-      : worktreeOf(deps.home, found.issue))
+  if (found.bench) {
+    refuseInPlace(found.bench, inPlace, ref)
+    await cloneAgain(deps.ghq, found.bench, found.issue)
+    return { bench: found.bench, created: false }
+  }
+  const checkout = await cloned(deps.ghq, found.issue, checkoutOf(deps.ghq, found.issue.repo))
+  const opened = inPlace
+    ? openBench(deps, found.issue, { cwd: checkout, mode: 'in_place' })
+    : openBench(deps, found.issue, { cwd: worktreeOf(checkout, found.issue), mode: 'worktree' })
   // 待つ間に別の run が Bench を作っていれば、そちらを使う。
-  const opened = openBench(deps, found.issue, { cwd, mode })
   refuseInPlace(opened.bench, inPlace, ref)
-  const prepared = await preparation(deps, opened.bench, found.issue)
-  if ('error' in prepared) {
+  return opened
+}
+
+async function cloned(ghq: Ghq, forIssue: Issue, checkout: Promise<string>): Promise<string> {
+  try {
+    const path = await checkout
+    await clone(ghq, forIssue.repo, path)
+    return path
+  } catch (error) {
     throw new ORPCError('PRECONDITION_FAILED', {
-      message: `could not prepare the Bench of ${ref}: ${prepared.error}; see ${setupLogOf(deps.home, found.issue)}`,
+      message: `could not get the checkout of ${formatRef(forIssue)}: ${messageOf(error)}`,
     })
   }
-  return { bench: opened.bench, created: opened.created, warnings: prepared.warnings }
+}
+
+// claude --worktree は checkout があれば worktree を作り直すが、`.claude/worktrees` の外の worktree は誰も作り直さない。
+async function cloneAgain(ghq: Ghq, row: Bench, forIssue: Issue) {
+  if (existsSync(row.cwd)) return
+  const checkout = row.mode === 'in_place' ? row.cwd : checkoutOfWorktree(row.cwd)
+  if (checkout === null) {
+    const ref = formatRef(forIssue)
+    throw new ORPCError('PRECONDITION_FAILED', {
+      message: `the worktree ${row.cwd} of ${ref} is gone; close and reopen ${ref} to open its Bench again`,
+    })
+  }
+  await cloned(ghq, forIssue, Promise.resolve(checkout))
 }
 
 export function refuseInPlace(row: Bench, inPlace: boolean | undefined, ref: string) {
@@ -83,16 +95,7 @@ export function listBenches(db: Db): BenchItem[] {
       runspaceId: row.bench.runspaceId,
       ref: formatRef(row.issue),
       title: row.issue.title,
-      setupState: row.bench.setupState,
     }))
-}
-
-// 準備は Backend の中でしか進まないので、止まった Backend が残した preparing は二度と終わらない。
-export function failInterruptedPreparations(db: Db) {
-  db.update(bench)
-    .set({ setupState: 'failed', setupError: INTERRUPTED })
-    .where(eq(bench.setupState, 'preparing'))
-    .run()
 }
 
 function openBench(
@@ -105,11 +108,7 @@ function openBench(
     const existing = tx.select().from(bench).where(eq(bench.taskIssueId, forIssue.id)).get()
     if (existing) return { bench: existing, created: false }
     return {
-      bench: insertBench(tx, deps.workbenchLedger, forIssue, {
-        cwd,
-        mode,
-        setupState: 'preparing',
-      }),
+      bench: insertBench(tx, deps.workbenchLedger, forIssue, { cwd, mode }),
       created: true,
     }
   })
@@ -121,9 +120,8 @@ export function insertBench(
   tx: Tx,
   workbenchLedger: WorkbenchLedger,
   forIssue: Issue,
-  { cwd, mode, setupState }: Pick<Bench, 'cwd' | 'mode' | 'setupState'>,
+  { cwd, mode }: Pick<Bench, 'cwd' | 'mode'>,
 ): Bench {
-  const createdAt = new Date()
   return tx
     .insert(bench)
     .values({
@@ -132,9 +130,7 @@ export function insertBench(
       cwd,
       mode,
       branch: mode === 'worktree' ? branchOf(forIssue) : null,
-      setupState,
-      createdAt,
-      preparedAt: setupState === 'ready' ? createdAt : null,
+      createdAt: new Date(),
     })
     .returning()
     .get()
@@ -149,50 +145,4 @@ export function dropBench(
 ): string[] {
   tx.delete(bench).where(eq(bench.taskIssueId, row.taskIssueId)).run()
   return workbenchLedger.removeRunspace(tx, row.runspaceId, { spare })
-}
-
-// 準備中の Bench に来た run は同じ準備を待つ。呼び手が切れても準備は Backend の中で続く。
-function preparation(deps: BenchDeps, row: Bench, forIssue: Issue): Promise<Prepared> {
-  const running = deps.reservations.preparation(row.taskIssueId)
-  if (running) return running
-  if (row.setupState === 'ready') return Promise.resolve({ warnings: [] })
-  if (row.setupState === 'failed') {
-    deps.db
-      .update(bench)
-      .set({ setupState: 'preparing', setupError: null })
-      .where(eq(bench.taskIssueId, row.taskIssueId))
-      .run()
-    deps.publish({ type: 'task', ref: formatRef(forIssue) })
-  }
-  return deps.reservations.prepare(row.taskIssueId, () => prepareAndRecord(deps, row, forIssue))
-}
-
-async function prepareAndRecord(deps: BenchDeps, row: Bench, forIssue: Issue): Promise<Prepared> {
-  const log = setupLogOf(deps.home, forIssue)
-  let prepared: Prepared
-  try {
-    mkdirSync(dirname(log), { recursive: true })
-    writeFileSync(log, '')
-    prepared = { warnings: await prepare(deps, forIssue, row, log) }
-  } catch (error) {
-    prepared = { error: messageOf(error) }
-    try {
-      appendFileSync(log, `monica: ${prepared.error}\n`)
-    } catch {
-      // log が書けなくても、理由は setup_error に残る。
-    }
-  }
-  // stop() の後は DB が閉じているかもしれない。preparing の行は次の start() が失敗にする。
-  if (deps.stopped.aborted) return { error: INTERRUPTED }
-  deps.db
-    .update(bench)
-    .set(
-      'error' in prepared
-        ? { setupState: 'failed', setupError: prepared.error }
-        : { setupState: 'ready', preparedAt: new Date() },
-    )
-    .where(eq(bench.taskIssueId, row.taskIssueId))
-    .run()
-  deps.publish({ type: 'task', ref: formatRef(forIssue) })
-  return prepared
 }

@@ -68,6 +68,18 @@ test('without force, changes written to the worktree after it was inspected stop
   expect(readdirSync(trashBeside(inspected))).toEqual([])
 })
 
+test('a locked worktree that got changes after it was inspected goes back still locked', async () => {
+  const { checkout, path, inspected } = await inspectedClean()
+  git(checkout, 'worktree', 'lock', path)
+  writeFileSync(join(path, 'late.txt'), 'late\n')
+
+  await expect(removeBeside(inspected)).rejects.toThrow(
+    `the worktree ${path} got changes after it was inspected`,
+  )
+
+  expect(git(checkout, 'worktree', 'list', '--porcelain')).toContain('locked')
+})
+
 test('without force, a git that fails in the trash stops the removal, and the worktree goes back to its path', async () => {
   const { checkout, path, inspected } = await inspectedClean()
   // 相対の gitdir は元の path からしか辿れないので、捨て場でだけ git が動かない。

@@ -1,9 +1,10 @@
 import { afterEach, expect, mock, setSystemTime, test } from 'bun:test'
-import { mkdirSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 
 import { startFakePtyd, writeFakeExecutable } from '@monica/workbench/testing'
 
+import { insertBench } from './bench.ts'
 import { bench, issue, run } from './schema.ts'
 import { cleanUp, failure, onCleanup, setup } from './testing.ts'
 
@@ -23,7 +24,8 @@ function untracked({ blockedBy = [] as string[], origin = true } = {}) {
   if (origin) fixture.ghq.origin('acme/app', {})
   for (const upstream of blockedBy) fixture.github.issue(upstream, { title: 'Upstream fix' })
   fixture.github.issue(ref, { title: 'Ship it', blockedBy })
-  return { ...fixture, cwd: join(fixture.home, 'worktrees/acme/app/issue-12') }
+  const checkout = fixture.ghq.checkout('acme/app')
+  return { ...fixture, checkout, cwd: join(checkout, '.claude/worktrees/issue-12') }
 }
 
 async function tracked({ blockedBy = [] as string[], origin = true } = {}) {
@@ -113,16 +115,55 @@ test('run opens a new Tab at the end of the Bench, starts its shell at 24x80 and
     forked: null,
   })
   expect(await benchTabs(fixture)).toMatchObject([
-    { id: output.tabId, cwd: fixture.cwd, terminalSessionId: output.terminalSessionId },
+    { id: output.tabId, cwd: fixture.checkout, terminalSessionId: output.terminalSessionId },
   ])
   await typedInto(fixture, output.terminalSessionId)
   expect(fixture.ptyd.sessionRequests()).toMatchObject([
-    { op: 'create', session_id: output.terminalSessionId, cwd: fixture.cwd, rows: 24, cols: 80 },
+    {
+      op: 'create',
+      session_id: output.terminalSessionId,
+      cwd: fixture.checkout,
+      rows: 24,
+      cols: 80,
+    },
     {
       op: 'write',
       session_id: output.terminalSessionId,
-      data: "claude --effort medium --model opus '/tackle'\r",
+      data: "claude --effort medium --model opus --worktree 'issue-12' '/tackle'\r",
     },
+  ])
+})
+
+test('run makes no worktree: the Bench is where claude --worktree puts it, on the branch claude names', async () => {
+  const fixture = await tracked()
+
+  await fixture.client.run({ ref })
+
+  expect(
+    fixture.db.select({ cwd: bench.cwd, mode: bench.mode, branch: bench.branch }).from(bench).get(),
+  ).toEqual({
+    cwd: fixture.cwd,
+    mode: 'worktree',
+    branch: 'worktree-issue-12',
+  })
+  expect(existsSync(fixture.cwd)).toBe(false)
+})
+
+test('a new Run in a Bench whose worktree monica made elsewhere starts claude there without --worktree', async () => {
+  const fixture = await tracked()
+  const made = join(fixture.home, 'worktrees/acme/app/issue-12')
+  mkdirSync(made, { recursive: true })
+  const forIssue = fixture.db.select().from(issue).get()!
+  fixture.db.transaction((tx) =>
+    insertBench(tx, fixture.workbenchLedger, forIssue, { cwd: made, mode: 'worktree' }),
+  )
+
+  const output = await fixture.client.run({ ref })
+
+  expect(await benchTabs(fixture)).toMatchObject([{ id: output.tabId, cwd: made }])
+  expect(await typedInto(fixture, output.terminalSessionId)).toMatchObject([
+    { op: 'create', cwd: made },
+    { op: 'write', data: "claude --effort medium --model opus '/tackle'\r" },
   ])
 })
 
@@ -137,6 +178,8 @@ test("a prompt with ' in it reaches claude as one argument, with nothing in it e
     'medium',
     '--model',
     'opus',
+    '--worktree',
+    'issue-12',
     prompt,
   ])
 })
@@ -176,7 +219,7 @@ test('run of an untracked Issue tracks it, prepares its Bench and starts claude 
     { ref, title: 'Ship it', cwd: fixture.cwd },
   ])
   expect((await typedInto(fixture, output.terminalSessionId)).at(-1)).toMatchObject({
-    data: "claude --effort medium --model opus '/tackle'\r",
+    data: "claude --effort medium --model opus --worktree 'issue-12' '/tackle'\r",
   })
 })
 
@@ -190,7 +233,7 @@ test("run asked by a repo's old name for an untracked Issue tracks it under the 
   expect(output).toMatchObject({
     ref: 'acme/renamed#12',
     tracked: true,
-    cwd: join(fixture.home, 'worktrees/acme/renamed/issue-12'),
+    cwd: join(fixture.ghq.checkout('acme/renamed'), '.claude/worktrees/issue-12'),
   })
 })
 
@@ -222,7 +265,7 @@ test('run returns while ptyd cannot be reached, leaving its Tab starting; once p
     {
       op: 'write',
       session_id: output.terminalSessionId,
-      data: "claude --effort medium --model opus '/tackle'\r",
+      data: "claude --effort medium --model opus --worktree 'issue-12' '/tackle'\r",
     },
   ])
 })
@@ -326,7 +369,7 @@ test("run starts a new claude when the Task's Runs all began before its Bench, a
 
   expect(output.resumed).toBeNull()
   expect((await typedInto(fixture, output.terminalSessionId)).at(-1)).toMatchObject({
-    data: "claude --effort medium --model opus '/tackle'\r",
+    data: "claude --effort medium --model opus --worktree 'issue-12' '/tackle'\r",
   })
 })
 
@@ -338,7 +381,7 @@ test('run starts a new claude rather than resume one that left no Agent Session 
 
   expect(output.resumed).toBeNull()
   expect((await typedInto(fixture, output.terminalSessionId)).at(-1)).toMatchObject({
-    data: "claude --effort medium --model opus '/tackle'\r",
+    data: "claude --effort medium --model opus --worktree 'issue-12' '/tackle'\r",
   })
 })
 
@@ -449,7 +492,7 @@ test('run --force starts a new Run of a Task whose Issue is closed', async () =>
   const output = await fixture.client.run({ ref, force: true })
 
   expect((await typedInto(fixture, output.terminalSessionId)).at(-1)).toMatchObject({
-    data: "claude --effort medium --model opus '/tackle'\r",
+    data: "claude --effort medium --model opus --worktree 'issue-12' '/tackle'\r",
   })
 })
 
@@ -496,7 +539,7 @@ test('run --force starts a new Run past the open Blockers', async () => {
   const output = await fixture.client.run({ ref, force: true })
 
   expect((await typedInto(fixture, output.terminalSessionId)).at(-1)).toMatchObject({
-    data: "claude --effort medium --model opus '/tackle'\r",
+    data: "claude --effort medium --model opus --worktree 'issue-12' '/tackle'\r",
   })
 })
 
@@ -538,7 +581,7 @@ test('when GitHub cannot be reached, run judges the gate on the copy and warns h
     ),
   ])
   expect((await typedInto(fixture, output.terminalSessionId)).at(-1)).toMatchObject({
-    data: "claude --effort medium --model opus '/tackle'\r",
+    data: "claude --effort medium --model opus --worktree 'issue-12' '/tackle'\r",
   })
 })
 
@@ -586,9 +629,9 @@ test('run --fork types claude resuming the Agent Session with --fork-session and
   const output = await fixture.client.run({ ref, fork })
 
   expect(output).toMatchObject({ benchCreated: true, resumed: null, forked: 's-0' })
-  expect(await benchTabs(fixture)).toMatchObject([{ id: output.tabId, cwd: fixture.cwd }])
+  expect(await benchTabs(fixture)).toMatchObject([{ id: output.tabId, cwd: fixture.checkout }])
   expect((await typedInto(fixture, output.terminalSessionId)).at(-1)).toMatchObject({
-    data: "claude --effort medium --model opus --resume 's-0' --fork-session '/tackle'\r",
+    data: "claude --effort medium --model opus --worktree 'issue-12' --resume 's-0' --fork-session '/tackle'\r",
   })
 })
 
@@ -599,7 +642,7 @@ test('run --fork passes the prompt after --fork-session', async () => {
   const output = await fixture.client.run({ ref, fork, prompt: 'the cwd moved to the Bench' })
 
   expect((await typedInto(fixture, output.terminalSessionId)).at(-1)).toMatchObject({
-    data: "claude --effort medium --model opus --resume 's-0' --fork-session 'the cwd moved to the Bench'\r",
+    data: "claude --effort medium --model opus --worktree 'issue-12' --resume 's-0' --fork-session 'the cwd moved to the Bench'\r",
   })
 })
 
@@ -612,7 +655,7 @@ test('run --fork starts a new Run rather than resume the ended Run of the Task',
 
   expect(output).toMatchObject({ resumed: null, forked: 's-0' })
   expect((await typedInto(fixture, output.terminalSessionId)).at(-1)).toMatchObject({
-    data: "claude --effort medium --model opus --resume 's-0' --fork-session '/tackle'\r",
+    data: "claude --effort medium --model opus --worktree 'issue-12' --resume 's-0' --fork-session '/tackle'\r",
   })
 })
 

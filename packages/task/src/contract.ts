@@ -27,7 +27,7 @@ const liveRuns = z
 
 export const DisplayStateSchema = z.discriminatedUnion('state', [
   z.object({
-    state: z.enum(['closed', 'issue_closed', 'not_started', 'preparing', 'setup_failed', 'ended']),
+    state: z.enum(['closed', 'issue_closed', 'not_started', 'ended']),
   }),
   z.object({
     state: z.literal('waiting'),
@@ -223,7 +223,6 @@ export const BenchItemSchema = z.object({
   runspaceId: z.string(),
   ref: z.string(),
   title: z.string(),
-  setupState: BenchSchema.shape.setupState,
 })
 
 export type SyncOutput = z.infer<typeof SyncOutputSchema>
@@ -258,7 +257,7 @@ export const contract = {
   run: meta
     .meta({
       description:
-        'Start claude with a first prompt (/tackle if left out) in a new Tab of the Bench of an open Task, tracking the Issue and opening and preparing the Bench first, or resume the last claude of the Bench once it has ended',
+        'Start claude with a first prompt (/tackle if left out) in a new Tab of the Bench of an open Task, tracking the Issue and opening the Bench first, or resume the last claude of the Bench once it has ended',
       cli: true,
     })
     .errors(runErrors)
@@ -275,7 +274,7 @@ export const contract = {
         inPlace: z
           .boolean()
           .optional()
-          .describe("use the Repo's checkout as the cwd, with no worktree and no setup"),
+          .describe("use the Repo's checkout as the cwd, with no worktree"),
         force: z
           .boolean()
           .optional()

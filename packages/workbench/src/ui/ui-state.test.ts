@@ -62,7 +62,7 @@ function benchesIn(repo: string, ...runspaceIds: string[]): BenchLabelOf {
   const labels = Object.fromEntries(
     runspaceIds.map((id, i): [string, BenchLabel] => [
       id,
-      { repo, number: i + 1, title: `Issue ${i + 1}`, setup: null },
+      { repo, number: i + 1, title: `Issue ${i + 1}` },
     ]),
   )
   return (runspaceId) => labels[runspaceId] ?? null
@@ -215,7 +215,7 @@ test('the Tile kept is saved as tile, and one saved as rail is not read, leaving
 function benchesAcross(byRunspaceId: Record<string, string>): BenchLabelOf {
   return (runspaceId) => {
     const repo = byRunspaceId[runspaceId]
-    return repo ? { repo, number: 1, title: 'Issue 1', setup: null } : null
+    return repo ? { repo, number: 1, title: 'Issue 1' } : null
   }
 }
 
