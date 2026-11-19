@@ -12,6 +12,8 @@ export type { PageTranslationState, SegmentsReply } from './translator.ts'
 export type PageTranslationMessage =
   | { type: 'monica.translateSegments'; segments: Segment[] }
   | { type: 'monica.pageTranslationState'; state: PageTranslationState }
+  | { type: 'monica.pageTranslationSwitched'; on: boolean }
+  | { type: 'monica.pageTranslationWanted' }
 
 export const PAGE_TRANSLATION_COMMAND = 'page-translation'
 
@@ -43,6 +45,39 @@ export async function injectPageTranslation(tabId: number, scriptFile: string): 
   }
 }
 
+// service worker は暇になると止まるので、⌥A で Page Translation をオンにした Browser Tab は storage.session に覚える。
+const switchedOnKey = (tabId: number) => `pageTranslation.on.${tabId}`
+
+async function isSwitchedOn(tabId: number): Promise<boolean> {
+  const key = switchedOnKey(tabId)
+  return (await chrome.storage.session.get(key))[key] === true
+}
+
+function rememberSwitch(tabId: number, on: boolean): Promise<void> {
+  return on
+    ? chrome.storage.session.set({ [switchedOnKey(tabId)]: true })
+    : forgetPageTranslation(tabId)
+}
+
+export function forgetPageTranslation(tabId: number): Promise<void> {
+  return chrome.storage.session.remove(switchedOnKey(tabId))
+}
+
+export async function reinjectPageTranslation(
+  navigation: chrome.webNavigation.WebNavigationFramedCallbackDetails,
+  scriptFile: string,
+): Promise<void> {
+  if (navigation.frameType !== 'outermost_frame') return
+  if (!(await isSwitchedOn(navigation.tabId))) return
+  // ⌥A を押していない chrome:// などで断られても、バッジに失敗を出さない。
+  await chrome.scripting
+    .executeScript({
+      target: { tabId: navigation.tabId, documentIds: [navigation.documentId] },
+      files: [scriptFile],
+    })
+    .catch(() => {})
+}
+
 type Client = ContractRouterClient<{ chat: Pick<typeof contract, 'translateSegments'> }>
 
 async function translateSegments(host: string, segments: Segment[]): Promise<SegmentsReply> {
@@ -64,12 +99,20 @@ export function relayPageTranslation(
   host: string,
   message: unknown,
   sender: chrome.runtime.MessageSender,
-): Promise<SegmentsReply | undefined> | undefined {
+): Promise<SegmentsReply | boolean | undefined> | undefined {
   if (!isMessage(message)) return undefined
   if (message.type === 'monica.translateSegments') return translateSegments(host, message.segments)
   const tabId = sender.tab?.id
-  if (tabId !== undefined) showPageTranslationState(tabId, message.state)
-  return Promise.resolve(undefined)
+  if (tabId === undefined) return Promise.resolve(undefined)
+  switch (message.type) {
+    case 'monica.pageTranslationState':
+      showPageTranslationState(tabId, message.state)
+      return Promise.resolve(undefined)
+    case 'monica.pageTranslationSwitched':
+      return rememberSwitch(tabId, message.on).then(() => undefined)
+    case 'monica.pageTranslationWanted':
+      return isSwitchedOn(tabId)
+  }
 }
 
 function isMessage(message: unknown): message is PageTranslationMessage {
@@ -80,5 +123,8 @@ function isMessage(message: unknown): message is PageTranslationMessage {
   if (message.type === 'monica.pageTranslationState') {
     return 'state' in message && typeof message.state === 'object' && message.state !== null
   }
-  return false
+  if (message.type === 'monica.pageTranslationSwitched') {
+    return 'on' in message && typeof message.on === 'boolean'
+  }
+  return message.type === 'monica.pageTranslationWanted'
 }

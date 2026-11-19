@@ -6,6 +6,7 @@
 
 - `translate-press`: ⌥A で本文が日本語になり、ナビゲーションと `code` は元のまま残る。
 - `translate-restore`: もう一度 ⌥A を押すと原文に戻り、バッジが空になる。
+- `translate-follow`: オンのまま、リンクでページごと読み込み直した先と、戻る・進むで戻ったページも訳す。オフにした後の遷移先は原文のまま。
 - `translate-unreachable`: Backend に届かないと、バッジに `!`、tooltip に `Page Translation failed: the monica desktop is not running` が出る。
 
 ## How to get to it (user POV)
@@ -26,6 +27,7 @@ Preconditions:
 - **訳し終わりを待つ.** `chrome.action.getBadgeText({ tabId })` を 0.5 秒おきに読み、`…` から `''` に変わるのを待つ。GitHub の markdown のファイル表示（30 段落ほど）で 10〜25 秒。
 - **見る.** page の target で本文（`article.markdown-body` などの `innerText`）が日本語になり、`header li, nav li` に日本語を含むものが 0 件、行内の `code` の文字が元の英語のまま。page で `typeof globalThis[Symbol.for('monica.pageTranslator')]` が `undefined`（ページの script から見えない）。
 - **戻す.** 同じ注入をもう一度流す。1 秒後に本文が英語に戻り、バッジが `''`。
+- **遷移の後も続く.** 自分で配る 2 枚のページ（互いにリンクし、読み込むたびに document が変わる）を scratchpad の `Bun.serve` で配る。押してからリンクを `click()` で踏み、移った先の `h1` が日本語になるのを待つ。`history.back()` で戻ったページは、page で `pageshow` の `persisted` が true（back/forward cache から戻った）かを見て、訳のままか、移った先で原文に戻したなら原文になるかを読む。先読みは、`<script type="speculationrules">` で移る先を `prerender` に挙げたページから踏む。
 - **届かない.** Backend だけを `kill -TERM $(jq .pid $H/backend.json)` で止め、`backend.json` が消えてから、別の Browser Tab で押す。数秒で `chrome.action.getBadgeText` が `!`、`chrome.action.getTitle` が `Page Translation failed: the monica desktop is not running`。
 - **証拠.** 各評価の値を `$E/page-translation.transcript` に追記し、`Page.captureScreenshot` で前と後を `$E/page-translation-{before,after}.png` に撮る。Backend の `err.log` の `[chat] translating claude …` の行が、訳しに送った証拠になる。
 
