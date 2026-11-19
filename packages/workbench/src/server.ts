@@ -16,7 +16,6 @@ import { agentSessionsOf, layoutWritesOf, type WorkbenchContext } from './workbe
 
 export { migrations } from '../migrations/index.ts'
 export { openInEditor } from './editor.ts'
-export { inheritableEnv } from './ptyd.ts'
 export { LIVE, terminating } from './terminal-session-status.ts'
 export type { Db, Tx } from './db.ts'
 export { createWorkbenchLedger, type WorkbenchLedger } from './workbench.ts'

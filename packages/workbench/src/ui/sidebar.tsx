@@ -177,16 +177,6 @@ function TileName({
 function RowMetaLine({ meta }: { meta: RowMeta }) {
   return (
     <span className="flex h-[15px] min-w-0 items-center gap-1.5 overflow-hidden text-[11px] text-white/50">
-      {meta.setup && (
-        <span
-          className={cn(
-            'shrink-0 rounded px-[5px] text-[10px] leading-[14px] ring-1 ring-white/16 ring-inset',
-            meta.setup.error ? 'text-destructive' : 'text-muted-foreground',
-          )}
-        >
-          {meta.setup.text}
-        </span>
-      )}
       {meta.tallies.map((tally) => (
         <AgentTallyMark key={tally.kind} tally={tally} />
       ))}

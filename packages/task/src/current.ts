@@ -37,7 +37,7 @@ export function currentTask(db: Db, caller: string | undefined): CurrentOutput {
     displayState: displayState(
       found.task,
       found.issue,
-      found.bench,
+      found.bench !== null,
       liveRunsOf(db, found.task.issueId),
     ),
     agentSessionId: byRun?.agentSessionId ?? null,

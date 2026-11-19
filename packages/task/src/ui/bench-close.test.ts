@@ -1,4 +1,4 @@
-import { afterEach, expect, mock, spyOn, test } from 'bun:test'
+import { afterEach, expect, mock, test } from 'bun:test'
 import { existsSync, mkdirSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 
@@ -18,7 +18,6 @@ await mock.module('@monica/ui', () => ({
 }))
 
 const { cleanUp, setup } = await import('../testing.ts')
-const { git } = await import('../fake-ghq.ts')
 const { benchCloseOf, benchClosesAtom, disarm, emptied, forgetGone, press, shownOf } =
   await import('./bench-close.ts')
 
@@ -39,7 +38,23 @@ async function tracked() {
   fixture.github.issue(ref, { title: 'Ship it' })
   await fixture.track(ref)
   const deps = { store: createStore(), client: fixture.client }
-  return { ...fixture, deps, cwd: join(fixture.home, 'worktrees/acme/app/issue-12') }
+  return {
+    ...fixture,
+    deps,
+    cwd: join(fixture.ghq.checkout('acme/app'), '.claude/worktrees/issue-12'),
+  }
+}
+
+// claude --worktree が作る worktree の代わり。
+async function runInWorktree(fixture: Fixture) {
+  const { terminalSessionId } = await fixture.client.run({ ref })
+  fixture.ghq.claudeWorktree('acme/app', 12)
+  await fixture.exit(terminalSessionId)
+}
+
+// worktree を git から切り離し、close の git を guard の外で失敗させる。
+function breakGitLink(worktree: string) {
+  writeFileSync(join(worktree, '.git'), 'gitdir: /nonexistent\n')
 }
 
 async function benchOf({ client }: Pick<Fixture, 'client'>) {
@@ -47,7 +62,6 @@ async function benchOf({ client }: Pick<Fixture, 'client'>) {
   return bench!
 }
 
-// 準備中かは今の Bench の行から読む。
 async function shown(fixture: Fixture, runspaceId: string) {
   const bench = await benchOf(fixture)
   return shownOf(benchCloseOf(fixture.deps.store, runspaceId), bench)
@@ -109,6 +123,7 @@ test('a refused close leaves the Bench with its reasons and Close anyway, and te
   fixture.ghq.origin('acme/app')
   const { client, cwd, deps } = fixture
   const { terminalSessionId } = await client.run({ ref })
+  fixture.ghq.claudeWorktree('acme/app', 12)
   await fixture.hook(terminalSessionId, 's-1', 'SessionStart', { source: 'startup' })
   writeFileSync(join(cwd, 'draft.txt'), 'draft\n')
   const { runspaceId } = await benchOf(fixture)
@@ -132,7 +147,7 @@ test('a refused close leaves the Bench with its reasons and Close anyway, and te
 async function refusedByUncommittedChanges() {
   const fixture = await tracked()
   fixture.ghq.origin('acme/app')
-  await fixture.exit((await fixture.client.run({ ref })).terminalSessionId)
+  await runInWorktree(fixture)
   writeFileSync(join(fixture.cwd, 'draft.txt'), 'draft\n')
   const { runspaceId } = await benchOf(fixture)
   await emptied(fixture.deps, runspaceId)
@@ -164,8 +179,8 @@ test('Close anyway asks once more, goes back when the focus leaves, and closes w
 
 test('a forced close that fails tells why on one line and keeps the reasons and Close anyway', async () => {
   const fixture = await refusedByUncommittedChanges()
-  const { deps, ghq, runspaceId, cwd } = fixture
-  git(ghq.checkout('acme/app'), 'worktree', 'lock', cwd)
+  const { deps, runspaceId, cwd } = fixture
+  breakGitLink(cwd)
 
   await press(deps, runspaceId)
   await press(deps, runspaceId)
@@ -177,7 +192,7 @@ test('a forced close that fails tells why on one line and keeps the reasons and 
   expect(toasts).toEqual([
     {
       type: 'error',
-      message: expect.stringMatching(/^could not close .*is locked$/),
+      message: expect.stringMatching(/^could not close .*not a git repository/),
     },
   ])
   expect(toasts[0]!.message).not.toContain('\n')
@@ -185,9 +200,9 @@ test('a forced close that fails tells why on one line and keeps the reasons and 
 
 test('a close run anew forgets the reasons it remembered before, even when it fails for another cause, and offers Close', async () => {
   const fixture = await refusedByUncommittedChanges()
-  const { deps, ghq, runspaceId, cwd } = fixture
+  const { deps, runspaceId, cwd } = fixture
   rmSync(join(cwd, 'draft.txt'))
-  git(ghq.checkout('acme/app'), 'worktree', 'lock', cwd)
+  breakGitLink(cwd)
 
   await emptied(deps, runspaceId)
 
@@ -195,7 +210,7 @@ test('a close run anew forgets the reasons it remembered before, even when it fa
   expect(toasts).toEqual([
     {
       type: 'error',
-      message: expect.stringMatching(/^could not close .*is locked$/),
+      message: expect.stringMatching(/^could not close .*not a git repository/),
     },
   ])
 })
@@ -203,8 +218,8 @@ test('a close run anew forgets the reasons it remembered before, even when it fa
 test('a Bench with no reasons, as after its last Tab moved out or a restart, offers Close, which closes without force once and turns into Close anyway when refused', async () => {
   const fixture = await tracked()
   fixture.ghq.origin('acme/app')
-  const { client, cwd, deps } = fixture
-  await fixture.exit((await client.run({ ref })).terminalSessionId)
+  const { cwd, deps } = fixture
+  await runInWorktree(fixture)
   writeFileSync(join(cwd, 'draft.txt'), 'draft\n')
   const { runspaceId } = await benchOf(fixture)
   const closeCalls = recordCloses(fixture)
@@ -231,36 +246,4 @@ test('a Bench with no reasons that closes without force is gone with its state o
 
   expect(deps.store.get(benchClosesAtom).size).toBe(0)
   expect(toasts).toEqual([{ type: 'info', message: `closed ${ref}` }])
-})
-
-test('a Bench still preparing shows nothing and is not closed, keeps the reasons it remembered, and offers Close once ready', async () => {
-  const fixture = await tracked()
-  const { client, deps, ghq } = fixture
-  const asked = Promise.withResolvers<void>()
-  const cloned = Promise.withResolvers<void>()
-  spyOn(ghq.client, 'get').mockImplementation(() => {
-    asked.resolve()
-    return cloned.promise
-  })
-  const running = client.run({ ref, inPlace: true })
-  await asked.promise
-  const { runspaceId, setupState } = await benchOf(fixture)
-  expect(setupState).toBe('preparing')
-  const closeCalls = recordCloses(fixture)
-  // 準備中の Bench が理由を覚えている場面は公開の操作では作れないので、状態を直に置く。
-  const reasons = [{ kind: 'uncommitted_changes' as const, worktree: '/w' }]
-  deps.store.set(benchClosesAtom, new Map([[runspaceId, { phase: 'refused' as const, reasons }]]))
-
-  expect(await shown(fixture, runspaceId)).toBeNull()
-  await emptied(deps, runspaceId)
-  expect(benchCloseOf(deps.store, runspaceId)).toEqual({ phase: 'refused', reasons })
-  deps.store.set(benchClosesAtom, new Map())
-  await press(deps, runspaceId)
-
-  expect(closeCalls).toEqual([])
-  expect(toasts).toEqual([])
-  mkdirSync(ghq.checkout('acme/app'), { recursive: true })
-  cloned.resolve()
-  await running
-  expect(await shown(fixture, runspaceId)).toEqual({ reasons: null, label: 'Close' })
 })

@@ -58,21 +58,23 @@ export async function removeWorktree(
 ) {
   if (!checkout) return { removedWorktree: null, deletedBranch: null, warnings: [] }
   if (present) {
-    if (existsSync(join(await git(path, 'rev-parse', '--absolute-git-dir'), 'locked'))) {
-      throw new Error(`the worktree ${path} is locked`)
-    }
+    // claude --worktree は作った worktree を lock し、lock された worktree の登録は外せない。
+    const locked = existsSync(join(await git(path, 'rev-parse', '--absolute-git-dir'), 'locked'))
     const trashed = moveAside(path, trash, { mark: !force })
     if (!trashed) {
       // 別の disk への rename などで移せなければ、遅くても git に消させる。
+      if (locked) await git(checkout, 'worktree', 'unlock', path)
       await git(checkout, 'worktree', 'remove', ...(force ? ['--force'] : []), path)
     } else {
+      // 取り直しで断って元へ戻した worktree には、lock を残す。
       if (!force) await recheckInTrash(trashed, path)
-      // path が無いので、強制でなくても登録だけを外してファイルには触れない。
-      await git(checkout, 'worktree', 'remove', path)
+      // path が無いので、重ねた --force が越えるのは lock だけで、ファイルには触れない。
+      await git(checkout, 'worktree', 'remove', '--force', '--force', path)
     }
   } else {
     // 登録が残るとその branch を消せないので、関係の無い登録まで外す prune ではなく、この path の登録だけを外す。
-    await succeeds(git(checkout, 'worktree', 'remove', '--force', path))
+    // --force を 2 つ重ねると、claude --worktree が付けた lock も越える。
+    await succeeds(git(checkout, 'worktree', 'remove', '--force', '--force', path))
   }
   const removedWorktree = present ? path : null
   if (!branchExists) return { removedWorktree, deletedBranch: null, warnings: [] }

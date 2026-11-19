@@ -5,9 +5,10 @@ import type { Db, Tx } from '@monica/workbench/server'
 import { ORPCError } from '@orpc/server'
 import { eq } from 'drizzle-orm'
 
-import { type Bench, type BenchDeps, prepareBench } from './bench.ts'
+import { type Bench, type BenchDeps, openBenchFor } from './bench.ts'
 import type { RunOutput } from './contract.ts'
 import type { FoundTask } from './open-task.ts'
+import { checkoutOfWorktree, worktreeNameOf } from './prepare.ts'
 import { formatRef } from './ref.ts'
 
 export type Launch = {
@@ -17,6 +18,7 @@ export type Launch = {
   benchCreated: boolean
   warnings: string[]
   tabCwd: string
+  worktree: string | null
   resumed: string | null
   forked: string | null
 }
@@ -66,6 +68,8 @@ export function resumeOf(
     benchCreated: false,
     warnings: [],
     tabCwd: existsSync(last.cwd) ? last.cwd : row.cwd,
+    // worktree で始めた session は、--resume で同じ worktree に戻る。
+    worktree: null,
     resumed: last.agentSessionId,
     forked: null,
   }
@@ -78,14 +82,17 @@ export async function newRun(
   warnings: string[],
   fork: string | undefined,
 ): Promise<Launch> {
-  const prepared = await prepareBench(deps, synced, inPlace)
+  const opened = await openBenchFor(deps, synced, inPlace)
+  // `.claude/worktrees` の外の worktree の Bench は、cwd でそのまま claude を起こす。
+  const checkout = opened.bench.mode === 'worktree' ? checkoutOfWorktree(opened.bench.cwd) : null
   return {
     ref: formatRef(synced.issue),
     title: synced.issue.title,
-    bench: prepared.bench,
-    benchCreated: prepared.created,
-    warnings: [...warnings, ...prepared.warnings],
-    tabCwd: prepared.bench.cwd,
+    bench: opened.bench,
+    benchCreated: opened.created,
+    warnings,
+    tabCwd: checkout ?? opened.bench.cwd,
+    worktree: checkout === null ? null : worktreeNameOf(synced.issue),
     resumed: null,
     forked: fork ?? null,
   }
@@ -127,13 +134,14 @@ function unsendable(reason: string) {
 }
 
 // resume する claude は tackle の途中か後なので、既定の prompt を送ると branch を切るところからやり直す。
-function claudeCommand({ resumed, forked }: Launch, prompt: string | undefined): string {
+function claudeCommand({ worktree, resumed, forked }: Launch, prompt: string | undefined): string {
+  const worktreeArgs = worktree === null ? [] : ['--worktree', quote(worktree)]
   const forkArgs = forked === null ? [] : ['--resume', quote(forked), '--fork-session']
   const words =
     resumed === null
       ? [...forkArgs, quote(prompt ?? DEFAULT_PROMPT)]
       : ['--resume', quote(resumed), ...(prompt === undefined ? [] : [quote(prompt)])]
-  return ['claude', '--effort', 'medium', '--model', 'opus', ...words].join(' ')
+  return ['claude', '--effort', 'medium', '--model', 'opus', ...worktreeArgs, ...words].join(' ')
 }
 
 // single quote の中では ' を escape できないので、一度閉じて \' を挟み、開き直す。

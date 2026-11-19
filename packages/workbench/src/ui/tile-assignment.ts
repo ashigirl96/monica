@@ -9,14 +9,11 @@ type Runspace = Layout['runspaces'][number]
 // Repo の Tile の key は owner/repo で必ず `/` を含むので、`/` の無い語は Repo と重ならない。
 export const OUTSIDE = 'outside'
 
-export type BenchSetup = { text: string; error: boolean }
-
 // workbench は Task を知らないので、Bench の Task の Repo と Issue は task の ui から slot で受ける。
 export type BenchLabel = {
   repo: string
   number: number
   title: string
-  setup: BenchSetup | null
 }
 
 export type BenchLabelOf = (runspaceId: string) => BenchLabel | null
