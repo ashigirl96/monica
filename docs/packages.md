@@ -45,7 +45,7 @@ entry は層ではなく、import してよい実行環境で切る。domain の
 | `@monica/<d>/body` | Note の本文の JSON を読む関数と、本文と markdown の変換 | どこでも | 自分の contract と server と ui |
 | `@monica/chat/native-host` | React と CSS を引かずに使えるよう、ui の index と分ける | browser（Chrome Extension） | `@monica/chat/ui`、apps/extension の service worker |
 | `@monica/chat/page-translation` | Page Translation で Browser Tab に注入する script が呼ぶ。Defuddle を含む | browser（Browser Tab の isolated world） | apps/extension の注入する script だけ |
-| `@monica/chat/page-translation-relay` | Page Translation の ⌥A の受け口と、Backend への中継とバッジ。service worker が起きるたびに読むので、Defuddle を引かないよう上と分ける | browser（Chrome Extension） | apps/extension の service worker |
+| `@monica/chat/page-translation-relay` | Page Translation の ⌥A の受け口と、Backend への中継とバッジと、オンにした Browser Tab の遷移先への入れ直し。service worker が起きるたびに読むので、Defuddle を引かないよう上と分ける | browser（Chrome Extension） | apps/extension の service worker |
 | `@monica/<d>/testing` | 他の package のテストに出す fake | Bun | 他 package のテストと `testing.ts` |
 | `@monica/chat/html-worker`・`@monica/chat/pdf-worker` | HTML と PDF を本文にする Bun の Worker の module | Bun の Worker | apps/backend の Worker の entrypoint だけ |
 

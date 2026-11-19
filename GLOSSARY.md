@@ -264,7 +264,7 @@ Chrome Extension の side panel で agent と交わす一続きの問答。side 
 _Avoid_: 会話（単独では Agent Session の会話と紛れる）, session, conversation, thread
 
 **Page Translation（ページの翻訳）**:
-Chrome Extension で ⌥A を押したときに、Current Page の本文だけを日本語に訳し、ページの文をその場で置き換えること。ナビゲーションやサイドバーなど本文でない所は訳さない。もう一度 ⌥A を押すと原文に戻る。訳している間に描き直された段落や、ページの中で移って新しく出た本文も訳し続ける。進み具合と失敗は拡張のアイコンのバッジに出す。Chat とは別のもので、side panel を開かず、どこにも残らない。
+Chrome Extension で ⌥A を押したときに、Current Page の本文だけを日本語に訳し、ページの文をその場で置き換えること。ナビゲーションやサイドバーなど本文でない所は訳さない。もう一度 ⌥A を押すと原文に戻る。オンとオフは Browser Tab ごとで、オンの間は、描き直された段落、ページの中で移って新しく出た本文、リンクで読み込み直した先のページ、戻る・進むで戻ったページも訳す。進み具合と失敗は拡張のアイコンのバッジに出す。Chat とは別のもので、side panel を開かず、訳はどこにも残らない。
 _Avoid_: 翻訳（単独で使うと Chat で訳させることと紛れる）, Translate Page
 
 **Page Snapshot（ページの控え）**:
