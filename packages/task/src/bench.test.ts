@@ -1,11 +1,12 @@
 import { afterEach, expect, mock, setSystemTime, spyOn, test } from 'bun:test'
-import { existsSync } from 'node:fs'
+import { existsSync, rmSync } from 'node:fs'
 import { join } from 'node:path'
 
 import { tab } from '@monica/workbench/schema'
 
+import { insertBench } from './bench.ts'
 import { git } from './fake-ghq.ts'
-import { task } from './schema.ts'
+import { issue, task } from './schema.ts'
 import { cleanUp, failure, setup } from './testing.ts'
 
 afterEach(() => {
@@ -101,6 +102,38 @@ test('task.changes signals the Task when run opens its Bench', async () => {
   await client.run({ ref })
 
   expect(signalled).toContain(ref)
+})
+
+test.each([
+  ['a worktree Bench', false],
+  ['an in-place Bench', true],
+])('a new Run in %s whose checkout is gone clones it again', async (_, inPlace) => {
+  const { ghq, client, checkout, exit } = await tracked()
+  await exit((await client.run({ ref, inPlace })).terminalSessionId)
+  rmSync(checkout, { recursive: true, force: true })
+
+  const output = await client.run({ ref })
+
+  expect(output).toMatchObject({ benchCreated: false })
+  expect(ghq.gets).toEqual(['acme/app', 'acme/app'])
+  expect(existsSync(checkout)).toBe(true)
+})
+
+test('a new Run in a Bench whose worktree outside .claude/worktrees is gone is refused, pointing to close and reopen', async () => {
+  const { db, workbenchLedger, home, client } = await tracked()
+  const gone = join(home, 'worktrees/acme/app/issue-12')
+  const forIssue = db.select().from(issue).get()!
+  db.transaction((tx) =>
+    insertBench(tx, workbenchLedger, forIssue, { cwd: gone, mode: 'worktree' }),
+  )
+
+  const error = await failure(client.run({ ref }))
+
+  expect(error.code).toBe('PRECONDITION_FAILED')
+  expect(error.message).toBe(
+    `the worktree ${gone} of ${ref} is gone; close and reopen ${ref} to open its Bench again`,
+  )
+  expect(db.select().from(tab).all()).toEqual([])
 })
 
 test('run --in-place refuses a Bench that is a worktree', async () => {

@@ -1,9 +1,19 @@
+import { existsSync } from 'node:fs'
+
 import type { Db, Tx, WorkbenchLedger } from '@monica/workbench/server'
 import { ORPCError } from '@orpc/server'
 import { asc, eq } from 'drizzle-orm'
 
 import type { BenchItem, TaskChange } from './contract.ts'
-import { branchOf, checkoutOf, clone, type Ghq, messageOf, worktreeOf } from './prepare.ts'
+import {
+  branchOf,
+  checkoutOf,
+  checkoutOfWorktree,
+  clone,
+  type Ghq,
+  messageOf,
+  worktreeOf,
+} from './prepare.ts'
 import { formatRef } from './ref.ts'
 import type { Reservations } from './reservation.ts'
 import { bench, issue } from './schema.ts'
@@ -29,24 +39,41 @@ export async function openBenchFor(
   const ref = formatRef(found.issue)
   if (found.bench) {
     refuseInPlace(found.bench, inPlace, ref)
+    await cloneAgain(deps.ghq, found.bench, found.issue)
     return { bench: found.bench, created: false }
   }
-  const checkout = await checkoutOf(deps.ghq, found.issue.repo)
-    .then(async (path) => {
-      await clone(deps.ghq, found.issue.repo, path)
-      return path
-    })
-    .catch((error: unknown) => {
-      throw new ORPCError('PRECONDITION_FAILED', {
-        message: `could not get the checkout of ${ref}: ${messageOf(error)}`,
-      })
-    })
+  const checkout = await cloned(deps.ghq, found.issue, checkoutOf(deps.ghq, found.issue.repo))
   const opened = inPlace
     ? openBench(deps, found.issue, { cwd: checkout, mode: 'in_place' })
     : openBench(deps, found.issue, { cwd: worktreeOf(checkout, found.issue), mode: 'worktree' })
   // 待つ間に別の run が Bench を作っていれば、そちらを使う。
   refuseInPlace(opened.bench, inPlace, ref)
   return opened
+}
+
+async function cloned(ghq: Ghq, forIssue: Issue, checkout: Promise<string>): Promise<string> {
+  try {
+    const path = await checkout
+    await clone(ghq, forIssue.repo, path)
+    return path
+  } catch (error) {
+    throw new ORPCError('PRECONDITION_FAILED', {
+      message: `could not get the checkout of ${formatRef(forIssue)}: ${messageOf(error)}`,
+    })
+  }
+}
+
+// claude --worktree は checkout があれば worktree を作り直すが、`.claude/worktrees` の外の worktree は誰も作り直さない。
+async function cloneAgain(ghq: Ghq, row: Bench, forIssue: Issue) {
+  if (existsSync(row.cwd)) return
+  const checkout = row.mode === 'in_place' ? row.cwd : checkoutOfWorktree(row.cwd)
+  if (checkout === null) {
+    const ref = formatRef(forIssue)
+    throw new ORPCError('PRECONDITION_FAILED', {
+      message: `the worktree ${row.cwd} of ${ref} is gone; close and reopen ${ref} to open its Bench again`,
+    })
+  }
+  await cloned(ghq, forIssue, Promise.resolve(checkout))
 }
 
 export function refuseInPlace(row: Bench, inPlace: boolean | undefined, ref: string) {
