@@ -46,6 +46,7 @@ import {
   docOf,
   heading,
   para,
+  tableOf,
   todo,
   toggle,
 } from './test-fixtures.ts'
@@ -288,6 +289,47 @@ describe('splitBlock', () => {
     const state = stateWithCursor(doc, 'A', 'start')
     const result = run(state, splitBlock)!
     expect(docShape(result.state.doc)).toEqual([sh('A', 'paragraph', '')])
+  })
+
+  test('子を持つ行の行末 Enter は、子の先頭に印なしの空行を作る', () => {
+    const doc = docOf(
+      block('A', bullet('Layer がある。'), [block('T', tableOf([['概念', '説明']]))]),
+      block('B', bullet('next')),
+    )
+    const result = run(stateWithCursor(doc, 'A', 'end'), splitBlock)!
+    const shapes = docShape(result.state.doc)
+    expect(shapes.map((s) => [s.id, s.type, s.children.map((c) => [c.type, c.text])])).toEqual([
+      [
+        'A',
+        'bullet',
+        [
+          ['paragraph', ''],
+          ['table', '概念説明'],
+        ],
+      ],
+      ['B', 'bullet', []],
+    ])
+    const fresh = shapes[0]!.children[0]!.id!
+    expect(result.state.selection.head).toBe(contentPos(result.state.doc, fresh, 'start'))
+    assertInvariants(result.state.doc)
+  })
+
+  test('子を持つ開いた toggle の行末 Enter は、子の先頭に空の段落を作る', () => {
+    const doc = docOf(block('A', toggle('t'), [block('X', para('x'))]))
+    const result = run(stateWithCursor(doc, 'A', 'end'), splitBlock)!
+    expect(docShape(result.state.doc)[0]!.children.map((c) => [c.type, c.text])).toEqual([
+      ['paragraph', ''],
+      ['paragraph', 'x'],
+    ])
+  })
+
+  test('閉じた toggle の行末 Enter は、隠れた子の後ろの兄弟に新しい toggle を作る', () => {
+    const doc = docOf(block('A', toggle('t', false), [block('X', para('x'))]))
+    const result = run(stateWithCursor(doc, 'A', 'end'), splitBlock)!
+    expect(docShape(result.state.doc).map((s) => [s.id, s.type, s.children.length])).toEqual([
+      ['A', 'toggle', 1],
+      [expect.any(String), 'toggle', 0],
+    ])
   })
 
   test('callout 行末 Enter は先頭に空の子 paragraph を作る', () => {
