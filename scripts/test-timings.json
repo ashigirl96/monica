@@ -52,7 +52,6 @@
     "packages/study/src/remove.test.ts": 170,
     "scripts/oxlint/sync-transaction.test.ts": 170,
     "packages/note/src/ui/notes/open-note.test.ts": 165,
-    "packages/task/src/setup-log.test.ts": 151,
     "apps/cli/src/job.test.ts": 143,
     "packages/workbench/src/unread.test.ts": 143,
     "apps/cli/src/main.test.ts": 142,

@@ -27,7 +27,7 @@ fi
 is_home() { [ -e "$1/monica.db" ] || [ -e "$1/ptyd.pid" ] || [ -e "$1/backend.json" ]; }
 
 # Task の Bench の一時 directory。名前が monica-<name>-ghq の別の instance の home は残す。
-for x in ghq origin mode; do
+for x in ghq origin; do
   [ -e "$home-$x" ] || continue
   if is_home "$home-$x"; then
     echo "$home-$x は別の instance の home なので残した"

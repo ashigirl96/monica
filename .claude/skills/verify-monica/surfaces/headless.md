@@ -101,18 +101,15 @@ SKILL.md の「起こす」の `launch.sh` と `doctor.sh --wait` で起こす�
 
 1. 「起こす」の 1 の command の後ろに `GHQ_ROOT=${TMPDIR%/}/monica-s2-ghq` を足す。ghq は `GHQ_ROOT` を `ghq root` の答えにする。渡し忘れると、ユーザーの本物の checkout で worktree を作る。
 2. Task を 1 つ `run --in-place` する。`ghq get` が GitHub から `monica-s2-ghq` の下に checkout を clone する。
-3. その checkout から一時の origin を作る。`.monica/setup.sh` を commit した main を push し、checkout の `origin` をそこへ向ける。以後の worktree の Bench は、この main から作られる。setup の振る舞いは script が読む mode file で切り替えるので、commit し直さずに成功・失敗・長い setup を作れる。
+3. その checkout を bare で clone して一時の origin にし、checkout の `origin` をそこへ向ける。以後の worktree の Bench は、この main から作られる。
 
    ```bash
-   T=${TMPDIR%/}; C=$T/monica-s2-ghq/github.com/<owner>/<repo>; O=$T/monica-s2-origin/repo.git; W=$T/monica-s2-origin/work
-   git clone --bare --quiet $C $O && git clone --quiet $O $W && mkdir -p $W/.monica
-   printf '#!/bin/sh\ncase "$(cat %s)" in fail) exit 1 ;; slow) sleep 30 ;; *) sleep 3 ;; esac\n' $T/monica-s2-mode > $W/.monica/setup.sh
-   chmod +x $W/.monica/setup.sh && echo ok > $T/monica-s2-mode
-   git -C $W add .monica && git -C $W -c user.name=t -c user.email=t@e commit -qm setup && git -C $W push -q origin HEAD:main
+   T=${TMPDIR%/}; C=$T/monica-s2-ghq/github.com/<owner>/<repo>; O=$T/monica-s2-origin/repo.git
+   git clone --bare --quiet $C $O
    git -C $C remote set-url origin $O
    ```
 
-4. 「止めて片付ける」の cleanup.sh が、home と一緒に `monica-s2-ghq`・`monica-s2-origin`・`monica-s2-mode` も消す。名前は home の名前に `-ghq`・`-origin`・`-mode` を付けた形から変えない。
+4. 「止めて片付ける」の cleanup.sh が、home と一緒に `monica-s2-ghq`・`monica-s2-origin` も消す。名前は home の名前に `-ghq`・`-origin` を付けた形から変えない。
 
 ## Job を確かめる
 
@@ -201,7 +198,7 @@ SKILL.md の「起こす」の `launch.sh` と `doctor.sh --wait` で起こす�
 ```
 
 - 起こしたときの stdin の sleep を pid file から止め、Backend を stdin の EOF で抜けさせる。残った ptyd を `dev:kill` で止め、home を消す。`pkill -f` は harness の zsh にも当たり、親ごと殺すので使わない。
-- Task の Bench の `monica-s2-ghq`・`monica-s2-origin`・`monica-s2-mode` も消す。Tab の claude が cwd ごとに作る `~/.claude/projects` の dir（cwd の `/` と `.` が `-` になった名前）は取り戻せないので消さず、起動の後にできたものを挙げる。`${TMPDIR%/}/verify-monica/s2/` の log は残す。
+- Task の Bench の `monica-s2-ghq`・`monica-s2-origin` も消す。Tab の claude が cwd ごとに作る `~/.claude/projects` の dir（cwd の `/` と `.` が `-` になった名前）は取り戻せないので消さず、起動の後にできたものを挙げる。`${TMPDIR%/}/verify-monica/s2/` の log は残す。
 - SIGTERM で止める振る舞いを確かめるときは、先に `kill -TERM $(jq .pid ${TMPDIR%/}/monica-s2/backend.json)` を送る。Backend は抜けるときに `backend.json` を消す。Backend が抜けると、`launch.sh` が stdin の sleep も止めて終わる。`backend.json` が消えたのを見てから cleanup.sh を流す。
 - ptyd は socket が消えたのを 2 秒おきの確認で見つけ、shell ごと終わる。script はそれも待つ。
 

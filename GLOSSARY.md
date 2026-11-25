@@ -53,7 +53,7 @@ _Avoid_: task runspace, bench runspace
 既にある Tab を Bench に移すこと。CLI と Tab のメニューの picker で行う。CLI は未 track の Issue を track してから移す。その Tab の live な Agent Session がどの Run でもなければ、その時点で Task の Run になる。既に別の Task の Run なら、CLI と picker の Attach は断る。
 
 **Display State（表示状態）**:
-Task で次に手を動かすのが誰か（私か、agent か、setup script か、誰でもないか）を、Run の Agent Session と Bench と Issue から導いた 1 語。保存しない。`closed`、`waiting`・`unobserved`・`running`（live な Run の Agent Session の Waiting・Unobserved・Running から）、`issue_closed`（片付け待ち。Issue は閉じたが Task は開いている）、`not_started`（未着手。Bench が無い）、`preparing`・`setup_failed`（準備中・準備失敗。Bench の準備）、`ended`（終了。Bench はあるが live な Run が無い）のどれか。
+Task で次に手を動かすのが誰か（私か、agent か、Bench の準備か、誰でもないか）を、Run の Agent Session と Bench と Issue から導いた 1 語。保存しない。`closed`、`waiting`・`unobserved`・`running`（live な Run の Agent Session の Waiting・Unobserved・Running から）、`issue_closed`（片付け待ち。Issue は閉じたが Task は開いている）、`not_started`（未着手。Bench が無い）、`preparing`・`setup_failed`（準備中・準備失敗。Bench の準備）、`ended`（終了。Bench はあるが live な Run が無い）のどれか。
 _Avoid_: DisplayStatus, status, Task の状態（Task 自身の状態は open / closed だけ）
 
 ### Workbench

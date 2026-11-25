@@ -1,21 +1,9 @@
-import { appendFileSync, mkdirSync, writeFileSync } from 'node:fs'
-import { dirname } from 'node:path'
-
 import type { Db, Tx, WorkbenchLedger } from '@monica/workbench/server'
 import { ORPCError } from '@orpc/server'
-import type { Subprocess } from 'bun'
 import { asc, eq } from 'drizzle-orm'
 
 import type { BenchItem, TaskChange } from './contract.ts'
-import {
-  branchOf,
-  checkoutOf,
-  type Ghq,
-  messageOf,
-  prepare,
-  setupLogOf,
-  worktreeOf,
-} from './prepare.ts'
+import { branchOf, checkoutOf, type Ghq, messageOf, prepare, worktreeOf } from './prepare.ts'
 import { formatRef } from './ref.ts'
 import type { Prepared, Reservations } from './reservation.ts'
 import { bench, issue } from './schema.ts'
@@ -27,7 +15,6 @@ export type BenchDeps = {
   ghq: Ghq
   publish: (change: TaskChange) => void
   stopped: AbortSignal
-  setups: Set<Subprocess>
   reservations: Reservations
 }
 
@@ -58,7 +45,7 @@ export async function prepareBench(
   const prepared = await preparation(deps, opened.bench, found.issue)
   if ('error' in prepared) {
     throw new ORPCError('PRECONDITION_FAILED', {
-      message: `could not prepare the Bench of ${ref}: ${prepared.error}; see ${setupLogOf(deps.home, found.issue)}`,
+      message: `could not prepare the Bench of ${ref}: ${prepared.error}`,
     })
   }
   return { bench: opened.bench, created: opened.created, warnings: prepared.warnings }
@@ -168,19 +155,11 @@ function preparation(deps: BenchDeps, row: Bench, forIssue: Issue): Promise<Prep
 }
 
 async function prepareAndRecord(deps: BenchDeps, row: Bench, forIssue: Issue): Promise<Prepared> {
-  const log = setupLogOf(deps.home, forIssue)
   let prepared: Prepared
   try {
-    mkdirSync(dirname(log), { recursive: true })
-    writeFileSync(log, '')
-    prepared = { warnings: await prepare(deps, forIssue, row, log) }
+    prepared = { warnings: await prepare(deps, forIssue, row) }
   } catch (error) {
     prepared = { error: messageOf(error) }
-    try {
-      appendFileSync(log, `monica: ${prepared.error}\n`)
-    } catch {
-      // log が書けなくても、理由は setup_error に残る。
-    }
   }
   // stop() の後は DB が閉じているかもしれない。preparing の行は次の start() が失敗にする。
   if (deps.stopped.aborted) return { error: INTERRUPTED }

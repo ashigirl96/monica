@@ -31,7 +31,7 @@ review で差分に当てる規則。どれも判断が要るもので、理由�
 - 呼び手の transaction を受け取る関数は、その transaction の中で合図を出す。rollback しても購読側が読み直すだけで害は無い。
 - CLI と webview で動くコードは、cli entry が import する内側のファイルも含めて DB に触らず、procedure を呼ぶ。
 - Shell（`apps/desktop/src-tauri`）に置くのは、Tauri プロセスにしか無いもの（窓と webview の event、app の名義、AppKit）に触る処理と、端末の byte だけ。fs と process の spawn で済む処理は Backend の procedure にする。
-- Backend で動くコードの `Bun.spawn` には、ふつうは `env: process.env` を渡す。Bench の setup のように、Backend だけの env（`MONICA_*`、Claude Code の env）を子に渡さないときは、workbench の `inheritableEnv()` を渡す。lint の `monica/spawn-env` は `env` の key があるかしか見ないため。
+- Backend で動くコードの `Bun.spawn` には、ふつうは `env: process.env` を渡す。monica-ptyd のように、Backend だけの env（`MONICA_*`、Claude Code の env）を子に渡さないときは、workbench の `inheritableEnv()` を渡す。lint の `monica/spawn-env` は `env` の key があるかしか見ないため。
 - Backend が起こして待つ子 process は、打ち切ったとき・Backend が SIGTERM で止まったとき（`exit` を登録する前の起動の途中も含む）のどちらでも、子孫ごと居なくなるようにする（`apps/backend/src/login-shell-path.ts` の `detached` と group の kill）。子孫は出力を握って待ちを終わらせず、`detached` の子には Backend の死が届かないため。
 - Backend の終了（`apps/backend/src/main.ts` の `exit`）は、口と ChatAgent と Study の claude を止めてから `process.exit` まで await を挟まない。await の間に token の口が新しい質問を受けると、止めた後に claude を起こすため。
 - oRPC の client を React の state か jotai の atom に入れるときは、`() => client` の形で渡す（`packages/workbench/src/ui/workbench.tsx` の `setClient`）。client は callable な Proxy なので、そのまま渡すと updater として呼ばれるため。property を読むたびに新しい Proxy が返るので、`client.<domain>` は endpoint ごとに `useMemo` で 1 つにする（`apps/desktop/src/App.tsx`）。
@@ -68,7 +68,7 @@ review で差分に当てる規則。どれも判断が要るもので、理由�
 - system の Job を足すときは、並びを出す domain のテストに 1 本足す。`systemJobs(<d>Ledger)` から名前で取り出した `run` を最小の場面で呼び、Ledger の method に届くことを見る。method の規則のテストは method を直に呼ぶ。`run` が別の method を呼んでも、型も Job Ledger のテストも捕まえないため。
 - task のテストで `run` の後に、強制でない `close` か同じ Task の次の `run` を呼ぶときは、先に Run Launch を外す。`packages/task/src/testing.ts` の `exit` で Terminal Session を終わらせるか、`close-fixture.ts` の `startedAndEnded` で claude を Run にして終わらせる。外さないと、60 秒の間どちらも `CONFLICT` で断られる。
 - 一定の間隔で走る処理は、`setInterval` を `spyOn` で捕まえ、間隔を確かめてから callback を手で呼ぶ。決まった時間の打ち切りは、`setTimeout` を `spyOn` してその callback を捕まえ、手で呼ぶ。
-- 本番が `Date.now()` の締め切りと短い sleep の loop で待つもの（setup と Job の SIGTERM から SIGKILL までの猶予）は、待ち始めた印を見てから `setSystemTime` で時計を進め、猶予の手前でまだ待っていることも確かめる。最後に `setSystemTime()` で戻す。
+- 本番が `Date.now()` の締め切りと短い sleep の loop で待つもの（Job の SIGTERM から SIGKILL までの猶予）は、待ち始めた印を見てから `setSystemTime` で時計を進め、猶予の手前でまだ待っていることも確かめる。最後に `setSystemTime()` で戻す。
 - 子の process の timer は、子を `bun --preload <テスト用の file>` で起こし、preload で差し替える（`apps/cli/src/hook.test.ts` の `AbortSignal.timeout`）。テストの process からは spy できないため。
 - 待たずに進むことは、待てば打ち切りまで返らない場面（Exit を送らない fake の ptyd など）を作って確かめる。操作を、打ち切りより短い `Bun.sleep` と `Promise.race` する。テストの既定の timeout は打ち切りより長いことがあり、待ちを戻す変異も通すため（`packages/workbench/src/ui/store.test.ts`）。
 - 偽の GitHub に request が届くのは、`requests` を poll せず、`received(count)` を await して待つ。固定の sleep でも待たない。
@@ -78,7 +78,7 @@ review で差分に当てる規則。どれも判断が要るもので、理由�
 - 外のサービスの fake（GitHub、ghq、ptyd）は、本物が引数で変える振る舞い（GraphQL の `states` や `includeClosedPrs` など）も再現する。引数を見ない fake では、query から引数を落としてもテストが通る。
 - 打ち切りのテストは、signal に応えない fake（終わらない promise を返す）で確かめる。signal で reject する fake では、打ち切りが相手の終わりを待つ実装でも通る。本物の process は kill されても、子が stdout を握れば出力が読み終わらない。
 - テストが exec する偽の実行 file は、repo に置いた 1 つの file を指す symlink にする。sh の script を走らせる偽物（偽の `gh`、偽の login shell）は `@monica/workbench/testing` の `writeFakeExecutable`、偽の claude は `@monica/chat/testing` の `writeFakeClaude` で置く。macOS は新しく書いた実行 file を初めて exec するたびに system で 1 列に並ぶ検査（1 回 0.1〜1 秒）を挟み、並列の worker どうしが待ち合って 5 秒の timeout を落とすため。
-- 本番のコードが書いて exec する file（Tab の claude の wrapper、checkout の `setup.sh`、git hook）を直に exec するのは、その振る舞いを見るテストだけにする。setup を見ないテストの Repo には `setup.sh` を置かず、準備中の Bench が要るだけのテストは ghq の取得を pending の Promise にして止める。同じ wrapper を何度も exec するテストどうしは、home を 1 つにして使い回す（`packages/workbench/src/tab-env.test.ts`）。
+- 本番のコードが書いて exec する file（Tab の claude の wrapper、git hook）を直に exec するのは、その振る舞いを見るテストだけにする。準備中の Bench が要るテストは、ghq の取得を pending の Promise にして止める。同じ wrapper を何度も exec するテストどうしは、home を 1 つにして使い回す（`packages/workbench/src/tab-env.test.ts`）。
 - 遅いテストの timeout を、test ごとの第 3 引数で引き上げない。1 本ごとに process を起こす file は、file の先頭の `setDefaultTimeout` で引き上げる（`apps/backend/src/main.test.ts`）。
 - テストが起こした process（Backend、偽の claude、偽の ptyd）は、居なくなるのを待ってから home を消す。走査の途中で他の process が子を消すと、Bun の `rmSync({ recursive: true, force: true })` は例外を出さずに止まり、home が TMPDIR に残るため。
 - 一時 directory は `finally` で消さず、hook（`afterAll` など）で消す。timeout で打ち切られた test は `finally` を飛ばすため。
