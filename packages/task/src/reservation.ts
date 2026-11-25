@@ -13,11 +13,14 @@ import { formatRef } from './ref.ts'
 import type { RunLaunches } from './run.ts'
 import { issue } from './schema.ts'
 
+export type Prepared = { warnings: string[] } | { error: string }
+
 export type Reservations = ReturnType<typeof createReservations>
 
 // 予約は Backend が止まれば要らなくなるので、DB ではなく Backend の memory に置く。
 export function createReservations(db: Db, launches: RunLaunches) {
   const closing = new Set<number>()
+  const preparations = new Map<number, Promise<Prepared>>()
 
   function writeTask<T>(
     taskIssueId: number,
@@ -51,6 +54,7 @@ export function createReservations(db: Db, launches: RunLaunches) {
       return opened
     },
     hasRunLaunch: launches.hasRunLaunch,
+    // 準備は worktree と Bench の行を書き続けるので、走っている間は --force でも close させない。
     async whileClosing<T>(
       taskIssueId: number,
       ref: string,
@@ -58,6 +62,11 @@ export function createReservations(db: Db, launches: RunLaunches) {
       close: () => Promise<T>,
     ): Promise<T> {
       if (closing.has(taskIssueId)) throw beingClosed(ref)
+      if (preparations.has(taskIssueId)) {
+        throw new ORPCError('CONFLICT', {
+          message: `the Bench of ${ref} is being prepared; close it once the setup ends, or times out after 600s`,
+        })
+      }
       if (!force && launches.hasRunLaunch(db, taskIssueId)) {
         throw new ORPCError('CONFLICT', {
           message: `${ref} has a Run being started; close it once its claude starts, or pass --force to close anyway`,
@@ -71,6 +80,14 @@ export function createReservations(db: Db, launches: RunLaunches) {
       } finally {
         closing.delete(taskIssueId)
       }
+    },
+    preparation(taskIssueId: number): Promise<Prepared> | undefined {
+      return preparations.get(taskIssueId)
+    },
+    prepare(taskIssueId: number, start: () => Promise<Prepared>): Promise<Prepared> {
+      const started = start().finally(() => preparations.delete(taskIssueId))
+      preparations.set(taskIssueId, started)
+      return started
     },
   }
 }

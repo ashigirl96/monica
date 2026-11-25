@@ -1,11 +1,11 @@
 import { afterEach, expect, test } from 'bun:test'
-import { mkdtempSync, readFileSync, rmSync } from 'node:fs'
+import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
 import { writeFakeExecutable } from '@monica/workbench/testing'
 
-import { branchOf, defaultGhq, git } from './prepare.ts'
+import { defaultGhq, git } from './prepare.ts'
 
 const { PATH: path, GIT_TERMINAL_PROMPT: terminalPrompt } = process.env
 const dirs: string[] = []
@@ -27,16 +27,4 @@ test('git and ghq run with GIT_TERMINAL_PROMPT=0 so that they never ask on the t
 
   expect(await git(dir, 'version')).toBe('0')
   expect(await defaultGhq.root()).toBe('0')
-})
-
-// Bench は branchOf の branch で PR を照らし close の検査をするので、/tackle はその branch で作業する。
-test('/tackle works on the branch the Bench records', () => {
-  const tackle = readFileSync(
-    join(import.meta.dir, '../../../.claude/skills/tackle/SKILL.md'),
-    'utf8',
-  )
-
-  expect(tackle).toContain(
-    `git switch --no-track -c ${branchOf({ number: 0 }).replace('0', '<番号>')} origin/main`,
-  )
 })

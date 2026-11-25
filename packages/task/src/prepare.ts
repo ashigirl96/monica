@@ -1,8 +1,28 @@
-import { existsSync } from 'node:fs'
-import { basename, dirname, join } from 'node:path'
+import {
+  appendFileSync,
+  closeSync,
+  existsSync,
+  lstatSync,
+  mkdirSync,
+  openSync,
+  readFileSync,
+  realpathSync,
+  symlinkSync,
+  writeFileSync,
+} from 'node:fs'
+import { dirname, join } from 'node:path'
+
+import { inheritableEnv } from '@monica/workbench/server'
+import type { Subprocess } from 'bun'
 
 import { oneLine } from './github.ts'
 import type { IssueRef } from './ref.ts'
+import type { bench } from './schema.ts'
+
+const SETUP_TIMEOUT_MS = 600_000
+const SETUP_KILL_GRACE_MS = 2000
+const SETUP_SCRIPT = '.monica/setup.sh'
+const CLAUDE_LOCAL = 'CLAUDE.local.md'
 
 export type Ghq = {
   root(): Promise<string>
@@ -16,21 +36,14 @@ export const defaultGhq: Ghq = {
   },
 }
 
-// `claude --worktree <name>` の名前。置き場と branch は Claude Code がこの名前から決める。
-export const worktreeNameOf = ({ number }: Pick<IssueRef, 'number'>) => `issue-${number}`
+export const branchOf = ({ number }: IssueRef) => `issue-${number}`
 
-// Claude Code が branch の名前を `worktree-<name>` に固定している。
-export const branchOf = (ref: Pick<IssueRef, 'number'>) => `worktree-${worktreeNameOf(ref)}`
+export const worktreeOf = (home: string, ref: IssueRef) =>
+  join(home, 'worktrees', ref.repo, branchOf(ref))
 
-export const worktreeOf = (checkout: string, ref: Pick<IssueRef, 'number'>) =>
-  join(checkout, '.claude', 'worktrees', worktreeNameOf(ref))
-
-/** `worktreeOf` の形の path なら、その checkout を返す。 */
-export function checkoutOfWorktree(path: string): string | null {
-  const worktrees = dirname(path)
-  if (basename(worktrees) !== 'worktrees' || basename(dirname(worktrees)) !== '.claude') return null
-  return dirname(dirname(worktrees))
-}
+// worktree の中に書くと、worktree に untracked file が残る。
+export const setupLogOf = (home: string, ref: IssueRef) =>
+  join(home, 'logs/setup', ref.repo, `${branchOf(ref)}.log`)
 
 export const checkoutUnder = (ghqRoot: string, repo: string) => join(ghqRoot, 'github.com', repo)
 
@@ -38,11 +51,196 @@ export async function checkoutOf(ghq: Ghq, repo: string): Promise<string> {
   return checkoutUnder(await ghq.root(), repo)
 }
 
-export async function clone(ghq: Ghq, repo: string, checkout: string) {
+/** 失敗は 1 行の理由を message に持つ Error で投げる。返すのは output の `warnings`。 */
+export async function prepare(
+  deps: { home: string; ghq: Ghq; setups: Set<Subprocess> },
+  ref: IssueRef,
+  { mode, cwd }: Pick<typeof bench.$inferSelect, 'mode' | 'cwd'>,
+  log: string,
+): Promise<string[]> {
+  if (mode === 'in_place') {
+    await clone(deps.ghq, ref.repo, cwd)
+    return shareClaudeLocal(cwd)
+  }
+  let warnings: string[] = []
+  // repo が改名されても、作った worktree は作った時の checkout に登録されているので、checkout を引き直さない。
+  if (!(await isLinkedWorktree(cwd))) {
+    // cwd は作った時の名前から決めたので、今の名前と食い違えば、元の branch は改名前の checkout にしか無い。
+    if (cwd !== worktreeOf(deps.home, ref)) {
+      throw new Error(
+        `the worktree ${cwd} is gone and the repo has been renamed to ${ref.repo} since, so close and reopen the Task to make the Bench again`,
+      )
+    }
+    const checkout = await checkoutOf(deps.ghq, ref.repo)
+    await clone(deps.ghq, ref.repo, checkout)
+    warnings = await addWorktree(checkout, cwd, branchOf(ref))
+  }
+  warnings.push(...(await shareClaudeLocal(cwd)))
+  await runSetup(cwd, log, deps.setups)
+  return warnings
+}
+
+export function killSetups(setups: Set<Subprocess>) {
+  for (const setup of setups) signalGroup(setup.pid, 'SIGKILL')
+}
+
+async function clone(ghq: Ghq, repo: string, checkout: string) {
   if (existsSync(checkout)) return
   await ghq.get(repo)
   // ghq は repo の今の名前の場所に clone するので、改名の前に決めた path には来ない。
   if (!existsSync(checkout)) throw new Error(`ghq get ${repo} did not clone it to ${checkout}`)
+}
+
+async function isLinkedWorktree(path: string): Promise<boolean> {
+  if (!existsSync(path)) return false
+  const answer = await git(
+    path,
+    'rev-parse',
+    '--path-format=absolute',
+    '--show-toplevel',
+    '--git-dir',
+    '--git-common-dir',
+  ).catch(() => null)
+  const [toplevel, gitDir, commonDir] = answer?.split('\n') ?? []
+  // git は path を realpath で答える。main の checkout では git dir と common dir が同じになる。
+  return toplevel === realpathSync(path) && gitDir !== commonDir
+}
+
+async function addWorktree(checkout: string, path: string, branch: string): Promise<string[]> {
+  // 消した worktree の登録が残っていると、同じ path にも同じ branch にも add できない。
+  // prune は外付けの disk の上の worktree のような、monica と関係の無い登録まで外すので使わない。
+  if (!existsSync(path)) await succeeds(git(checkout, 'worktree', 'remove', path))
+  if (await succeeds(git(checkout, 'rev-parse', '--verify', '--quiet', `refs/heads/${branch}`))) {
+    await git(checkout, 'worktree', 'add', path, branch)
+    return []
+  }
+  const base = await defaultBranch(checkout)
+  const warnings: string[] = []
+  // Bench を開く操作に network を要求しないので、fetch できなければ手元の origin/<default> から作る。
+  try {
+    await git(checkout, 'fetch', 'origin', base)
+  } catch (error) {
+    warnings.push(
+      `could not fetch origin/${base}, so the worktree starts from the local origin/${base}: ${messageOf(error)}`,
+    )
+  }
+  await git(checkout, 'worktree', 'add', '-b', branch, path, `origin/${base}`)
+  return warnings
+}
+
+// CLAUDE.local.md は追跡しないので、worktree には checkout のものを symlink で見せ、教訓を 1 か所に残す。
+// worktree を作った後なので、失敗しても Bench を failed にせず warnings に載せる。
+async function shareClaudeLocal(cwd: string): Promise<string[]> {
+  // 直下に .git が無い directory は git の外か別の repo の下で、そこに書くと関係の無い repo を汚す。
+  if (!existsSync(join(cwd, '.git'))) return []
+  try {
+    const commonDir = await git(cwd, 'rev-parse', '--path-format=absolute', '--git-common-dir')
+    const checkout = dirname(commonDir)
+    const checkoutFile = join(checkout, CLAUDE_LOCAL)
+    if (!existsSync(checkoutFile)) writeFileSync(checkoutFile, '')
+    const link = join(cwd, CLAUDE_LOCAL)
+    // 既にある file や link は、ユーザーが置いたものとして上書きしない。
+    if (realpathSync(cwd) !== checkout && !lstatSync(link, { throwIfNoEntry: false })) {
+      symlinkSync(checkoutFile, link)
+    }
+    // .gitignore は branch ごとに違いうるので、checkout と worktree の両方で見る。
+    // 追跡している file は ignore されないが status にも出ないので、check-ignore ではなく status で見る。
+    const listed = async () => {
+      const statuses = await Promise.all(
+        [...new Set([checkout, cwd])].map((dir) =>
+          // status.showUntrackedFiles=no の設定でも untracked の file を出させる。
+          git(dir, 'status', '--porcelain', '--untracked-files=all', '--', CLAUDE_LOCAL),
+        ),
+      )
+      return statuses.some((status) => status !== '')
+    }
+    if (!(await listed())) return []
+    excludeFromGit(commonDir, CLAUDE_LOCAL)
+    // .gitignore の `!CLAUDE.local.md` は info/exclude より強いので、足しても ignore されないことがある。
+    return (await listed()) ? [`${CLAUDE_LOCAL} is not ignored by git, so git status lists it`] : []
+  } catch (error) {
+    return [`could not share ${CLAUDE_LOCAL} with the checkout: ${messageOf(error)}`]
+  }
+}
+
+function excludeFromGit(commonDir: string, pattern: string) {
+  const exclude = join(commonDir, 'info/exclude')
+  mkdirSync(dirname(exclude), { recursive: true })
+  const current = existsSync(exclude) ? readFileSync(exclude, 'utf8') : ''
+  const separator = current === '' || current.endsWith('\n') ? '' : '\n'
+  appendFileSync(exclude, `${separator}${pattern}\n`)
+}
+
+async function defaultBranch(checkout: string): Promise<string> {
+  const originHead = () => git(checkout, 'symbolic-ref', '--short', 'refs/remotes/origin/HEAD')
+  let head = await originHead().catch(() => null)
+  if (head === null) {
+    await succeeds(git(checkout, 'remote', 'set-head', 'origin', '--auto'))
+    head = await originHead().catch(() => null)
+  }
+  if (!head?.startsWith('origin/')) throw new Error('could not find the default branch of origin')
+  return head.slice('origin/'.length)
+}
+
+async function runSetup(worktree: string, log: string, setups: Set<Subprocess>) {
+  const script = join(worktree, SETUP_SCRIPT)
+  if (!existsSync(script)) {
+    appendFileSync(log, `monica: no ${SETUP_SCRIPT}, so there is nothing to set up\n`)
+    return
+  }
+  const output = openSync(log, 'a')
+  let setup: Subprocess
+  try {
+    // 自分の process group で起こし、timeout と Backend の終了で子孫ごと止める。
+    setup = Bun.spawn([script], {
+      cwd: worktree,
+      // Tab の外で動くので、MONICA_HOME も付け直さない。
+      env: inheritableEnv(),
+      stdin: 'ignore',
+      stdout: output,
+      stderr: output,
+      detached: true,
+    })
+  } catch (error) {
+    throw new Error(`spawn failed: ${messageOf(error)}`, { cause: error })
+  } finally {
+    closeSync(output)
+  }
+  setups.add(setup)
+  try {
+    let timer: ReturnType<typeof setTimeout> | undefined
+    const timedOut = new Promise<null>((resolve) => {
+      timer = setTimeout(() => resolve(null), SETUP_TIMEOUT_MS)
+    })
+    const code = await Promise.race([setup.exited, timedOut])
+    clearTimeout(timer)
+    if (code === null) {
+      await stopGroup(setup)
+      throw new Error(`timed out after ${SETUP_TIMEOUT_MS / 1000}s`)
+    }
+    if (setup.signalCode) throw new Error(`killed by ${setup.signalCode}`)
+    if (code !== 0) throw new Error(`exit ${code}`)
+  } finally {
+    setups.delete(setup)
+  }
+}
+
+// script が先に抜けても、SIGTERM を受けて後始末をしている子孫には猶予を残す。
+async function stopGroup(setup: Subprocess) {
+  signalGroup(setup.pid, 'SIGTERM')
+  const deadline = Date.now() + SETUP_KILL_GRACE_MS
+  while (Date.now() < deadline && signalGroup(setup.pid, 0)) await Bun.sleep(50)
+  signalGroup(setup.pid, 'SIGKILL')
+  await setup.exited
+}
+
+/** group に誰か居れば true。 */
+function signalGroup(pid: number, signal: NodeJS.Signals | 0): boolean {
+  try {
+    return process.kill(-pid, signal)
+  } catch {
+    return false
+  }
 }
 
 export function git(cwd: string, ...args: string[]): Promise<string> {
@@ -71,7 +269,7 @@ async function command(
   return stdout.trim()
 }
 
-// Backend が端末から起こされていると、git は認証を /dev/tty で尋ねて止まる。
+// Backend が端末から起こされていると、git は認証を /dev/tty で尋ねて準備が止まる。
 function spawned(argv: string[], stdin: 'ignore' | ReadableStream<Uint8Array>) {
   return Bun.spawn(argv, {
     env: { ...process.env, GIT_TERMINAL_PROMPT: '0' },

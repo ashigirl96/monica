@@ -206,7 +206,7 @@ test('a clicked notification of a Tab in a Pinned Runspace leaves the Tile that 
       runspace('p', LIB, { pinned: [0] }),
       runspace('b', APP, { tabs: 2, pinned: [0], owned: true }),
     ],
-    { benches: { b: { repo: 'acme/app', number: 1, title: 'Ship it' } } },
+    { benches: { b: { repo: 'acme/app', number: 1, title: 'Ship it', setup: null } } },
   )
   const shown = run(world, [row('l')]).state
 
@@ -247,7 +247,7 @@ test('cycling Runspaces skips the rows of a collapsed section, and from an activ
   const world = worldOf(
     [runspace('b', APP, { owned: true }), runspace('a1', APP), runspace('a2', APP)],
     {
-      benches: { b: { repo: 'acme/app', number: 1, title: 'Ship it' } },
+      benches: { b: { repo: 'acme/app', number: 1, title: 'Ship it', setup: null } },
       collapsed: ['acme/app:bench'],
     },
   )
@@ -438,8 +438,8 @@ test('closing the active Runspace at the bottom of its Tile brings up the row ju
 
 test('closing the last row of the Bench section brings up the first row of the Runspaces section under the same Tile, even when that section is collapsed', () => {
   const benches = {
-    b1: { repo: 'acme/app', number: 1, title: 'Ship it' },
-    b2: { repo: 'acme/app', number: 2, title: 'Fix it' },
+    b1: { repo: 'acme/app', number: 1, title: 'Ship it', setup: null },
+    b2: { repo: 'acme/app', number: 2, title: 'Fix it', setup: null },
   }
   const rows = [
     runspace('b1', APP, { owned: true }),

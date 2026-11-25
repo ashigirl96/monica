@@ -4,6 +4,7 @@ import { type AgentDot, type AgentTally, tallyAgentDots } from './agent-dot.ts'
 import {
   type AssignedTile,
   type BenchLabel,
+  type BenchSetup,
   isCollapsed,
   OUTSIDE,
   type SectionKind,
@@ -180,6 +181,7 @@ export function sectionPeersOf(sidebar: Sidebar, runspaceId: string): string[] {
 export type ListedIn = 'pinned' | 'repo' | 'outside'
 
 export type RowMeta = {
+  setup: BenchSetup | null
   tallies: AgentTally[]
   dot: AgentDot | null
   info: string
@@ -190,6 +192,7 @@ export type RowMeta = {
 }
 
 export function rowMetaOf(row: RunspaceRow, listedIn: ListedIn): RowMeta | null {
+  const setup = row.bench?.setup ?? null
   const tallies = row.agentTallies
   const dot = row.agentDot
   const info = row.bench ? row.terminalTitle : (row.branch ?? '')
@@ -203,8 +206,9 @@ export function rowMetaOf(row: RunspaceRow, listedIn: ListedIn): RowMeta | null 
   } else if (listedIn !== 'repo' && !row.titleIsPath) {
     where = row.path
   }
-  if (tallies.length === 0 && !dot && !info && !where) return null
+  if (!setup && tallies.length === 0 && !dot && !info && !where) return null
   return {
+    setup,
     tallies,
     dot,
     info,

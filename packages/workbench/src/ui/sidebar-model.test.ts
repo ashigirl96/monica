@@ -141,7 +141,7 @@ test('collapsing a section hides its rows and leaves their count and unread Tabs
     runspaceIn('a', APP, { alsoIn: [APP] }),
     runspaceIn('b', APP),
   ]
-  const label: BenchLabel = { repo: 'acme/app', number: 1, title: 'Ship it' }
+  const label: BenchLabel = { repo: 'acme/app', number: 1, title: 'Ship it', setup: null }
   const benchLabelOf = (id: string) => (id === 'shipIt' ? label : null)
   const unread = new Set(['ts-a.0', 'ts-a.1'])
   const unreadOf = (id: string) => unread.has(id)
@@ -225,7 +225,7 @@ test("a Bench's row reads its Issue's title, then its terminal's title with Clau
   const { db, workbenchLedger, client, store } = bench()
   const runspaceId = db.transaction((tx) => workbenchLedger.createRunspace(tx, { cwd: '/work' }))
   const tab = await client.tab.open({ runspaceId, ...size })
-  const label = { repo: 'acme/app', number: 12, title: 'Ship it' }
+  const label = { repo: 'acme/app', number: 12, title: 'Ship it', setup: null }
   store.set(benchLabelOfAtom, () => (id: string) => (id === runspaceId ? label : null))
   await store.set(reloadAtom)
 
@@ -243,7 +243,7 @@ test("a Bench's second line shows the dot and the terminal's title of the Tab wh
   const runspaceId = db.transaction((tx) => workbenchLedger.createRunspace(tx, { cwd: '/work' }))
   const front = await client.tab.open({ runspaceId, ...size })
   const behind = await client.tab.open({ runspaceId, ...size })
-  const label = { repo: 'acme/app', number: 12, title: 'Ship it' }
+  const label = { repo: 'acme/app', number: 12, title: 'Ship it', setup: null }
   store.set(benchLabelOfAtom, () => (id: string) => (id === runspaceId ? label : null))
   await store.set(reloadAtom)
   store.set(activateRunspaceAtom, runspaceId)
@@ -279,7 +279,7 @@ function benchRowWith(dots: (AgentDot | null)[], activeIndex = 0): RunspaceRow |
     pinned: false,
   }))
   const runspaces = [{ id: 'rs-bench', cwd: '/work', sortOrder: 0, owned: true, tabs }]
-  const label = { repo: 'acme/app', number: 12, title: 'Ship it' }
+  const label = { repo: 'acme/app', number: 12, title: 'Ship it', setup: null }
   const sidebar = buildSidebar({
     runspaces,
     assignment: assignTiles({ runspaces, places: {}, benchLabelOf: () => label }),
@@ -325,14 +325,16 @@ test("a Bench with no claude shows no dot and takes its terminal's title from th
   expect([row?.agentDot, row?.terminalTitle]).toEqual([null, 'claude 1'])
 })
 
-test('a Bench with no Tab yet has only its number on its second line', async () => {
+test('a Bench being prepared, with no Tab yet, has only the setup and its number on its second line', async () => {
   const { db, workbenchLedger, store } = bench()
   const runspaceId = db.transaction((tx) => workbenchLedger.createRunspace(tx, { cwd: '/work' }))
-  const label = { repo: 'acme/app', number: 12, title: 'Ship it' }
+  const preparing = { text: 'preparing', error: false }
+  const label = { repo: 'acme/app', number: 12, title: 'Ship it', setup: preparing }
   store.set(benchLabelOfAtom, () => (id: string) => (id === runspaceId ? label : null))
   await store.set(reloadAtom)
 
   expect(secondLineOf(store.get(sidebarAtom), runspaceId)).toEqual({
+    setup: preparing,
     tallies: [],
     dot: null,
     info: '',
@@ -485,7 +487,7 @@ test("a Runspace whose shell moves into another Repo goes to the bottom of the r
   const inLib = await client.runspace.create({ cwd: lib.checkout, ...size })
   // Bench は動かないので、Repo が初めて引けたときに動かすと、Bench が前へ出て Tile の順が変わる。
   const shipIt = db.transaction((tx) => workbenchLedger.createRunspace(tx, { cwd: lib.worktree }))
-  const label: BenchLabel = { repo: 'acme/lib', number: 1, title: 'Ship it' }
+  const label: BenchLabel = { repo: 'acme/lib', number: 1, title: 'Ship it', setup: null }
   store.set(benchLabelOfAtom, () => (runspaceId: string) => (runspaceId === shipIt ? label : null))
   await store.set(reloadAtom)
   await untilListed(store, 'acme/lib', [inLib.runspaceId])
@@ -532,7 +534,7 @@ test('jump hints number the Pinned rows and the rows shown under the selected Ti
   const listed = await client.runspace.create({ cwd: app.checkout, ...size })
   await client.runspace.create({ cwd: lib.checkout, ...size })
   const benchId = db.transaction((tx) => workbenchLedger.createRunspace(tx, { cwd: app.checkout }))
-  const label = { repo: 'acme/app', number: 1, title: 'Ship it' }
+  const label = { repo: 'acme/app', number: 1, title: 'Ship it', setup: null }
   store.set(benchLabelOfAtom, () => (id: string) => (id === benchId ? label : null))
   await store.set(reloadAtom)
   await untilListed(store, 'acme/app', [listed.runspaceId])
@@ -572,7 +574,7 @@ const withClaudes: RunspaceRow = {
 const benchRow: RunspaceRow = {
   ...shell,
   agentDot: 'question',
-  bench: { repo: 'acme/app', number: 12, title: 'Ship it' },
+  bench: { repo: 'acme/app', number: 12, title: 'Ship it', setup: null },
   title: 'Ship it',
 }
 
@@ -589,6 +591,12 @@ test.each([
     benchRow,
     'repo',
     { tallies: [], dot: 'question', info: 'Read the tile', where: '#12', chip: null },
+  ],
+  [
+    'a Bench being prepared',
+    { ...benchRow, bench: { ...benchRow.bench!, setup: { text: 'preparing', error: false } } },
+    'repo',
+    { setup: { text: 'preparing', error: false }, where: '#12' },
   ],
   [
     'a row in no Repo',

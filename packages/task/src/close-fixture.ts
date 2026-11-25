@@ -19,13 +19,12 @@ export async function tracked({ origin }: { origin?: Files } = {}) {
   fixture.taskLedger.start()
   fixture.github.issue(ref, { title: 'Ship it' })
   await fixture.track(ref)
-  return { ...fixture, cwd: join(fixture.ghq.checkout('acme/app'), '.claude/worktrees/issue-12') }
+  return { ...fixture, cwd: join(fixture.home, 'worktrees/acme/app/issue-12') }
 }
 
 export async function withWorktreeBench(files: Files = {}) {
   const fixture = await tracked({ origin: files })
   const { terminalSessionId } = await fixture.client.run({ ref })
-  fixture.ghq.claudeWorktree('acme/app', 12)
   await startedAndEnded(fixture, terminalSessionId)
   return { ...fixture, claudeTab: terminalSessionId, runspaceId: benchOf(fixture)!.runspaceId }
 }

@@ -1,5 +1,4 @@
 import {
-  appendFileSync,
   chmodSync,
   existsSync,
   mkdirSync,
@@ -10,7 +9,7 @@ import {
 } from 'node:fs'
 import { dirname, join } from 'node:path'
 
-import { branchOf, type Ghq, worktreeOf } from './prepare.ts'
+import type { Ghq } from './prepare.ts'
 
 export type Files = Record<string, { content: string | Uint8Array; mode?: number }>
 
@@ -144,24 +143,6 @@ export function fakeGhq(scratch: string) {
     gets,
     checkout,
     clone,
-    /** `claude --worktree issue-<n>` の代わりに、Claude Code と同じ置き場と branch で worktree を作って lock する。 */
-    claudeWorktree(repo: string, number: number) {
-      const path = worktreeOf(checkout(repo), { number })
-      // 手元では global の gitignore が .claude/worktrees/ を無視させ、checkout の git add に worktree を入れない。
-      appendFileSync(join(checkout(repo), '.git/info/exclude'), '.claude/worktrees/\n')
-      git(
-        checkout(repo),
-        'worktree',
-        'add',
-        '--quiet',
-        '-b',
-        branchOf({ number }),
-        path,
-        'origin/main',
-      )
-      git(checkout(repo), 'worktree', 'lock', path)
-      return path
-    },
     /** default branch が main の origin を作り、最初の commit に `files` を入れる。 */
     origin(repo: string, files: Files = {}) {
       const path = join(origins, repo)

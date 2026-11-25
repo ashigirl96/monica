@@ -30,7 +30,9 @@ export type Shown = {
   label: 'Close' | 'Close anyway' | 'Click again to discard changes'
 }
 
+// close は準備中の Bench を CONFLICT で断るので、準備中には何も出さない。
 export function shownOf(state: BenchClose, bench: BenchItem): Shown | null {
+  if (bench.setupState === 'preparing') return null
   switch (state.phase) {
     case 'idle':
       return { reasons: null, label: 'Close' }
@@ -107,7 +109,7 @@ async function close(
   let reasons = remembered(benchCloseOf(store, runspaceId))
   try {
     const bench = (await client.bench.list()).find((b) => b.runspaceId === runspaceId)
-    if (!bench) {
+    if (!bench || bench.setupState === 'preparing') {
       settle(store, runspaceId, reasons)
       return
     }
