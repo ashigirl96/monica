@@ -213,7 +213,7 @@ async function launch(
     opening = await newRun(deps, starting.found, inPlace, starting.warnings, rules.fork)
   }
   return openRun(deps, opening, { prompt: typed, tracked: admitted.tracked }, (tx, current) => {
-    // GitHub と ghq を待つ間に、この Task か spec の Run が起動しうる。
+    // GitHub と Bench の準備を待つ間に、この Task か spec の Run が起動しうる。
     const changed = recheck(tx, deps.reservations, current, facts, launching, rules)
     if (changed) throw new Refused(changed)
   })

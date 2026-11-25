@@ -34,16 +34,23 @@ const unobserved = (id: string, minute: number) => session(id, 'unobserved', min
 const ended = (id: string, minute: number) => session(id, 'ended', minute)
 
 const open = { closedAt: null }
-const withBench = true
+const ready = 'ready' as const
 
 test.each<
-  [string, { closedAt: Date | null }, 'open' | 'closed', boolean, RunAgentSession[], DisplayState]
+  [
+    string,
+    { closedAt: Date | null },
+    'open' | 'closed',
+    'preparing' | 'ready' | 'failed' | null,
+    RunAgentSession[],
+    DisplayState,
+  ]
 >([
   [
     'a closed Task, even with a live Run',
     { closedAt: at(0) },
     'open',
-    withBench,
+    ready,
     [idle('a', 1)],
     {
       state: 'closed',
@@ -53,7 +60,7 @@ test.each<
     'a live Run before a closed Issue',
     open,
     'closed',
-    withBench,
+    ready,
     [idle('a', 1)],
     {
       state: 'waiting',
@@ -66,19 +73,21 @@ test.each<
     'a closed Issue with no live Run',
     open,
     'closed',
-    withBench,
+    ready,
     [ended('a', 1)],
     {
       state: 'issue_closed',
     },
   ],
-  ['no Bench', open, 'open', false, [], { state: 'not_started' }],
-  ['a Bench whose Runs all ended', open, 'open', withBench, [ended('a', 1)], { state: 'ended' }],
+  ['no Bench', open, 'open', null, [], { state: 'not_started' }],
+  ['a Bench preparing', open, 'open', 'preparing', [], { state: 'preparing' }],
+  ['a Bench that failed to prepare', open, 'open', 'failed', [], { state: 'setup_failed' }],
+  ['a ready Bench whose Runs all ended', open, 'open', ready, [ended('a', 1)], { state: 'ended' }],
   [
     'a running Run',
     open,
     'open',
-    withBench,
+    ready,
     [running('a', 2)],
     {
       state: 'running',
@@ -90,7 +99,7 @@ test.each<
     'an unobserved Run',
     open,
     'open',
-    withBench,
+    ready,
     [unobserved('a', 2)],
     {
       state: 'unobserved',
@@ -102,7 +111,7 @@ test.each<
     'a Run waiting for permission names the tool',
     open,
     'open',
-    withBench,
+    ready,
     [permission('a', 2, 'Bash')],
     {
       state: 'waiting',
@@ -116,7 +125,7 @@ test.each<
     'a Run waiting on an error names its type',
     open,
     'open',
-    withBench,
+    ready,
     [error('a', 2, 'rate_limit')],
     {
       state: 'waiting',
@@ -130,7 +139,7 @@ test.each<
     'waiting before unobserved before running',
     open,
     'open',
-    withBench,
+    ready,
     [running('run', 1), unobserved('unobserved', 2), idle('idle', 3), ended('ended', 0)],
     {
       state: 'waiting',
@@ -147,7 +156,7 @@ test.each<
     'unobserved before running',
     open,
     'open',
-    withBench,
+    ready,
     [running('run', 1), unobserved('unobserved', 2)],
     {
       state: 'unobserved',
@@ -162,7 +171,7 @@ test.each<
     'a question or permission before an error before idle',
     open,
     'open',
-    withBench,
+    ready,
     [idle('idle', 1), error('error', 2, 'server_error'), permission('permission', 3, 'Edit')],
     {
       state: 'waiting',
@@ -180,7 +189,7 @@ test.each<
     'a question and a permission rank the same, the longer wait first',
     open,
     'open',
-    withBench,
+    ready,
     [permission('permission', 5, 'Bash'), question('question', 4)],
     {
       state: 'waiting',
@@ -196,7 +205,7 @@ test.each<
     'the same rank puts the longer wait first',
     open,
     'open',
-    withBench,
+    ready,
     [idle('later', 6), idle('earlier', 5)],
     {
       state: 'waiting',
@@ -208,6 +217,7 @@ test.each<
       ],
     },
   ],
-])('%s', (_, task, issueState, hasBench, runs, expected) => {
-  expect(displayState(task, { state: issueState }, hasBench, runs)).toEqual(expected)
+])('%s', (_, task, issueState, setupState, runs, expected) => {
+  const bench = setupState === null ? null : { setupState }
+  expect(displayState(task, { state: issueState }, bench, runs)).toEqual(expected)
 })

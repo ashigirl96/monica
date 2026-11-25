@@ -1,4 +1,4 @@
-import { afterEach, expect, mock, setSystemTime, test } from 'bun:test'
+import { afterEach, expect, mock, setSystemTime, spyOn, test } from 'bun:test'
 import { mkdirSync } from 'node:fs'
 
 import { tab } from '@monica/workbench/schema'
@@ -138,19 +138,23 @@ test('a run whose claude neither becomes a Run nor ends stops refusing the next 
 
 test('a run refused in the transaction that would open its Tab leaves no reservation, so the next run passes once the Run that refused it ends', async () => {
   const fixture = setup()
-  const { client, ghq, github, track } = fixture
+  const { client, ghq, track } = fixture
   fixture.taskLedger.start()
-  github.issue(ref, { title: 'Ship it', labels: ['ready-for-agent'] })
+  fixture.github.issue(ref, { title: 'Ship it', labels: ['ready-for-agent'] })
   await track(ref)
-  mkdirSync(ghq.checkout('acme/app'), { recursive: true })
-  const other = await fixture.openTabOutsideBench()
-  await client.attach({ ref, terminalSessionId: other })
-  const sent = github.requests.length
-  const release = github.hold()
-  const running = failure(client.run({ ref }))
-  await github.received(sent + 1)
+  const asked = Promise.withResolvers<void>()
+  const cloned = Promise.withResolvers<void>()
+  spyOn(ghq.client, 'get').mockImplementation(() => {
+    asked.resolve()
+    return cloned.promise
+  })
+  const running = failure(client.run({ ref, inPlace: true }))
+  await asked.promise
+  const [preparing] = await client.bench.list()
+  const other = fixture.openTab(preparing!.runspaceId)
   await fixture.hook(other, 's-1', 'SessionStart', { source: 'startup' })
-  release()
+  mkdirSync(ghq.checkout('acme/app'), { recursive: true })
+  cloned.resolve()
   expect((await running).code).toBe('CONFLICT')
 
   await fixture.hook(other, 's-1', 'SessionEnd', { reason: 'exit' })

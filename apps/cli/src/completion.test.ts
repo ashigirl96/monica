@@ -27,7 +27,7 @@ test('__complete lists the subcommands with their descriptions for zsh', async (
     stdout:
       'sync:Copy the Issues of every open Task, or of one Task given its ref, from GitHub\n' +
       'list:List open Tasks in the order they were tracked\n' +
-      'run:Start claude with a first prompt (/tackle if left out) in a new Tab of the Bench of an open Task, tracking the Issue and opening the Bench first, or resume the last claude of the Bench once it has ended\n' +
+      'run:Start claude with a first prompt (/tackle if left out) in a new Tab of the Bench of an open Task, tracking the Issue and opening and preparing the Bench first, or resume the last claude of the Bench once it has ended\n' +
       'current:Show the Task of the Tab this runs in\n' +
       "attach:Move the Tab this runs in into the Bench of an open Task, tracking the Issue when it is not tracked and opening the Bench in place when it has none, and make the Tab's claude a Run of the Task\n" +
       'close:Close a Task and take down its Bench: the worktree, the branch issue-n, the Runspace and its Tabs, all but the Tab this runs in unless --close-caller\n' +
@@ -42,7 +42,7 @@ test('__complete lists the options of the command and of its parents for a word 
   const result = await monica(['__complete', '--', 'task', 'run', '-'], () => null)
 
   expect(result.stdout).toBe(
-    "--in-place:use the Repo's checkout as the cwd, with no worktree\n" +
+    "--in-place:use the Repo's checkout as the cwd, with no worktree and no setup\n" +
       '--force:start a new Run even when the Issue has open Blockers\n' +
       '--fork:fork this Agent Session into the new claude instead of starting a new conversation\n' +
       '--help:display help for command\n' +

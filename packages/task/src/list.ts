@@ -31,6 +31,6 @@ export function listTasks(db: Db, { closed }: { closed: boolean }): ListItem[] {
     issueState: row.issue.state,
     blockers: openBlockers.filter((b) => b.issueId === row.issue.id).map(formatRef),
     cwd: row.bench?.cwd ?? null,
-    displayState: displayState(row.task, row.issue, row.bench !== null, runsOf(row.issue.id)),
+    displayState: displayState(row.task, row.issue, row.bench, runsOf(row.issue.id)),
   }))
 }

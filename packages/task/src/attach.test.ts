@@ -1,5 +1,6 @@
 import { afterEach, expect, mock, spyOn, test } from 'bun:test'
-import { mkdirSync } from 'node:fs'
+import { existsSync, mkdirSync, writeFileSync } from 'node:fs'
+import { join } from 'node:path'
 
 import { tab } from '@monica/workbench/schema'
 import { eq } from 'drizzle-orm'
@@ -147,9 +148,12 @@ test('attach brings back a Tab whose claude is already a Run of the Task without
   expect(runsOf(fixture)).toEqual([{ number: 12, agentSessionId: 's-1', origin: 'started' }])
 })
 
-test("attach opens the Bench of a Task that has none in place on the Repo's checkout, without a clone", async () => {
+test("attach opens the Bench of a Task that has none in place on the Repo's checkout, ready and without a setup or a clone", async () => {
   const fixture = await trackedWithoutBench()
   mkdirSync(fixture.ghq.checkout('acme/app'), { recursive: true })
+  const setupScript = join(fixture.ghq.checkout('acme/app'), '.monica/setup.sh')
+  mkdirSync(join(setupScript, '..'))
+  writeFileSync(setupScript, '#!/bin/sh\ntouch .setup-ran\n', { mode: 0o755 })
   const outside = await fixture.openTabOutsideBench()
 
   const output = await fixture.client.attach({ ref, terminalSessionId: outside })
@@ -159,8 +163,10 @@ test("attach opens the Bench of a Task that has none in place on the Repo's chec
     runspaceId: runspaceOfTab(fixture, outside),
     cwd: fixture.ghq.checkout('acme/app'),
     mode: 'in_place',
+    setupState: 'ready',
   })
   expect(fixture.ghq.gets).toEqual([])
+  expect(existsSync(join(fixture.ghq.checkout('acme/app'), '.setup-ran'))).toBe(false)
   expect((await fixture.client.list({})).tasks[0]!.displayState).toEqual({ state: 'ended' })
 })
 

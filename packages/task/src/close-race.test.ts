@@ -89,7 +89,6 @@ test('a run --in-place that waited on ghq while the Task was closed opens no Ben
   const asked = Promise.withResolvers<void>()
   const answer = Promise.withResolvers<string>()
   const root = await ghq.client.root()
-  mkdirSync(ghq.checkout('acme/app'), { recursive: true })
   spyOn(ghq.client, 'root').mockImplementation(() => {
     asked.resolve()
     return answer.promise
@@ -116,7 +115,7 @@ test('a second close while the first is under way is refused', async () => {
   expect(await closing).toMatchObject({ removedWorktree: fixture.cwd })
 })
 
-// git の reference-transaction hook で、close の `branch -D worktree-issue-12` を release の file ができるまで止める。
+// git の reference-transaction hook で、close の `branch -D issue-12` を release の file ができるまで止める。
 function pauseBranchDeletion(fixture: Fixture) {
   const marks = join(fixture.home, 'pause')
   mkdirSync(marks)
@@ -128,7 +127,7 @@ function pauseBranchDeletion(fixture: Fixture) {
     [
       '#!/bin/sh',
       '[ "$1" = prepared ] || exit 0',
-      'grep -q refs/heads/worktree-issue-12 || exit 0',
+      'grep -q refs/heads/issue-12 || exit 0',
       `touch '${started}'`,
       `while [ ! -e '${release}' ]; do sleep 0.02; done`,
     ].join('\n'),
@@ -152,7 +151,7 @@ test("a claude that becomes a Run while close removes the worktree keeps its Tab
   expect(output).toEqual({
     ref,
     removedWorktree: fixture.cwd,
-    deletedBranch: 'worktree-issue-12',
+    deletedBranch: 'issue-12',
     spared: false,
     warnings: ['claude s-1 became a live Run while closing, so its Tab stays'],
   })
@@ -204,14 +203,13 @@ test('close returns before ptyd answers the Terminate of the Bench, and the Task
   await fixture.client.close({ ref })
   const output = await fixture.client.reopen({ ref })
   await fixture.client.run({ ref })
-  fixture.ghq.claudeWorktree('acme/app', 12)
   finish()
 
   expect(output).toMatchObject({ ref })
   expect(await terminatedAfterClose(fixture, 1)).toEqual([fixture.claudeTab])
   expect(trashed(fixture)).toEqual([{ tree: true, mark: false }])
-  expect(benchOf(fixture)).toMatchObject({ cwd: fixture.cwd, branch: 'worktree-issue-12' })
-  expect(git(fixture.cwd, 'branch', '--show-current')).toBe('worktree-issue-12')
+  expect(benchOf(fixture)).toMatchObject({ cwd: fixture.cwd, branch: 'issue-12' })
+  expect(git(fixture.cwd, 'branch', '--show-current')).toBe('issue-12')
 })
 
 // 止めた sync に後から来た同じ Task の sync は、合流して自分の timeout まで待つ。その timeout を手で起こし、写しで進ませる。
@@ -242,9 +240,7 @@ test('a reopen that reaches its transaction while close is under way is refused,
   await reopened
   const running = client.run({ ref })
   await giveUpJoinedSync(1)
-  const { terminalSessionId } = await running
-  fixture.ghq.claudeWorktree('acme/app', 12)
-  await startedAndEnded(fixture, terminalSessionId)
+  await startedAndEnded(fixture, (await running).terminalSessionId)
   const pause = pauseBranchDeletion(fixture)
   const closing = client.close({ ref })
   await giveUpJoinedSync(2)

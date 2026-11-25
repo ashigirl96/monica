@@ -37,7 +37,7 @@ test("a Bench and a checkout of the same Repo share a Tile whatever the case of 
     places,
     // Task は GitHub の nameWithOwner で Repo を持つので、checkout の path と大小文字が違うことがある。
     benchLabelOf: (id) =>
-      id === 'bench' ? { repo: 'Acme/App', number: 1, title: 'Ship it' } : null,
+      id === 'bench' ? { repo: 'Acme/App', number: 1, title: 'Ship it', setup: null } : null,
   })
 
   expect(tiles.map((tile) => [tile.key, tile.sections.flatMap((s) => s.runspaceIds)])).toEqual([
@@ -58,7 +58,7 @@ test("a Runspace is listed under the Tile of its leftmost Tab's Repo, not under 
 })
 
 function appIssue(number: number): BenchLabel {
-  return { repo: 'acme/app', number, title: `Issue ${number}` }
+  return { repo: 'acme/app', number, title: `Issue ${number}`, setup: null }
 }
 
 test("a Bench is listed in the Bench section of its Task's Repo, whichever Repo its cwd is in, if any", () => {

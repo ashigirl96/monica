@@ -265,21 +265,19 @@ test('pressing a tackle Run tracks the Issue, types claude with /tackle into a T
     button: { kind: 'tackle', run: 'running' },
     reason: null,
   })
-  expect(await typedClaude(fixture)).toEqual([
-    "claude --effort medium --model opus --worktree 'issue-12' '/tackle'\r",
-  ])
+  expect(await typedClaude(fixture)).toEqual(["claude --effort medium --model opus '/tackle'\r"])
   expect((await fixture.client.list({})).tasks.map((t) => t.ref)).toEqual([ref])
   expect(await fixture.client.bench.list()).toHaveLength(1)
 })
 
-test('pressing a Run whose Bench cannot be opened fails, opening no Tab', async () => {
+test('pressing a Run whose Bench cannot be prepared fails, opening no Tab', async () => {
   const fixture = setup()
   fixture.github.issue(ref, { title: 'Ship it', labels: ['ready-for-agent'] })
 
   const error = await failure(fixture.client.press({ ref, run: 'new' }))
 
   expect(error.code).toBe('PRECONDITION_FAILED')
-  expect(error.message).toContain('could not get the checkout')
+  expect(error.message).toContain('could not prepare the Bench')
   expect(tabCount(fixture)).toBe(0)
 })
 
@@ -293,7 +291,7 @@ test('pressing a triage Run types claude with /triage and the Issue number', asy
   await fixture.client.press({ ref, run: 'new' })
 
   expect(await typedClaude(fixture)).toEqual([
-    "claude --effort medium --model opus --worktree 'issue-12' '/triage #12'\r",
+    "claude --effort medium --model opus '/triage #12'\r",
   ])
 })
 
@@ -312,7 +310,7 @@ test('pressing the Run of a wayfinder map types claude with /wayfinder and the m
   await fixture.client.press({ ref, run: 'new' })
 
   expect(await typedClaude(fixture)).toEqual([
-    "claude --effort medium --model opus --worktree 'issue-12' '/wayfinder 12'\r",
+    "claude --effort medium --model opus '/wayfinder 12'\r",
   ])
 })
 
@@ -328,7 +326,7 @@ test('pressing the Run of a ready-for-agent Issue with an open sub-issue types c
   await fixture.client.press({ ref, run: 'new' })
 
   expect(await typedClaude(fixture)).toEqual([
-    "claude --effort medium --model opus --worktree 'issue-12' '/implement-spec #12'\r",
+    "claude --effort medium --model opus '/implement-spec #12'\r",
   ])
 })
 
@@ -369,7 +367,7 @@ test('pressing the Run of a wayfinder Issue under a map types claude with /wayfi
   await fixture.client.press({ ref, run: 'new' })
 
   expect(await typedClaude(fixture)).toEqual([
-    "claude --effort medium --model opus --worktree 'issue-12' '/wayfinder 7 12'\r",
+    "claude --effort medium --model opus '/wayfinder 7 12'\r",
   ])
   expect((await fixture.client.list({})).tasks.map((t) => t.ref)).toEqual([ref])
 })
@@ -462,9 +460,7 @@ test('pressing Run picks the prompt from the Issue read when the sync that follo
   const pressed = await pressHeldUntilSync(fixture, () => fixture.github.fail('acme/app'))
 
   expect(pressed).toEqual({ ref, button: { kind: 'tackle', run: 'running' }, reason: null })
-  expect(await typedClaude(fixture)).toEqual([
-    "claude --effort medium --model opus --worktree 'issue-12' '/tackle'\r",
-  ])
+  expect(await typedClaude(fixture)).toEqual(["claude --effort medium --model opus '/tackle'\r"])
 })
 
 test('pressing a Run fails without tracking when GitHub cannot be read', async () => {
@@ -495,7 +491,7 @@ async function claudeStarted(fixture: Fixture, terminalSessionId: string, sessio
   mkdirSync(dirname(transcript), { recursive: true })
   writeFileSync(transcript, '{}\n')
   const fields = {
-    cwd: join(fixture.ghq.checkout('acme/app'), '.claude/worktrees/issue-12'),
+    cwd: join(fixture.home, 'worktrees/acme/app/issue-12'),
     transcript_path: transcript,
   }
   await fixture.hook(terminalSessionId, sessionId, 'SessionStart', { source: 'startup', ...fields })

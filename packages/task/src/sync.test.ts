@@ -88,26 +88,20 @@ test('sync copies every open Task with one query per repo and replaces the Block
   expect(titles(fixture)).toMatchObject({ 'acme/app#2': 'Two', 'acme/app#4': 'Schema first' })
 })
 
-test('sync links a Task to the pull requests headed by the branch worktree-issue-n of its Bench and to the ones that close its Issue, as two rows when one does both', async () => {
+test('sync links a Task to the pull requests headed by the branch issue-n of its Bench and to the ones that close its Issue, as two rows when one does both', async () => {
   const fixture = setup()
   const { github, client } = fixture
   fixture.ghq.origin('acme/app')
   await fixture.openBench('acme/app#1', 'Ship it', { worktree: true })
-  github.pullRequest('acme/app#20', { title: 'Fix it', headRef: 'worktree-issue-1' })
-  github.pullRequest('acme/app#21', {
-    title: 'First try',
-    headRef: 'worktree-issue-1',
-    state: 'closed',
-  })
+  github.pullRequest('acme/app#20', { title: 'Fix it', headRef: 'issue-1' })
+  github.pullRequest('acme/app#21', { title: 'First try', headRef: 'issue-1', state: 'closed' })
   github.pullRequest('acme/lib#3', { title: 'Fix it in lib', headRef: 'fix-app' })
   github.issue('acme/app#1', { title: 'One', closingPullRequests: ['acme/app#20', 'acme/lib#3'] })
   github.requests.length = 0
 
   await client.sync({})
 
-  expect(github.requests).toEqual([
-    { repo: 'acme/app', numbers: [1], branches: ['worktree-issue-1'] },
-  ])
+  expect(github.requests).toEqual([{ repo: 'acme/app', numbers: [1], branches: ['issue-1'] }])
   expect(links(fixture)).toEqual([
     'acme/app#1 branch acme/app#20',
     'acme/app#1 branch acme/app#21',
@@ -148,11 +142,7 @@ test('a Task with no worktree Bench has no pull request linked by branch, so the
   const { github, client } = fixture
   fixture.ghq.origin('acme/app')
   await fixture.openBench('acme/app#1', 'Ship it', { worktree: true })
-  github.pullRequest('acme/app#20', {
-    title: 'Fix it',
-    headRef: 'worktree-issue-1',
-    state: 'merged',
-  })
+  github.pullRequest('acme/app#20', { title: 'Fix it', headRef: 'issue-1', state: 'merged' })
   await client.sync({})
   await client.close({ ref: 'acme/app#1', force: true })
 
@@ -166,10 +156,10 @@ test('a branch GitHub answers null for keeps its links, while the closing refere
   const { github, client } = fixture
   fixture.ghq.origin('acme/app')
   await fixture.openBench('acme/app#1', 'Ship it', { worktree: true })
-  github.pullRequest('acme/app#20', { title: 'Fix it', headRef: 'worktree-issue-1' })
+  github.pullRequest('acme/app#20', { title: 'Fix it', headRef: 'issue-1' })
   github.issue('acme/app#1', { title: 'One', closingPullRequests: ['acme/app#20'] })
   await client.sync({})
-  github.failBranch('worktree-issue-1')
+  github.failBranch('issue-1')
   github.issue('acme/app#1', { title: 'One' })
 
   await client.sync({})

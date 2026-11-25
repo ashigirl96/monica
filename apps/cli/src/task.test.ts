@@ -188,8 +188,9 @@ test('task run --fork prints that it forked claude from the Agent Session', asyn
   )
 })
 
-test("task run exits 1 with the reason when it cannot get the Repo's checkout", async () => {
-  const { connect } = backendWithBench()
+test('task run exits 1 with the reason and the log path when the Bench cannot be prepared', async () => {
+  const home = inScratch()
+  const { connect } = backendWithBench({ home })
 
   const result = await monica(['task', 'run', 'acme/app#12'], connect)
 
@@ -197,7 +198,8 @@ test("task run exits 1 with the reason when it cannot get the Repo's checkout", 
     code: 1,
     stdout: '',
     stderr:
-      'PRECONDITION_FAILED: could not get the checkout of acme/app#12: ghq root failed: no ghq in the CLI tests\n',
+      'PRECONDITION_FAILED: could not prepare the Bench of acme/app#12: ghq root failed: no ghq in the CLI tests; ' +
+      `see ${home}/logs/setup/acme/app/issue-12.log\n`,
   })
 })
 
@@ -210,7 +212,7 @@ test("task run --in-place exits 1 when it cannot find the Repo's checkout", asyn
     code: 1,
     stdout: '',
     stderr:
-      'PRECONDITION_FAILED: could not get the checkout of acme/app#12: ghq root failed: no ghq in the CLI tests\n',
+      'PRECONDITION_FAILED: could not find the checkout of acme/app#12: ghq root failed: no ghq in the CLI tests\n',
   })
 })
 
@@ -224,6 +226,7 @@ test('task current names the Task of the Bench the Tab is in, given by MONICA_TE
         runspaceId: id,
         cwd: '/work',
         mode: 'in_place',
+        setupState: 'ready',
         createdAt: new Date(0),
       })
       .run()
