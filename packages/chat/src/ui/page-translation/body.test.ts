@@ -120,3 +120,24 @@ test('the header, footer and side bars of the page and anything in a navigation 
   ])
   expect(['byline', 'body'].map(chrome)).toEqual([false, false])
 })
+
+test('a note inside the article, such as a Starlight aside, is main text', () => {
+  const document = page(`
+    <main><article class="prose">
+      <h1>Tide pools of the coast</h1>
+      <p>${LONG.repeat(6)}</p>
+      <aside class="aside aside--note" aria-label="Low tide">
+        <p class="aside-title" aria-hidden="true"><svg></svg> Low tide</p>
+        <div class="aside-content"><p>Visit the pools when the tide is at its <strong>lowest</strong>.</p></div>
+      </aside>
+      <p>${LONG.repeat(3)}</p>
+    </article></main>`)
+
+  expect(texts(document)).toEqual([
+    'Tide pools of the coast',
+    LONG.repeat(6).trim(),
+    '<x0/> Low tide',
+    'Visit the pools when the tide is at its <g0>lowest</g0>.',
+    LONG.repeat(3).trim(),
+  ])
+})

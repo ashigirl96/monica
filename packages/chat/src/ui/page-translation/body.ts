@@ -11,6 +11,7 @@ const LATIN = /[A-Za-z]{2}/
 const flat = (text: string | null) => (text ?? '').replace(/\s+/g, ' ').trim()
 
 type Kept = { kept: Set<Element>; title: string; text: string }
+type Main = Kept & { root: Element | undefined }
 
 function keptBy(document: Document, all: Element[], url: string, partial: boolean): Kept {
   const result = new Defuddle(document, {
@@ -43,7 +44,7 @@ function commonAncestor(elements: Element[]): Element | undefined {
  * 既定の設定は class 名の部分一致（frontmatter など）で記事の冒頭の要約まで外し、外さない設定は page によって header のメニューまで残すので、
  * 外さない設定で増えた要素は、既定の設定の本文を包む要素の中のものだけを足す。
  */
-function mainElements(document: Document, url: string): Kept {
+function mainElements(document: Document, url: string): Main {
   const all = [...document.body.querySelectorAll('*')]
   const before = all.map((element) => element.getAttribute(MARK))
   all.forEach((element, i) => element.setAttribute(MARK, `monica-${i}`))
@@ -52,7 +53,7 @@ function mainElements(document: Document, url: string): Kept {
     const loose = keptBy(document, all, url, false)
     const root = commonAncestor([...strict.kept])
     for (const element of loose.kept) if (root?.contains(element)) strict.kept.add(element)
-    return { kept: strict.kept, title: strict.title, text: `${strict.text} ${loose.text}` }
+    return { kept: strict.kept, title: strict.title, text: `${strict.text} ${loose.text}`, root }
   } finally {
     all.forEach((element, i) => {
       const value = before[i]
@@ -63,8 +64,11 @@ function mainElements(document: Document, url: string): Kept {
 }
 
 // Defuddle は見出しや配置用の表を作り直して目印を落とし、題の h1 は本文から外すので、目印の無い段落は包む要素と文で決める。
-function isMain(element: Element, main: Kept): boolean {
+function isMain(element: Element, main: Main): boolean {
   if (main.kept.has(element)) return true
+  // Defuddle は記事の中の注記（Starlight の aside など）も本文から逸れる囲みとして外すが、読者が読む本文なので訳す。
+  const note = element.closest('aside, .aside')
+  if (note && main.root?.contains(note)) return true
   const text = flat(element.textContent)
   if (
     element.localName === 'h1' &&

@@ -269,6 +269,19 @@ export const splitBlock: Command = (state, dispatch) => {
     dispatch?.(tr.scrollIntoView())
     return true
   }
+  // 子が見えている行の行末 Enter は、子の先頭に印なしの空行を置く。後ろの兄弟に置くと子の下に離れて現れるため。
+  if (
+    offset === content.content.size &&
+    containerChildren(ctx.containerNode).length > 0 &&
+    !isFoldedContent(content)
+  ) {
+    const at = ctx.containerPos + 1 + content.nodeSize + 1
+    tr.insert(at, createContainer(nodes.paragraph.create()))
+    tr.setSelection(TextSelection.create(tr.doc, at + 2))
+    tr.setMeta('blockOperation', { type: 'split' })
+    dispatch?.(tr.scrollIntoView())
+    return true
+  }
   // 行頭 Enter は分割ではなく空 block の上挿入。元 block は container ごと動かさず、
   // ID・attrs・fold・children をそのまま保つ（カーソルも元テキストの先頭に留まる）
   if (offset === 0 && content.content.size > 0) {
