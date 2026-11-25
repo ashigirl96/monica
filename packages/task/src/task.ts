@@ -6,11 +6,10 @@ import { eq } from 'drizzle-orm'
 import { type BenchDeps, failInterruptedPreparations } from './bench.ts'
 import type { BackgroundSyncError, TaskChange } from './contract.ts'
 import { defaultGitHub, type GitHub } from './github.ts'
-import { defaultGhq, type Ghq, killSetups } from './prepare.ts'
+import { defaultGhq, type Ghq } from './prepare.ts'
 import { formatRef } from './ref.ts'
 import { createReservations } from './reservation.ts'
 import { applyRunInvariant, createRunLaunches, type RunOrigin, taskOfRun } from './run.ts'
-import { sweepSetupLogs } from './setup-log.ts'
 import { SYNC_TIMEOUT_MS, type SyncDeps, syncOpenTasks } from './sync.ts'
 import { restoreTrashedWorktrees, sweepTrashedWorktrees, trashOf } from './trash.ts'
 
@@ -20,8 +19,6 @@ export type TaskLedger = {
   stop(): void
   /** open な Task すべての Sync。失敗した repo があるか throw したら reject する。 */
   syncInBackground(): Promise<void>
-  /** 消せなかった setup の log か directory があれば、残りを消してから reject する。 */
-  cleanSetupLogs(): Promise<void>
   /** close が捨て場へ移した worktree を消す。消せなかったものがあれば、残りを消してから reject する。 */
   sweepTrashedWorktrees(): Promise<void>
 }
@@ -29,11 +26,6 @@ export type TaskLedger = {
 export function systemJobs(taskLedger: TaskLedger) {
   return [
     { name: 'task.sync', every: 5 * 60_000, run: () => taskLedger.syncInBackground() },
-    {
-      name: 'task.setup-log-cleanup',
-      every: 24 * 60 * 60_000,
-      run: () => taskLedger.cleanSetupLogs(),
-    },
     {
       name: 'task.worktree-sweep',
       every: 10 * 60_000,
@@ -77,7 +69,6 @@ export function createTaskLedger(deps: {
     ghq,
     publish: syncDeps.publish,
     stopped: stopped.signal,
-    setups: new Set(),
     reservations: createReservations(db, createRunLaunches()),
   }
   let backgroundSyncError: BackgroundSyncError | null = null
@@ -144,12 +135,8 @@ export function createTaskLedger(deps: {
     stop() {
       unsubscribe?.()
       stopped.abort(new Error('the Task Ledger has stopped'))
-      killSetups(benchDeps.setups)
     },
     syncInBackground,
-    async cleanSetupLogs() {
-      sweepSetupLogs({ db, home })
-    },
     sweepTrashedWorktrees: () => sweepTrashedWorktrees(trashOf(home)),
   }
   internalsOf.set(taskLedger, {
