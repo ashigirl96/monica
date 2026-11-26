@@ -277,6 +277,8 @@ function successorOf(
 ): string | undefined {
   // Pinned はどの Tile にも入らないので、見えていた Tile を閉じた Runspace の Tile とみなす。
   const key = previous.tiles.tileKeys[closedId] ?? selectedTileOf(state, previous)
+  const recent = state.recentRunspaceIds.find((id) => world.tiles.tileKeys[id] === key)
+  if (recent) return recent
   const index = rowsOf(previous, key).indexOf(closedId)
   const sibling = index === -1 ? undefined : atOrAbove(rowsOf(world, key), index)
   if (sibling) return sibling

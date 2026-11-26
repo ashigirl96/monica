@@ -436,12 +436,13 @@ test('closing the active Runspace at the bottom of its Tile brings up the row ju
   })
 })
 
-test('closing the last row of the Bench section brings up the first row of the Runspaces section under the same Tile, even when that section is collapsed', () => {
+test('closing the last row of the Bench section with no other Runspace of its Tile visited brings up the first row of the Runspaces section, even when that section is collapsed', () => {
   const benches = {
     b1: { repo: 'acme/app', number: 1, title: 'Ship it', setup: null },
     b2: { repo: 'acme/app', number: 2, title: 'Fix it', setup: null },
   }
   const rows = [
+    runspace('l', LIB),
     runspace('b1', APP, { owned: true }),
     runspace('a1', APP),
     runspace('a2', APP),
@@ -459,6 +460,31 @@ test('closing the last row of the Bench section brings up the first row of the R
     tile: 'acme/app',
     runspace: 'a1',
     tab: 'a1.0',
+  })
+})
+
+test('closing the active Runspace brings up the Runspace of its Tile shown just before it, even across the Bench and Runspaces sections', () => {
+  const benches = {
+    b1: { repo: 'acme/app', number: 1, title: 'Ship it', setup: null },
+    b2: { repo: 'acme/app', number: 2, title: 'Fix it', setup: null },
+  }
+  const rows = [
+    runspace('b1', APP, { owned: true }),
+    runspace('b2', APP, { owned: true }),
+    runspace('a1', APP),
+    runspace('l', LIB),
+  ]
+  const before = worldOf(rows, { benches })
+  const after = worldOf(
+    rows.filter((r) => r.id !== 'b2'),
+    { benches },
+  )
+  const shown = run(before, [row('a1'), row('b1'), row('l'), row('b2')]).state
+
+  expect(onScreen(reload(shown, before, after), after)).toEqual({
+    tile: 'acme/app',
+    runspace: 'b1',
+    tab: 'b1.0',
   })
 })
 
