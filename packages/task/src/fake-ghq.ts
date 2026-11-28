@@ -31,6 +31,9 @@ export function commit(repo: string, files: Files, message: string) {
     if (mode !== undefined) chmodSync(file, mode)
   }
   git(repo, 'add', '--all')
+  // 手元の global な gitignore に当たる file も、渡したものは追跡させる。
+  const paths = Object.keys(files)
+  if (paths.length > 0) git(repo, 'add', '--force', '--', ...paths)
   git(
     repo,
     '-c',
