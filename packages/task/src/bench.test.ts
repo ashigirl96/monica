@@ -3,12 +3,13 @@ import {
   chmodSync,
   existsSync,
   lstatSync,
+  mkdirSync,
   readFileSync,
   realpathSync,
   rmSync,
   writeFileSync,
 } from 'node:fs'
-import { join } from 'node:path'
+import { dirname, join } from 'node:path'
 
 import { runspace, tab } from '@monica/workbench/schema'
 
@@ -169,6 +170,63 @@ test('run leaves a CLAUDE.local.md the worktree already has in place of the link
 
   expect(lstatSync(join(cwd, 'CLAUDE.local.md')).isSymbolicLink()).toBe(false)
   expect(readFileSync(join(cwd, 'CLAUDE.local.md'), 'utf8')).toBe('tracked\n')
+})
+
+test('run links the Claude Code settings and skills the checkout ignores into the worktree, and keeps them out of git status', async () => {
+  const fixture = setup()
+  fixture.ghq.origin('acme/app', {
+    '.claude/skills/shared/SKILL.md': { content: 'tracked\n' },
+    '.claude/skills/tooling/SKILL.md': { content: 'tracked\n' },
+  })
+  fixture.github.issue(ref, { title: 'Ship it' })
+  await fixture.track(ref)
+  fixture.ghq.clone('acme/app')
+  const checkout = fixture.ghq.checkout('acme/app')
+  const local = {
+    '.claude/settings.local.json': '{}\n',
+    '.claude/skills/private/SKILL.md': 'private\n',
+    '.claude/hooks/guard.sh': 'exit 0\n',
+    '.claude/skills/tooling/__pycache__/x.pyc': '',
+    '.claude/worktrees/other/file': '',
+  }
+  for (const [path, content] of Object.entries(local)) {
+    mkdirSync(dirname(join(checkout, path)), { recursive: true })
+    writeFileSync(join(checkout, path), content)
+  }
+  // 末尾の / は directory にしか当たらないので、worktree の symlink は無視しない。
+  writeFileSync(
+    join(checkout, '.git/info/exclude'),
+    '.claude/settings.local.json\n.claude/skills/private/\n.claude/hooks/\n__pycache__/\n.claude/worktrees/\n',
+  )
+  const cwd = join(fixture.home, 'worktrees/acme/app/issue-12')
+
+  expect(await fixture.client.run({ ref })).toMatchObject({ warnings: [] })
+
+  expect(readFileSync(join(cwd, '.claude/settings.local.json'), 'utf8')).toBe('{}\n')
+  expect(readFileSync(join(cwd, '.claude/skills/private/SKILL.md'), 'utf8')).toBe('private\n')
+  expect(readFileSync(join(cwd, '.claude/hooks/guard.sh'), 'utf8')).toBe('exit 0\n')
+  expect(lstatSync(join(cwd, '.claude/skills/shared')).isSymbolicLink()).toBe(false)
+  expect(lstatSync(join(cwd, '.claude/skills/tooling')).isSymbolicLink()).toBe(false)
+  expect(existsSync(join(cwd, '.claude/worktrees'))).toBe(false)
+  expect(git(cwd, 'status', '--porcelain')).toBe('')
+  expect(git(checkout, 'status', '--porcelain')).toBe('')
+})
+
+test('run leaves a skill the worktree already has in place of the link', async () => {
+  const { ghq, client, cwd } = await tracked()
+  ghq.clone('acme/app')
+  const checkout = ghq.checkout('acme/app')
+  mkdirSync(join(checkout, '.claude/skills/private'), { recursive: true })
+  writeFileSync(join(checkout, '.claude/skills/private/SKILL.md'), 'checkout\n')
+  writeFileSync(join(checkout, '.git/info/exclude'), '.claude/skills/private\n')
+  git(checkout, 'worktree', 'add', '--quiet', '-b', 'issue-12', cwd, 'origin/main')
+  mkdirSync(join(cwd, '.claude/skills/private'), { recursive: true })
+  writeFileSync(join(cwd, '.claude/skills/private/SKILL.md'), 'worktree\n')
+
+  await client.run({ ref })
+
+  expect(lstatSync(join(cwd, '.claude/skills/private')).isSymbolicLink()).toBe(false)
+  expect(readFileSync(join(cwd, '.claude/skills/private/SKILL.md'), 'utf8')).toBe('worktree\n')
 })
 
 test('the Bench is listed while it prepares, and a second run waits for the same preparation, then is refused without a Tab once the first opens its own', async () => {
