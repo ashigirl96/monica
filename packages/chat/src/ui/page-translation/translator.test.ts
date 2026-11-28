@@ -272,6 +272,75 @@ test('paragraphs with the same tags each keep their own translation when drawn a
   ])
 })
 
+test('paragraphs that leave the page are not sent and do not hold a seat, so the next page is sent at once', async () => {
+  const held: (() => void)[] = []
+  const firstPage = Array.from(
+    { length: 30 },
+    (_, i) => `<p>Paragraph ${i}: ${LONG.repeat(3)}</p>`,
+  ).join('')
+  const { translator, article, sent, settle } = start(
+    (segments) =>
+      new Promise((resolve) =>
+        held.push(() =>
+          resolve({ segments: segments.map(({ id, text }) => ({ id, text: japanese(text) })) }),
+        ),
+      ),
+    firstPage,
+  )
+  translator.toggle()
+  await Bun.sleep(0)
+  const sentBefore = sent.length
+
+  article.innerHTML = '<h1>Encryption</h1><p>Each run keeps its own key.</p>'
+  await Bun.sleep(0)
+
+  expect(texts(sent.slice(sentBefore))).toEqual(['Encryption', 'Each run keeps its own key.'])
+  const settled = settle().then(() => true)
+  while (!(await Promise.race([settled, Bun.sleep(0).then(() => false)]))) held.shift()?.()
+
+  expect(texts(sent.slice(sentBefore))).toEqual(['Encryption', 'Each run keeps its own key.'])
+  expect(article.querySelector('h1')!.textContent).toBe('訳 Encryption')
+})
+
+test('restarting writes the kept translations back without sending them and sends again what never came back', async () => {
+  let answering = true
+  const article = '<h1>Tide pools</h1><p>Pools form in <b>hollows</b> of rock.</p>'
+  const {
+    translator,
+    article: root,
+    sent,
+    settle,
+  } = start(
+    (segments) =>
+      answering
+        ? { segments: segments.map(({ id, text }) => ({ id, text: japanese(text) })) }
+        : new Promise<never>(() => {}),
+    article,
+  )
+  const settled = settle()
+  translator.toggle()
+  await settled
+  answering = false
+  const p = root.ownerDocument.createElement('p')
+  p.textContent = 'Sea stars eat the mussels that cling to the rock.'
+  root.append(p)
+  await Bun.sleep(0)
+  const sentBefore = sent.length
+
+  answering = true
+  translator.restart()
+  await settle()
+
+  expect(texts(sent.slice(sentBefore))).toEqual([
+    'Sea stars eat the mussels that cling to the rock.',
+  ])
+  expect([...root.children].map((e) => e.textContent)).toEqual([
+    '訳 Tide pools',
+    '訳 Pools form in hollows of rock.',
+    '訳 Sea stars eat the mussels that cling to the rock.',
+  ])
+})
+
 test('a paragraph rewritten while its translation is on the way is sent again in its new words', async () => {
   const held: (() => void)[] = []
   const article = '<p>Sea stars eat the mussels that cling to the rock.</p>'

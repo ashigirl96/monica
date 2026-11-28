@@ -24,6 +24,9 @@ export type PageTranslationState =
 export type PageTranslator = {
   /** 原文なら訳し始め、訳しているか訳したなら原文に戻す。 */
   toggle(): void
+  /** 訳していれば、送った塊の答えを待たずに訳し直す。訳を控えた段落は送らずに付け直す。 */
+  restart(): void
+  readonly active: boolean
 }
 
 // Chat に残す claude は Backend が守り、断られた塊は待って送り直すので、この数は送りすぎない目安。
@@ -76,7 +79,7 @@ export function createPageTranslator(deps: {
   let givenUp = new WeakMap<Element, string>()
   const queued = new Set<Element>()
   let pending: Pending[] = []
-  let inFlight = 0
+  const inFlight = new Set<Pending[]>()
   let active = false
   let session = 0
   let settling = 0
@@ -110,6 +113,13 @@ export function createPageTranslator(deps: {
   }
 
   function scan() {
+    pending = pending.filter(({ block }) => {
+      if (!block.element.isConnected) queued.delete(block.element)
+      return block.element.isConnected
+    })
+    for (const chunk of inFlight) {
+      if (chunk.every(({ block }) => !block.element.isConnected)) inFlight.delete(chunk)
+    }
     const fresh = unwatched(collect)
     if (fresh.length === 0) {
       settle()
@@ -143,15 +153,15 @@ export function createPageTranslator(deps: {
   }
 
   function settle() {
-    if (active && !failed && inFlight === 0 && pending.length === 0) {
+    if (active && !failed && inFlight.size === 0 && pending.length === 0) {
       deps.report({ kind: 'translated' })
     }
   }
 
   function pump() {
-    while (inFlight < MAX_IN_FLIGHT && pending.length > 0) {
+    while (inFlight.size < MAX_IN_FLIGHT && pending.length > 0) {
       const chunk = takeChunk(pending)
-      inFlight++
+      inFlight.add(chunk)
       const sent = session
       void send(chunk, sent)
         // 書き戻しが投げても、送信中の数と送り待ちの印を残さない。
@@ -165,7 +175,7 @@ export function createPageTranslator(deps: {
           return false
         })
         .then((stale) => {
-          inFlight--
+          inFlight.delete(chunk)
           for (const { block } of chunk)
             if (!pending.some((p) => p.block === block)) queued.delete(block.element)
           // 送っている間に書き換わった段落は、見張りが見ても送り待ちとして飛ばしたので、ここで見直す。
@@ -232,6 +242,7 @@ export function createPageTranslator(deps: {
     observer.disconnect()
     pending = []
     queued.clear()
+    inFlight.clear()
     restoreOriginals(originals)
     written = new WeakMap()
     givenUp = new WeakMap()
@@ -239,6 +250,14 @@ export function createPageTranslator(deps: {
   }
 
   return {
+    restart() {
+      if (!active) return
+      stop()
+      start()
+    },
+    get active() {
+      return active
+    },
     toggle() {
       if (active) stop()
       else start()

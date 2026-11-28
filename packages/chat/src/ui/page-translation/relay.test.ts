@@ -5,7 +5,12 @@ import { RPCHandler } from '@orpc/server/fetch'
 
 import { contract } from '../../contract.ts'
 import { FakeChrome } from '../fake-chrome.ts'
-import { relayPageTranslation, showPageTranslationState } from './relay.ts'
+import {
+  forgetPageTranslation,
+  relayPageTranslation,
+  reinjectPageTranslation,
+  showPageTranslationState,
+} from './relay.ts'
 
 const HOST = 'com.ashigirl96.monica_dev'
 const TOKEN = 'extension-token'
@@ -50,7 +55,17 @@ function serviceWorker() {
   chrome.install()
   const badges: { tabId: number; text: string }[] = []
   const titles: { tabId: number; title: string }[] = []
+  const stored = new Map<string, unknown>()
   Object.assign((globalThis as unknown as { chrome: object }).chrome, {
+    storage: {
+      session: {
+        get: async (key: string) => (stored.has(key) ? { [key]: stored.get(key) } : {}),
+        set: async (items: Record<string, unknown>) => {
+          for (const [key, value] of Object.entries(items)) stored.set(key, value)
+        },
+        remove: async (key: string) => void stored.delete(key),
+      },
+    },
     action: {
       setBadgeText: async (details: { tabId: number; text: string }) => void badges.push(details),
       setTitle: async (details: { tabId: number; title: string }) => void titles.push(details),
@@ -145,4 +160,80 @@ test('a message for someone else is left to the other listeners', () => {
   expect(
     relayPageTranslation(HOST, { type: 'monica.runButtons', refs: [] }, sender(7)),
   ).toBeUndefined()
+})
+
+const switched = (tabId: number, on: boolean) =>
+  relayPageTranslation(HOST, { type: 'monica.pageTranslationSwitched', on }, sender(tabId))
+
+const wanted = (tabId: number) =>
+  relayPageTranslation(HOST, { type: 'monica.pageTranslationWanted' }, sender(tabId))
+
+const loaded = (tabId: number, frameType: chrome.extensionTypes.FrameType = 'outermost_frame') =>
+  ({
+    tabId,
+    frameType,
+    documentId: `document-of-${tabId}`,
+  }) as chrome.webNavigation.WebNavigationFramedCallbackDetails
+
+test('a Browser Tab switched on with ⌥A gets the script again in the next document, and one switched off does not', async () => {
+  const { chrome } = serviceWorker()
+  await switched(7, true)
+  await switched(8, true)
+  await switched(8, false)
+
+  for (const tabId of [7, 8, 9]) await reinjectPageTranslation(loaded(tabId), 'resume.js')
+
+  expect(chrome.injections).toEqual([
+    { target: { tabId: 7, documentIds: ['document-of-7'] }, files: ['resume.js'] },
+  ])
+})
+
+test('a document restored by back or forward asks whether ⌥A left Page Translation on in its Browser Tab', async () => {
+  serviceWorker()
+  await switched(7, true)
+  await switched(8, true)
+  await switched(8, false)
+
+  expect(await Promise.all([wanted(7), wanted(8), wanted(9)])).toEqual([true, false, false])
+})
+
+test('the state a document reports goes only to the badge, so a document restored by back or forward does not switch its Browser Tab on', async () => {
+  serviceWorker()
+  await switched(7, false)
+
+  await relayPageTranslation(
+    HOST,
+    { type: 'monica.pageTranslationState', state: { kind: 'translated' } },
+    sender(7),
+  )
+
+  expect(await wanted(7)).toBe(false)
+})
+
+test('a frame inside the page does not get the script', async () => {
+  const { chrome } = serviceWorker()
+  await switched(7, true)
+
+  await reinjectPageTranslation(loaded(7, 'sub_frame'), 'resume.js')
+
+  expect(chrome.injections).toEqual([])
+})
+
+test('a page that refuses the script, such as chrome://, shows no failure on the badge', async () => {
+  const { chrome, badges } = serviceWorker()
+  await switched(7, true)
+
+  await reinjectPageTranslation(loaded(7), 'resume.js')
+
+  expect(chrome.injections).toHaveLength(1)
+  expect(badges).toEqual([])
+})
+
+test('a closed Browser Tab is forgotten', async () => {
+  serviceWorker()
+  await switched(7, true)
+
+  await forgetPageTranslation(7)
+
+  expect(await wanted(7)).toBe(false)
 })
