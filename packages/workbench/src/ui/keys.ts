@@ -136,9 +136,9 @@ function pressInJumpMode(store: Store, key: KeyFacts): Pressed {
     return taken(undefined)
   }
 
-  if (key.key === 'c' && !key.ctrl) {
+  if ((key.key === 'c' || key.key === 'C') && !key.ctrl) {
     store.set(jumpModeAtom, false)
-    return taken(store.set(createTerminalTabAtom))
+    return taken(store.set(createTerminalTabAtom, key.key === 'C' ? 'claude' : 'tab'))
   }
 
   if (key.key === 'H' || key.key === 'L') {
