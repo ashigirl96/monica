@@ -3,6 +3,7 @@ import {
   existsSync,
   lstatSync,
   mkdirSync,
+  readdirSync,
   readFileSync,
   realpathSync,
   symlinkSync,
@@ -62,7 +63,7 @@ export async function prepare(
     await clone(deps.ghq, ref.repo, checkout)
     warnings = await addWorktree(checkout, cwd, branchOf(ref))
   }
-  warnings.push(...(await shareClaudeLocal(cwd)))
+  warnings.push(...(await shareClaudeLocal(cwd)), ...(await shareIgnoredClaudeConfig(cwd)))
   return warnings
 }
 
@@ -142,6 +143,64 @@ async function shareClaudeLocal(cwd: string): Promise<string[]> {
     return (await listed()) ? [`${CLAUDE_LOCAL} is not ignored by git, so git status lists it`] : []
   } catch (error) {
     return [`could not share ${CLAUDE_LOCAL} with the checkout: ${messageOf(error)}`]
+  }
+}
+
+// repo で追跡しない Claude Code の設定と skill は checkout にしか無いので、worktree に symlink で見せる。
+async function shareIgnoredClaudeConfig(cwd: string): Promise<string[]> {
+  if (!existsSync(join(cwd, '.git'))) return []
+  try {
+    const commonDir = await git(cwd, 'rev-parse', '--path-format=absolute', '--git-common-dir')
+    const checkout = dirname(commonDir)
+    if (realpathSync(cwd) === checkout) return []
+    const candidates = [
+      '.claude/settings.local.json',
+      ...['.claude/skills', '.claude/hooks'].flatMap((dir) =>
+        existsSync(join(checkout, dir))
+          ? readdirSync(join(checkout, dir)).map((name) => `${dir}/${name}`)
+          : [],
+      ),
+    ].filter((path) => existsSync(join(checkout, path)))
+    if (candidates.length === 0) return []
+    // 無視された directory は 1 行に畳まれて出るので、候補かその祖先が出ていれば無視されている。
+    // 追跡している path は出ないので、worktree の branch にあるものを link で隠さない。
+    const ignored = (
+      await git(
+        checkout,
+        'ls-files',
+        '--others',
+        '--ignored',
+        '--exclude-standard',
+        '--directory',
+        '--',
+        ...candidates,
+      )
+    )
+      .split('\n')
+      .filter(Boolean)
+      .map((line) => line.replace(/\/$/, ''))
+    const linked = candidates.filter((path) => {
+      if (!ignored.some((dir) => path === dir || path.startsWith(`${dir}/`))) return false
+      const link = join(cwd, path)
+      if (lstatSync(link, { throwIfNoEntry: false })) return false
+      mkdirSync(dirname(link), { recursive: true })
+      symlinkSync(join(checkout, path), link)
+      return true
+    })
+    if (linked.length === 0) return []
+    // `skills/x/` のような末尾の / は directory にしか当たらず、symlink は status に出て commit されうる。
+    const listed = async () =>
+      (await git(cwd, 'status', '--porcelain', '--untracked-files=all', '--', ...linked))
+        .split('\n')
+        .filter(Boolean)
+        .map((line) => line.slice(3))
+    for (const path of await listed()) excludeFromGit(commonDir, path)
+    const still = await listed()
+    return still.length === 0
+      ? []
+      : [`${still.join(', ')} not ignored by git, so git status lists them`]
+  } catch (error) {
+    return [`could not share the Claude Code settings with the checkout: ${messageOf(error)}`]
   }
 }
 
