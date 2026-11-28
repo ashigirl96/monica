@@ -170,18 +170,37 @@ test('a new Tab goes right after the active one, in its cwd, and becomes active'
   expect(store.get(activeTerminalTabAtom)?.id).toBe(tabs[1]!.id)
 })
 
-test("a new Tab opens where the active Tab's claude is, not in the Tab's cwd", async () => {
+test("C in jump mode opens a new Tab where the active Tab's claude is, not in the Tab's cwd", async () => {
+  const backend = bench()
+  const { client, store } = backend
+  const { runspaceId, tab } = await client.runspace.create({ cwd: '/repo', ...size })
+  const last = await client.tab.open({ runspaceId, cwd: '/b', ...size })
+  await runAgentIn(backend, tab.terminalSessionId, { cwd: '/repo/.claude/worktrees/w' })
+  store.set(activateTerminalTabAtom, tab.id)
+  await enterJumpMode(store)
+
+  await press(store, 'C')
+
+  const tabs = (await client.layout.get()).runspaces[0]!.tabs
+  expect(tabs.map((t) => t.id)).toEqual([tab.id, expect.any(String), last.id])
+  expect(tabs[1]?.cwd).toBe('/repo/.claude/worktrees/w')
+  expect(store.get(activeTerminalTabAtom)?.id).toBe(tabs[1]!.id)
+  expect(store.get(jumpModeActiveAtom)).toBe(false)
+})
+
+test("c in jump mode opens a new Tab in the Tab's cwd even while its claude is elsewhere", async () => {
   const backend = bench()
   const { client, store } = backend
   const { tab } = await client.runspace.create({ cwd: '/repo', ...size })
   await runAgentIn(backend, tab.terminalSessionId, { cwd: '/repo/.claude/worktrees/w' })
+  await enterJumpMode(store)
 
-  await store.set(createTerminalTabAtom)
+  await press(store, 'c')
 
-  expect((await client.layout.get()).runspaces[0]!.tabs[1]?.cwd).toBe('/repo/.claude/worktrees/w')
+  expect((await client.layout.get()).runspaces[0]!.tabs[1]?.cwd).toBe('/repo')
 })
 
-test("a new Runspace opens where the active Tab's claude is, not in the Tab's cwd", async () => {
+test("a new Runspace opens in the active Tab's cwd even while its claude is elsewhere", async () => {
   const backend = bench()
   const { client, store } = backend
   const { tab } = await client.runspace.create({ cwd: '/repo', ...size })
@@ -189,10 +208,10 @@ test("a new Runspace opens where the active Tab's claude is, not in the Tab's cw
 
   await store.set(createRunspaceAtom)
 
-  expect((await client.layout.get()).runspaces[1]?.cwd).toBe('/repo/.claude/worktrees/w')
+  expect((await client.layout.get()).runspaces[1]?.cwd).toBe('/repo')
 })
 
-test("once the active Tab's claude has ended, a new Tab opens in the Tab's cwd again", async () => {
+test("once the active Tab's claude has ended, C in jump mode opens a new Tab in the Tab's cwd", async () => {
   const backend = bench()
   const { client, store } = backend
   const { tab } = await client.runspace.create({ cwd: '/repo', ...size })
@@ -201,8 +220,9 @@ test("once the active Tab's claude has ended, a new Tab opens in the Tab's cwd a
     cwd: '/repo/.claude/worktrees/w',
     hookEventName: 'SessionEnd',
   })
+  await enterJumpMode(store)
 
-  await store.set(createTerminalTabAtom)
+  await press(store, 'C')
 
   expect((await client.layout.get()).runspaces[0]!.tabs[1]?.cwd).toBe('/repo')
 })

@@ -273,8 +273,8 @@ export const moveTileAtom = atom(null, (get, set, from: string, to: string) => {
   set(tileOrderAtom, reorderTiles(get(tileOrderAtom), shown, from, to))
 })
 
-// `claude -w` で移るのは claude だけで shell の cwd は動かないので、claude が今いる場所を先に見る。
-function newTabCwdOf(get: Getter, tab: Tab | null): string | undefined {
+// `claude -w` で移るのは claude だけで shell の cwd は動かないので、claude の場所は Tab の cwd と別に引く。
+function claudeCwdOf(get: Getter, tab: Tab | null): string | undefined {
   if (!tab) return undefined
   return get(agentSessionByTerminalSessionAtom).get(tab.terminalSessionId)?.cwd ?? tab.cwd
 }
@@ -283,7 +283,7 @@ export const createRunspaceAtom = action(async (get, set) => {
   const active = get(activeRunspaceAtom)
   const tab = get(activeTerminalTabAtom)
   const { runspaceId } = await clientOf(get).runspace.create({
-    cwd: newTabCwdOf(get, tab),
+    cwd: tab?.cwd,
     index: active ? active.sortOrder + 1 : undefined,
     ...sizeOf(get, tab),
   })
@@ -291,13 +291,13 @@ export const createRunspaceAtom = action(async (get, set) => {
   set(activateRunspaceAtom, runspaceId)
 })
 
-export const createTerminalTabAtom = action(async (get, set) => {
+export const createTerminalTabAtom = action(async (get, set, opensIn: 'tab' | 'claude' = 'tab') => {
   const runspace = get(activeRunspaceAtom)
   if (!runspace) return
   const tab = get(activeTerminalTabAtom)
   const opened = await clientOf(get).tab.open({
     runspaceId: runspace.id,
-    cwd: newTabCwdOf(get, tab),
+    cwd: opensIn === 'claude' ? claudeCwdOf(get, tab) : tab?.cwd,
     index: tab ? tab.sortOrder + 1 : undefined,
     ...sizeOf(get, tab),
   })
