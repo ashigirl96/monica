@@ -84,10 +84,14 @@ function ownedRunspace({ db, workbenchLedger }: Backend) {
   return db.transaction((tx) => workbenchLedger.createRunspace(tx, { cwd: '/work/bench' }))
 }
 
-async function runAgentIn({ client, store }: Backend, terminalSessionId: string) {
+async function runAgentIn(
+  { client, store }: Backend,
+  terminalSessionId: string,
+  { cwd = '/work', hookEventName = 'UserPromptSubmit' } = {},
+) {
   await client.agentSession.recordHook({
     terminalSessionId,
-    payload: { session_id: 's-1', cwd: '/work', hook_event_name: 'UserPromptSubmit' },
+    payload: { session_id: 's-1', cwd, hook_event_name: hookEventName },
   })
   await store.set(reloadAtom)
   await store.set(reloadAgentSessionsAtom)
@@ -164,6 +168,43 @@ test('a new Tab goes right after the active one, in its cwd, and becomes active'
   expect(tabs.map((t) => t.id)).toEqual([first.id, expect.any(String), last.id])
   expect(tabs[1]?.cwd).toBe('/a')
   expect(store.get(activeTerminalTabAtom)?.id).toBe(tabs[1]!.id)
+})
+
+test("a new Tab opens where the active Tab's claude is, not in the Tab's cwd", async () => {
+  const backend = bench()
+  const { client, store } = backend
+  const { tab } = await client.runspace.create({ cwd: '/repo', ...size })
+  await runAgentIn(backend, tab.terminalSessionId, { cwd: '/repo/.claude/worktrees/w' })
+
+  await store.set(createTerminalTabAtom)
+
+  expect((await client.layout.get()).runspaces[0]!.tabs[1]?.cwd).toBe('/repo/.claude/worktrees/w')
+})
+
+test("a new Runspace opens where the active Tab's claude is, not in the Tab's cwd", async () => {
+  const backend = bench()
+  const { client, store } = backend
+  const { tab } = await client.runspace.create({ cwd: '/repo', ...size })
+  await runAgentIn(backend, tab.terminalSessionId, { cwd: '/repo/.claude/worktrees/w' })
+
+  await store.set(createRunspaceAtom)
+
+  expect((await client.layout.get()).runspaces[1]?.cwd).toBe('/repo/.claude/worktrees/w')
+})
+
+test("once the active Tab's claude has ended, a new Tab opens in the Tab's cwd again", async () => {
+  const backend = bench()
+  const { client, store } = backend
+  const { tab } = await client.runspace.create({ cwd: '/repo', ...size })
+  await runAgentIn(backend, tab.terminalSessionId, { cwd: '/repo/.claude/worktrees/w' })
+  await runAgentIn(backend, tab.terminalSessionId, {
+    cwd: '/repo/.claude/worktrees/w',
+    hookEventName: 'SessionEnd',
+  })
+
+  await store.set(createTerminalTabAtom)
+
+  expect((await client.layout.get()).runspaces[0]!.tabs[1]?.cwd).toBe('/repo')
 })
 
 test('closing the active Tab ends its Terminal Session and activates the Tab that took its place', async () => {

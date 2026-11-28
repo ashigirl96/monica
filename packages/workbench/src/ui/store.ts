@@ -273,11 +273,17 @@ export const moveTileAtom = atom(null, (get, set, from: string, to: string) => {
   set(tileOrderAtom, reorderTiles(get(tileOrderAtom), shown, from, to))
 })
 
+// `claude -w` で移るのは claude だけで shell の cwd は動かないので、claude が今いる場所を先に見る。
+function newTabCwdOf(get: Getter, tab: Tab | null): string | undefined {
+  if (!tab) return undefined
+  return get(agentSessionByTerminalSessionAtom).get(tab.terminalSessionId)?.cwd ?? tab.cwd
+}
+
 export const createRunspaceAtom = action(async (get, set) => {
   const active = get(activeRunspaceAtom)
   const tab = get(activeTerminalTabAtom)
   const { runspaceId } = await clientOf(get).runspace.create({
-    cwd: tab?.cwd,
+    cwd: newTabCwdOf(get, tab),
     index: active ? active.sortOrder + 1 : undefined,
     ...sizeOf(get, tab),
   })
@@ -291,7 +297,7 @@ export const createTerminalTabAtom = action(async (get, set) => {
   const tab = get(activeTerminalTabAtom)
   const opened = await clientOf(get).tab.open({
     runspaceId: runspace.id,
-    cwd: tab?.cwd,
+    cwd: newTabCwdOf(get, tab),
     index: tab ? tab.sortOrder + 1 : undefined,
     ...sizeOf(get, tab),
   })
